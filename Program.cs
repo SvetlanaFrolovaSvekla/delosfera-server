@@ -4,8 +4,11 @@ using delosfera_server.Common.Services;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using System.Text;
+using delosfera_server.Modules.Files.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Minio;
+using Minio.DataModel.Args;
 
 /*Создается построитель приложения, собирает настройки, переменные окружения*/
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +32,7 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddScoped<ILanguageResolver, LanguageResolver>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
 builder.AddDatabase();
 builder.AddDictionaryServices();
 builder.AddVndServices();
@@ -41,6 +45,18 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
+});
+
+builder.Services.AddSingleton<IMinioClient>(_ =>
+    new MinioClient()
+        .WithEndpoint(builder.Configuration["Minio:Endpoint"])
+        .WithCredentials(builder.Configuration["Minio:AccessKey"], builder.Configuration["Minio:SecretKey"])
+        .WithSSL(builder.Configuration.GetValue<bool>("Minio:UseSSL"))
+        .Build());
+
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o =>
+{
+    o.MultipartBodyLengthLimit = 50 * 1024 * 1024; 
 });
 
 builder.AddUserServices();
@@ -83,6 +99,19 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+// Создаём бакет MinIO при старте, если его ещё нет
+using (var scope = app.Services.CreateScope())
+{
+    var minio = scope.ServiceProvider.GetRequiredService<IMinioClient>();
+    var bucket = app.Configuration["Minio:Bucket"]!;
+
+    var exists = await minio.BucketExistsAsync(new BucketExistsArgs().WithBucket(bucket));
+    if (!exists)
+    {
+        await minio.MakeBucketAsync(new MakeBucketArgs().WithBucket(bucket));
+    }
+}
+
 // Проверка среды, если режим = Development (из launchSettings.json)
 if (app.Environment.IsDevelopment())
 {
@@ -101,4 +130,3 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.Run();
-

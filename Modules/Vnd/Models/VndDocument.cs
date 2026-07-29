@@ -53,6 +53,9 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
 
     public ICollection<VndRedaction> Redactions { get; set; } = new List<VndRedaction>();
 
+    public int? CurrentRedactionId { get; set; }
+    public VndRedaction? CurrentRedaction { get; set; }
+    
     // Ссылки на другие ВНД (само-связь многие-ко-многим через явную join-сущность VndLink)
     public ICollection<VndLink> OutgoingLinks { get; set; } = new List<VndLink>();
     public ICollection<VndLink> IncomingLinks { get; set; } = new List<VndLink>();

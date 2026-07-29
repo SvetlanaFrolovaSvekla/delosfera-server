@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Models;
 using delosfera_server.Modules.Dictionaries.Models;
+using delosfera_server.Modules.Files.Models;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Vnd.Models;
 
@@ -23,9 +24,12 @@ public class DelosferaDbContext : DbContext
     public DbSet<User> Users => Set<User>(); // Пользователи
     public DbSet<Token> Tokens => Set<Token>(); // Токены
     
+    public DbSet<FileAttachment> FileAttachments { get; set; }
+    public DbSet<VndRedaction> VndRedactions { get; set; }
+    
+    public DbSet<VndRedactionAttachment> VndRedactionAttachments { get; set; }
     
     public DbSet<VndDocument> VndDocuments => Set<VndDocument>();
-    public DbSet<VndRedaction> VndRedactions => Set<VndRedaction>();
     public DbSet<VndLink> VndLinks => Set<VndLink>();
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)

@@ -9,14 +9,37 @@ public class VndRedactionConfiguration : IEntityTypeConfiguration<VndRedaction>
     {
         builder.ToTable("vnd_redaction");
 
-        var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Номер редакции уникален в рамках одного ВНД
+        builder.HasIndex(x => new { x.VndId, x.Number }).IsUnique();
 
-        builder.HasData(
-            new { Id = 1, VndId = 1, DocRu = "Текст редакции на русском языке...", DocKg = "Редакциянын кыргыз тилиндеги тексти...", DocEn = "Revision text in English...", AttachmentIds = new int[0], CreatedAt = seedDate, UpdatedAt = seedDate },
-            new { Id = 2, VndId = 2, DocRu = "Текст редакции на русском языке...", DocKg = "Редакциянын кыргыз тилиндеги тексти...", DocEn = "Revision text in English...", AttachmentIds = new int[0], CreatedAt = seedDate, UpdatedAt = seedDate },
-            new { Id = 3, VndId = 3, DocRu = "Текст редакции на русском языке...", DocKg = "Редакциянын кыргыз тилиндеги тексти...", DocEn = "Revision text in English...", AttachmentIds = new int[0], CreatedAt = seedDate, UpdatedAt = seedDate },
-            new { Id = 4, VndId = 4, DocRu = "Текст редакции на русском языке...", DocKg = "Редакциянын кыргыз тилиндеги тексти...", DocEn = "Revision text in English...", AttachmentIds = new int[0], CreatedAt = seedDate, UpdatedAt = seedDate },
-            new { Id = 5, VndId = 5, DocRu = "Текст редакции на русском языке...", DocKg = "Редакциянын кыргыз тилиндеги тексти...", DocEn = "Revision text in English...", AttachmentIds = new int[0], CreatedAt = seedDate, UpdatedAt = seedDate }
-        );
+        // Код редакции уникален глобально (10062-Р3 и т.п.)
+        builder.HasIndex(x => x.Code).IsUnique();
+
+        builder.HasOne(x => x.Vnd)
+            .WithMany(x => x.Redactions)
+            .HasForeignKey(x => x.VndId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Restrict — чтобы нельзя было случайно удалить файл, пока он привязан к редакции.
+        // Удаление файла должно идти через явную бизнес-операцию (удалить редакцию → удалить файлы).
+        builder.HasOne(x => x.DocFileRu)
+            .WithMany()
+            .HasForeignKey(x => x.DocFileRuId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.DocFileKg)
+            .WithMany()
+            .HasForeignKey(x => x.DocFileKgId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.DocFileEn)
+            .WithMany()
+            .HasForeignKey(x => x.DocFileEnId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(x => x.Attachments)
+            .WithOne(x => x.VndRedaction)
+            .HasForeignKey(x => x.VndRedactionId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

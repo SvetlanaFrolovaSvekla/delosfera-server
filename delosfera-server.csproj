@@ -18,11 +18,14 @@
           <PrivateAssets>all</PrivateAssets>
         </PackageReference>
         <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
+        <PackageReference Include="Minio" Version="7.0.0" />
         <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
         <PackageReference Include="Scalar.AspNetCore" Version="2.16.16" />
     </ItemGroup>
 
     <ItemGroup>
+      <Folder Include="Modules\Files\DTO\" />
+      <Folder Include="Modules\Files\Models\Configurations\" />
       <Folder Include="Modules\Sz\" />
       <Folder Include="Modules\Zakupki\" />
     </ItemGroup>

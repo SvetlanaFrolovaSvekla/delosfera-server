@@ -4,14 +4,20 @@ using delosfera_server.Modules.Vnd.DTO.Request;
 using delosfera_server.Modules.Vnd.DTO.Response;
 using delosfera_server.Modules.Vnd.Models;
 using delosfera_server.Common.Extensions;
+using delosfera_server.Modules.Files.Services;
 
 namespace delosfera_server.Modules.Vnd.Services;
 
 public class VndService : IVndService
 {
     private readonly DelosferaDbContext _db;
+    private readonly IFileStorageService _fileService;
 
-    public VndService(DelosferaDbContext db) => _db = db;
+    public VndService(DelosferaDbContext db, IFileStorageService fileService)
+    {
+        _db = db;
+        _fileService = fileService;
+    }
 
     public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
     {
@@ -34,12 +40,6 @@ public class VndService : IVndService
                 EF.Functions.ILike(x.TitleRu, $"%{request.Name}%") ||
                 (x.TitleEn != null && EF.Functions.ILike(x.TitleEn, $"%{request.Name}%")) ||
                 (x.TitleKg != null && EF.Functions.ILike(x.TitleKg, $"%{request.Name}%")));
-
-        if (!string.IsNullOrWhiteSpace(request.RevisionText))
-            query = query.Where(x => x.Redactions.Any(r =>
-                EF.Functions.ILike(r.DocRu, $"%{request.RevisionText}%") ||
-                (r.DocEn != null && EF.Functions.ILike(r.DocEn, $"%{request.RevisionText}%")) ||
-                (r.DocKg != null && EF.Functions.ILike(r.DocKg, $"%{request.RevisionText}%"))));
 
         if (request.Statuses.Count > 0)
         {
@@ -192,6 +192,21 @@ public class VndService : IVndService
         UpdatedAt = x.UpdatedAt
     };
 
+    private static VndRedactionResponse ToRedactionResponse(VndRedaction x) => new()
+    {
+        Id = x.Id,
+        Code = x.Code,
+        Number = x.Number,
+        DocFileRuId = x.DocFileRuId,
+        DocFileKgId = x.DocFileKgId,
+        DocFileEnId = x.DocFileEnId,
+        RequiresApproval = x.RequiresApproval,
+        ApprovalStatus = x.ApprovalStatus.ToString(),
+        AttachmentFileIds = x.Attachments.Select(a => a.FileAttachmentId).ToList(),
+        CreatedAt = x.CreatedAt
+    };
+
+
     public async Task<VndResponse> CreateAsync(CreateVndRequest request, int currentUserId, string languageCode)
     {
         var typeExists = await _db.TypesVnd.AnyAsync(x => x.Id == request.TypeId);
@@ -304,5 +319,52 @@ public class VndService : IVndService
         if (items.Count != ids.Distinct().Count())
             throw new KeyNotFoundException($"{entityName}: не все id найдены");
         return items;
+    }
+
+    public async Task<VndRedactionResponse> AddRedactionAsync(
+        int vndId, CreateVndRedactionRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var docRu = await _fileService.SaveAsync(request.DocRu, currentUserId);
+        var docKg = request.DocKg is not null ? await _fileService.SaveAsync(request.DocKg, currentUserId) : null;
+        var docEn = request.DocEn is not null ? await _fileService.SaveAsync(request.DocEn, currentUserId) : null;
+
+        var attachmentEntities = new List<VndRedactionAttachment>();
+        foreach (var file in request.Attachments ?? [])
+        {
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            attachmentEntities.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
+        }
+
+        var nextNumber = (await _db.VndRedactions
+            .Where(r => r.VndId == vndId)
+            .Select(r => (int?)r.Number)
+            .MaxAsync() ?? 0) + 1;
+
+        var redaction = new VndRedaction
+        {
+            VndId = vndId,
+            Number = nextNumber,
+            Code = $"{vnd.Code}-Р{nextNumber}",
+            DocFileRuId = docRu.Id,
+            DocFileKgId = docKg?.Id,
+            DocFileEnId = docEn?.Id,
+            RequiresApproval = request.RequiresApproval,
+            ApprovalStatus = request.RequiresApproval
+                ? RedactionApprovalStatus.Pending
+                : RedactionApprovalStatus.NotRequired,
+            Attachments = attachmentEntities
+        };
+
+        _db.VndRedactions.Add(redaction);
+        await _db.SaveChangesAsync(); // нужен Id редакции перед проставлением ссылки
+
+        vnd.CurrentRedactionId = redaction.Id;
+        vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        await _db.SaveChangesAsync();
+
+        return ToRedactionResponse(redaction);
     }
 }
