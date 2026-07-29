@@ -137,6 +137,7 @@ public class VndService : IVndService
         "review" => VndStatus.Review,
         "consol" => VndStatus.Consolidation,
         "arch" => VndStatus.Archived,
+        "draft" => VndStatus.Draft,
         _ => throw new InvalidOperationException($"Неизвестный статус: {key}")
     };
 
@@ -147,6 +148,7 @@ public class VndService : IVndService
         VndStatus.Review => "review",
         VndStatus.Consolidation => "consol",
         VndStatus.Archived => "arch",
+        VndStatus.Draft => "draft",
         _ => "onact"
     };
 

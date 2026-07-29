@@ -6,7 +6,7 @@ public class VndSearchRequest
     public string? Name { get; set; }
     public string? RevisionText { get; set; }
 
-    public List<string> Statuses { get; set; } = []; // "active","onact","review","consol","arch"
+    public List<string> Statuses { get; set; } = []; // "active","onact","review","consol","arch","draft"
     public List<int> TypeIds { get; set; } = [];
     public List<int> OrganIds { get; set; } = [];
     public List<int> DeveloperIds { get; set; } = [];
