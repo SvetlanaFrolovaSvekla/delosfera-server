@@ -1,0 +1,81 @@
+﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using delosfera_server.Common.Services;
+using delosfera_server.Modules.Vnd.DTO.Request;
+using delosfera_server.Modules.Vnd.DTO.Response;
+using delosfera_server.Modules.Vnd.Services;
+
+namespace delosfera_server.Modules.Vnd.Controllers;
+
+[ApiController]
+[Route("/vnd/{vndId:int}/approval")]
+[Tags("ВНД — Согласование")]
+[Authorize]
+public class VndApprovalController : ControllerBase
+{
+    private readonly IVndApprovalService _service;
+    private readonly ICurrentUserService _currentUser;
+
+    public VndApprovalController(IVndApprovalService service, ICurrentUserService currentUser)
+    {
+        _service = service;
+        _currentUser = currentUser;
+    }
+
+    /// <summary>Запустить согласование последней редакции ВНД</summary>
+    [HttpPost("start")]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status201Created)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Start(int vndId, [FromBody] StartApprovalRequest request)
+    {
+        try
+        {
+            var result = await _service.StartAsync(vndId, request, _currentUser.UserId);
+            return CreatedAtAction(nameof(Get), new { vndId }, result);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    /// <summary>Текущий процесс согласования для последней редакции ВНД</summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Get(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.GetByVndIdAsync(vndId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    }
+
+    /// <summary>Решение согласующего по своему этапу</summary>
+    [HttpPost("stages/{stageId:int}/decision")]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Decide(
+        int vndId, int stageId, [FromBody] ApprovalDecisionRequest request)
+    {
+        try
+        {
+            return Ok(await _service.DecideAsync(vndId, stageId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
+    /// <summary>Инициатор отправляет исправленную редакцию на повторное согласование</summary>
+    [HttpPost("resubmit")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Resubmit(
+        int vndId, [FromForm] ResubmitAfterRevisionRequest request)
+    {
+        try
+        {
+            return Ok(await _service.ResubmitAfterRevisionAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+}

@@ -32,6 +32,9 @@ public class DelosferaDbContext : DbContext
     public DbSet<VndDocument> VndDocuments => Set<VndDocument>();
     public DbSet<VndLink> VndLinks => Set<VndLink>();
     
+    public DbSet<VndApprovalProcess> VndApprovalProcesses => Set<VndApprovalProcess>();
+    public DbSet<VndApprovalStage> VndApprovalStages => Set<VndApprovalStage>();
+    
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
