@@ -192,11 +192,13 @@ public class VndService : IVndService
         UpdatedAt = x.UpdatedAt
     };
 
-    private static VndRedactionResponse ToRedactionResponse(VndRedaction x) => new()
+    private static VndRedactionResponse ToRedactionResponse(VndRedaction x, int? currentRedactionId) => new()
     {
         Id = x.Id,
         Code = x.Code,
         Number = x.Number,
+        Description = x.Description,
+        IsCurrent = x.Id == currentRedactionId,
         DocFileRuId = x.DocFileRuId,
         DocFileKgId = x.DocFileKgId,
         DocFileEnId = x.DocFileEnId,
@@ -321,11 +323,41 @@ public class VndService : IVndService
         return items;
     }
 
+    /*
+    Правила при загрузке новой редакции:
+    1. Первая редакция документа, RequiresApproval = false - сразу становится актуальной.
+    2. Первая редакция документа, RequiresApproval = true - создаётся, но актуальной
+     не становится; ждёт согласования.
+    3. Есть предыдущие редакции, новая с RequiresApproval = false - сразу
+     становится актуальной, прежняя актуальная автоматически "теряет" этот статус (вытеснена).
+    4. Есть предыдущие редакции, новая с RequiresApproval = true - создаётся,
+     но актуальной не становится; прежняя актуальная остаётся актуальной до исхода согласования.
+    5. Блокировка загрузки: если последняя по номеру редакция документа находится
+     в статусе "на согласовании" (Pending) — новую редакцию загрузить нельзя. Сначала нужно её согласовать/отклонить/отозвать.
+    */
+
     public async Task<VndRedactionResponse> AddRedactionAsync(
         int vndId, CreateVndRedactionRequest request, int currentUserId)
     {
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        // Правило: последняя редакция не должна быть незавершённой (черновик или на согласовании)
+        var lastRedaction = await _db.VndRedactions
+            .Where(r => r.VndId == vndId)
+            .OrderByDescending(r => r.Number)
+            .FirstOrDefaultAsync();
+
+        if (lastRedaction is not null &&
+            (lastRedaction.ApprovalStatus == RedactionApprovalStatus.Draft ||
+             lastRedaction.ApprovalStatus == RedactionApprovalStatus.Pending))
+        {
+            var reason = lastRedaction.ApprovalStatus == RedactionApprovalStatus.Draft
+                ? "ещё не отправлена на согласование"
+                : "ожидает решения по согласованию";
+            throw new InvalidOperationException(
+                $"Редакция {lastRedaction.Code} {reason}. Завершите работу с ней, прежде чем загружать новую.");
+        }
 
         var docRu = await _fileService.SaveAsync(request.DocRu, currentUserId);
         var docKg = request.DocKg is not null ? await _fileService.SaveAsync(request.DocKg, currentUserId) : null;
@@ -338,33 +370,73 @@ public class VndService : IVndService
             attachmentEntities.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
         }
 
-        var nextNumber = (await _db.VndRedactions
-            .Where(r => r.VndId == vndId)
-            .Select(r => (int?)r.Number)
-            .MaxAsync() ?? 0) + 1;
+        var nextNumber = (lastRedaction?.Number ?? 0) + 1;
 
         var redaction = new VndRedaction
         {
             VndId = vndId,
             Number = nextNumber,
             Code = $"{vnd.Code}-Р{nextNumber}",
+            Description = request.Description,
             DocFileRuId = docRu.Id,
             DocFileKgId = docKg?.Id,
             DocFileEnId = docEn?.Id,
             RequiresApproval = request.RequiresApproval,
             ApprovalStatus = request.RequiresApproval
-                ? RedactionApprovalStatus.Pending
+                ? RedactionApprovalStatus.Draft
                 : RedactionApprovalStatus.NotRequired,
             Attachments = attachmentEntities
         };
 
         _db.VndRedactions.Add(redaction);
-        await _db.SaveChangesAsync(); // нужен Id редакции перед проставлением ссылки
-
-        vnd.CurrentRedactionId = redaction.Id;
-        vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
         await _db.SaveChangesAsync();
 
-        return ToRedactionResponse(redaction);
+        if (!request.RequiresApproval)
+        {
+            vnd.CurrentRedactionId = redaction.Id;
+            vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+            vnd.Status = VndStatus.Active;
+            await _db.SaveChangesAsync();
+        }
+
+        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+    }
+    
+    // Отправка на согласование (заглушка)
+    public async Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(int vndId, int redactionId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var redaction = await _db.VndRedactions
+                            .Include(x => x.Attachments)
+                            .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
+                        ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
+
+        if (redaction.ApprovalStatus != RedactionApprovalStatus.Draft)
+            throw new InvalidOperationException("Отправить на согласование можно только черновик редакции");
+        
+        // если RequiresApproval = true, то черновик редакции ещё
+        // не отправлен на согласование, остается черновиком
+        redaction.ApprovalStatus = RedactionApprovalStatus.Pending;
+        vnd.Status = VndStatus.Review; 
+        await _db.SaveChangesAsync();
+
+        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+    }
+    
+
+    public async Task<List<VndRedactionResponse>> GetRedactionsAsync(int vndId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var redactions = await _db.VndRedactions
+            .Where(x => x.VndId == vndId)
+            .Include(x => x.Attachments)
+            .OrderBy(x => x.Number)
+            .ToListAsync();
+
+        return redactions.Select(r => ToRedactionResponse(r, vnd.CurrentRedactionId)).ToList();
     }
 }

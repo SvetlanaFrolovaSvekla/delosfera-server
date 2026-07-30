@@ -9,6 +9,8 @@ public class VndRedaction : IAuditableEntity
 
     public int VndId { get; set; }
     public VndDocument? Vnd { get; set; }
+    
+    public string? Description { get; set; } // Описание редакции
 
     /// <summary>Порядковый номер редакции в рамках ВНД, авто-инкремент (1, 2, 3...)</summary>
     public int Number { get; set; }

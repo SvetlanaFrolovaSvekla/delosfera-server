@@ -81,4 +81,34 @@ public class VndController : ControllerBase
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
+    
+    /// <summary>Получить список редакций ВНД</summary>
+    [HttpGet("{vndId:int}/redactions")]
+    [ProducesResponseType(typeof(List<VndRedactionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<VndRedactionResponse>>> GetRedactions(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.GetRedactionsAsync(vndId));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+    
+    /// <summary>Отправить черновик редакции (редакция со статусом "Требуется согласование"
+    /// на согласование</summary>
+    [HttpPost("{vndId:int}/redactions/{redactionId:int}/submit")]
+    [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndRedactionResponse>> SubmitRedaction(int vndId, int redactionId)
+    {
+        try
+        {
+            return Ok(await _service.SubmitRedactionForApprovalAsync(vndId, redactionId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
 }
