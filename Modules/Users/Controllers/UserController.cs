@@ -3,6 +3,7 @@ using delosfera_server.Common.Services;
 using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
 using delosfera_server.Modules.Users.Services;
+using Microsoft.AspNetCore.Authorization;
 
 namespace delosfera_server.Modules.Users.Controllers;
 
@@ -12,15 +13,27 @@ namespace delosfera_server.Modules.Users.Controllers;
 [ApiController]
 [Route("api/users")]
 [Tags("Пользователи")]
+[Authorize]
 public class UserController : ControllerBase
 {
     private readonly IUserService _service;
     private readonly ILanguageResolver _languageResolver;
+    private readonly ICurrentUserService _currentUser;
 
-    public UserController(IUserService service, ILanguageResolver languageResolver)
+    public UserController(IUserService service, ILanguageResolver languageResolver, ICurrentUserService currentUser)
     {
         _service = service;
         _languageResolver = languageResolver;
+        _currentUser = currentUser;
+    }
+    
+    /// <summary>Текущий авторизованный пользователь</summary>
+    [HttpGet("me")]
+    [ProducesResponseType(typeof(UserResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<UserResponse>> GetMe()
+    {
+        var language = _languageResolver.Resolve(Request);
+        return Ok(await _service.GetByIdAsync(_currentUser.UserId, language));
     }
 
     /// <summary>

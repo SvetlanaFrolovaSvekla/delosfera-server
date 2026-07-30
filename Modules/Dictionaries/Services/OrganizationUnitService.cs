@@ -20,7 +20,9 @@ public class OrganizationUnitService : IOrganizationUnitService
 
     public async Task<List<OrganizationUnitResponse>> GetAllAsync(OrganizationUnitSortBy sortBy, string? search, string languageCode)
     {
-        IQueryable<OrganizationUnit> query = _db.OrganizationUnits;
+        IQueryable<OrganizationUnit> query = _db.OrganizationUnits
+            .Include(x => x.HeadUser)
+            .Include(x => x.CuratorUser);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -52,43 +54,72 @@ public class OrganizationUnitService : IOrganizationUnitService
             await EnsureDepthNotExceededAsync(request.ParentId.Value);
         }
 
+        if (request.HeadUserId.HasValue)
+            await EnsureUserExistsAsync(request.HeadUserId.Value, "Начальник");
+        if (request.CuratorUserId.HasValue)
+            await EnsureUserExistsAsync(request.CuratorUserId.Value, "Куратор");
+
         var entity = new OrganizationUnit
         {
             TitleRu = request.TitleRu,
             TitleEn = request.TitleEn,
             TitleKg = request.TitleKg,
-            ParentId = request.ParentId
+            ParentId = request.ParentId,
+            HeadUserId = request.HeadUserId,
+            CuratorUserId = request.CuratorUserId
         };
 
         _db.OrganizationUnits.Add(entity);
         await _db.SaveChangesAsync();
 
-        return ToResponse(entity, languageCode);
+        return await LoadResponseAsync(entity.Id, languageCode);
     }
 
     public async Task<OrganizationUnitResponse> UpdateAsync(int id, UpdateOrganizationUnitRequest request, string languageCode)
     {
         var entity = await _db.OrganizationUnits.FindAsync(id)
-            ?? throw new KeyNotFoundException($"Структурное подразделение с id={id} не найдено");
+                     ?? throw new KeyNotFoundException($"Структурное подразделение с id={id} не найдено");
 
         if (request.ParentId.HasValue)
         {
             if (request.ParentId.Value == id)
                 throw new InvalidOperationException("Подразделение не может быть родителем самого себя");
-
             await EnsureParentExistsAsync(request.ParentId.Value);
             await EnsureNoCircularReferenceAsync(id, request.ParentId.Value);
             await EnsureDepthNotExceededAsync(request.ParentId.Value);
         }
 
+        if (request.HeadUserId.HasValue)
+            await EnsureUserExistsAsync(request.HeadUserId.Value, "Начальник");
+        if (request.CuratorUserId.HasValue)
+            await EnsureUserExistsAsync(request.CuratorUserId.Value, "Куратор");
+
         entity.TitleRu = request.TitleRu;
         entity.TitleEn = request.TitleEn;
         entity.TitleKg = request.TitleKg;
         entity.ParentId = request.ParentId;
+        entity.HeadUserId = request.HeadUserId;
+        entity.CuratorUserId = request.CuratorUserId;
         await _db.SaveChangesAsync();
 
+        return await LoadResponseAsync(id, languageCode);
+    }
+    
+    private async Task EnsureUserExistsAsync(int userId, string role)
+    {
+        var exists = await _db.Users.AnyAsync(x => x.Id == userId);
+        if (!exists) throw new KeyNotFoundException($"{role} с id={userId} не найден среди пользователей");
+    }
+
+    private async Task<OrganizationUnitResponse> LoadResponseAsync(int id, string languageCode)
+    {
+        var entity = await _db.OrganizationUnits
+            .Include(x => x.HeadUser)
+            .Include(x => x.CuratorUser)
+            .FirstAsync(x => x.Id == id);
         return ToResponse(entity, languageCode);
     }
+    
 
     public async Task DeleteAsync(int id)
     {
@@ -168,6 +199,10 @@ public class OrganizationUnitService : IOrganizationUnitService
         TitleEn = entity.TitleEn,
         TitleKg = entity.TitleKg,
         ParentId = entity.ParentId,
+        HeadUserId = entity.HeadUserId,
+        HeadUserName = entity.HeadUser?.FullName,
+        CuratorUserId = entity.CuratorUserId,
+        CuratorUserName = entity.CuratorUser?.FullName,
         CreatedAt = entity.CreatedAt,
         UpdatedAt = entity.UpdatedAt
     };

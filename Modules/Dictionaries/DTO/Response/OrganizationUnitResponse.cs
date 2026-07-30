@@ -21,6 +21,11 @@ public class OrganizationUnitResponse
     /// <summary>Дата создания записи</summary>
     public DateTime CreatedAt { get; set; }
 
+    public int? HeadUserId { get; set; }
+    public string? HeadUserName { get; set; }
+    public int? CuratorUserId { get; set; }
+    public string? CuratorUserName { get; set; }
+
     /// <summary>Дата последнего обновления записи</summary>
     public DateTime UpdatedAt { get; set; }
 }

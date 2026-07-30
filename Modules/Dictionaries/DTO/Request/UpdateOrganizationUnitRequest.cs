@@ -16,4 +16,8 @@ public class UpdateOrganizationUnitRequest
 
     /// <summary>Идентификатор родительского подразделения (если есть)</summary>
     public int? ParentId { get; set; }
+
+    public int? HeadUserId { get; set; }
+    
+    public int? CuratorUserId { get; set; }
 }

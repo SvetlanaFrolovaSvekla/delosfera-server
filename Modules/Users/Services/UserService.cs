@@ -73,7 +73,7 @@ public class UserService : IUserService
         _db.Users.Add(entity);
         await _db.SaveChangesAsync();
 
-        return await GetByIdOrThrowAsync(entity.Id, languageCode);
+        return await GetByIdAsync(entity.Id, languageCode);
     }
 
     public async Task<UserResponse> UpdateAsync(int id, UpdateUserRequest request, string languageCode)
@@ -104,7 +104,7 @@ public class UserService : IUserService
 
         await _db.SaveChangesAsync();
 
-        return await GetByIdOrThrowAsync(id, languageCode);
+        return await GetByIdAsync(id, languageCode);
     }
 
     public async Task DeleteAsync(int id)
@@ -125,14 +125,14 @@ public class UserService : IUserService
         }
     }
 
-    private async Task<UserResponse> GetByIdOrThrowAsync(int id, string languageCode)
+    public async Task<UserResponse> GetByIdAsync(int id, string languageCode)
     {
         var entity = await _db.Users
-            .Include(x => x.Position)
-            .Include(x => x.OrgUnit)
-            .Include(x => x.Roles)
-            .FirstOrDefaultAsync(x => x.Id == id)
-            ?? throw new KeyNotFoundException($"Пользователь с id={id} не найден");
+                         .Include(x => x.Position)
+                         .Include(x => x.OrgUnit)
+                         .Include(x => x.Roles)
+                         .FirstOrDefaultAsync(x => x.Id == id)
+                     ?? throw new KeyNotFoundException($"Пользователь с id={id} не найден");
 
         return ToResponse(entity, languageCode);
     }
