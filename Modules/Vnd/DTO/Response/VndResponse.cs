@@ -37,6 +37,9 @@ public class VndResponse
     public bool LastActualizationHadChanges { get; set; }
     public int DaysInArchive { get; set; }
 
+    /// <summary>статусы актуализации: "normal" | "approaching" | "critical" | "overdue" | null (нет даты актуализации)</summary>
+    public string? ActualizationBucket { get; set; }
+
     public List<int> KeywordIds { get; set; } = [];
     public List<int> RubricIds { get; set; } = [];
     public int SecrecyLevelId { get; set; }

@@ -24,7 +24,6 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Folder Include="Modules\Files\DTO\" />
       <Folder Include="Modules\Files\Models\Configurations\" />
       <Folder Include="Modules\Sz\" />
       <Folder Include="Modules\Zakupki\" />

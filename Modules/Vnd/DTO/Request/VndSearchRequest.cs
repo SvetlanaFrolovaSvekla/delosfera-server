@@ -16,6 +16,10 @@ public class VndSearchRequest
     public List<int> SecrecyLevelIds { get; set; } = [];
     public List<int> UserGroupIds { get; set; } = [];
 
+    /// <summary>Фильтр по статусу срока актуализации: "normal","approaching","critical","overdue".
+    /// Пусто = без фильтра (все, включая документы без даты актуализации).</summary>
+    public List<string> ActualizationBuckets { get; set; } = [];
+
     public DateRangeFilter? AdoptionDate { get; set; }
     public string? AdoptionCode { get; set; }
     public DateRangeFilter? EffectiveDate { get; set; }

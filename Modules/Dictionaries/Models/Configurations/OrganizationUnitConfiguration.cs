@@ -67,7 +67,7 @@ public class OrganizationUnitConfiguration : IEntityTypeConfiguration<Organizati
             new { Id = 30, TitleRu = "Управление розничных продуктов", TitleEn = "Retail Products Department", TitleKg = "Чекене продукттар башкармасы", ParentId = (int?)null, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 31, TitleRu = "Управление стратегического планирования и бюджетирования", TitleEn = "Strategic Planning and Budgeting Department", TitleKg = "Стратегиялык пландоо жана бюджеттөө башкармасы", ParentId = (int?)null, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 32, TitleRu = "Управление человеческими ресурсами", TitleEn = "Human Resources Department", TitleKg = "Адам ресурстарын башкаруу", ParentId = (int?)null, CreatedAt = seedDate, UpdatedAt = seedDate },
-            new { Id = 33, TitleRu = "Управление методологии и продуктов", TitleEn = "Methodology and Products Department", TitleKg = "Методология жана продукттар башкармасы", ParentId = (int?)null, CreatedAt = seedDate, UpdatedAt = seedDate },
+            new { Id = 33, TitleRu = "Управление методологии", TitleEn = "Methodology and Products Department", TitleKg = "Методология жана продукттар башкармасы", ParentId = (int?)null, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 34, TitleRu = "Юридическое управление", TitleEn = "Legal Department", TitleKg = "Юридикалык башкарма", ParentId = (int?)null, CreatedAt = seedDate, UpdatedAt = seedDate },
 
             new { Id = 35, TitleRu = "Административный отдел", TitleEn = "Administrative Division", TitleKg = "Административдик бөлүм", ParentId = (int?)null, CreatedAt = seedDate, UpdatedAt = seedDate },

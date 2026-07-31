@@ -27,6 +27,8 @@ public class VndApprovalProcess : IAuditableEntity
     public DateTime PrimaryStartedAt { get; set; }
     public DateTime? RepeatStartedAt { get; set; }
     public DateTime? FinalHoldStartedAt { get; set; }
+    
+    public string? RepeatInitiatorComment { get; set; }
 
     public DateTime? CompletedAt { get; set; } // Когда процесс завершился, ВНД стал действующим 
 

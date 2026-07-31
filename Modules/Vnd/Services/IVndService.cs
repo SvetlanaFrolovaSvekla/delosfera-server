@@ -11,4 +11,5 @@ public interface IVndService
     Task<VndRedactionResponse> AddRedactionAsync(int vndId, CreateVndRedactionRequest request, int currentUserId);
     Task<List<VndRedactionResponse>> GetRedactionsAsync(int vndId);
     Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(int vndId, int redactionId);
+    Task<VndActualizationSummaryResponse> GetActualizationSummaryAsync();
 }

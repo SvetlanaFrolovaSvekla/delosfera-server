@@ -88,8 +88,11 @@ public class VndService : IVndService
         query = ApplyDateFilter(query, request.LastActualizationDate, x => x.LastActualizationDate);
         query = ApplyDateFilter(query, request.ArchivedDate, x => x.ArchivedDate);
 
+        query = ApplyActualizationBucketFilter(query, request.ActualizationBuckets);
+
         var entities = await query.ToListAsync();
-        return entities.Select(x => ToResponse(x, languageCode)).ToList();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return entities.Select(x => ToResponse(x, languageCode, today)).ToList();
     }
 
     public async Task<VndResponse> GetByIdAsync(int id, string languageCode)
@@ -107,8 +110,81 @@ public class VndService : IVndService
                          .FirstOrDefaultAsync(x => x.Id == id)
                      ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 
-        return ToResponse(entity, languageCode);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return ToResponse(entity, languageCode, today);
     }
+
+    /// <summary>Сводка по срокам актуализации для дашборда планирования.
+    /// Документы без DueActualizationDate (архив/черновики) не учитываются.
+    /// Считается одним SQL-запросом через условные COUNT.</summary>
+    public async Task<VndActualizationSummaryResponse> GetActualizationSummaryAsync()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var criticalEnd = today.AddDays(ActualizationThresholds.CriticalDays);
+        var approachingEnd = today.AddDays(ActualizationThresholds.ApproachingDays);
+
+        var counts = await _db.VndDocuments
+            .Where(x => x.DueActualizationDate != null)
+            .GroupBy(x => 1)
+            .Select(g => new VndActualizationSummaryResponse
+            {
+                Overdue = g.Count(x => x.DueActualizationDate!.Value < today),
+                Critical = g.Count(x =>
+                    x.DueActualizationDate!.Value >= today && x.DueActualizationDate!.Value <= criticalEnd),
+                Approaching = g.Count(x =>
+                    x.DueActualizationDate!.Value > criticalEnd && x.DueActualizationDate!.Value <= approachingEnd),
+                Normal = g.Count(x => x.DueActualizationDate!.Value > approachingEnd)
+            })
+            .FirstOrDefaultAsync() ?? new VndActualizationSummaryResponse();
+
+        counts.Total = counts.Normal + counts.Approaching + counts.Critical + counts.Overdue;
+        return counts;
+    }
+
+    private static IQueryable<VndDocument> ApplyActualizationBucketFilter(
+        IQueryable<VndDocument> query, List<string> bucketKeys)
+    {
+        if (bucketKeys.Count == 0) return query;
+
+        var buckets = bucketKeys.Select(MapActualizationBucketKey).ToHashSet();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var criticalEnd = today.AddDays(ActualizationThresholds.CriticalDays);
+        var approachingEnd = today.AddDays(ActualizationThresholds.ApproachingDays);
+
+        var includeNormal = buckets.Contains(ActualizationBucket.Normal);
+        var includeApproaching = buckets.Contains(ActualizationBucket.Approaching);
+        var includeCritical = buckets.Contains(ActualizationBucket.Critical);
+        var includeOverdue = buckets.Contains(ActualizationBucket.Overdue);
+
+        return query.Where(x =>
+            x.DueActualizationDate != null && (
+                (includeOverdue && x.DueActualizationDate.Value < today) ||
+                (includeCritical && x.DueActualizationDate.Value >= today &&
+                 x.DueActualizationDate.Value <= criticalEnd) ||
+                (includeApproaching && x.DueActualizationDate.Value > criticalEnd &&
+                 x.DueActualizationDate.Value <= approachingEnd) ||
+                (includeNormal && x.DueActualizationDate.Value > approachingEnd)
+            ));
+    }
+
+    private static ActualizationBucket MapActualizationBucketKey(string key) => key.ToLowerInvariant() switch
+    {
+        "normal" => ActualizationBucket.Normal,
+        "approaching" => ActualizationBucket.Approaching,
+        "critical" => ActualizationBucket.Critical,
+        "overdue" => ActualizationBucket.Overdue,
+        _ => throw new InvalidOperationException($"Неизвестный статус срока актуализации: {key}")
+    };
+
+    private static string? MapActualizationBucketBack(ActualizationBucket? bucket) => bucket switch
+    {
+        ActualizationBucket.Normal => "normal",
+        ActualizationBucket.Approaching => "approaching",
+        ActualizationBucket.Critical => "critical",
+        ActualizationBucket.Overdue => "overdue",
+        _ => null
+    };
 
     private static IQueryable<VndDocument> ApplyDateFilter(
         IQueryable<VndDocument> query, DateRangeFilter? filter,
@@ -152,7 +228,7 @@ public class VndService : IVndService
         _ => "onact"
     };
 
-    private static VndResponse ToResponse(VndDocument x, string languageCode) => new()
+    private static VndResponse ToResponse(VndDocument x, string languageCode, DateOnly today) => new()
     {
         Id = x.Id,
         Code = x.Code,
@@ -183,6 +259,7 @@ public class VndService : IVndService
         LastActualizationDate = x.LastActualizationDate,
         LastActualizationHadChanges = x.LastActualizationHadChanges,
         DaysInArchive = x.DaysInArchive,
+        ActualizationBucket = MapActualizationBucketBack(ActualizationThresholds.Resolve(x.DueActualizationDate, today)),
         KeywordIds = x.Keywords.Select(k => k.Id).ToList(),
         RubricIds = x.Rubrics.Select(r => r.Id).ToList(),
         SecrecyLevelId = x.SecrecyLevelId,
@@ -281,7 +358,7 @@ public class VndService : IVndService
         _db.VndDocuments.Add(entity);
         await _db.SaveChangesAsync();
 
-        return ToResponse(entity, languageCode);
+        return ToResponse(entity, languageCode, today);
     }
 
     private static DateOnly ResolveDueDate(ActualizationPeriod period, DateOnly? customDate, DateOnly today) =>

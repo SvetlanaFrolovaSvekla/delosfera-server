@@ -2,7 +2,8 @@
 
 /// <summary>
 /// Id подразделений для фиксированных этапов маршрута согласования.
-/// Пока что реальные СП в dictionary_organization_unit.
+/// Пока что СП в dictionary_organization_unit
+/// TODO: сделать функцию для главного редактора - добавление фиксированных пользователей/СП во все маршруты
 /// </summary>
 public static class FixedApprovalOrgUnits
 {

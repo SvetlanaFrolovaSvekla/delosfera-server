@@ -91,9 +91,6 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 j =>
                 {
                     j.ToTable("vnd_user_group");
-                    // В моках ВНД-062/ВНД-084 ссылались на группу "g3 — Риск-менеджмент",
-                    // которой нет среди трёх созданных групп (Согласующие/Редакторы/ИТ-админы).
-                    // Пока оставляю без группы — скажи, если создать отдельную группу "Риск-менеджмент".
                 });
 
         var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);

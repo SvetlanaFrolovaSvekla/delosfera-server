@@ -3,7 +3,11 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Vnd.DTO.Request;
 using delosfera_server.Modules.Vnd.DTO.Response;
 using delosfera_server.Modules.Vnd.Models;
+using delosfera_server.Modules.Vnd.Notifications;
 using delosfera_server.Modules.Files.Services;
+using delosfera_server.Modules.Notifications.DTO.Request;
+using delosfera_server.Modules.Notifications.Models;
+using delosfera_server.Modules.Notifications.Services;
 
 namespace delosfera_server.Modules.Vnd.Services;
 
@@ -11,11 +15,19 @@ public class VndApprovalService : IVndApprovalService
 {
     private readonly DelosferaDbContext _db;
     private readonly IFileStorageService _fileService;
+    private readonly INotificationService _notifications;
+    private readonly ILogger<VndApprovalService> _logger;
 
-    public VndApprovalService(DelosferaDbContext db, IFileStorageService fileService)
+    public VndApprovalService(
+        DelosferaDbContext db,
+        IFileStorageService fileService,
+        INotificationService notifications,
+        ILogger<VndApprovalService> logger)
     {
         _db = db;
         _fileService = fileService;
+        _notifications = notifications;
+        _logger = logger;
     }
 
     public async Task<ApprovalProcessResponse> StartAsync(int vndId, StartApprovalRequest request, int currentUserId)
@@ -24,10 +36,10 @@ public class VndApprovalService : IVndApprovalService
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         var lastRedaction = await _db.VndRedactions
-            .Where(r => r.VndId == vndId)
-            .OrderByDescending(r => r.Number)
-            .FirstOrDefaultAsync()
-            ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
+                                .Where(r => r.VndId == vndId)
+                                .OrderByDescending(r => r.Number)
+                                .FirstOrDefaultAsync()
+                            ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
 
         if (lastRedaction.ApprovalStatus != RedactionApprovalStatus.Draft)
             throw new InvalidOperationException(
@@ -35,11 +47,12 @@ public class VndApprovalService : IVndApprovalService
 
         var alreadyRunning = await _db.VndApprovalProcesses
             .AnyAsync(x => x.RedactionId == lastRedaction.Id && x.Status != ApprovalProcessStatus.Approved
-                                                              && x.Status != ApprovalProcessStatus.Cancelled);
+                                                             && x.Status != ApprovalProcessStatus.Cancelled);
         if (alreadyRunning)
             throw new InvalidOperationException("По этой редакции уже запущено согласование");
 
-        if (request.PrimaryDeadlineHours <= 0 || request.RepeatDeadlineHours <= 0 || request.FinalHoldDeadlineHours <= 0)
+        if (request.PrimaryDeadlineHours <= 0 || request.RepeatDeadlineHours <= 0 ||
+            request.FinalHoldDeadlineHours <= 0)
             throw new InvalidOperationException("Все три норматива должны быть больше нуля часов");
 
         var stages = await BuildAndValidateStagesAsync(request.Stages);
@@ -64,20 +77,32 @@ public class VndApprovalService : IVndApprovalService
 
         await _db.SaveChangesAsync();
 
+        // --- Уведомления: задача на первичное согласование всем этапам маршрута
+        await NotifyAsync(
+            VndApprovalNotificationMessages.TaskPrimaryApproval(lastRedaction.Code, vnd.TitleRu),
+            NotificationCategory.Approval, vndId, currentUserId,
+            stages.Select(s => s.ApproverUserId).ToArray());
+
+        // --- Уведомление инициатору: редакция отправлена на согласование
+        await NotifyAsync(
+            VndApprovalNotificationMessages.SentToApproval(lastRedaction.Code, vnd.TitleRu),
+            NotificationCategory.Approval, vndId, currentUserId,
+            currentUserId);
+
         return await LoadResponseAsync(process.Id);
     }
 
     public async Task<ApprovalProcessResponse> GetByVndIdAsync(int vndId)
     {
         var lastRedaction = await _db.VndRedactions
-            .Where(r => r.VndId == vndId)
-            .OrderByDescending(r => r.Number)
-            .FirstOrDefaultAsync()
-            ?? throw new KeyNotFoundException($"У ВНД с id={vndId} нет редакций");
+                                .Where(r => r.VndId == vndId)
+                                .OrderByDescending(r => r.Number)
+                                .FirstOrDefaultAsync()
+                            ?? throw new KeyNotFoundException($"У ВНД с id={vndId} нет редакций");
 
         var process = await _db.VndApprovalProcesses
-            .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
-            ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
+                          .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
+                      ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
 
         return await LoadResponseAsync(process.Id);
     }
@@ -116,7 +141,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.PrimaryComment = request.Comment;
                 stage.PrimaryDecidedAt = DateTime.UtcNow;
                 stage.ParticipatesInRepeat = decision is ApprovalStageDecision.ApprovedWithComment
-                                                       or ApprovalStageDecision.Rejected;
+                    or ApprovalStageDecision.Rejected;
 
                 await _db.SaveChangesAsync();
 
@@ -137,7 +162,8 @@ public class VndApprovalService : IVndApprovalService
                 await _db.SaveChangesAsync();
 
                 var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
-                if (repeatStages.All(s => s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending))
+                if (repeatStages.All(s =>
+                        s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending))
                     await CompleteRepeatPhaseAsync(process);
                 break;
 
@@ -145,6 +171,28 @@ public class VndApprovalService : IVndApprovalService
                 throw new InvalidOperationException(
                     "В текущем статусе процесса принятие решений недоступно");
         }
+
+        // --- Уведомление инициатору о конкретном решении согласующего
+        // (общее для первичного и повторного этапов — decision уже посчитан выше)
+        var approver = await _db.Users.FindAsync(currentUserId);
+        var approverName = approver?.FullName ?? "—";
+        var redactionCode = process.Redaction!.Code;
+        var vndTitle = process.Vnd!.TitleRu;
+
+        var decisionNotice = decision switch
+        {
+            ApprovalStageDecision.Approved =>
+                VndApprovalNotificationMessages.ApprovedByUser(approverName, redactionCode, vndTitle),
+            ApprovalStageDecision.ApprovedWithComment =>
+                VndApprovalNotificationMessages.ApprovedWithComment(approverName, redactionCode, vndTitle,
+                    request.Comment),
+            ApprovalStageDecision.Rejected =>
+                VndApprovalNotificationMessages.Rejected(approverName, redactionCode, vndTitle, request.Comment),
+            _ => throw new InvalidOperationException($"Неожиданное значение decision: {decision}")
+        };
+
+        await NotifyAsync(
+            decisionNotice, NotificationCategory.Approval, vndId, currentUserId, process.InitiatorUserId);
 
         return await LoadResponseAsync(process.Id);
     }
@@ -168,11 +216,13 @@ public class VndApprovalService : IVndApprovalService
             var saved = await _fileService.SaveAsync(request.DocRu, currentUserId);
             redaction.DocFileRuId = saved.Id;
         }
+
         if (request.DocKg is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocKg, currentUserId);
             redaction.DocFileKgId = saved.Id;
         }
+
         if (request.DocEn is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocEn, currentUserId);
@@ -186,10 +236,21 @@ public class VndApprovalService : IVndApprovalService
             stage.RepeatDecidedAt = null;
         }
 
+        process.RepeatInitiatorComment = request.Comment;
         process.Status = ApprovalProcessStatus.Repeated;
         process.RepeatStartedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+
+        // --- Уведомление: задача на повторное согласование (только тем, кто участвует в repeat)
+        var repeatApproverIds = process.Stages
+            .Where(s => s.ParticipatesInRepeat)
+            .Select(s => s.ApproverUserId)
+            .ToArray();
+
+        await NotifyAsync(
+            VndApprovalNotificationMessages.TaskRepeatApproval(redaction.Code, process.Vnd!.TitleRu),
+            NotificationCategory.Approval, vndId, currentUserId, repeatApproverIds);
 
         return await LoadResponseAsync(process.Id);
     }
@@ -213,6 +274,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.PrimaryDecision = ApprovalStageDecision.AutoApprovedByTimeout;
                 stage.PrimaryDecidedAt = now;
             }
+
             await CompletePrimaryPhaseAsync(process, save: false);
         }
 
@@ -224,7 +286,8 @@ public class VndApprovalService : IVndApprovalService
             .Where(x => x.Status == ApprovalProcessStatus.Repeated)
             .ToListAsync();
 
-        foreach (var process in repeatedProcesses.Where(p => p.RepeatDeadlineAt is not null && p.RepeatDeadlineAt <= now))
+        foreach (var process in
+                 repeatedProcesses.Where(p => p.RepeatDeadlineAt is not null && p.RepeatDeadlineAt <= now))
         {
             foreach (var stage in process.Stages.Where(s =>
                          s.ParticipatesInRepeat &&
@@ -233,6 +296,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.RepeatDecision = ApprovalStageDecision.AutoApprovedByTimeout;
                 stage.RepeatDecidedAt = now;
             }
+
             await CompleteRepeatPhaseAsync(process, save: false);
         }
 
@@ -243,14 +307,16 @@ public class VndApprovalService : IVndApprovalService
             .Where(x => x.Status == ApprovalProcessStatus.FinalHold)
             .ToListAsync();
 
-        foreach (var process in finalHoldProcesses.Where(p => p.FinalHoldDeadlineAt is not null && p.FinalHoldDeadlineAt <= now))
+        foreach (var process in finalHoldProcesses.Where(p =>
+                     p.FinalHoldDeadlineAt is not null && p.FinalHoldDeadlineAt <= now))
         {
-            FinalizeApproval(process);
+            // Финальная выдержка бывает только после цикла с замечаниями → afterRevision: true
+            await FinalizeApprovalAsync(process, afterRevision: true);
         }
 
         await _db.SaveChangesAsync();
     }
-    
+
     private async Task CompletePrimaryPhaseAsync(VndApprovalProcess process, bool save = true)
     {
         var hasRemarks = process.Stages.Any(s =>
@@ -259,11 +325,15 @@ public class VndApprovalService : IVndApprovalService
         if (!hasRemarks)
         {
             // Если никто не оставил замечаний, то финальной выдержки не будет, ВНД сразу действующий
-            FinalizeApproval(process);
+            await FinalizeApprovalAsync(process, afterRevision: false);
         }
         else
         {
             process.Status = ApprovalProcessStatus.RevisionNeeded;
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
+                NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
         }
 
         if (save) await _db.SaveChangesAsync();
@@ -274,10 +344,22 @@ public class VndApprovalService : IVndApprovalService
         process.Status = ApprovalProcessStatus.FinalHold;
         process.FinalHoldStartedAt = DateTime.UtcNow;
 
+        var stageApproverIds = process.Stages.Select(s => s.ApproverUserId).ToArray();
+
+        // --- Всем согласующим: документ ушёл на финальную выдержку (ознакомление, без решений)
+        await NotifyAsync(
+            VndApprovalNotificationMessages.FinalHoldForApprovers(process.Redaction!.Code, process.Vnd!.TitleRu),
+            NotificationCategory.Approval, process.VndId, null, stageApproverIds);
+
+        // --- Инициатору: его редакция отправлена на финальную выдержку
+        await NotifyAsync(
+            VndApprovalNotificationMessages.SentToFinalHold(process.Redaction!.Code),
+            NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+
         if (save) await _db.SaveChangesAsync();
     }
 
-    private void FinalizeApproval(VndApprovalProcess process)
+    private async Task FinalizeApprovalAsync(VndApprovalProcess process, bool afterRevision)
     {
         process.Status = ApprovalProcessStatus.Approved;
         process.CompletedAt = DateTime.UtcNow;
@@ -289,13 +371,19 @@ public class VndApprovalService : IVndApprovalService
         vnd.CurrentRedactionId = redaction.Id;
         vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
         vnd.Status = VndStatus.Active;
+
+        var notice = afterRevision
+            ? VndApprovalNotificationMessages.ApprovedAfterRevision(redaction.Code, vnd.TitleRu)
+            : VndApprovalNotificationMessages.Approved(redaction.Code, vnd.TitleRu);
+
+        await NotifyAsync(notice, NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
     }
 
     private async Task<List<VndApprovalStage>> BuildAndValidateStagesAsync(List<ApprovalStageRequest> requestStages)
     {
-        if (requestStages.Count < 4)
+        if (requestStages.Count < 3)
             throw new InvalidOperationException(
-                "Маршрут должен содержать минимум 4 этапа: Юр. управление, Риск-менеджмент, Комплаенс и Методология");
+                "Маршрут должен содержать минимум 3 этапа: Юр. управление, Риск-менеджмент и Комплаенс");
 
         if (requestStages[0].Kind != ApprovalStageKind.Legal)
             throw new InvalidOperationException("Первый этап маршрута всегда — Юридическое управление");
@@ -303,14 +391,14 @@ public class VndApprovalService : IVndApprovalService
             throw new InvalidOperationException("Второй этап маршрута всегда — Управление риск-менеджмента");
         if (requestStages[2].Kind != ApprovalStageKind.Compliance)
             throw new InvalidOperationException("Третий этап маршрута всегда — Управление комплаенс-контроля");
-        if (requestStages[^1].Kind != ApprovalStageKind.Methodology)
-            throw new InvalidOperationException("Последний этап маршрута всегда — Отдел методологии");
 
-        for (var i = 3; i < requestStages.Count - 1; i++)
+        for (var i = 3; i < requestStages.Count; i++)
         {
-            if (requestStages[i].Kind != ApprovalStageKind.Custom)
+            if (requestStages[i].Kind != ApprovalStageKind.Custom
+                && requestStages[i].Kind != ApprovalStageKind.Methodology)
                 throw new InvalidOperationException(
-                    "Промежуточные этапы (между фиксированными) должны иметь тип Custom");
+                    "Этапы после фиксированных (Юр. управление, Риск-менеджмент, Комплаенс) " +
+                    "должны иметь тип Custom или Методология");
         }
 
         var approverIds = requestStages.Select(s => s.ApproverUserId).ToList();
@@ -348,7 +436,7 @@ public class VndApprovalService : IVndApprovalService
                 Order = i + 1,
                 Kind = reqStage.Kind,
                 OrgUnitId = approver.OrgUnitId ?? expectedOrgUnitId
-                            ?? throw new InvalidOperationException("У согласующего не указано подразделение"),
+                    ?? throw new InvalidOperationException("У согласующего не указано подразделение"),
                 ApproverUserId = approver.Id
             });
         }
@@ -359,17 +447,17 @@ public class VndApprovalService : IVndApprovalService
     private async Task<VndApprovalProcess> LoadProcessForVndAsync(int vndId)
     {
         var lastRedaction = await _db.VndRedactions
-            .Where(r => r.VndId == vndId)
-            .OrderByDescending(r => r.Number)
-            .FirstOrDefaultAsync()
-            ?? throw new KeyNotFoundException($"У ВНД с id={vndId} нет редакций");
+                                .Where(r => r.VndId == vndId)
+                                .OrderByDescending(r => r.Number)
+                                .FirstOrDefaultAsync()
+                            ?? throw new KeyNotFoundException($"У ВНД с id={vndId} нет редакций");
 
         return await _db.VndApprovalProcesses
-            .Include(x => x.Stages)
-            .Include(x => x.Redaction)
-            .Include(x => x.Vnd)
-            .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
-            ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
+                   .Include(x => x.Stages)
+                   .Include(x => x.Redaction)
+                   .Include(x => x.Vnd)
+                   .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
+               ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
     }
 
     private async Task<ApprovalProcessResponse> LoadResponseAsync(int processId)
@@ -394,6 +482,7 @@ public class VndApprovalService : IVndApprovalService
             FinalHoldDeadlineHours = process.FinalHoldDeadlineHours,
             PrimaryStartedAt = process.PrimaryStartedAt,
             PrimaryDeadlineAt = process.PrimaryDeadlineAt,
+            RepeatInitiatorComment = process.RepeatInitiatorComment,
             RepeatStartedAt = process.RepeatStartedAt,
             RepeatDeadlineAt = process.RepeatDeadlineAt,
             FinalHoldStartedAt = process.FinalHoldStartedAt,
@@ -419,6 +508,42 @@ public class VndApprovalService : IVndApprovalService
                 RepeatDecidedAt = s.RepeatDecidedAt
             }).ToList()
         };
+    }
+
+    /// <summary>
+    /// Общий хелпер отправки уведомлений по событиям согласования.
+    /// Принимает уже переведённый на 3 языка текст (см. VndApprovalNotificationMessages).
+    /// Ошибка отправки не должна ронять сам процесс согласования — только логируется.
+    /// </summary>
+    private async Task NotifyAsync(
+        NotificationText text, NotificationCategory category,
+        int vndId, int? triggeredByUserId, params int[] recipientUserIds)
+    {
+        if (recipientUserIds.Length == 0) return;
+
+        try
+        {
+            await _notifications.CreateAsync(new CreateNotificationRequest
+            {
+                TitleRu = text.TitleRu,
+                TitleEn = text.TitleEn,
+                TitleKg = text.TitleKg,
+                BodyRu = text.BodyRu,
+                BodyEn = text.BodyEn,
+                BodyKg = text.BodyKg,
+                Category = category,
+                Severity = text.Severity,
+                EntityType = "Vnd",
+                EntityId = vndId,
+                UserIds = recipientUserIds.Distinct().ToList()
+            }, triggeredByUserId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Не удалось отправить уведомление по согласованию ВНД (vndId={VndId}, category={Category})",
+                vndId, category);
+        }
     }
 
     private static string MapStatus(ApprovalProcessStatus status) => status switch

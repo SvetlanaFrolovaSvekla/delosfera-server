@@ -2,6 +2,7 @@
 using delosfera_server.Common.Models;
 using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Files.Models;
+using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Vnd.Models;
 
@@ -34,6 +35,9 @@ public class DelosferaDbContext : DbContext
     
     public DbSet<VndApprovalProcess> VndApprovalProcesses => Set<VndApprovalProcess>();
     public DbSet<VndApprovalStage> VndApprovalStages => Set<VndApprovalStage>();
+    
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

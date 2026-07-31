@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace delosfera_server.Modules.Vnd.Controllers;
 
+// TODO: добавить фильтр к базе ВНД поле ИНИЦИАТОР
+
 [ApiController]
 [Route("/vnd")]
 [Tags("ВНД")]
@@ -49,6 +51,15 @@ public class VndController : ControllerBase
         var language = _languageResolver.Resolve(Request);
         var result = await _service.SearchAsync(request, language);
         return Ok(result);
+    }
+
+    /// <summary>Сводка по срокам актуализации: сколько документов в норме,
+    /// с приближающимся сроком, критичных и просроченных. Для дашборда планирования актуализации.</summary>
+    [HttpGet("actualization/summary")]
+    [ProducesResponseType(typeof(VndActualizationSummaryResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndActualizationSummaryResponse>> GetActualizationSummary()
+    {
+        return Ok(await _service.GetActualizationSummaryAsync());
     }
 
     /// <summary>Получить один ВНД по id</summary>

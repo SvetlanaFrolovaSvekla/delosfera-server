@@ -8,4 +8,7 @@ public class ResubmitAfterRevisionRequest
     public IFormFile? DocRu { get; set; }
     public IFormFile? DocKg { get; set; }
     public IFormFile? DocEn { get; set; }
+    
+    /// <summary>Комментарий инициатора о внесённых исправлениях</summary>
+    public string? Comment { get; set; }
 }

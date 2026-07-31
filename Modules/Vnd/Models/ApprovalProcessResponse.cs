@@ -9,6 +9,8 @@ public class ApprovalProcessResponse
     public required string InitiatorName { get; set; }
     public required string Status { get; set; } // primary/revision_needed/repeated/final_hold/approved/cancelled
 
+    public string? RepeatInitiatorComment { get; set; }
+    
     public int PrimaryDeadlineHours { get; set; }
     public int RepeatDeadlineHours { get; set; }
     public int FinalHoldDeadlineHours { get; set; }

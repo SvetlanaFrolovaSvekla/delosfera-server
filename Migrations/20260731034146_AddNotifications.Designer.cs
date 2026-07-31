@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using delosfera_server.Data;
@@ -11,9 +12,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260731034146_AddNotifications")]
+    partial class AddNotifications
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -716,7 +719,7 @@ namespace delosfera_server.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             TitleEn = "Methodology and Products Department",
                             TitleKg = "Методология жана продукттар башкармасы",
-                            TitleRu = "Управление методологии",
+                            TitleRu = "Управление методологии и продуктов",
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
                         new
@@ -1573,10 +1576,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("text")
                         .HasColumnName("entity_type");
 
-                    b.Property<int>("Severity")
-                        .HasColumnType("integer")
-                        .HasColumnName("severity");
-
                     b.Property<string>("TitleEn")
                         .HasColumnType("text")
                         .HasColumnName("title_en");
@@ -2008,78 +2007,6 @@ namespace delosfera_server.Migrations
                             PasswordHash = "AQAAAAEAAYagAAAAEJ22NmtcxUmIhlc2h5MYf+9ras0f2x67OwOIA1JzqpE0EqB10wr/7yYZD1HvYlcEsA==",
                             PositionId = 13,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 14,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "anuruev@keremetbank.kg",
-                            FullName = "Айбек Нуруев",
-                            IsActive = true,
-                            OrgUnitId = 28,
-                            PasswordHash = "AQAAAAEAAYagAAAAEFSX5Y9mFPKRXkdc0ZpOic9JgLOmCyM6M3nS1F25N6k6Wkq6YRY/5/661p4kJbLiIw==",
-                            PositionId = 5,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 15,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "jesenova@keremetbank.kg",
-                            FullName = "Жаныл Эсенова",
-                            IsActive = true,
-                            OrgUnitId = 5,
-                            PasswordHash = "AQAAAAEAAYagAAAAEJqdeTyPiLGevQVuajcuy3on8zX2JUZAcez6WwYuW546rr7DEhBtMFYOr/lZHRx5aw==",
-                            PositionId = 6,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 16,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "mbekbolotov@keremetbank.kg",
-                            FullName = "Марат Бекболотов",
-                            IsActive = true,
-                            OrgUnitId = 34,
-                            PasswordHash = "AQAAAAEAAYagAAAAEJpz1AWMncL0sXvrT8aX/qcQA8GttDT/hxPkJpF7YziJRmwmvNGWWtFA0jDTlE/rxw==",
-                            PositionId = 2,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 17,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "noskonov@keremetbank.kg",
-                            FullName = "Нурбек Осконов",
-                            IsActive = true,
-                            OrgUnitId = 33,
-                            PasswordHash = "AQAAAAEAAYagAAAAEKXQ0AW10isOhlDcbGPT3gKxa/FaM3gtb2FxhkLBzurisRAXL0HeBBusit2wDqDOkA==",
-                            PositionId = 3,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 18,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "atokoeva@keremetbank.kg",
-                            FullName = "Айнура Токоева",
-                            IsActive = true,
-                            OrgUnitId = 3,
-                            PasswordHash = "AQAAAAEAAYagAAAAEIPjSgpvjJwzYCkxoEjkiZaopA0lLwFnDpT75Vvr78Y3YX3VGFQKXmXpy2F57M2VJQ==",
-                            PositionId = 8,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 19,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "dpetrov@keremetbank.kg",
-                            FullName = "Данил Петров",
-                            IsActive = true,
-                            OrgUnitId = 37,
-                            PasswordHash = "AQAAAAEAAYagAAAAEHCfve+vcccRWGbiuG7dVDwSpv4ep13q1yGPUnZH66qz101wPZ5GV3becS/qgn4PHA==",
-                            PositionId = 2,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
                 });
 
@@ -2127,10 +2054,6 @@ namespace delosfera_server.Migrations
                     b.Property<int>("RepeatDeadlineHours")
                         .HasColumnType("integer")
                         .HasColumnName("repeat_deadline_hours");
-
-                    b.Property<string>("RepeatInitiatorComment")
-                        .HasColumnType("text")
-                        .HasColumnName("repeat_initiator_comment");
 
                     b.Property<DateTime?>("RepeatStartedAt")
                         .HasColumnType("timestamp with time zone")
@@ -2805,36 +2728,6 @@ namespace delosfera_server.Migrations
                         {
                             RolesId = 1,
                             UsersId = 13
-                        },
-                        new
-                        {
-                            RolesId = 3,
-                            UsersId = 14
-                        },
-                        new
-                        {
-                            RolesId = 3,
-                            UsersId = 15
-                        },
-                        new
-                        {
-                            RolesId = 3,
-                            UsersId = 16
-                        },
-                        new
-                        {
-                            RolesId = 3,
-                            UsersId = 17
-                        },
-                        new
-                        {
-                            RolesId = 2,
-                            UsersId = 18
-                        },
-                        new
-                        {
-                            RolesId = 2,
-                            UsersId = 19
                         });
                 });
 

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using delosfera_server.Data;
@@ -11,9 +12,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260731072314_AddApprovalTestUsers")]
+    partial class AddApprovalTestUsers
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -716,7 +719,7 @@ namespace delosfera_server.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             TitleEn = "Methodology and Products Department",
                             TitleKg = "Методология жана продукттар башкармасы",
-                            TitleRu = "Управление методологии",
+                            TitleRu = "Управление методологии и продуктов",
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
                         new
@@ -2017,7 +2020,7 @@ namespace delosfera_server.Migrations
                             FullName = "Айбек Нуруев",
                             IsActive = true,
                             OrgUnitId = 28,
-                            PasswordHash = "AQAAAAEAAYagAAAAEFSX5Y9mFPKRXkdc0ZpOic9JgLOmCyM6M3nS1F25N6k6Wkq6YRY/5/661p4kJbLiIw==",
+                            PasswordHash = "AQAAAAEAAYagAAAAEHASH_ANURUEV==",
                             PositionId = 5,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
@@ -2029,7 +2032,7 @@ namespace delosfera_server.Migrations
                             FullName = "Жаныл Эсенова",
                             IsActive = true,
                             OrgUnitId = 5,
-                            PasswordHash = "AQAAAAEAAYagAAAAEJqdeTyPiLGevQVuajcuy3on8zX2JUZAcez6WwYuW546rr7DEhBtMFYOr/lZHRx5aw==",
+                            PasswordHash = "AQAAAAEAAYagAAAAEHASH_JESENOVA==",
                             PositionId = 6,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
@@ -2041,7 +2044,7 @@ namespace delosfera_server.Migrations
                             FullName = "Марат Бекболотов",
                             IsActive = true,
                             OrgUnitId = 34,
-                            PasswordHash = "AQAAAAEAAYagAAAAEJpz1AWMncL0sXvrT8aX/qcQA8GttDT/hxPkJpF7YziJRmwmvNGWWtFA0jDTlE/rxw==",
+                            PasswordHash = "AQAAAAEAAYagAAAAEHASH_MBEKBOLOTOV==",
                             PositionId = 2,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
@@ -2053,7 +2056,7 @@ namespace delosfera_server.Migrations
                             FullName = "Нурбек Осконов",
                             IsActive = true,
                             OrgUnitId = 33,
-                            PasswordHash = "AQAAAAEAAYagAAAAEKXQ0AW10isOhlDcbGPT3gKxa/FaM3gtb2FxhkLBzurisRAXL0HeBBusit2wDqDOkA==",
+                            PasswordHash = "AQAAAAEAAYagAAAAEHASH_NOSKONOV==",
                             PositionId = 3,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
@@ -2065,7 +2068,7 @@ namespace delosfera_server.Migrations
                             FullName = "Айнура Токоева",
                             IsActive = true,
                             OrgUnitId = 3,
-                            PasswordHash = "AQAAAAEAAYagAAAAEIPjSgpvjJwzYCkxoEjkiZaopA0lLwFnDpT75Vvr78Y3YX3VGFQKXmXpy2F57M2VJQ==",
+                            PasswordHash = "AQAAAAEAAYagAAAAEHASH_ATOKOEVA==",
                             PositionId = 8,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
@@ -2077,7 +2080,7 @@ namespace delosfera_server.Migrations
                             FullName = "Данил Петров",
                             IsActive = true,
                             OrgUnitId = 37,
-                            PasswordHash = "AQAAAAEAAYagAAAAEHCfve+vcccRWGbiuG7dVDwSpv4ep13q1yGPUnZH66qz101wPZ5GV3becS/qgn4PHA==",
+                            PasswordHash = "AQAAAAEAAYagAAAAEHASH_DPETROV==",
                             PositionId = 2,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
@@ -2127,10 +2130,6 @@ namespace delosfera_server.Migrations
                     b.Property<int>("RepeatDeadlineHours")
                         .HasColumnType("integer")
                         .HasColumnName("repeat_deadline_hours");
-
-                    b.Property<string>("RepeatInitiatorComment")
-                        .HasColumnType("text")
-                        .HasColumnName("repeat_initiator_comment");
 
                     b.Property<DateTime?>("RepeatStartedAt")
                         .HasColumnType("timestamp with time zone")

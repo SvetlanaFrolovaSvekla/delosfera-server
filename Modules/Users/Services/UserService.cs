@@ -20,7 +20,7 @@ public class UserService : IUserService
         _passwordHasher = passwordHasher;
     }
 
-    public async Task<List<UserResponse>> GetAllAsync(UserSortBy sortBy, string? search, string languageCode)
+    public async Task<List<UserResponse>> GetAllAsync(UserSortBy sortBy, string? search, List<int>? orgUnitIds, string languageCode)
     {
         IQueryable<User> query = _db.Users
             .Include(x => x.Position)
@@ -34,6 +34,9 @@ public class UserService : IUserService
                 EF.Functions.ILike(x.FullName, $"%{term}%") ||
                 EF.Functions.ILike(x.Email, $"%{term}%"));
         }
+
+        if (orgUnitIds is { Count: > 0 })
+            query = query.Where(x => x.OrgUnitId.HasValue && orgUnitIds.Contains(x.OrgUnitId.Value));
 
         query = sortBy switch
         {

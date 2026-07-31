@@ -10,7 +10,7 @@ public class VndApprovalStage : IAuditableEntity
 
     public int ApprovalProcessId { get; set; }
     public VndApprovalProcess? ApprovalProcess { get; set; }
-
+    
     /// <summary>Порядковый номер для отображения в маршрутном листе (1,2,3...).
     /// На права принятия решения НЕ влияет - согласование параллельное.</summary>
     public int Order { get; set; }

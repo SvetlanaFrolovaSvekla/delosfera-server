@@ -41,15 +41,17 @@ public class UserController : ControllerBase
     /// </summary>
     /// <param name="sortBy">Способ сортировки результата</param>
     /// <param name="search">Поиск по ФИО или email</param>
+    /// <param name="orgUnitIds">Фильтр по структурным подразделениям (можно указать несколько id)</param>
     /// <response code="200">Список пользователей получен успешно</response>
     [HttpGet]
     [ProducesResponseType(typeof(List<UserResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<UserResponse>>> GetAll(
         [FromQuery] UserSortBy sortBy = UserSortBy.CreatedAtAsc,
-        [FromQuery] string? search = null)
+        [FromQuery] string? search = null,
+        [FromQuery] List<int>? orgUnitIds = null)
     {
         var language = _languageResolver.Resolve(Request);
-        var result = await _service.GetAllAsync(sortBy, search, language);
+        var result = await _service.GetAllAsync(sortBy, search, orgUnitIds, language);
         return Ok(result);
     }
 
