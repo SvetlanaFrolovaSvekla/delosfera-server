@@ -12,4 +12,6 @@ public interface IVndService
     Task<List<VndRedactionResponse>> GetRedactionsAsync(int vndId);
     Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(int vndId, int redactionId);
     Task<VndActualizationSummaryResponse> GetActualizationSummaryAsync();
+    Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request, string languageCode);
+
 }

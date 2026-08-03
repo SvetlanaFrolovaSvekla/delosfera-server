@@ -1,7 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using delosfera_server.Common.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
+using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Users.Services;
 
 namespace delosfera_server.Modules.Users.Controllers;
@@ -43,6 +45,7 @@ public class RoleController : ControllerBase
     /// <param name="search">Поиск по названию на любом из трёх языков (регистронезависимый)</param>
     /// <response code="200">Список ролей получен успешно</response>
     [HttpGet]
+    [RequirePermission(PermissionCode.ManageRoles)]
     [ProducesResponseType(typeof(List<RoleResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<RoleResponse>>> GetAll(
         [FromQuery] RoleSortBy sortBy = RoleSortBy.CreatedAtAsc,
@@ -60,6 +63,7 @@ public class RoleController : ControllerBase
     /// <response code="201">Роль успешно создана</response>
     /// <response code="409">В списке прав указан неизвестный код</response>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageRoles)]
     [ProducesResponseType(typeof(RoleResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<RoleResponse>> Create([FromBody] CreateRoleRequest request)
@@ -86,6 +90,7 @@ public class RoleController : ControllerBase
     /// <response code="404">Роль с указанным id не найдена</response>
     /// <response code="409">В списке прав указан неизвестный код</response>
     [HttpPut("{id:int}")]
+    [RequirePermission(PermissionCode.ManageRoles)]
     [ProducesResponseType(typeof(RoleResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -116,6 +121,7 @@ public class RoleController : ControllerBase
     /// <response code="404">Роль с указанным id не найдена</response>
     /// <response code="409">Роль назначена пользователям — удаление невозможно</response>
     [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.ManageRoles)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

@@ -1,7 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using delosfera_server.Common.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
+using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Users.Services;
 using Microsoft.AspNetCore.Authorization;
 
@@ -44,6 +46,7 @@ public class UserController : ControllerBase
     /// <param name="orgUnitIds">Фильтр по структурным подразделениям (можно указать несколько id)</param>
     /// <response code="200">Список пользователей получен успешно</response>
     [HttpGet]
+    [RequirePermission(PermissionCode.ManageUsers)]
     [ProducesResponseType(typeof(List<UserResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<UserResponse>>> GetAll(
         [FromQuery] UserSortBy sortBy = UserSortBy.CreatedAtAsc,
@@ -63,6 +66,7 @@ public class UserController : ControllerBase
     /// <response code="404">Указанная должность, подразделение или роль не найдены</response>
     /// <response code="409">Пользователь с таким email уже существует</response>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageUsers)]
     [ProducesResponseType(typeof(UserResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -94,6 +98,7 @@ public class UserController : ControllerBase
     /// <response code="404">Пользователь, должность, подразделение или роль не найдены</response>
     /// <response code="409">Пользователь с таким email уже существует</response>
     [HttpPut("{id:int}")]
+    [RequirePermission(PermissionCode.ManageUsers)]
     [ProducesResponseType(typeof(UserResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -122,8 +127,9 @@ public class UserController : ControllerBase
     /// <param name="id">Идентификатор пользователя</param>
     /// <response code="204">Пользователь успешно удалён</response>
     /// <response code="404">Пользователь не найден</response>
-    /// <response code="409">Нельзя удалить — на пользователя есть ссылки в других данных</response>
+    /// <response code="409">Нельзя удалить - на пользователя есть ссылки в других данных</response>
     [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.ManageUsers)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

@@ -122,4 +122,25 @@ public class VndController : ControllerBase
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
+    
+    /// <summary>Обновление реквизитов ВНД (кнопка "Изменить реквизиты")</summary>
+    [HttpPut("{id:int}/requisites")]
+    [ProducesResponseType(typeof(VndResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<VndResponse>> UpdateRequisites(int id, [FromBody] UpdateVndRequisitesRequest request)
+    {
+        var language = _languageResolver.Resolve(Request);
+        try
+        {
+            return Ok(await _service.UpdateRequisitesAsync(id, request, language));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }

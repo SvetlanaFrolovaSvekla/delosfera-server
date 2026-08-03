@@ -516,4 +516,122 @@ public class VndService : IVndService
 
         return redactions.Select(r => ToRedactionResponse(r, vnd.CurrentRedactionId)).ToList();
     }
+    
+    public async Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request, string languageCode)
+    {
+        var entity = await _db.VndDocuments
+                         .Include(x => x.Type)
+                         .Include(x => x.Developer)
+                         .Include(x => x.CuratorDeveloper)
+                         .Include(x => x.Organ)
+                         .Include(x => x.ResponsibleExecutors)
+                         .Include(x => x.Rubrics)
+                         .Include(x => x.Keywords)
+                         .Include(x => x.UserGroups)
+                         .Include(x => x.Redactions)
+                         .FirstOrDefaultAsync(x => x.Id == id)
+                     ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
+
+        var typeExists = await _db.TypesVnd.AnyAsync(x => x.Id == request.TypeId);
+        if (!typeExists) throw new KeyNotFoundException($"Вид ВНД с id={request.TypeId} не найден");
+
+        var organExists = await _db.ApprovalBodies.AnyAsync(x => x.Id == request.OrganId);
+        if (!organExists) throw new KeyNotFoundException($"Орган утверждения с id={request.OrganId} не найден");
+
+        int developerId;
+        if (request.DeveloperId.HasValue)
+        {
+            var developerExists = await _db.OrganizationUnits.AnyAsync(x => x.Id == request.DeveloperId.Value);
+            if (!developerExists)
+                throw new KeyNotFoundException($"Структурное подразделение с id={request.DeveloperId} не найдено");
+            developerId = request.DeveloperId.Value;
+        }
+        else
+        {
+            developerId = entity.DeveloperId; // не меняем, если не передали
+        }
+
+        if (request.CuratorDeveloperId.HasValue)
+        {
+            var curatorExists = await _db.Users.AnyAsync(x => x.Id == request.CuratorDeveloperId.Value);
+            if (!curatorExists)
+                throw new KeyNotFoundException($"Куратор с id={request.CuratorDeveloperId} не найден");
+        }
+
+        var responsibleExecutorIds = request.ResponsibleExecutorIds.Count > 0
+            ? request.ResponsibleExecutorIds
+            : [developerId];
+
+        var responsibleExecutors = await _db.OrganizationUnits
+            .Where(x => responsibleExecutorIds.Contains(x.Id)).ToListAsync();
+        var missingExecutors = responsibleExecutorIds.Except(responsibleExecutors.Select(x => x.Id)).ToList();
+        if (missingExecutors.Count > 0)
+            throw new KeyNotFoundException($"Подразделения с id={string.Join(", ", missingExecutors)} не найдены");
+
+        var keywords = await GetByIdsAsync(_db.Keywords, request.KeywordIds, "Ключевые слова");
+        var rubrics = await GetByIdsAsync(_db.Rubrics, request.RubricIds, "Рубрики");
+        var userGroups = await GetByIdsAsync(_db.UserGroups, request.UserGroupIds, "Группы пользователей");
+
+        if (request.SecrecyLevelId.HasValue)
+        {
+            var secrecyExists = await _db.SecurityLevels.AnyAsync(x => x.Id == request.SecrecyLevelId.Value);
+            if (!secrecyExists)
+                throw new KeyNotFoundException($"Уровень секретности с id={request.SecrecyLevelId} не найден");
+        }
+
+        // --- Применяем изменения ---
+        entity.TypeId = request.TypeId;
+        entity.OrganId = request.OrganId;
+        entity.DeveloperId = developerId;
+        entity.CuratorDeveloperId = request.CuratorDeveloperId;
+
+        entity.ResponsibleExecutors.Clear();
+        foreach (var executor in responsibleExecutors)
+            entity.ResponsibleExecutors.Add(executor);
+
+        entity.TitleRu = request.TitleRu;
+        entity.TitleEn = request.TitleEn;
+        entity.TitleKg = request.TitleKg;
+
+        entity.AdoptionDate = request.AdoptionDate;
+        entity.AdoptionCode = request.AdoptionCode;
+        entity.EffectiveDate = request.EffectiveDate;
+
+        entity.DueActualizationDate = request.DueActualizationDate;
+        entity.LastActualizationDate = request.LastActualizationDate;
+        entity.LastActualizationHadChanges = request.LastActualizationHadChanges;
+
+        entity.CancelDate = request.CancelDate;
+        entity.CancelCode = request.CancelCode;
+        entity.CancelReason = request.CancelReason;
+        entity.ArchivedDate = request.ArchivedDate;
+
+        entity.Keywords.Clear();
+        foreach (var keyword in keywords)
+            entity.Keywords.Add(keyword);
+
+        entity.Rubrics.Clear();
+        foreach (var rubric in rubrics)
+            entity.Rubrics.Add(rubric);
+
+        entity.UserGroups.Clear();
+        foreach (var group in userGroups)
+            entity.UserGroups.Add(group);
+
+        entity.SecrecyLevelId = request.SecrecyLevelId ?? entity.SecrecyLevelId;
+
+        // Отмена/архивация — переводим статус, если реквизиты этого потребовали
+        if (entity.ArchivedDate.HasValue)
+            entity.Status = VndStatus.Archived;
+        else if (entity.CancelDate.HasValue && entity.Status != VndStatus.Draft)
+            entity.Status = entity.Status; // отмена сама по себе не архивирует — оставляем как есть
+
+        // "Изменение реквизитов" проставляется автоматически, руками эту дату задать нельзя
+        entity.RequisitesChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        await _db.SaveChangesAsync();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return ToResponse(entity, languageCode, today);
+    }
 }
