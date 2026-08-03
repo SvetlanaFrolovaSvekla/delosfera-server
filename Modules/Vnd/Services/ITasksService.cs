@@ -1,0 +1,11 @@
+﻿using delosfera_server.Modules.Vnd.DTO.Response;
+
+namespace delosfera_server.Modules.Vnd.Services;
+
+public interface ITasksService
+{
+    Task<List<VndTaskResponse>> GetCoordinationTasksAsync(int userId);
+    Task<List<VndTaskResponse>> GetActualizationTasksAsync(int userId);
+    Task<List<VndTaskResponse>> GetConsolidationTasksAsync(int userId);
+    Task<VndTaskCountsResponse> GetCountsAsync(int userId);
+}

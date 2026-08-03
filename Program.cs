@@ -38,6 +38,7 @@ builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
 builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<ITasksService, TasksService>();
 builder.AddDatabase();
 builder.AddDictionaryServices();
 builder.AddVndServices();

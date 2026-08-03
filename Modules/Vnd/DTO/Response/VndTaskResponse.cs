@@ -1,0 +1,30 @@
+﻿namespace delosfera_server.Modules.Vnd.DTO.Response;
+
+public class VndTaskResponse
+{
+    public int VndId { get; set; }
+    public required string VndCode { get; set; }
+    public required string VndTitle { get; set; }
+
+    /// <summary>"coordination" | "actualization" | "consolidation"</summary>
+    public required string Scope { get; set; }
+
+    // --- Только для coordination ---
+    public int? RedactionId { get; set; }
+    public string? RedactionCode { get; set; }
+    public int? StageId { get; set; }
+    /// <summary>"primary" | "repeat" — какой именно этап согласования сейчас ждёт решения</summary>
+    public string? StagePhase { get; set; }
+    public DateTime? DeadlineAt { get; set; }
+
+    /// <summary>Инициатор редакции (кто отправил на согласование)</summary>
+    public string? InitiatorName { get; set; }
+
+    /// <summary>Норматив в часах для текущей фазы согласования (Primary/Repeat)</summary>
+    public int? DeadlineHours { get; set; }
+
+    // --- Только для actualization/consolidation ---
+    public DateOnly? DueActualizationDate { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+}
