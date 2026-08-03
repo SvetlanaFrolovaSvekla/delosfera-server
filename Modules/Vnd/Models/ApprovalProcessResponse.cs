@@ -23,6 +23,8 @@ public class ApprovalProcessResponse
     public DateTime? FinalHoldDeadlineAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 
+    public List<DisagreementMatrixRowResponse> DisagreementMatrixRows { get; set; } = [];
+    
     public List<ApprovalStageResponse> Stages { get; set; } = [];
 
     public DateTime CreatedAt { get; set; }
@@ -50,4 +52,8 @@ public class ApprovalStageResponse
     public string? RepeatDecision { get; set; }
     public string? RepeatComment { get; set; }
     public DateTime? RepeatDecidedAt { get; set; }
+
+    public string? FinalHoldDecision { get; set; }
+    public string? FinalHoldComment { get; set; }
+    public DateTime? FinalHoldDecidedAt { get; set; }
 }

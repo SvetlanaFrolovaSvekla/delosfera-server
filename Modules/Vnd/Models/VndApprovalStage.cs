@@ -39,4 +39,9 @@ public class VndApprovalStage : IAuditableEntity
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    
+    // --- Финальная выдержка (тоже может быть с замечанием)
+    public ApprovalStageDecision? FinalHoldDecision { get; set; }
+    public string? FinalHoldComment { get; set; }
+    public DateTime? FinalHoldDecidedAt { get; set; }
 }

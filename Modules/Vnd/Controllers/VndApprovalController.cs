@@ -78,4 +78,33 @@ public class VndApprovalController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
+    
+    /// <summary>Добавить строку в матрицу разногласий (только инициатор, только на доработке)</summary>
+    [HttpPost("disagreement-matrix/rows")]
+    [ProducesResponseType(typeof(DisagreementMatrixRowResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<DisagreementMatrixRowResponse>> AddDisagreementRow(
+        int vndId, [FromBody] AddDisagreementMatrixRowRequest request)
+    {
+        try
+        {
+            return Ok(await _service.AddDisagreementMatrixRowAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
+    /// <summary>Удалить строку из матрицы разногласий</summary>
+    [HttpDelete("disagreement-matrix/rows/{rowId:int}")]
+    public async Task<IActionResult> DeleteDisagreementRow(int vndId, int rowId)
+    {
+        try
+        {
+            await _service.DeleteDisagreementMatrixRowAsync(vndId, rowId, _currentUser.UserId);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
 }

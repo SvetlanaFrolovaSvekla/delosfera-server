@@ -167,13 +167,38 @@ public class VndApprovalService : IVndApprovalService
                     await CompleteRepeatPhaseAsync(process);
                 break;
 
+            case ApprovalProcessStatus.FinalHold:
+                if (stage.FinalHoldDecision is not null && stage.FinalHoldDecision != ApprovalStageDecision.Pending)
+                    throw new InvalidOperationException("Решение по финальной выдержке уже принято");
+
+                stage.FinalHoldDecision = decision;
+                stage.FinalHoldComment = request.Comment;
+                stage.FinalHoldDecidedAt = DateTime.UtcNow;
+
+                await _db.SaveChangesAsync();
+
+                if (decision is ApprovalStageDecision.ApprovedWithComment or ApprovalStageDecision.Rejected)
+                {
+                    // Замечание на финальной выдержке — возвращаем на доработку.
+                    // Матрица разногласий предыдущего круга сохраняется как есть.
+                    await ReturnToRevisionFromFinalHoldAsync(process);
+                    await _db.SaveChangesAsync();
+                }
+                else if (process.Stages.All(s =>
+                             s.FinalHoldDecision is not null && s.FinalHoldDecision != ApprovalStageDecision.Pending))
+                {
+                    await FinalizeApprovalAsync(process, afterRevision: true);
+                    await _db.SaveChangesAsync();
+                }
+                break;
+
             default:
                 throw new InvalidOperationException(
                     "В текущем статусе процесса принятие решений недоступно");
         }
 
         // --- Уведомление инициатору о конкретном решении согласующего
-        // (общее для первичного и повторного этапов — decision уже посчитан выше)
+        // (общее для первичного, повторного и финального этапов — decision уже посчитан выше)
         var approver = await _db.Users.FindAsync(currentUserId);
         var approverName = approver?.FullName ?? "—";
         var redactionCode = process.Redaction!.Code;
@@ -209,6 +234,10 @@ public class VndApprovalService : IVndApprovalService
         if (process.InitiatorUserId != currentUserId)
             throw new UnauthorizedAccessException("Отправить на повторное согласование может только инициатор");
 
+        if (!request.AgreesWithAllRemarks && process.DisagreementMatrixRows.Count == 0)
+            throw new InvalidOperationException(
+                "Если вы не согласны со всеми замечаниями, заполните матрицу разногласий (хотя бы одна строка)");
+
         var redaction = process.Redaction!;
 
         if (request.DocRu is not null)
@@ -229,30 +258,106 @@ public class VndApprovalService : IVndApprovalService
             redaction.DocFileEnId = saved.Id;
         }
 
-        foreach (var stage in process.Stages.Where(s => s.ParticipatesInRepeat))
+        process.RepeatInitiatorComment = request.Comment;
+
+        if (request.AgreesWithAllRemarks)
         {
-            stage.RepeatDecision = ApprovalStageDecision.Pending;
-            stage.RepeatComment = null;
-            stage.RepeatDecidedAt = null;
+            // Замечания исправлены — обычное повторное согласование (только с теми, кто участвует в repeat)
+            foreach (var stage in process.Stages.Where(s => s.ParticipatesInRepeat))
+            {
+                stage.RepeatDecision = ApprovalStageDecision.Pending;
+                stage.RepeatComment = null;
+                stage.RepeatDecidedAt = null;
+            }
+
+            process.Status = ApprovalProcessStatus.Repeated;
+            process.RepeatStartedAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync();
+
+            var repeatApproverIds = process.Stages
+                .Where(s => s.ParticipatesInRepeat)
+                .Select(s => s.ApproverUserId)
+                .ToArray();
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.TaskRepeatApproval(redaction.Code, process.Vnd!.TitleRu),
+                NotificationCategory.Approval, vndId, currentUserId, repeatApproverIds);
+        }
+        else
+        {
+            // Составлена матрица разногласий — повторное согласование пропускаем,
+            // сразу идём на финальную выдержку (там решения принимают ВСЕ этапы)
+            foreach (var stage in process.Stages)
+            {
+                stage.FinalHoldDecision = ApprovalStageDecision.Pending;
+                stage.FinalHoldComment = null;
+                stage.FinalHoldDecidedAt = null;
+            }
+
+            process.Status = ApprovalProcessStatus.FinalHold;
+            process.FinalHoldStartedAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync();
+
+            var stageApproverIds = process.Stages.Select(s => s.ApproverUserId).ToArray();
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.FinalHoldForApprovers(redaction.Code, process.Vnd!.TitleRu),
+                NotificationCategory.Approval, vndId, currentUserId, stageApproverIds);
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.SentToFinalHold(redaction.Code),
+                NotificationCategory.Approval, vndId, currentUserId, currentUserId);
         }
 
-        process.RepeatInitiatorComment = request.Comment;
-        process.Status = ApprovalProcessStatus.Repeated;
-        process.RepeatStartedAt = DateTime.UtcNow;
+        return await LoadResponseAsync(process.Id);
+    }
 
+    public async Task<DisagreementMatrixRowResponse> AddDisagreementMatrixRowAsync(
+        int vndId, AddDisagreementMatrixRowRequest request, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        if (process.InitiatorUserId != currentUserId)
+            throw new UnauthorizedAccessException("Заполнять матрицу разногласий может только инициатор");
+
+        if (process.Status != ApprovalProcessStatus.RevisionNeeded)
+            throw new InvalidOperationException(
+                "Матрицу разногласий можно заполнять только в статусе \"требуются правки\"");
+
+        var row = new VndDisagreementMatrixRow
+        {
+            ApprovalProcessId = process.Id,
+            DeveloperPosition = request.DeveloperPosition,
+            OpponentPosition = request.OpponentPosition,
+            DeveloperJustification = request.DeveloperJustification,
+            CreatedByUserId = currentUserId
+        };
+
+        _db.Set<VndDisagreementMatrixRow>().Add(row);
         await _db.SaveChangesAsync();
 
-        // --- Уведомление: задача на повторное согласование (только тем, кто участвует в repeat)
-        var repeatApproverIds = process.Stages
-            .Where(s => s.ParticipatesInRepeat)
-            .Select(s => s.ApproverUserId)
-            .ToArray();
+        return ToDisagreementRowResponse(row);
+    }
 
-        await NotifyAsync(
-            VndApprovalNotificationMessages.TaskRepeatApproval(redaction.Code, process.Vnd!.TitleRu),
-            NotificationCategory.Approval, vndId, currentUserId, repeatApproverIds);
+    public async Task DeleteDisagreementMatrixRowAsync(int vndId, int rowId, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
 
-        return await LoadResponseAsync(process.Id);
+        if (process.InitiatorUserId != currentUserId)
+            throw new UnauthorizedAccessException("Удалять строки матрицы разногласий может только инициатор");
+
+        if (process.Status != ApprovalProcessStatus.RevisionNeeded)
+            throw new InvalidOperationException(
+                "Матрицу разногласий можно редактировать только в статусе \"требуются правки\"");
+
+        var row = await _db.Set<VndDisagreementMatrixRow>()
+                       .FirstOrDefaultAsync(x => x.Id == rowId && x.ApprovalProcessId == process.Id)
+                   ?? throw new KeyNotFoundException($"Строка матрицы разногласий с id={rowId} не найдена");
+
+        _db.Set<VndDisagreementMatrixRow>().Remove(row);
+        await _db.SaveChangesAsync();
     }
 
     public async Task ProcessTimeoutsAsync()
@@ -302,6 +407,7 @@ public class VndApprovalService : IVndApprovalService
 
         // --- Финальная выдержка
         var finalHoldProcesses = await _db.VndApprovalProcesses
+            .Include(x => x.Stages)
             .Include(x => x.Redaction)
             .Include(x => x.Vnd)
             .Where(x => x.Status == ApprovalProcessStatus.FinalHold)
@@ -310,7 +416,15 @@ public class VndApprovalService : IVndApprovalService
         foreach (var process in finalHoldProcesses.Where(p =>
                      p.FinalHoldDeadlineAt is not null && p.FinalHoldDeadlineAt <= now))
         {
-            // Финальная выдержка бывает только после цикла с замечаниями → afterRevision: true
+            foreach (var stage in process.Stages.Where(s =>
+                         s.FinalHoldDecision is null || s.FinalHoldDecision == ApprovalStageDecision.Pending))
+            {
+                stage.FinalHoldDecision = ApprovalStageDecision.AutoApprovedByTimeout;
+                stage.FinalHoldDecidedAt = now;
+            }
+
+            // Никто не оставил замечаний до дедлайна — завершаем (afterRevision: true,
+            // т.к. финальная выдержка бывает только после цикла с замечаниями)
             await FinalizeApprovalAsync(process, afterRevision: true);
         }
 
@@ -344,9 +458,16 @@ public class VndApprovalService : IVndApprovalService
         process.Status = ApprovalProcessStatus.FinalHold;
         process.FinalHoldStartedAt = DateTime.UtcNow;
 
+        foreach (var stage in process.Stages)
+        {
+            stage.FinalHoldDecision = ApprovalStageDecision.Pending;
+            stage.FinalHoldComment = null;
+            stage.FinalHoldDecidedAt = null;
+        }
+
         var stageApproverIds = process.Stages.Select(s => s.ApproverUserId).ToArray();
 
-        // --- Всем согласующим: документ ушёл на финальную выдержку (ознакомление, без решений)
+        // --- Всем согласующим: документ ушёл на финальную выдержку
         await NotifyAsync(
             VndApprovalNotificationMessages.FinalHoldForApprovers(process.Redaction!.Code, process.Vnd!.TitleRu),
             NotificationCategory.Approval, process.VndId, null, stageApproverIds);
@@ -357,6 +478,18 @@ public class VndApprovalService : IVndApprovalService
             NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
 
         if (save) await _db.SaveChangesAsync();
+    }
+
+    /// <summary>Кто-то на финальной выдержке оставил замечание/отклонил — возвращаем
+    /// процесс на доработку. Матрица разногласий предыдущего круга (если была) не трогается,
+    /// инициатор сможет дополнить/почистить её строки заново на фронте.</summary>
+    private async Task ReturnToRevisionFromFinalHoldAsync(VndApprovalProcess process)
+    {
+        process.Status = ApprovalProcessStatus.RevisionNeeded;
+
+        await NotifyAsync(
+            VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
+            NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
     }
 
     private async Task FinalizeApprovalAsync(VndApprovalProcess process, bool afterRevision)
@@ -456,6 +589,7 @@ public class VndApprovalService : IVndApprovalService
                    .Include(x => x.Stages)
                    .Include(x => x.Redaction)
                    .Include(x => x.Vnd)
+                   .Include(x => x.DisagreementMatrixRows)
                    .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
                ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
     }
@@ -465,6 +599,7 @@ public class VndApprovalService : IVndApprovalService
         var process = await _db.VndApprovalProcesses
             .Include(x => x.Stages).ThenInclude(s => s.OrgUnit)
             .Include(x => x.Stages).ThenInclude(s => s.ApproverUser)
+            .Include(x => x.DisagreementMatrixRows)
             .FirstAsync(x => x.Id == processId);
 
         var initiator = await _db.Users.FindAsync(process.InitiatorUserId);
@@ -490,6 +625,10 @@ public class VndApprovalService : IVndApprovalService
             CompletedAt = process.CompletedAt,
             CreatedAt = process.CreatedAt,
             UpdatedAt = process.UpdatedAt,
+            DisagreementMatrixRows = process.DisagreementMatrixRows
+                .OrderBy(r => r.CreatedAt)
+                .Select(ToDisagreementRowResponse)
+                .ToList(),
             Stages = process.Stages.OrderBy(s => s.Order).Select(s => new ApprovalStageResponse
             {
                 Id = s.Id,
@@ -505,10 +644,22 @@ public class VndApprovalService : IVndApprovalService
                 ParticipatesInRepeat = s.ParticipatesInRepeat,
                 RepeatDecision = s.RepeatDecision.HasValue ? MapDecision(s.RepeatDecision.Value) : null,
                 RepeatComment = s.RepeatComment,
-                RepeatDecidedAt = s.RepeatDecidedAt
+                RepeatDecidedAt = s.RepeatDecidedAt,
+                FinalHoldDecision = s.FinalHoldDecision.HasValue ? MapDecision(s.FinalHoldDecision.Value) : null,
+                FinalHoldComment = s.FinalHoldComment,
+                FinalHoldDecidedAt = s.FinalHoldDecidedAt
             }).ToList()
         };
     }
+
+    private static DisagreementMatrixRowResponse ToDisagreementRowResponse(VndDisagreementMatrixRow row) => new()
+    {
+        Id = row.Id,
+        DeveloperPosition = row.DeveloperPosition,
+        OpponentPosition = row.OpponentPosition,
+        DeveloperJustification = row.DeveloperJustification,
+        CreatedAt = row.CreatedAt
+    };
 
     /// <summary>
     /// Общий хелпер отправки уведомлений по событиям согласования.

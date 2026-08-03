@@ -41,4 +41,7 @@ public class VndApprovalProcess : IAuditableEntity
     public DateTime PrimaryDeadlineAt => PrimaryStartedAt.AddHours(PrimaryDeadlineHours);
     public DateTime? RepeatDeadlineAt => RepeatStartedAt?.AddHours(RepeatDeadlineHours);
     public DateTime? FinalHoldDeadlineAt => FinalHoldStartedAt?.AddHours(FinalHoldDeadlineHours);
+    
+    // Матрица разногласий
+    public ICollection<VndDisagreementMatrixRow> DisagreementMatrixRows { get; set; } = new List<VndDisagreementMatrixRow>();
 }
