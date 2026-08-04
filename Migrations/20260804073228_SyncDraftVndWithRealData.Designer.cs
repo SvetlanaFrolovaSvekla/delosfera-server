@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using delosfera_server.Data;
@@ -11,9 +12,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260804073228_SyncDraftVndWithRealData")]
+    partial class SyncDraftVndWithRealData
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2083,134 +2086,6 @@ namespace delosfera_server.Migrations
                         });
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.CoordinationDefaultApprover", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("ApproverUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("approver_user_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("Kind")
-                        .HasColumnType("integer")
-                        .HasColumnName("kind");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_coordination_default_approver");
-
-                    b.HasIndex("ApproverUserId")
-                        .HasDatabaseName("ix_vnd_coordination_default_approver_approver_user_id");
-
-                    b.HasIndex("Kind")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_coordination_default_approver_kind");
-
-                    b.ToTable("vnd_coordination_default_approver", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            ApproverUserId = 2,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 0,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 2,
-                            ApproverUserId = 14,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 1,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 3,
-                            ApproverUserId = 15,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 4,
-                            ApproverUserId = 3,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 4,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        });
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRequest", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateTime?>("DecidedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("decided_at");
-
-                    b.Property<int?>("DecidedByUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("decided_by_user_id");
-
-                    b.Property<int>("RequestedByUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("requested_by_user_id");
-
-                    b.Property<bool>("RequiresApproval")
-                        .HasColumnType("boolean")
-                        .HasColumnName("requires_approval");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("VndId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_actualization_request");
-
-                    b.HasIndex("DecidedByUserId")
-                        .HasDatabaseName("ix_vnd_actualization_request_decided_by_user_id");
-
-                    b.HasIndex("RequestedByUserId")
-                        .HasDatabaseName("ix_vnd_actualization_request_requested_by_user_id");
-
-                    b.HasIndex("VndId", "RequestedByUserId", "Status")
-                        .HasDatabaseName("ix_vnd_actualization_request_vnd_id_requested_by_user_id_status");
-
-                    b.ToTable("vnd_actualization_request", (string)null);
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndApprovalProcess", b =>
                 {
                     b.Property<int>("Id")
@@ -2439,18 +2314,6 @@ namespace delosfera_server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<bool>("ActualizationRequiresApproval")
-                        .HasColumnType("boolean")
-                        .HasColumnName("actualization_requires_approval");
-
-                    b.Property<int?>("ActualizationResponsibleUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("actualization_responsible_user_id");
-
-                    b.Property<bool>("ActualizationShiftNextPeriod")
-                        .HasColumnType("boolean")
-                        .HasColumnName("actualization_shift_next_period");
-
                     b.Property<string>("AdoptionCode")
                         .HasColumnType("text")
                         .HasColumnName("adoption_code");
@@ -2516,10 +2379,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("organ_id");
 
-                    b.Property<int>("Period")
-                        .HasColumnType("integer")
-                        .HasColumnName("period");
-
                     b.Property<DateOnly?>("RequisitesChangedDate")
                         .HasColumnType("date")
                         .HasColumnName("requisites_changed_date");
@@ -2560,9 +2419,6 @@ namespace delosfera_server.Migrations
                     b.HasKey("Id")
                         .HasName("pk_vnd_document");
 
-                    b.HasIndex("ActualizationResponsibleUserId")
-                        .HasDatabaseName("ix_vnd_document_actualization_responsible_user_id");
-
                     b.HasIndex("Code")
                         .IsUnique()
                         .HasDatabaseName("ix_vnd_document_code");
@@ -2591,8 +2447,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 1,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
                             AdoptionCode = "пр. №4(2)",
                             AdoptionDate = new DateOnly(2023, 2, 9),
                             Code = "10062",
@@ -2604,7 +2458,6 @@ namespace delosfera_server.Migrations
                             LastActualizationDate = new DateOnly(2025, 8, 9),
                             LastActualizationHadChanges = true,
                             OrganId = 3,
-                            Period = 2,
                             RequisitesChangedDate = new DateOnly(2026, 1, 12),
                             RevisionChangedDate = new DateOnly(2026, 7, 20),
                             SecrecyLevelId = 3,
@@ -2616,8 +2469,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 2,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
                             AdoptionCode = "пр. №9(1)",
                             AdoptionDate = new DateOnly(2021, 3, 14),
                             Code = "10084",
@@ -2629,7 +2480,6 @@ namespace delosfera_server.Migrations
                             LastActualizationDate = new DateOnly(2025, 7, 22),
                             LastActualizationHadChanges = false,
                             OrganId = 7,
-                            Period = 2,
                             RequisitesChangedDate = new DateOnly(2025, 5, 5),
                             RevisionChangedDate = new DateOnly(2026, 6, 18),
                             SecrecyLevelId = 2,
@@ -2641,8 +2491,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 3,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
                             AdoptionCode = "пр. №2(5)",
                             AdoptionDate = new DateOnly(2020, 1, 20),
                             Code = "10011",
@@ -2654,7 +2502,6 @@ namespace delosfera_server.Migrations
                             LastActualizationDate = new DateOnly(2025, 7, 25),
                             LastActualizationHadChanges = true,
                             OrganId = 3,
-                            Period = 2,
                             RequisitesChangedDate = new DateOnly(2024, 10, 10),
                             RevisionChangedDate = new DateOnly(2026, 7, 1),
                             SecrecyLevelId = 1,
@@ -2666,8 +2513,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 4,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
                             AdoptionCode = "пр. ОСА-1",
                             AdoptionDate = new DateOnly(2019, 5, 5),
                             Code = "10201",
@@ -2679,7 +2524,6 @@ namespace delosfera_server.Migrations
                             LastActualizationDate = new DateOnly(2025, 9, 28),
                             LastActualizationHadChanges = false,
                             OrganId = 2,
-                            Period = 2,
                             RequisitesChangedDate = new DateOnly(2024, 3, 1),
                             RevisionChangedDate = new DateOnly(2025, 9, 14),
                             SecrecyLevelId = 1,
@@ -2691,8 +2535,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 5,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
                             AdoptionCode = "пр. №1(4)",
                             AdoptionDate = new DateOnly(2019, 1, 10),
                             ArchivedDate = new DateOnly(2024, 3, 20),
@@ -2706,7 +2548,6 @@ namespace delosfera_server.Migrations
                             EffectiveDate = new DateOnly(2019, 2, 1),
                             LastActualizationHadChanges = false,
                             OrganId = 3,
-                            Period = 2,
                             RequisitesChangedDate = new DateOnly(2019, 2, 1),
                             SecrecyLevelId = 2,
                             Status = 4,
@@ -2717,8 +2558,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 6,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
                             Code = "10210",
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             DeveloperId = 33,
@@ -2726,7 +2565,6 @@ namespace delosfera_server.Migrations
                             LastActualizationDate = new DateOnly(2026, 8, 4),
                             LastActualizationHadChanges = false,
                             OrganId = 2,
-                            Period = 2,
                             SecrecyLevelId = 3,
                             Status = 5,
                             TitleRu = "Тест",
@@ -3367,46 +3205,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("Position");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.CoordinationDefaultApprover", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ApproverUser")
-                        .WithMany()
-                        .HasForeignKey("ApproverUserId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_vnd_coordination_default_approver_user_approver_user_id");
-
-                    b.Navigation("ApproverUser");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRequest", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "DecidedByUser")
-                        .WithMany()
-                        .HasForeignKey("DecidedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_actualization_request_user_decided_by_user_id");
-
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "RequestedByUser")
-                        .WithMany()
-                        .HasForeignKey("RequestedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_request_user_requested_by_user_id");
-
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", "Vnd")
-                        .WithMany()
-                        .HasForeignKey("VndId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_request_vnd_documents_vnd_id");
-
-                    b.Navigation("DecidedByUser");
-
-                    b.Navigation("RequestedByUser");
-
-                    b.Navigation("Vnd");
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndApprovalProcess", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Vnd.Models.VndRedaction", "Redaction")
@@ -3472,12 +3270,6 @@ namespace delosfera_server.Migrations
 
             modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndDocument", b =>
                 {
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ActualizationResponsibleUser")
-                        .WithMany()
-                        .HasForeignKey("ActualizationResponsibleUserId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_vnd_document_user_actualization_responsible_user_id");
-
                     b.HasOne("delosfera_server.Modules.Users.Models.User", "CuratorDeveloper")
                         .WithMany()
                         .HasForeignKey("CuratorDeveloperId")
@@ -3516,8 +3308,6 @@ namespace delosfera_server.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_vnd_document_dictionary_type_vnd_type_id");
-
-                    b.Navigation("ActualizationResponsibleUser");
 
                     b.Navigation("CuratorDeveloper");
 

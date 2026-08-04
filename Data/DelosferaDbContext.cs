@@ -30,6 +30,8 @@ public class DelosferaDbContext : DbContext
     
     public DbSet<VndRedactionAttachment> VndRedactionAttachments { get; set; }
     
+    public DbSet<VndActualizationRequest> VndActualizationRequests { get; set; }
+    
     public DbSet<VndDocument> VndDocuments => Set<VndDocument>();
     public DbSet<VndLink> VndLinks => Set<VndLink>();
     

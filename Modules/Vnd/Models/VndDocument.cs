@@ -1,6 +1,7 @@
 ﻿using delosfera_server.Common.Models;
 using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Modules.Vnd.DTO.Request;
 
 namespace delosfera_server.Modules.Vnd.Models;
 
@@ -42,6 +43,23 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
     public DateOnly? LastActualizationDate { get; set; }
     public bool LastActualizationHadChanges { get; set; }
 
+    /// <summary>Периодичность плановой актуализации — нужна, чтобы уметь
+    /// автоматически сдвигать DueActualizationDate после публикации редакции
+    /// (см. VndActualizationService). Заполняется при создании ВНД.</summary>
+    public ActualizationPeriod Period { get; set; }
+
+    // --- Текущий цикл актуализации: заполняется при переходе в OnActualization,
+    // сбрасывается после публикации из Consolidation
+    /// <summary>Пользователь, ответственный за текущий цикл актуализации</summary>
+    public int? ActualizationResponsibleUserId { get; set; }
+    public User? ActualizationResponsibleUser { get; set; }
+
+    /// <summary>Требуется ли согласование в текущем цикле актуализации</summary>
+    public bool ActualizationRequiresApproval { get; set; }
+
+    /// <summary>Сдвигать ли DueActualizationDate после публикации текущего цикла</summary>
+    public bool ActualizationShiftNextPeriod { get; set; }
+
     // --- Классификаторы
     public ICollection<Rubric> Rubrics { get; set; } = new List<Rubric>();
 
@@ -55,7 +73,7 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
 
     public int? CurrentRedactionId { get; set; }
     public VndRedaction? CurrentRedaction { get; set; }
-    
+
     // Ссылки на другие ВНД (само-связь многие-ко-многим через явную join-сущность VndLink)
     public ICollection<VndLink> OutgoingLinks { get; set; } = new List<VndLink>();
     public ICollection<VndLink> IncomingLinks { get; set; } = new List<VndLink>();

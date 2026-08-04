@@ -55,6 +55,9 @@ public class VndApprovalService : IVndApprovalService
             request.FinalHoldDeadlineHours <= 0)
             throw new InvalidOperationException("Все три норматива должны быть больше нуля часов");
 
+        if (request.Stages.Any(s => s.ApproverUserId == currentUserId))
+            throw new InvalidOperationException("Инициатор согласования не может быть указан как согласующий");
+        
         var stages = await BuildAndValidateStagesAsync(request.Stages);
 
         var process = new VndApprovalProcess
@@ -501,9 +504,11 @@ public class VndApprovalService : IVndApprovalService
         var vnd = process.Vnd!;
 
         redaction.ApprovalStatus = RedactionApprovalStatus.Approved;
-        vnd.CurrentRedactionId = redaction.Id;
-        vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
-        vnd.Status = VndStatus.Active;
+
+        // Согласование завершено, но документ ещё не публикуется автоматически —
+        // CurrentRedactionId и RevisionChangedDate выставит VndActualizationService.PublishAsync
+        // в момент явной публикации из статуса Consolidation.
+        vnd.Status = VndStatus.Consolidation;
 
         var notice = afterRevision
             ? VndApprovalNotificationMessages.ApprovedAfterRevision(redaction.Code, vnd.TitleRu)

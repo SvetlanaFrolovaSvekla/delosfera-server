@@ -351,6 +351,7 @@ public class VndService : IVndService
             Rubrics = rubrics,
             UserGroups = userGroups,
             SecrecyLevelId = request.SecrecyLevelId ?? 1, // дефолт "Открытый доступ" 
+            Period = request.Period,
             LastActualizationDate = today,
             DueActualizationDate = dueDate,
             LastActualizationHadChanges = false
@@ -473,7 +474,15 @@ public class VndService : IVndService
         {
             vnd.CurrentRedactionId = redaction.Id;
             vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
-            vnd.Status = VndStatus.Active;
+            
+            // Если документ был в цикле актуализации - консолидация обязательна,
+            // даже если конкретно эта редакция не требовала согласования.
+            // Иначе (первая редакция нового ВНД, или обычное обновление активного
+            // документа без согласования, без консолидации) - сразу становится действующим, как раньше.
+            vnd.Status = vnd.Status == VndStatus.OnActualization
+                ? VndStatus.Consolidation
+                : VndStatus.Active;
+
             await _db.SaveChangesAsync();
         }
 

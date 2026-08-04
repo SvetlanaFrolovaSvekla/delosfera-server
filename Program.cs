@@ -39,9 +39,13 @@ builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ITasksService, TasksService>();
+builder.Services.AddScoped<ICoordinationDefaultApproverService, CoordinationDefaultApproverService>();
+builder.Services.AddScoped<IVndActualizationService, VndActualizationService>();
+
 builder.AddDatabase();
 builder.AddDictionaryServices();
 builder.AddVndServices();
+
 
 builder.Services.AddCors(options =>
 {

@@ -24,7 +24,7 @@ public class VndApprovalProcessConfiguration : IEntityTypeConfiguration<VndAppro
             .HasForeignKey(x => x.ApprovalProcessId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // На одну редакцию — не больше одного процесса согласования
+        // На одну редакцию - не больше одного процесса согласования
         builder.HasIndex(x => x.RedactionId).IsUnique();
     }
 }

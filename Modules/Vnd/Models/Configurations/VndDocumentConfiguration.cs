@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using delosfera_server.Modules.Vnd.DTO.Request;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace delosfera_server.Modules.Vnd.Models.Configurations;
@@ -13,10 +14,17 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
 
         builder.HasOne(x => x.Type).WithMany().HasForeignKey(x => x.TypeId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Developer).WithMany().HasForeignKey(x => x.DeveloperId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne(x => x.CuratorDeveloper).WithMany().HasForeignKey(x => x.CuratorDeveloperId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.CuratorDeveloper).WithMany().HasForeignKey(x => x.CuratorDeveloperId)
+            .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Organ).WithMany().HasForeignKey(x => x.OrganId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne(x => x.SecrecyLevel).WithMany().HasForeignKey(x => x.SecrecyLevelId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.SecrecyLevel).WithMany().HasForeignKey(x => x.SecrecyLevelId)
+            .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(x => x.ActualizationResponsibleUser)
+            .WithMany()
+            .HasForeignKey(x => x.ActualizationResponsibleUserId)
+            .OnDelete(DeleteBehavior.SetNull); 
+        
         builder.HasMany(x => x.Redactions)
             .WithOne(x => x.Vnd)
             .HasForeignKey(x => x.VndId)
@@ -35,10 +43,10 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                     j.HasData(
                         new { VndId = 1, OrganizationUnitId = 26 }, // ВНД-062 — Управление рисками
                         new { VndId = 2, OrganizationUnitId = 26 }, // ВНД-084 — Управление рисками
-                        new { VndId = 2, OrganizationUnitId = 8 },  // ВНД-084 — Управление кредитования
+                        new { VndId = 2, OrganizationUnitId = 8 }, // ВНД-084 — Управление кредитования
                         new { VndId = 3, OrganizationUnitId = 38 }, // ВНД-011 — УБУиО
                         new { VndId = 4, OrganizationUnitId = 32 }, // ВНД-201 — Управление ЧР
-                        new { VndId = 5, OrganizationUnitId = 4 }   // ВНД-037 — Управление казначейских операций
+                        new { VndId = 5, OrganizationUnitId = 4 } // ВНД-037 — Управление казначейских операций
                     );
                 });
 
@@ -53,14 +61,14 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 {
                     j.ToTable("vnd_keyword");
                     j.HasData(
-                        new { VndId = 1, KeywordId = 6 },  // ВНД-062 — Ответственность
+                        new { VndId = 1, KeywordId = 6 }, // ВНД-062 — Ответственность
                         new { VndId = 1, KeywordId = 12 }, // ВНД-062 — Матрица
                         new { VndId = 2, KeywordId = 11 }, // ВНД-084 — Безопасность
-                        new { VndId = 3, KeywordId = 8 },  // ВНД-011 — Расход
-                        new { VndId = 4, KeywordId = 6 }   // ВНД-201 — Ответственность
+                        new { VndId = 3, KeywordId = 8 }, // ВНД-011 — Расход
+                        new { VndId = 4, KeywordId = 6 } // ВНД-201 — Ответственность
                     );
                 });
-        
+
         // ─── Рубрики (many-to-many с Rubric) ───
         builder.HasMany(x => x.Rubrics)
             .WithMany()
@@ -88,10 +96,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 "vnd_user_group",
                 j => j.HasOne<Dictionaries.Models.UserGroup>().WithMany().HasForeignKey("UserGroupId"),
                 j => j.HasOne<VndDocument>().WithMany().HasForeignKey("VndId"),
-                j =>
-                {
-                    j.ToTable("vnd_user_group");
-                });
+                j => { j.ToTable("vnd_user_group"); });
 
         var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
@@ -110,6 +115,10 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 DueActualizationDate = (DateOnly?)new DateOnly(2026, 8, 9),
                 LastActualizationDate = (DateOnly?)new DateOnly(2025, 8, 9),
                 LastActualizationHadChanges = true,
+                Period = ActualizationPeriod.Annual,
+                ActualizationResponsibleUserId = (int?)null,
+                ActualizationRequiresApproval = false,
+                ActualizationShiftNextPeriod = false,
                 SecrecyLevelId = 3,
                 CreatedAt = seedDate, UpdatedAt = seedDate
             },
@@ -127,6 +136,10 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 DueActualizationDate = (DateOnly?)new DateOnly(2026, 7, 22),
                 LastActualizationDate = (DateOnly?)new DateOnly(2025, 7, 22),
                 LastActualizationHadChanges = false,
+                Period = ActualizationPeriod.Annual,
+                ActualizationResponsibleUserId = (int?)null,
+                ActualizationRequiresApproval = false,
+                ActualizationShiftNextPeriod = false,
                 SecrecyLevelId = 2,
                 CreatedAt = seedDate, UpdatedAt = seedDate
             },
@@ -144,6 +157,10 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 DueActualizationDate = (DateOnly?)new DateOnly(2026, 7, 25),
                 LastActualizationDate = (DateOnly?)new DateOnly(2025, 7, 25),
                 LastActualizationHadChanges = true,
+                Period = ActualizationPeriod.Annual,
+                ActualizationResponsibleUserId = (int?)null,
+                ActualizationRequiresApproval = false,
+                ActualizationShiftNextPeriod = false,
                 SecrecyLevelId = 1,
                 CreatedAt = seedDate, UpdatedAt = seedDate
             },
@@ -161,6 +178,10 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 DueActualizationDate = (DateOnly?)new DateOnly(2026, 9, 28),
                 LastActualizationDate = (DateOnly?)new DateOnly(2025, 9, 28),
                 LastActualizationHadChanges = false,
+                Period = ActualizationPeriod.Annual,
+                ActualizationResponsibleUserId = (int?)null,
+                ActualizationRequiresApproval = false,
+                ActualizationShiftNextPeriod = false,
                 SecrecyLevelId = 1,
                 CreatedAt = seedDate, UpdatedAt = seedDate
             },
@@ -172,14 +193,39 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 AdoptionDate = new DateOnly(2019, 1, 10), AdoptionCode = "пр. №1(4)",
                 EffectiveDate = (DateOnly?)new DateOnly(2019, 2, 1),
                 RequisitesChangedDate = (DateOnly?)new DateOnly(2019, 2, 1),
-                RevisionChangedDate = (DateOnly?)new DateOnly(2019, 2, 1),
+                RevisionChanфgedDate = (DateOnly?)new DateOnly(2019, 2, 1),
                 CancelDate = (DateOnly?)new DateOnly(2024, 3, 14), CancelCode = "пр. №8(3)",
                 CancelReason = "Заменён новой редакцией ВНД-037 v4.1",
                 ArchivedDate = (DateOnly?)new DateOnly(2024, 3, 20),
                 DueActualizationDate = (DateOnly?)null,
                 LastActualizationDate = (DateOnly?)null,
                 LastActualizationHadChanges = false,
+                Period = ActualizationPeriod.Annual,
+                ActualizationResponsibleUserId = (int?)null,
+                ActualizationRequiresApproval = false,
+                ActualizationShiftNextPeriod = false,
                 SecrecyLevelId = 2,
+                CreatedAt = seedDate, UpdatedAt = seedDate
+            },
+            new
+            {
+                Id = 6, Code = "10210", TitleRu = "Тест",
+                Status = VndStatus.Draft, // Status=5 в базе — предполагаю, что это Draft, судя по контексту; сверь с самим enum VndStatus, если не так
+                TypeId = 1, DeveloperId = 33, CuratorDeveloperId = (int?)null, OrganId = 2,
+                AdoptionDate = (DateOnly?)null, AdoptionCode = (string?)null,
+                EffectiveDate = (DateOnly?)null,
+                RequisitesChangedDate = (DateOnly?)null,
+                RevisionChangedDate = (DateOnly?)null,
+                CancelDate = (DateOnly?)null, CancelCode = (string?)null, CancelReason = (string?)null,
+                ArchivedDate = (DateOnly?)null,
+                DueActualizationDate = (DateOnly?)new DateOnly(2027, 8, 4),
+                LastActualizationDate = (DateOnly?)new DateOnly(2026, 8, 4),
+                LastActualizationHadChanges = false,
+                Period = ActualizationPeriod.Annual,
+                ActualizationResponsibleUserId = (int?)null,
+                ActualizationRequiresApproval = false,
+                ActualizationShiftNextPeriod = false,
+                SecrecyLevelId = 3,
                 CreatedAt = seedDate, UpdatedAt = seedDate
             }
         );
