@@ -1,8 +1,11 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using delosfera_server.Common.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Dictionaries.Services;
+using delosfera_server.Modules.Users.Models;
+using Microsoft.AspNetCore.Authorization;
 
 namespace delosfera_server.Modules.Dictionaries.Controllers;
 
@@ -10,8 +13,9 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник групп пользователей
 /// </summary>
 [ApiController]
-[Route("api/dictionaries/user-group")]
+[Route("dictionaries/user-group")]
 [Tags("Справочники — Группы пользователей")]
+[Authorize]
 public class UserGroupController : ControllerBase
 {
     private readonly IUserGroupService _service;
@@ -47,6 +51,7 @@ public class UserGroupController : ControllerBase
     /// <response code="201">Группа успешно создана</response>
     /// <response code="404">Один из указанных пользователей не найден</response>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(UserGroupResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<UserGroupResponse>> Create([FromBody] CreateUserGroupRequest request)
@@ -72,6 +77,7 @@ public class UserGroupController : ControllerBase
     /// <response code="200">Группа успешно обновлена</response>
     /// <response code="404">Группа или один из пользователей не найдены</response>
     [HttpPut("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(UserGroupResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<UserGroupResponse>> Update(int id, [FromBody] UpdateUserGroupRequest request)
@@ -97,6 +103,7 @@ public class UserGroupController : ControllerBase
     /// <response code="404">Группа не найдена</response>
     /// <response code="409">Нельзя удалить — на группу есть ссылки в других данных</response>
     [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

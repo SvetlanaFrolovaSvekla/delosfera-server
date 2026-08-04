@@ -13,5 +13,7 @@ public interface IVndService
     Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(int vndId, int redactionId);
     Task<VndActualizationSummaryResponse> GetActualizationSummaryAsync();
     Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request, string languageCode);
-
+    Task<VndLinksResponse> GetLinksAsync(int vndId, string languageCode);
+    Task<VndLinkResponse> AddLinkAsync(int vndId, AddVndLinkRequest request, string languageCode);
+    Task DeleteLinkAsync(int vndId, int linkId);
 }

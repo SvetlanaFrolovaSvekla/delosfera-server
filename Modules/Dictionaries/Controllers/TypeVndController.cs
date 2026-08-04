@@ -1,8 +1,11 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using delosfera_server.Common.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Dictionaries.Services;
+using delosfera_server.Modules.Users.Models;
+using Microsoft.AspNetCore.Authorization;
 
 namespace delosfera_server.Modules.Dictionaries.Controllers;
 
@@ -10,8 +13,9 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник видов внутренних нормативных документов (ВНД)
 /// </summary>
 [ApiController]
-[Route("api/dictionaries/type-vnd")]
+[Route("dictionaries/type-vnd")]
 [Tags("Справочники — Виды ВНД")]
+[Authorize]
 public class TypeVndController : ControllerBase
 {
     private readonly ITypeVndService _service;
@@ -46,6 +50,7 @@ public class TypeVndController : ControllerBase
     /// <param name="request">Данные нового вида ВНД</param>
     /// <response code="201">Вид ВНД успешно создан</response>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(TypeVndResponse), StatusCodes.Status201Created)]
     public async Task<ActionResult<TypeVndResponse>> Create([FromBody] CreateTypeVndRequest request)
     {
@@ -62,6 +67,7 @@ public class TypeVndController : ControllerBase
     /// <response code="200">Вид ВНД успешно обновлён</response>
     /// <response code="404">Вид ВНД с указанным id не найден</response>
     [HttpPut("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(TypeVndResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<TypeVndResponse>> Update(int id, [FromBody] UpdateTypeVndRequest request)
@@ -87,6 +93,7 @@ public class TypeVndController : ControllerBase
     /// <response code="404">Вид ВНД с указанным id не найден</response>
     /// <response code="409">Нельзя удалить — на вид ВНД есть ссылки в других документах</response>
     [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

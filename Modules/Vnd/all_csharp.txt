@@ -1,0 +1,3224 @@
+﻿===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Controllers\TasksController.cs =====
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using delosfera_server.Common.Services;
+using delosfera_server.Modules.Vnd.DTO.Response;
+using delosfera_server.Modules.Vnd.Services;
+
+namespace delosfera_server.Modules.Tasks.Controllers;
+
+[ApiController]
+[Route("/tasks")]
+[Tags("Мои задачи")]
+[Authorize]
+public class TasksController : ControllerBase
+{
+    private readonly ITasksService _service;
+    private readonly ICurrentUserService _currentUser;
+
+    public TasksController(ITasksService service, ICurrentUserService currentUser)
+    {
+        _service = service;
+        _currentUser = currentUser;
+    }
+
+    /// <summary>Задачи текущего пользователя по согласованию редакций ВНД</summary>
+    [HttpGet("coordination")]
+    public async Task<ActionResult<List<VndTaskResponse>>> GetCoordination() =>
+        Ok(await _service.GetCoordinationTasksAsync(_currentUser.UserId));
+
+    /// <summary>ВНД в статусе актуализации, где пользователь причастен</summary>
+    [HttpGet("actualization")]
+    public async Task<ActionResult<List<VndTaskResponse>>> GetActualization() =>
+        Ok(await _service.GetActualizationTasksAsync(_currentUser.UserId));
+
+    /// <summary>ВНД в статусе консолидации, где пользователь причастен</summary>
+    [HttpGet("consolidation")]
+    public async Task<ActionResult<List<VndTaskResponse>>> GetConsolidation() =>
+        Ok(await _service.GetConsolidationTasksAsync(_currentUser.UserId));
+    
+    /// <summary>Счётчики задач текущего пользователя по всем разделам</summary>
+    [HttpGet("counts")]
+    public async Task<ActionResult<VndTaskCountsResponse>> GetCounts() =>
+        Ok(await _service.GetCountsAsync(_currentUser.UserId));
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Controllers\VndApprovalController.cs =====
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using delosfera_server.Common.Services;
+using delosfera_server.Modules.Vnd.DTO.Request;
+using delosfera_server.Modules.Vnd.DTO.Response;
+using delosfera_server.Modules.Vnd.Services;
+
+namespace delosfera_server.Modules.Vnd.Controllers;
+
+[ApiController]
+[Route("/vnd/{vndId:int}/approval")]
+[Tags("ВНД — Согласование")]
+[Authorize]
+public class VndApprovalController : ControllerBase
+{
+    private readonly IVndApprovalService _service;
+    private readonly ICurrentUserService _currentUser;
+
+    public VndApprovalController(IVndApprovalService service, ICurrentUserService currentUser)
+    {
+        _service = service;
+        _currentUser = currentUser;
+    }
+
+    /// <summary>Запустить согласование последней редакции ВНД</summary>
+    [HttpPost("start")]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status201Created)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Start(int vndId, [FromBody] StartApprovalRequest request)
+    {
+        try
+        {
+            var result = await _service.StartAsync(vndId, request, _currentUser.UserId);
+            return CreatedAtAction(nameof(Get), new { vndId }, result);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    /// <summary>Текущий процесс согласования для последней редакции ВНД</summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Get(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.GetByVndIdAsync(vndId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    }
+
+    /// <summary>Решение согласующего по своему этапу</summary>
+    [HttpPost("stages/{stageId:int}/decision")]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Decide(
+        int vndId, int stageId, [FromBody] ApprovalDecisionRequest request)
+    {
+        try
+        {
+            return Ok(await _service.DecideAsync(vndId, stageId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
+    /// <summary>Инициатор отправляет исправленную редакцию на повторное согласование</summary>
+    [HttpPost("resubmit")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Resubmit(
+        int vndId, [FromForm] ResubmitAfterRevisionRequest request)
+    {
+        try
+        {
+            return Ok(await _service.ResubmitAfterRevisionAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+    
+    /// <summary>Добавить строку в матрицу разногласий (только инициатор, только на доработке)</summary>
+    [HttpPost("disagreement-matrix/rows")]
+    [ProducesResponseType(typeof(DisagreementMatrixRowResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<DisagreementMatrixRowResponse>> AddDisagreementRow(
+        int vndId, [FromBody] AddDisagreementMatrixRowRequest request)
+    {
+        try
+        {
+            return Ok(await _service.AddDisagreementMatrixRowAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
+    /// <summary>Удалить строку из матрицы разногласий</summary>
+    [HttpDelete("disagreement-matrix/rows/{rowId:int}")]
+    public async Task<IActionResult> DeleteDisagreementRow(int vndId, int rowId)
+    {
+        try
+        {
+            await _service.DeleteDisagreementMatrixRowAsync(vndId, rowId, _currentUser.UserId);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Controllers\VndController.cs =====
+using delosfera_server.Common.Services;
+using Microsoft.AspNetCore.Mvc;
+using delosfera_server.Modules.Vnd.DTO.Request;
+using delosfera_server.Modules.Vnd.DTO.Response;
+using delosfera_server.Modules.Vnd.Services;
+using Microsoft.AspNetCore.Authorization;
+
+namespace delosfera_server.Modules.Vnd.Controllers;
+
+// TODO: добавить фильтр к базе ВНД поле ИНИЦИАТОР
+
+[ApiController]
+[Route("/vnd")]
+[Tags("ВНД")]
+[Authorize]
+public class VndController : ControllerBase
+{
+    private readonly IVndService _service;
+    private readonly ILanguageResolver _languageResolver;
+    private readonly ICurrentUserService _currentUser;
+
+    public VndController(IVndService service, ILanguageResolver languageResolver, ICurrentUserService currentUser)
+    {
+        _service = service;
+        _languageResolver = languageResolver;
+        _currentUser = currentUser;
+    }
+
+    /// <summary>Добавление новой ВНД</summary>
+    [HttpPost]
+    [ProducesResponseType(typeof(VndResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<VndResponse>> Create([FromBody] CreateVndRequest request)
+    {
+        try
+        {
+            var language = _languageResolver.Resolve(Request);
+            var result = await _service.CreateAsync(request, _currentUser.UserId, language);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Расширенный поиск ВНД по всем фильтрам</summary>
+    [HttpPost("search")]
+    public async Task<ActionResult<List<VndResponse>>> Search([FromBody] VndSearchRequest request)
+    {
+        var language = _languageResolver.Resolve(Request);
+        var result = await _service.SearchAsync(request, language);
+        return Ok(result);
+    }
+
+    /// <summary>Сводка по срокам актуализации: сколько документов в норме,
+    /// с приближающимся сроком, критичных и просроченных. Для дашборда планирования актуализации.</summary>
+    [HttpGet("actualization/summary")]
+    [ProducesResponseType(typeof(VndActualizationSummaryResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndActualizationSummaryResponse>> GetActualizationSummary()
+    {
+        return Ok(await _service.GetActualizationSummaryAsync());
+    }
+
+    /// <summary>Получить один ВНД по id</summary>
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<VndResponse>> GetById(int id)
+    {
+        var language = _languageResolver.Resolve(Request);
+        try
+        {
+            return Ok(await _service.GetByIdAsync(id, language));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Добавление новой редакции ВНД</summary>
+    [HttpPost("{vndId:int}/redactions")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status201Created)]
+    public async Task<ActionResult<VndRedactionResponse>> AddRedaction(
+        int vndId, [FromForm] CreateVndRedactionRequest request)
+    {
+        try
+        {
+            var result = await _service.AddRedactionAsync(vndId, request, _currentUser.UserId);
+            return CreatedAtAction(nameof(GetById), new { id = vndId }, result);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+    
+    /// <summary>Получить список редакций ВНД</summary>
+    [HttpGet("{vndId:int}/redactions")]
+    [ProducesResponseType(typeof(List<VndRedactionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<VndRedactionResponse>>> GetRedactions(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.GetRedactionsAsync(vndId));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+    
+    /// <summary>Отправить черновик редакции (редакция со статусом "Требуется согласование"
+    /// на согласование</summary>
+    [HttpPost("{vndId:int}/redactions/{redactionId:int}/submit")]
+    [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndRedactionResponse>> SubmitRedaction(int vndId, int redactionId)
+    {
+        try
+        {
+            return Ok(await _service.SubmitRedactionForApprovalAsync(vndId, redactionId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+    
+    /// <summary>Обновление реквизитов ВНД (кнопка "Изменить реквизиты")</summary>
+    [HttpPut("{id:int}/requisites")]
+    [ProducesResponseType(typeof(VndResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<VndResponse>> UpdateRequisites(int id, [FromBody] UpdateVndRequisitesRequest request)
+    {
+        var language = _languageResolver.Resolve(Request);
+        try
+        {
+            return Ok(await _service.UpdateRequisitesAsync(id, request, language));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\ActualizationPeriod.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+public enum ActualizationPeriod
+{
+    Quarterly,   // 3 месяца
+    HalfYear,    // 6 месяцев
+    Annual,      // 12 месяцев
+    Biennial,    // 24 месяца
+    Triennial,   // 36 месяцев
+    Custom       // явная дата DueActualizationDate
+}
+
+/*public enum ActualizationPeriod {
+    Quarterly = 0, // 3 месяца
+    HalfYear = 1, // 6 месяцев
+    Annual = 2, // 12 месяцев
+    Biennial = 3, // 24 месяца
+    Triennial = 4, // 36 месяцев
+    Custom = 5, // явная дата DueActualizationDate
+}*/
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\AddDisagreementMatrixRowRequest.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+public class AddDisagreementMatrixRowRequest
+{
+    public required string DeveloperPosition { get; set; }
+    public required string OpponentPosition { get; set; }
+    public string? DeveloperJustification { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\ApprovalDecisionRequest.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+public class ApprovalDecisionRequest
+{
+    public required ApprovalDecisionType Decision { get; set; }
+
+    /// <summary>Обязателен для ApproveWithComment и Reject</summary>
+    public string? Comment { get; set; }
+}
+
+public enum ApprovalDecisionType
+{
+    Approve = 0,
+    ApproveWithComment = 1,
+    Reject = 2
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\CreateVndRedactionRequest.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+public class CreateVndRedactionRequest
+{
+    public required IFormFile DocRu { get; set; }
+    public IFormFile? DocKg { get; set; }
+    public IFormFile? DocEn { get; set; }
+    
+    public string? Description { get; set; }
+    
+    public List<IFormFile>? Attachments { get; set; }
+    public bool RequiresApproval { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\CreateVndRequest.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+public class CreateVndRequest
+{
+    public required int TypeId { get; set; }
+    public required int OrganId { get; set; }
+
+    /// <summary>Разработчик (СП). Если null — берём OrgUnitId текущего пользователя</summary>
+    public int? DeveloperId { get; set; }
+
+    /// <summary>Куратор разработчика. Если null — берём CuratorUserId у Developer</summary>
+    public int? CuratorDeveloperId { get; set; }
+
+    /// <summary>Ответственные исполнители (СП). Если пусто — [DeveloperId текущего пользователя]</summary>
+    public List<int> ResponsibleExecutorIds { get; set; } = [];
+
+    public required string TitleRu { get; set; }
+    public string? TitleEn { get; set; }
+    public string? TitleKg { get; set; }
+
+    public List<int> KeywordIds { get; set; } = [];
+    public List<int> RubricIds { get; set; } = [];
+    public int? SecrecyLevelId { get; set; }
+    public List<int> UserGroupIds { get; set; } = [];
+
+    public required ActualizationPeriod Period { get; set; }
+
+    /// <summary>Обязательно, если Period == Custom</summary>
+    public DateOnly? DueActualizationDate { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\DateRangeFilter.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+/// <summary>Фильтр по дате — точная или диапазон</summary>
+public class DateRangeFilter
+{
+    public DateOnly? Exact { get; set; }
+    public DateOnly? From { get; set; }
+    public DateOnly? To { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\ResubmitAfterRevisionRequest.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+public class ResubmitAfterRevisionRequest
+{
+    /// <summary>Обновлённые файлы редакции - если нужно заменить документ по итогам замечаний.
+    /// Можно отправить на повторное согласование и без замены файлов.</summary>
+    public IFormFile? DocRu { get; set; }
+    public IFormFile? DocKg { get; set; }
+    public IFormFile? DocEn { get; set; }
+    
+    /// <summary>Комментарий инициатора о внесённых исправлениях</summary>
+    public string? Comment { get; set; }
+
+    /// <summary>Согласен ли инициатор со всеми замечаниями.
+    /// false → нужна заполненная матрица разногласий, повторное согласование
+    /// пропускается, процесс сразу переходит на финальную выдержку.</summary>
+    public required bool AgreesWithAllRemarks { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\StartApprovalRequest.cs =====
+using delosfera_server.Modules.Vnd.Models;
+
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+// TODO: добавить для нормативов только рабочие часы - с 9 до 18 (?) или в общем
+// Тогда что делать, если внд отправлена на согласование в пятницу?
+
+public class StartApprovalRequest
+{
+    // Список этапов согласования
+    public required List<ApprovalStageRequest> Stages { get; set; }
+
+    // Норматив первичного согласования
+    public required int PrimaryDeadlineHours { get; set; }
+    // Норматив согласования после исправленных замечаний
+    public required int RepeatDeadlineHours { get; set; }
+    // Норматив финальной выдержки
+    public required int FinalHoldDeadlineHours { get; set; }
+}
+
+public class ApprovalStageRequest
+{
+    // Обязательный этап согласования (юр. отдел, методологи и др.)
+    public required ApprovalStageKind Kind { get; set; } 
+    // id пользователя, который должен согласовывать на данном этапе
+    public required int ApproverUserId { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\UpdateVndRequisitesRequest.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+public class UpdateVndRequisitesRequest
+{
+    public required int TypeId { get; set; }
+    public required int OrganId { get; set; }
+
+    public int? DeveloperId { get; set; }
+    public int? CuratorDeveloperId { get; set; }
+    public List<int> ResponsibleExecutorIds { get; set; } = [];
+
+    public required string TitleRu { get; set; }
+    public string? TitleEn { get; set; }
+    public string? TitleKg { get; set; }
+
+    public DateOnly? AdoptionDate { get; set; }
+    public string? AdoptionCode { get; set; }
+    public DateOnly? EffectiveDate { get; set; }
+
+    public DateOnly? DueActualizationDate { get; set; }
+    public DateOnly? LastActualizationDate { get; set; }
+    public bool LastActualizationHadChanges { get; set; }
+
+    public DateOnly? CancelDate { get; set; }
+    public string? CancelCode { get; set; }
+    public string? CancelReason { get; set; }
+    public DateOnly? ArchivedDate { get; set; }
+
+    public List<int> KeywordIds { get; set; } = [];
+    public List<int> RubricIds { get; set; } = [];
+    public int? SecrecyLevelId { get; set; }
+    public List<int> UserGroupIds { get; set; } = [];
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Request\VndSearchRequest.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Request;
+
+public class VndSearchRequest
+{
+    public string? Code { get; set; }
+    public string? Name { get; set; }
+    public string? RevisionText { get; set; }
+
+    public List<string> Statuses { get; set; } = []; // "active","onact","review","consol","arch","draft"
+    public List<int> TypeIds { get; set; } = [];
+    public List<int> OrganIds { get; set; } = [];
+    public List<int> DeveloperIds { get; set; } = [];
+    public List<int> ResponsibleExecutorIds { get; set; } = [];
+    public List<int> KeywordIds { get; set; } = [];
+    public List<int> RubricIds { get; set; } = [];
+    public List<int> SecrecyLevelIds { get; set; } = [];
+    public List<int> UserGroupIds { get; set; } = [];
+
+    /// <summary>Фильтр по статусу срока актуализации: "normal","approaching","critical","overdue".
+    /// Пусто = без фильтра (все, включая документы без даты актуализации).</summary>
+    public List<string> ActualizationBuckets { get; set; } = [];
+
+    public DateRangeFilter? AdoptionDate { get; set; }
+    public string? AdoptionCode { get; set; }
+    public DateRangeFilter? EffectiveDate { get; set; }
+    public DateRangeFilter? RequisitesChangedDate { get; set; }
+    public DateRangeFilter? RevisionChangedDate { get; set; }
+    public DateRangeFilter? CancelDate { get; set; }
+    public string? CancelCode { get; set; }
+    public DateRangeFilter? DueActualizationDate { get; set; }
+    public DateRangeFilter? LastActualizationDate { get; set; }
+    public DateRangeFilter? ArchivedDate { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Response\DisagreementMatrixRowResponse.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Response;
+
+public class DisagreementMatrixRowResponse
+{
+    public int Id { get; set; }
+    public required string DeveloperPosition { get; set; }
+    public required string OpponentPosition { get; set; }
+    public string? DeveloperJustification { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Response\VndActualizationSummaryResponse.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Response;
+
+// Для метрик по актуализации
+public class VndActualizationSummaryResponse
+{
+    public int Normal { get; set; }
+    public int Approaching { get; set; }
+    public int Critical { get; set; }
+    public int Overdue { get; set; }
+
+    /// <summary>Normal + Approaching + Critical + Overdue.
+    /// Документы без DueActualizationDate сюда не входят.</summary>
+    public int Total { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Response\VndRedactionResponse.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Response;
+
+public class VndRedactionResponse
+{
+    public int Id { get; set; }
+    public required string Code { get; set; }
+    public int Number { get; set; }
+    
+    // TODO: будет ли это лучшим решением при переходе ВНД из черновика в зависимости от редакции?
+    /* public required string VndStatus { get; set; }
+    // Статус самой ВНД (изменяется в зависимости от редакции)*/
+    
+    public bool IsCurrent { get; set; } // Является ли последней актуальной
+    
+    public string? Description { get; set; }
+
+    public int DocFileRuId { get; set; }
+    public int? DocFileKgId { get; set; }
+    public int? DocFileEnId { get; set; }
+
+    public bool RequiresApproval { get; set; }
+    public required string ApprovalStatus { get; set; }
+
+    public List<int> AttachmentFileIds { get; set; } = [];
+
+    public DateTime CreatedAt { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Response\VndResponse.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Response;
+
+public class VndResponse
+{
+    public int Id { get; set; }
+    public required string Code { get; set; }
+    public required string Name { get; set; }
+    public required string TitleRu { get; set; }
+    public string? TitleEn { get; set; }
+    public string? TitleKg { get; set; }
+    public required string Status { get; set; }
+
+    public int TypeId { get; set; }
+    public required string TypeName { get; set; }
+
+    public int DeveloperId { get; set; }
+    public required string DeveloperName { get; set; }
+    public int? CuratorDeveloperId { get; set; }
+    public string? CuratorDeveloperName { get; set; }
+
+    public int OrganId { get; set; }
+    public required string OrganName { get; set; }
+
+    public List<int> ResponsibleExecutorIds { get; set; } = [];
+
+    public DateOnly? AdoptionDate { get; set; }
+    public string? AdoptionCode { get; set; }
+    public DateOnly? EffectiveDate { get; set; }
+    public DateOnly? RequisitesChangedDate { get; set; }
+    public DateOnly? RevisionChangedDate { get; set; }
+    public DateOnly? CancelDate { get; set; }
+    public string? CancelCode { get; set; }
+    public string? CancelReason { get; set; }
+    public DateOnly? ArchivedDate { get; set; }
+    public DateOnly? DueActualizationDate { get; set; }
+    public DateOnly? LastActualizationDate { get; set; }
+    public bool LastActualizationHadChanges { get; set; }
+    public int DaysInArchive { get; set; }
+
+    /// <summary>статусы актуализации: "normal" | "approaching" | "critical" | "overdue" | null (нет даты актуализации)</summary>
+    public string? ActualizationBucket { get; set; }
+
+    public List<int> KeywordIds { get; set; } = [];
+    public List<int> RubricIds { get; set; } = [];
+    public int SecrecyLevelId { get; set; }
+    public List<int> UserGroupIds { get; set; } = [];
+
+    public List<int> RedactionIds { get; set; } = [];
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Response\VndTaskCountsResponse.c.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Response;
+
+public class VndTaskCountsResponse
+{
+    public int Coordination { get; set; }
+    public int Actualization { get; set; }
+    public int Consolidation { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\DTO\Response\VndTaskResponse.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Response;
+
+public class VndTaskResponse
+{
+    public int VndId { get; set; }
+    public required string VndCode { get; set; }
+    public required string VndTitle { get; set; }
+
+    /// <summary>"coordination" | "actualization" | "consolidation"</summary>
+    public required string Scope { get; set; }
+
+    // --- Только для coordination ---
+    public int? RedactionId { get; set; }
+    public string? RedactionCode { get; set; }
+    public int? StageId { get; set; }
+    /// <summary>"primary" | "repeat" — какой именно этап согласования сейчас ждёт решения</summary>
+    public string? StagePhase { get; set; }
+    public DateTime? DeadlineAt { get; set; }
+
+    /// <summary>Инициатор редакции (кто отправил на согласование)</summary>
+    public string? InitiatorName { get; set; }
+
+    /// <summary>Норматив в часах для текущей фазы согласования (Primary/Repeat)</summary>
+    public int? DeadlineHours { get; set; }
+
+    // --- Только для actualization/consolidation ---
+    public DateOnly? DueActualizationDate { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\ActualizationBucket.cs =====
+namespace delosfera_server.Modules.Vnd.Models;
+
+/// <summary>
+/// Статус срока актуализации ВНД относительно текущей даты.
+/// Вычисляется на лету от DueActualizationDate, в БД не хранится
+/// </summary>
+public enum ActualizationBucket
+{
+    Normal = 0,       // > 30 дней до срока
+    Approaching = 1,  // от 6 до 30 дней
+    Critical = 2,     // от 0 до 5 дней
+    Overdue = 3        // срок уже прошёл
+}
+
+/// <summary>
+/// Пороги в днях для расчёта ActualizationBucket
+/// </summary>
+public static class ActualizationThresholds
+{
+    public const int CriticalDays = 5;
+    public const int ApproachingDays = 30;
+
+    public static ActualizationBucket? Resolve(DateOnly? dueDate, DateOnly today)
+    {
+        if (!dueDate.HasValue) return null;
+
+        if (dueDate.Value < today) return ActualizationBucket.Overdue;
+
+        var daysLeft = dueDate.Value.DayNumber - today.DayNumber;
+
+        if (daysLeft <= CriticalDays) return ActualizationBucket.Critical;
+        if (daysLeft <= ApproachingDays) return ActualizationBucket.Approaching;
+
+        return ActualizationBucket.Normal;
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\ApprovalProcessResponse.cs =====
+namespace delosfera_server.Modules.Vnd.DTO.Response;
+
+public class ApprovalProcessResponse
+{
+    public int Id { get; set; }
+    public int VndId { get; set; }
+    public int RedactionId { get; set; }
+    public int InitiatorUserId { get; set; }
+    public required string InitiatorName { get; set; }
+    public required string Status { get; set; } // primary/revision_needed/repeated/final_hold/approved/cancelled
+
+    public string? RepeatInitiatorComment { get; set; }
+    
+    public int PrimaryDeadlineHours { get; set; }
+    public int RepeatDeadlineHours { get; set; }
+    public int FinalHoldDeadlineHours { get; set; }
+
+    public DateTime PrimaryStartedAt { get; set; }
+    public DateTime PrimaryDeadlineAt { get; set; }
+    public DateTime? RepeatStartedAt { get; set; }
+    public DateTime? RepeatDeadlineAt { get; set; }
+    public DateTime? FinalHoldStartedAt { get; set; }
+    public DateTime? FinalHoldDeadlineAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    public List<DisagreementMatrixRowResponse> DisagreementMatrixRows { get; set; } = [];
+    
+    public List<ApprovalStageResponse> Stages { get; set; } = [];
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class ApprovalStageResponse
+{
+    public int Id { get; set; }
+    public int Order { get; set; }
+    public required string Kind { get; set; } 
+
+    public int OrgUnitId { get; set; }
+    public required string OrgUnitName { get; set; }
+
+    public int ApproverUserId { get; set; }
+    public required string ApproverName { get; set; }
+
+    public required string PrimaryDecision { get; set; }
+    public string? PrimaryComment { get; set; }
+    public DateTime? PrimaryDecidedAt { get; set; }
+
+    public bool ParticipatesInRepeat { get; set; }
+
+    public string? RepeatDecision { get; set; }
+    public string? RepeatComment { get; set; }
+    public DateTime? RepeatDecidedAt { get; set; }
+
+    public string? FinalHoldDecision { get; set; }
+    public string? FinalHoldComment { get; set; }
+    public DateTime? FinalHoldDecidedAt { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\ApprovalProcessStatus.cs =====
+namespace delosfera_server.Modules.Vnd.Models;
+
+public enum ApprovalProcessStatus
+{
+    Primary = 0,          // первичное согласование в процессе
+    RevisionNeeded = 1,   // на доработке - есть замечания/отклонения
+    Repeated = 2,         // повторное согласование (только по замечаниям)
+    FinalHold = 3,        // финальная выдержка - ознакомление без решений
+    Approved = 4,         // завершено, ВНД стал действующим
+    Cancelled = 5,        // отозван инициатором (на будущее, пока логики нет)
+    Rejected = 6          // Отклонен
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\ApprovalStageDecision.cs =====
+namespace delosfera_server.Modules.Vnd.Models;
+
+public enum ApprovalStageDecision
+{
+    Pending = 0, // в ожидании
+    Approved = 1, // согласовано
+    ApprovedWithComment = 2, // отправлено на устранение замечаний
+    Rejected = 3, // отклонено
+    AutoApprovedByTimeout = 4 // просрочка - засчитано как согласование
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\ApprovalStageKind.cs =====
+namespace delosfera_server.Modules.Vnd.Models;
+
+public enum ApprovalStageKind
+{
+    Legal = 0,           // Юридическое управление - фиксированный, всегда 1-й
+    RiskManagement = 1,  // Управление риск-менеджмента - фиксированный, всегда 2-й
+    Compliance = 2,      // Управление комплаенс-контроля - фиксированный, всегда 3-й
+    Custom = 3,          // этапы, добавленные инициатором
+    Methodology = 4      // Отдел методологии - фиксированный, всегда последний
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\FixedApprovalOrgUnits.cs =====
+namespace delosfera_server.Modules.Vnd.Models;
+
+/// <summary>
+/// Id подразделений для фиксированных этапов маршрута согласования.
+/// Пока что СП в dictionary_organization_unit
+/// TODO: сделать функцию для главного редактора - добавление фиксированных пользователей/СП во все маршруты
+/// </summary>
+public static class FixedApprovalOrgUnits
+{
+    public const int LegalOrgUnitId = 34;          // Юридическое управление
+    public const int RiskManagementOrgUnitId = 28;  // Управление риск-менеджмента
+    public const int ComplianceOrgUnitId = 5;        // Управление комплаенс контроля
+    public const int MethodologyOrgUnitId = 33;      // Управление методологии и продуктов
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\RedactionApprovalStatus.cs =====
+namespace delosfera_server.Modules.Vnd.Models;
+
+public enum RedactionApprovalStatus
+{
+    NotRequired = 0, 
+    Pending = 1,
+    Approved = 2,
+    Rejected = 3,
+    Draft = 4 // Черновик, статус "Требуется согласование" - ещё не отправлена на согласование
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\VndApprovalProcess.cs =====
+using delosfera_server.Common.Models;
+
+namespace delosfera_server.Modules.Vnd.Models;
+
+public class VndApprovalProcess : IAuditableEntity
+{
+    public int Id { get; set; }
+
+    public int VndId { get; set; }
+    public VndDocument? Vnd { get; set; }
+
+    /// <summary>Редакция, которая проходит согласование</summary>
+    public int RedactionId { get; set; }
+    public VndRedaction? Redaction { get; set; }
+
+    public int InitiatorUserId { get; set; }
+
+    // --- Текущий статус ВНД (Primary/RevisionNeeded/Repeated/FinalHold/Approved/Cancelled/Rejected)
+    public ApprovalProcessStatus Status { get; set; } = ApprovalProcessStatus.Primary;
+
+    // --- Нормативы в часах. Отсчёт каждого — от момента старта именно этого этапа
+    public int PrimaryDeadlineHours { get; set; } // Первичная выдержка 
+    public int RepeatDeadlineHours { get; set; } // Согласование после устранения замечаний
+    public int FinalHoldDeadlineHours { get; set; } // Финальная выдержка
+
+    // Моменты отсчёта выдержек
+    public DateTime PrimaryStartedAt { get; set; }
+    public DateTime? RepeatStartedAt { get; set; }
+    public DateTime? FinalHoldStartedAt { get; set; }
+    
+    public string? RepeatInitiatorComment { get; set; }
+
+    public DateTime? CompletedAt { get; set; } // Когда процесс завершился, ВНД стал действующим 
+
+    public ICollection<VndApprovalStage> Stages { get; set; } = new List<VndApprovalStage>();
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    // Конкретные дедлайны для согласующих  
+    public DateTime PrimaryDeadlineAt => PrimaryStartedAt.AddHours(PrimaryDeadlineHours);
+    public DateTime? RepeatDeadlineAt => RepeatStartedAt?.AddHours(RepeatDeadlineHours);
+    public DateTime? FinalHoldDeadlineAt => FinalHoldStartedAt?.AddHours(FinalHoldDeadlineHours);
+    
+    // Матрица разногласий
+    public ICollection<VndDisagreementMatrixRow> DisagreementMatrixRows { get; set; } = new List<VndDisagreementMatrixRow>();
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\VndApprovalStage.cs =====
+using delosfera_server.Common.Models;
+using delosfera_server.Modules.Dictionaries.Models;
+using delosfera_server.Modules.Users.Models;
+
+namespace delosfera_server.Modules.Vnd.Models;
+
+public class VndApprovalStage : IAuditableEntity
+{
+    public int Id { get; set; }
+
+    public int ApprovalProcessId { get; set; }
+    public VndApprovalProcess? ApprovalProcess { get; set; }
+    
+    /// <summary>Порядковый номер для отображения в маршрутном листе (1,2,3...).
+    /// На права принятия решения НЕ влияет - согласование параллельное.</summary>
+    public int Order { get; set; }
+
+    public ApprovalStageKind Kind { get; set; }
+
+    public int OrgUnitId { get; set; }
+    public OrganizationUnit? OrgUnit { get; set; }
+
+    public int ApproverUserId { get; set; }
+    public User? ApproverUser { get; set; }
+
+    // --- Первичный этап
+    public ApprovalStageDecision PrimaryDecision { get; set; } = ApprovalStageDecision.Pending;
+    public string? PrimaryComment { get; set; }
+    public DateTime? PrimaryDecidedAt { get; set; }
+
+    /// <summary>Проставляется, если по первичному решению были замечания/отклонение, то
+    /// определяет, кто участвует в повторном согласовании</summary>
+    public bool ParticipatesInRepeat { get; set; }
+
+    // --- Повторный этап (заполняется, только если ParticipatesInRepeat == true)
+    public ApprovalStageDecision? RepeatDecision { get; set; }
+    public string? RepeatComment { get; set; }
+    public DateTime? RepeatDecidedAt { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    
+    // --- Финальная выдержка (тоже может быть с замечанием)
+    public ApprovalStageDecision? FinalHoldDecision { get; set; }
+    public string? FinalHoldComment { get; set; }
+    public DateTime? FinalHoldDecidedAt { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\VndDisagreementMatrixRow.cs =====
+using delosfera_server.Common.Models;
+
+namespace delosfera_server.Modules.Vnd.Models;
+
+/// <summary>Строка матрицы разногласий по замечаниям к редакции.
+/// Заполняется вручную инициатором, пока процесс в статусе RevisionNeeded.
+/// Живёт весь жизненный цикл процесса согласования (переживает несколько кругов доработки).</summary>
+public class VndDisagreementMatrixRow : IAuditableEntity
+{
+    public int Id { get; set; }
+
+    public int ApprovalProcessId { get; set; }
+    public VndApprovalProcess? ApprovalProcess { get; set; }
+
+    /// <summary>Редакция (позиция) разработчика</summary>
+    public required string DeveloperPosition { get; set; }
+
+    /// <summary>Редакция и комментарий оппонента (согласующего)</summary>
+    public required string OpponentPosition { get; set; }
+
+    /// <summary>Комментарий (обоснование) разработчика</summary>
+    public string? DeveloperJustification { get; set; }
+
+    public int CreatedByUserId { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\VndDocument.cs =====
+using delosfera_server.Common.Models;
+using delosfera_server.Modules.Dictionaries.Models;
+using delosfera_server.Modules.Users.Models;
+
+namespace delosfera_server.Modules.Vnd.Models;
+
+public class VndDocument : IAuditableEntity, ITranslatableEntity
+{
+    public int Id { get; set; }
+    public required string Code { get; set; }
+    public required string TitleRu { get; set; }
+    public string? TitleEn { get; set; }
+    public string? TitleKg { get; set; }
+    public VndStatus Status { get; set; } = VndStatus.OnActualization;
+
+    public int TypeId { get; set; }
+    public TypeVnd? Type { get; set; }
+
+    public int DeveloperId { get; set; } // СП-разработчик
+    public OrganizationUnit? Developer { get; set; }
+
+    public int? CuratorDeveloperId { get; set; } // Куратор разработчика (User)
+    public User? CuratorDeveloper { get; set; }
+
+    public int OrganId { get; set; } // Орган утверждения
+    public ApprovalBody? Organ { get; set; }
+
+    // Ответственные исполнители - начальник выбранного СП
+    public ICollection<OrganizationUnit> ResponsibleExecutors { get; set; } = new List<OrganizationUnit>();
+
+    // --- Даты
+    public DateOnly? AdoptionDate { get; set; }
+    public string? AdoptionCode { get; set; }
+    public DateOnly? EffectiveDate { get; set; }
+    public DateOnly? RequisitesChangedDate { get; set; }
+    public DateOnly? RevisionChangedDate { get; set; }
+    public DateOnly? CancelDate { get; set; }
+    public string? CancelCode { get; set; }
+    public string? CancelReason { get; set; }
+    public DateOnly? ArchivedDate { get; set; }
+    public DateOnly? DueActualizationDate { get; set; }
+    public DateOnly? LastActualizationDate { get; set; }
+    public bool LastActualizationHadChanges { get; set; }
+
+    // --- Классификаторы
+    public ICollection<Rubric> Rubrics { get; set; } = new List<Rubric>();
+
+    public int SecrecyLevelId { get; set; }
+    public SecurityLevel? SecrecyLevel { get; set; }
+
+    public ICollection<Keyword> Keywords { get; set; } = new List<Keyword>();
+    public ICollection<UserGroup> UserGroups { get; set; } = new List<UserGroup>();
+
+    public ICollection<VndRedaction> Redactions { get; set; } = new List<VndRedaction>();
+
+    public int? CurrentRedactionId { get; set; }
+    public VndRedaction? CurrentRedaction { get; set; }
+    
+    // Ссылки на другие ВНД (само-связь многие-ко-многим через явную join-сущность VndLink)
+    public ICollection<VndLink> OutgoingLinks { get; set; } = new List<VndLink>();
+    public ICollection<VndLink> IncomingLinks { get; set; } = new List<VndLink>();
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public int DaysInArchive => Status == VndStatus.Archived && ArchivedDate.HasValue
+        ? (DateOnly.FromDateTime(DateTime.UtcNow).DayNumber - ArchivedDate.Value.DayNumber)
+        : 0;
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\VndLink.cs =====
+namespace delosfera_server.Modules.Vnd.Models;
+
+public class VndLink
+{
+    public int Id { get; set; }
+    public int SourceVndId { get; set; } // Документ, который ссылается
+    public VndDocument? SourceVnd { get; set; }
+    public int TargetVndId { get; set; } // Документ, на который ссылаются
+    public VndDocument? TargetVnd { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\VndRedaction.cs =====
+using delosfera_server.Common.Models;
+using delosfera_server.Modules.Files.Models;
+
+namespace delosfera_server.Modules.Vnd.Models;
+
+public class VndRedaction : IAuditableEntity
+{
+    public int Id { get; set; }
+
+    public int VndId { get; set; }
+    public VndDocument? Vnd { get; set; }
+    
+    public string? Description { get; set; } // Описание редакции
+
+    /// <summary>Порядковый номер редакции в рамках ВНД, авто-инкремент (1, 2, 3...)</summary>
+    public int Number { get; set; }
+
+    /// <summary>Код редакции, авто: {КодВНД}-Р{Number}, например "10062-Р3"</summary>
+    public required string Code { get; set; }
+
+    // --- Основные файлы редакции (DOC/DOCX)
+    public int DocFileRuId { get; set; }
+    public FileAttachment? DocFileRu { get; set; }
+
+    public int? DocFileKgId { get; set; }
+    public FileAttachment? DocFileKg { get; set; }
+
+    public int? DocFileEnId { get; set; }
+    public FileAttachment? DocFileEn { get; set; }
+
+    // --- Согласование
+    public bool RequiresApproval { get; set; }
+    public RedactionApprovalStatus ApprovalStatus { get; set; } = RedactionApprovalStatus.NotRequired;
+
+    // --- Прочие вложения (Word/Excel/презентации и др.)
+    public ICollection<VndRedactionAttachment> Attachments { get; set; } = new List<VndRedactionAttachment>();
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\VndRedactionAttachment.cs =====
+using delosfera_server.Modules.Files.Models;
+
+namespace delosfera_server.Modules.Vnd.Models;
+
+public class VndRedactionAttachment
+{
+    public int Id { get; set; }
+    public int VndRedactionId { get; set; }
+    public VndRedaction? VndRedaction { get; set; }
+    public int FileAttachmentId { get; set; }
+    public FileAttachment? FileAttachment { get; set; }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\VndStatus.cs =====
+namespace delosfera_server.Modules.Vnd.Models;
+
+public enum VndStatus
+{
+    Active = 0,  // действующий
+    OnActualization = 1, // на актуализации
+    Review = 2,  // на согласовании
+    Consolidation = 3, // на консолидации
+    Archived = 4,  // архивирован
+    Draft = 5,           // черновик — только что создан, редакция ещё не загружена
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\Configurations\VndApprovalProcessConfiguration.cs =====
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace delosfera_server.Modules.Vnd.Models.Configurations;
+
+public class VndApprovalProcessConfiguration : IEntityTypeConfiguration<VndApprovalProcess>
+{
+    public void Configure(EntityTypeBuilder<VndApprovalProcess> builder)
+    {
+        builder.ToTable("vnd_approval_process");
+
+        builder.HasOne(x => x.Vnd)
+            .WithMany()
+            .HasForeignKey(x => x.VndId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.Redaction)
+            .WithMany()
+            .HasForeignKey(x => x.RedactionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(x => x.Stages)
+            .WithOne(x => x.ApprovalProcess)
+            .HasForeignKey(x => x.ApprovalProcessId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // На одну редакцию — не больше одного процесса согласования
+        builder.HasIndex(x => x.RedactionId).IsUnique();
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\Configurations\VndApprovalStageConfiguration.cs =====
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace delosfera_server.Modules.Vnd.Models.Configurations;
+
+public class VndApprovalStageConfiguration : IEntityTypeConfiguration<VndApprovalStage>
+{
+    public void Configure(EntityTypeBuilder<VndApprovalStage> builder)
+    {
+        builder.ToTable("vnd_approval_stage");
+
+        builder.HasOne(x => x.OrgUnit)
+            .WithMany()
+            .HasForeignKey(x => x.OrgUnitId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.ApproverUser)
+            .WithMany()
+            .HasForeignKey(x => x.ApproverUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(x => new { x.ApprovalProcessId, x.Order }).IsUnique();
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\Configurations\VndDisagreementMatrixRowConfiguration.cs =====
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace delosfera_server.Modules.Vnd.Models.Configurations;
+
+public class VndDisagreementMatrixRowConfiguration : IEntityTypeConfiguration<VndDisagreementMatrixRow>
+{
+    public void Configure(EntityTypeBuilder<VndDisagreementMatrixRow> builder)
+    {
+        builder.ToTable("vnd_disagreement_matrix_row");
+
+        builder.HasOne(x => x.ApprovalProcess)
+            .WithMany(x => x.DisagreementMatrixRows)
+            .HasForeignKey(x => x.ApprovalProcessId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\Configurations\VndDocumentConfiguration.cs =====
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace delosfera_server.Modules.Vnd.Models.Configurations;
+
+public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
+{
+    public void Configure(EntityTypeBuilder<VndDocument> builder)
+    {
+        builder.ToTable("vnd_document");
+
+        builder.HasIndex(x => x.Code).IsUnique();
+
+        builder.HasOne(x => x.Type).WithMany().HasForeignKey(x => x.TypeId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.Developer).WithMany().HasForeignKey(x => x.DeveloperId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.CuratorDeveloper).WithMany().HasForeignKey(x => x.CuratorDeveloperId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.Organ).WithMany().HasForeignKey(x => x.OrganId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.SecrecyLevel).WithMany().HasForeignKey(x => x.SecrecyLevelId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(x => x.Redactions)
+            .WithOne(x => x.Vnd)
+            .HasForeignKey(x => x.VndId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // ─── Ответственные исполнители (many-to-many с OrganizationUnit) ───
+        builder.HasMany(x => x.ResponsibleExecutors)
+            .WithMany()
+            .UsingEntity<Dictionary<string, object>>(
+                "vnd_responsible_executor",
+                j => j.HasOne<Dictionaries.Models.OrganizationUnit>().WithMany().HasForeignKey("OrganizationUnitId"),
+                j => j.HasOne<VndDocument>().WithMany().HasForeignKey("VndId"),
+                j =>
+                {
+                    j.ToTable("vnd_responsible_executor");
+                    j.HasData(
+                        new { VndId = 1, OrganizationUnitId = 26 }, // ВНД-062 — Управление рисками
+                        new { VndId = 2, OrganizationUnitId = 26 }, // ВНД-084 — Управление рисками
+                        new { VndId = 2, OrganizationUnitId = 8 },  // ВНД-084 — Управление кредитования
+                        new { VndId = 3, OrganizationUnitId = 38 }, // ВНД-011 — УБУиО
+                        new { VndId = 4, OrganizationUnitId = 32 }, // ВНД-201 — Управление ЧР
+                        new { VndId = 5, OrganizationUnitId = 4 }   // ВНД-037 — Управление казначейских операций
+                    );
+                });
+
+        // ─── Ключевые слова (many-to-many с Keyword) ───
+        builder.HasMany(x => x.Keywords)
+            .WithMany()
+            .UsingEntity<Dictionary<string, object>>(
+                "vnd_keyword",
+                j => j.HasOne<Dictionaries.Models.Keyword>().WithMany().HasForeignKey("KeywordId"),
+                j => j.HasOne<VndDocument>().WithMany().HasForeignKey("VndId"),
+                j =>
+                {
+                    j.ToTable("vnd_keyword");
+                    j.HasData(
+                        new { VndId = 1, KeywordId = 6 },  // ВНД-062 — Ответственность
+                        new { VndId = 1, KeywordId = 12 }, // ВНД-062 — Матрица
+                        new { VndId = 2, KeywordId = 11 }, // ВНД-084 — Безопасность
+                        new { VndId = 3, KeywordId = 8 },  // ВНД-011 — Расход
+                        new { VndId = 4, KeywordId = 6 }   // ВНД-201 — Ответственность
+                    );
+                });
+        
+        // ─── Рубрики (many-to-many с Rubric) ───
+        builder.HasMany(x => x.Rubrics)
+            .WithMany()
+            .UsingEntity<Dictionary<string, object>>(
+                "vnd_rubric",
+                j => j.HasOne<Dictionaries.Models.Rubric>().WithMany().HasForeignKey("RubricId"),
+                j => j.HasOne<VndDocument>().WithMany().HasForeignKey("VndId"),
+                j =>
+                {
+                    j.ToTable("vnd_rubric");
+                    j.HasData(
+                        new { VndId = 1, RubricId = 5 },
+                        new { VndId = 2, RubricId = 5 },
+                        new { VndId = 3, RubricId = 15 },
+                        new { VndId = 4, RubricId = 7 },
+                        new { VndId = 5, RubricId = 11 },
+                        new { VndId = 3, RubricId = 11 }
+                    );
+                });
+
+        // ─── Группы доступа (many-to-many с UserGroup) ───
+        builder.HasMany(x => x.UserGroups)
+            .WithMany()
+            .UsingEntity<Dictionary<string, object>>(
+                "vnd_user_group",
+                j => j.HasOne<Dictionaries.Models.UserGroup>().WithMany().HasForeignKey("UserGroupId"),
+                j => j.HasOne<VndDocument>().WithMany().HasForeignKey("VndId"),
+                j =>
+                {
+                    j.ToTable("vnd_user_group");
+                });
+
+        var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        builder.HasData(
+            new
+            {
+                Id = 1, Code = "10062", TitleRu = "Порядок работы с обеспечением (залогами)",
+                Status = VndStatus.Consolidation,
+                TypeId = 13, DeveloperId = 26, CuratorDeveloperId = (int?)1, OrganId = 3,
+                AdoptionDate = new DateOnly(2023, 2, 9), AdoptionCode = "пр. №4(2)",
+                EffectiveDate = (DateOnly?)new DateOnly(2023, 2, 16),
+                RequisitesChangedDate = (DateOnly?)new DateOnly(2026, 1, 12),
+                RevisionChangedDate = (DateOnly?)new DateOnly(2026, 7, 20),
+                CancelDate = (DateOnly?)null, CancelCode = (string?)null, CancelReason = (string?)null,
+                ArchivedDate = (DateOnly?)null,
+                DueActualizationDate = (DateOnly?)new DateOnly(2026, 8, 9),
+                LastActualizationDate = (DateOnly?)new DateOnly(2025, 8, 9),
+                LastActualizationHadChanges = true,
+                SecrecyLevelId = 3,
+                CreatedAt = seedDate, UpdatedAt = seedDate
+            },
+            new
+            {
+                Id = 2, Code = "10084", TitleRu = "Политика управления кредитными рисками",
+                Status = VndStatus.Active,
+                TypeId = 11, DeveloperId = 26, CuratorDeveloperId = (int?)1, OrganId = 7,
+                AdoptionDate = new DateOnly(2021, 3, 14), AdoptionCode = "пр. №9(1)",
+                EffectiveDate = (DateOnly?)new DateOnly(2021, 4, 1),
+                RequisitesChangedDate = (DateOnly?)new DateOnly(2025, 5, 5),
+                RevisionChangedDate = (DateOnly?)new DateOnly(2026, 6, 18),
+                CancelDate = (DateOnly?)null, CancelCode = (string?)null, CancelReason = (string?)null,
+                ArchivedDate = (DateOnly?)null,
+                DueActualizationDate = (DateOnly?)new DateOnly(2026, 7, 22),
+                LastActualizationDate = (DateOnly?)new DateOnly(2025, 7, 22),
+                LastActualizationHadChanges = false,
+                SecrecyLevelId = 2,
+                CreatedAt = seedDate, UpdatedAt = seedDate
+            },
+            new
+            {
+                Id = 3, Code = "10011", TitleRu = "Регламент кассовых операций",
+                Status = VndStatus.OnActualization,
+                TypeId = 17, DeveloperId = 38, CuratorDeveloperId = (int?)11, OrganId = 3,
+                AdoptionDate = new DateOnly(2020, 1, 20), AdoptionCode = "пр. №2(5)",
+                EffectiveDate = (DateOnly?)new DateOnly(2020, 2, 1),
+                RequisitesChangedDate = (DateOnly?)new DateOnly(2024, 10, 10),
+                RevisionChangedDate = (DateOnly?)new DateOnly(2026, 7, 1),
+                CancelDate = (DateOnly?)null, CancelCode = (string?)null, CancelReason = (string?)null,
+                ArchivedDate = (DateOnly?)null,
+                DueActualizationDate = (DateOnly?)new DateOnly(2026, 7, 25),
+                LastActualizationDate = (DateOnly?)new DateOnly(2025, 7, 25),
+                LastActualizationHadChanges = true,
+                SecrecyLevelId = 1,
+                CreatedAt = seedDate, UpdatedAt = seedDate
+            },
+            new
+            {
+                Id = 4, Code = "10201", TitleRu = "Кодекс корпоративной этики",
+                Status = VndStatus.Active,
+                TypeId = 5, DeveloperId = 32, CuratorDeveloperId = (int?)9, OrganId = 2,
+                AdoptionDate = new DateOnly(2019, 5, 5), AdoptionCode = "пр. ОСА-1",
+                EffectiveDate = (DateOnly?)new DateOnly(2019, 6, 1),
+                RequisitesChangedDate = (DateOnly?)new DateOnly(2024, 3, 1),
+                RevisionChangedDate = (DateOnly?)new DateOnly(2025, 9, 14),
+                CancelDate = (DateOnly?)null, CancelCode = (string?)null, CancelReason = (string?)null,
+                ArchivedDate = (DateOnly?)null,
+                DueActualizationDate = (DateOnly?)new DateOnly(2026, 9, 28),
+                LastActualizationDate = (DateOnly?)new DateOnly(2025, 9, 28),
+                LastActualizationHadChanges = false,
+                SecrecyLevelId = 1,
+                CreatedAt = seedDate, UpdatedAt = seedDate
+            },
+            new
+            {
+                Id = 5, Code = "10037", TitleRu = "Регламент управления ликвидностью (ред. 2019)",
+                Status = VndStatus.Archived,
+                TypeId = 17, DeveloperId = 4, CuratorDeveloperId = (int?)12, OrganId = 3,
+                AdoptionDate = new DateOnly(2019, 1, 10), AdoptionCode = "пр. №1(4)",
+                EffectiveDate = (DateOnly?)new DateOnly(2019, 2, 1),
+                RequisitesChangedDate = (DateOnly?)new DateOnly(2019, 2, 1),
+                RevisionChangedDate = (DateOnly?)new DateOnly(2019, 2, 1),
+                CancelDate = (DateOnly?)new DateOnly(2024, 3, 14), CancelCode = "пр. №8(3)",
+                CancelReason = "Заменён новой редакцией ВНД-037 v4.1",
+                ArchivedDate = (DateOnly?)new DateOnly(2024, 3, 20),
+                DueActualizationDate = (DateOnly?)null,
+                LastActualizationDate = (DateOnly?)null,
+                LastActualizationHadChanges = false,
+                SecrecyLevelId = 2,
+                CreatedAt = seedDate, UpdatedAt = seedDate
+            }
+        );
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\Configurations\VndLinkConfiguration.cs =====
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace delosfera_server.Modules.Vnd.Models.Configurations;
+
+public class VndLinkConfiguration : IEntityTypeConfiguration<VndLink>
+{
+    public void Configure(EntityTypeBuilder<VndLink> builder)
+    {
+        builder.ToTable("vnd_link");
+
+        builder.HasOne(x => x.SourceVnd)
+            .WithMany(x => x.OutgoingLinks)
+            .HasForeignKey(x => x.SourceVndId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.TargetVnd)
+            .WithMany(x => x.IncomingLinks)
+            .HasForeignKey(x => x.TargetVndId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\Configurations\VndRedactionAttachment.cs =====
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace delosfera_server.Modules.Vnd.Models.Configurations;
+
+public class VndRedactionAttachmentConfiguration : IEntityTypeConfiguration<VndRedactionAttachment>
+{
+    public void Configure(EntityTypeBuilder<VndRedactionAttachment> builder)
+    {
+        builder.ToTable("vnd_redaction_attachment");
+
+        builder.HasOne(x => x.VndRedaction)
+            .WithMany(x => x.Attachments)
+            .HasForeignKey(x => x.VndRedactionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.FileAttachment)
+            .WithMany()
+            .HasForeignKey(x => x.FileAttachmentId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Один и тот же файл не может быть дважды прикреплён к одной редакции
+        builder.HasIndex(x => new { x.VndRedactionId, x.FileAttachmentId }).IsUnique();
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Models\Configurations\VndRedactionConfiguration.cs =====
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace delosfera_server.Modules.Vnd.Models.Configurations;
+
+public class VndRedactionConfiguration : IEntityTypeConfiguration<VndRedaction>
+{
+    public void Configure(EntityTypeBuilder<VndRedaction> builder)
+    {
+        builder.ToTable("vnd_redaction");
+
+        // Номер редакции уникален в рамках одного ВНД
+        builder.HasIndex(x => new { x.VndId, x.Number }).IsUnique();
+
+        // Код редакции уникален глобально (10062-Р3 и т.п.)
+        builder.HasIndex(x => x.Code).IsUnique();
+
+        builder.HasOne(x => x.Vnd)
+            .WithMany(x => x.Redactions)
+            .HasForeignKey(x => x.VndId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Restrict — чтобы нельзя было случайно удалить файл, пока он привязан к редакции.
+        // Удаление файла должно идти через явную бизнес-операцию (удалить редакцию → удалить файлы).
+        builder.HasOne(x => x.DocFileRu)
+            .WithMany()
+            .HasForeignKey(x => x.DocFileRuId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.DocFileKg)
+            .WithMany()
+            .HasForeignKey(x => x.DocFileKgId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.DocFileEn)
+            .WithMany()
+            .HasForeignKey(x => x.DocFileEnId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(x => x.Attachments)
+            .WithOne(x => x.VndRedaction)
+            .HasForeignKey(x => x.VndRedactionId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Notifications\VndApprovalNotificationMessages.cs =====
+namespace delosfera_server.Modules.Vnd.Notifications;
+
+using delosfera_server.Modules.Notifications.Models;
+
+/// <summary>Готовый набор заголовок+текст на трёх языках + серьёзность для одного уведомления</summary>
+public record NotificationText(
+    string TitleRu, string? TitleEn, string? TitleKg,
+    string BodyRu, string? BodyEn, string? BodyKg,
+    NotificationSeverity Severity);
+
+// TODO: на английском нужно будет отобразить ФИО пользователя латинскими буками (фронт)
+
+/// <summary>
+/// Тексты уведомлений по событиям согласования редакций ВНД.
+/// Динамические вставки (ФИО согласующего, комментарий) не переводятся,
+/// приходят как есть от пользователя на любом языке.
+/// </summary>
+public static class VndApprovalNotificationMessages
+{
+    public static NotificationText TaskPrimaryApproval(string redactionCode, string vndTitle) => new(
+        TitleRu: "Новая задача на согласование",
+        TitleEn: "New approval task",
+        TitleKg: "Макулдашуу боюнча жаңы тапшырма",
+        BodyRu: $"Вам необходимо согласовать редакцию {redactionCode} документа «{vndTitle}» (первичное согласование).",
+        BodyEn: $"You need to approve revision {redactionCode} of the document \"{vndTitle}\" (primary approval).",
+        BodyKg: $"«{vndTitle}» документинин {redactionCode} редакциясын макулдашууңуз керек (биринчи макулдашуу).",
+        Severity: NotificationSeverity.Urgent); // есть задача, требующая действия
+
+    public static NotificationText TaskRepeatApproval(string redactionCode, string vndTitle) => new(
+        TitleRu: "Повторное согласование",
+        TitleEn: "Repeated approval",
+        TitleKg: "Кайталап макулдашуу",
+        BodyRu: $"Инициатор внёс исправления по редакции {redactionCode} документа «{vndTitle}». " +
+                "Требуется повторное согласование с учётом ваших замечаний.",
+        BodyEn: $"The initiator made corrections to revision {redactionCode} of the document \"{vndTitle}\". " +
+                "Repeated approval is required, taking your remarks into account.",
+        BodyKg: $"Демилгечи «{vndTitle}» документинин {redactionCode} редакциясына оңдоолорду киргизди. " +
+                "Сиздин эскертүүлөрүңүздү эске алуу менен кайра макулдашуу талап кылынат.",
+        Severity: NotificationSeverity.Urgent); // тоже задача, требующая действия
+
+    public static NotificationText FinalHoldForApprovers(string redactionCode, string vndTitle) => new(
+        TitleRu: "Редакция на финальной выдержке",
+        TitleEn: "Revision in final hold",
+        TitleKg: "Редакция акыркы кармоодо",
+        BodyRu: $"Редакция {redactionCode} документа «{vndTitle}» прошла повторное согласование и находится " +
+                "на финальной выдержке (ознакомление, без решений).",
+        BodyEn: $"Revision {redactionCode} of the document \"{vndTitle}\" passed repeated approval and is now " +
+                "in the final hold period (for review only, no decisions required).",
+        BodyKg: $"«{vndTitle}» документинин {redactionCode} редакциясы кайра макулдашуудан өттү жана " +
+                "акыркы кармоодо турат (таанышуу үчүн, чечим талап кылынбайт).",
+        Severity: NotificationSeverity.Info); // просто ознакомление, действие не требуется
+
+    public static NotificationText ApprovedByUser(string approverName, string redactionCode, string vndTitle) => new(
+        TitleRu: "Редакцию согласовали",
+        TitleEn: "Revision approved",
+        TitleKg: "Редакция макулдашылды",
+        BodyRu: $"{approverName} согласовал(а) редакцию {redactionCode} документа «{vndTitle}».",
+        BodyEn: $"{approverName} approved revision {redactionCode} of the document \"{vndTitle}\".",
+        BodyKg: $"{approverName} «{vndTitle}» документинин {redactionCode} редакциясын макулдады.",
+        Severity: NotificationSeverity.Success);
+
+    public static NotificationText ApprovedWithComment(
+        string approverName, string redactionCode, string vndTitle, string? comment) => new(
+        TitleRu: "Редакцию согласовали с замечаниями",
+        TitleEn: "Revision approved with remarks",
+        TitleKg: "Редакция эскертүүлөр менен макулдашылды",
+        BodyRu: $"{approverName} согласовал(а) редакцию {redactionCode} документа «{vndTitle}» " +
+                $"с замечаниями: «{comment}».",
+        BodyEn: $"{approverName} approved revision {redactionCode} of the document \"{vndTitle}\" " +
+                $"with remarks: \"{comment}\".",
+        BodyKg: $"{approverName} «{vndTitle}» документинин {redactionCode} редакциясын эскертүүлөр менен " +
+                $"макулдады: «{comment}».",
+        Severity: NotificationSeverity.Warning); // формально согласовано, но есть замечания
+
+    public static NotificationText Rejected(
+        string approverName, string redactionCode, string vndTitle, string? comment) => new(
+        TitleRu: "Редакцию отклонили",
+        TitleEn: "Revision rejected",
+        TitleKg: "Редакция четке кагылды",
+        BodyRu: $"{approverName} отклонил(а) редакцию {redactionCode} документа «{vndTitle}». " +
+                $"Причина: «{comment}».",
+        BodyEn: $"{approverName} rejected revision {redactionCode} of the document \"{vndTitle}\". " +
+                $"Reason: \"{comment}\".",
+        BodyKg: $"{approverName} «{vndTitle}» документинин {redactionCode} редакциясын четке какты. " +
+                $"Себеби: «{comment}».",
+        Severity: NotificationSeverity.Urgent); // отклонение — требует немедленной реакции инициатора
+
+    public static NotificationText ApprovedAfterRevision(string redactionCode, string vndTitle) => new(
+        TitleRu: "Редакция согласована после доработки",
+        TitleEn: "Revision approved after revision",
+        TitleKg: "Редакция оңдоодон кийин макулдашылды",
+        BodyRu: $"Редакция {redactionCode} документа «{vndTitle}» проверена после исправления замечаний " +
+                "и согласована. Документ стал действующим.",
+        BodyEn: $"Revision {redactionCode} of the document \"{vndTitle}\" was reviewed after remarks were " +
+                "addressed and has been approved. The document is now active.",
+        BodyKg: $"«{vndTitle}» документинин {redactionCode} редакциясы эскертүүлөр оңдолгондон кийин " +
+                "текшерилип, макулдашылды. Документ колдонуудагы болду.",
+        Severity: NotificationSeverity.Success);
+
+    public static NotificationText Approved(string redactionCode, string vndTitle) => new(
+        TitleRu: "Редакция согласована",
+        TitleEn: "Revision approved",
+        TitleKg: "Редакция макулдашылды",
+        BodyRu: $"Редакция {redactionCode} документа «{vndTitle}» согласована. Документ стал действующим.",
+        BodyEn: $"Revision {redactionCode} of the document \"{vndTitle}\" has been approved. " +
+                "The document is now active.",
+        BodyKg: $"«{vndTitle}» документинин {redactionCode} редакциясы макулдашылды. " +
+                "Документ колдонуудагы болду.",
+        Severity: NotificationSeverity.Success);
+
+    public static NotificationText SentToFinalHold(string redactionCode) => new(
+        TitleRu: "Редакция отправлена на финальную выдержку",
+        TitleEn: "Revision sent to final hold",
+        TitleKg: "Редакция акыркы кармоого жиберилди",
+        BodyRu: $"Ваша редакция {redactionCode} прошла повторное согласование и отправлена на финальную выдержку.",
+        BodyEn: $"Your revision {redactionCode} passed repeated approval and was sent to the final hold period.",
+        BodyKg: $"Сиздин {redactionCode} редакцияңыз кайра макулдашуудан өтүп, акыркы кармоого жиберилди.",
+        Severity: NotificationSeverity.Info);
+
+    public static NotificationText SentToApproval(string redactionCode, string vndTitle) => new(
+        TitleRu: "Редакция отправлена на согласование",
+        TitleEn: "Revision sent for approval",
+        TitleKg: "Редакция макулдашууга жиберилди",
+        BodyRu: $"Ваша редакция {redactionCode} документа «{vndTitle}» отправлена на согласование.",
+        BodyEn: $"Your revision {redactionCode} of the document \"{vndTitle}\" was sent for approval.",
+        BodyKg: $"Сиздин «{vndTitle}» документинин {redactionCode} редакцияңыз макулдашууга жиберилди.",
+        Severity: NotificationSeverity.Info);
+
+    public static NotificationText RevisionNeeded(string redactionCode, string vndTitle) => new(
+        TitleRu: "Редакция требует доработки",
+        TitleEn: "Revision requires changes",
+        TitleKg: "Редакция оңдоону талап кылат",
+        BodyRu: $"По редакции {redactionCode} документа «{vndTitle}» есть замечания. " +
+                "Внесите исправления и отправьте на повторное согласование.",
+        BodyEn: $"There are remarks on revision {redactionCode} of the document \"{vndTitle}\". " +
+                "Make the corrections and resubmit for approval.",
+        BodyKg: $"«{vndTitle}» документинин {redactionCode} редакциясы боюнча эскертүүлөр бар. " +
+                "Оңдоолорду киргизип, кайра макулдашууга жибериңиз.",
+        Severity: NotificationSeverity.Warning); // требует доработки, но не критично
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Services\ITasksService.cs =====
+using delosfera_server.Modules.Vnd.DTO.Response;
+
+namespace delosfera_server.Modules.Vnd.Services;
+
+public interface ITasksService
+{
+    Task<List<VndTaskResponse>> GetCoordinationTasksAsync(int userId);
+    Task<List<VndTaskResponse>> GetActualizationTasksAsync(int userId);
+    Task<List<VndTaskResponse>> GetConsolidationTasksAsync(int userId);
+    Task<VndTaskCountsResponse> GetCountsAsync(int userId);
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Services\IVndApprovalService.cs =====
+using delosfera_server.Modules.Vnd.DTO.Request;
+using delosfera_server.Modules.Vnd.DTO.Response;
+
+namespace delosfera_server.Modules.Vnd.Services;
+
+public interface IVndApprovalService
+{
+    Task<ApprovalProcessResponse> StartAsync(int vndId, StartApprovalRequest request, int currentUserId);
+    Task<ApprovalProcessResponse> GetByVndIdAsync(int vndId);
+    Task<ApprovalProcessResponse> DecideAsync(int vndId, int stageId, ApprovalDecisionRequest request, int currentUserId);
+    Task<ApprovalProcessResponse> ResubmitAfterRevisionAsync(int vndId, ResubmitAfterRevisionRequest request, int currentUserId);
+    Task<DisagreementMatrixRowResponse> AddDisagreementMatrixRowAsync(int vndId, AddDisagreementMatrixRowRequest request, int currentUserId);
+    Task DeleteDisagreementMatrixRowAsync(int vndId, int rowId, int currentUserId);
+    Task ProcessTimeoutsAsync();
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Services\IVndService.cs =====
+using delosfera_server.Modules.Vnd.DTO.Request;
+using delosfera_server.Modules.Vnd.DTO.Response;
+
+namespace delosfera_server.Modules.Vnd.Services;
+
+public interface IVndService
+{
+    Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode);
+    Task<VndResponse> GetByIdAsync(int id, string languageCode);
+    Task<VndResponse> CreateAsync(CreateVndRequest request, int currentUserId, string languageCode);
+    Task<VndRedactionResponse> AddRedactionAsync(int vndId, CreateVndRedactionRequest request, int currentUserId);
+    Task<List<VndRedactionResponse>> GetRedactionsAsync(int vndId);
+    Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(int vndId, int redactionId);
+    Task<VndActualizationSummaryResponse> GetActualizationSummaryAsync();
+    Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request, string languageCode);
+
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Services\TasksService.cs =====
+using Microsoft.EntityFrameworkCore;
+using delosfera_server.Data;
+using delosfera_server.Modules.Vnd.DTO.Response;
+using delosfera_server.Modules.Vnd.Models;
+
+namespace delosfera_server.Modules.Vnd.Services;
+
+public class TasksService : ITasksService
+{
+    private readonly DelosferaDbContext _db;
+
+    public TasksService(DelosferaDbContext db)
+    {
+        _db = db;
+    }
+
+    public async Task<List<VndTaskResponse>> GetCoordinationTasksAsync(int userId)
+{
+    var stages = await _db.Set<VndApprovalStage>()
+        .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Vnd)
+        .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Redaction)
+        .Where(s => s.ApproverUserId == userId)
+        .Where(s =>
+            (s.ApprovalProcess!.Status == ApprovalProcessStatus.Primary
+             && s.PrimaryDecision == ApprovalStageDecision.Pending)
+            ||
+            (s.ApprovalProcess!.Status == ApprovalProcessStatus.Repeated
+             && s.ParticipatesInRepeat
+             && (s.RepeatDecision == null || s.RepeatDecision == ApprovalStageDecision.Pending)))
+        .ToListAsync();
+
+    // Инициаторов подтягиваем одним запросом, чтобы не делать N+1
+    var initiatorIds = stages.Select(s => s.ApprovalProcess!.InitiatorUserId).Distinct().ToList();
+    var initiators = await _db.Users
+        .Where(u => initiatorIds.Contains(u.Id))
+        .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+    return stages.Select(s =>
+    {
+        var process = s.ApprovalProcess!;
+        var isPrimaryPhase = process.Status == ApprovalProcessStatus.Primary;
+
+        return new VndTaskResponse
+        {
+            VndId = process.VndId,
+            VndCode = process.Vnd!.Code,
+            VndTitle = process.Vnd!.TitleRu,
+            Scope = "coordination",
+            RedactionId = process.RedactionId,
+            RedactionCode = process.Redaction!.Code,
+            StageId = s.Id,
+            StagePhase = isPrimaryPhase ? "primary" : "repeat",
+            DeadlineAt = isPrimaryPhase ? process.PrimaryDeadlineAt : process.RepeatDeadlineAt,
+            InitiatorName = initiators.GetValueOrDefault(process.InitiatorUserId, "—"),
+            DeadlineHours = isPrimaryPhase ? process.PrimaryDeadlineHours : process.RepeatDeadlineHours,
+            CreatedAt = isPrimaryPhase ? process.PrimaryStartedAt : (process.RepeatStartedAt ?? process.CreatedAt)
+        };
+    })
+    .OrderBy(t => t.DeadlineAt)
+    .ToList();
+}
+
+    public Task<List<VndTaskResponse>> GetActualizationTasksAsync(int userId) =>
+        GetByStatusForUserAsync(userId, VndStatus.OnActualization, "actualization");
+
+    public Task<List<VndTaskResponse>> GetConsolidationTasksAsync(int userId) =>
+        GetByStatusForUserAsync(userId, VndStatus.Consolidation, "consolidation");
+
+    private async Task<List<VndTaskResponse>> GetByStatusForUserAsync(int userId, VndStatus status, string scope)
+    {
+        var docs = await _db.VndDocuments
+            .Include(x => x.ResponsibleExecutors)
+            .Where(x => x.Status == status)
+            .Where(x =>
+                x.DeveloperId == userId
+                || x.CuratorDeveloperId == userId
+                || x.ResponsibleExecutors.Any(e => e.CuratorUserId == userId))
+            .ToListAsync();
+
+        return docs.Select(x => new VndTaskResponse
+        {
+            VndId = x.Id,
+            VndCode = x.Code,
+            VndTitle = x.TitleRu,
+            Scope = scope,
+            DueActualizationDate = x.DueActualizationDate,
+            CreatedAt = x.UpdatedAt
+        })
+        .OrderBy(t => t.DueActualizationDate)
+        .ToList();
+    }
+    
+    public async Task<VndTaskCountsResponse> GetCountsAsync(int userId)
+    {
+        var coordinationCount = await _db.Set<VndApprovalStage>()
+            .Where(s => s.ApproverUserId == userId)
+            .Where(s =>
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.Primary
+                 && s.PrimaryDecision == ApprovalStageDecision.Pending)
+                ||
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.Repeated
+                 && s.ParticipatesInRepeat
+                 && (s.RepeatDecision == null || s.RepeatDecision == ApprovalStageDecision.Pending)))
+            .CountAsync();
+
+        var actualizationCount = await CountByStatusForUserAsync(userId, VndStatus.OnActualization);
+        var consolidationCount = await CountByStatusForUserAsync(userId, VndStatus.Consolidation);
+
+        return new VndTaskCountsResponse
+        {
+            Coordination = coordinationCount,
+            Actualization = actualizationCount,
+            Consolidation = consolidationCount
+        };
+    }
+
+    private async Task<int> CountByStatusForUserAsync(int userId, VndStatus status) =>
+        await _db.VndDocuments
+            .Where(x => x.Status == status)
+            .Where(x =>
+                x.DeveloperId == userId
+                || x.CuratorDeveloperId == userId
+                || x.ResponsibleExecutors.Any(e => e.CuratorUserId == userId))
+            .CountAsync();
+    
+}
+
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Services\VndApprovalService.cs =====
+using Microsoft.EntityFrameworkCore;
+using delosfera_server.Data;
+using delosfera_server.Modules.Vnd.DTO.Request;
+using delosfera_server.Modules.Vnd.DTO.Response;
+using delosfera_server.Modules.Vnd.Models;
+using delosfera_server.Modules.Vnd.Notifications;
+using delosfera_server.Modules.Files.Services;
+using delosfera_server.Modules.Notifications.DTO.Request;
+using delosfera_server.Modules.Notifications.Models;
+using delosfera_server.Modules.Notifications.Services;
+
+namespace delosfera_server.Modules.Vnd.Services;
+
+public class VndApprovalService : IVndApprovalService
+{
+    private readonly DelosferaDbContext _db;
+    private readonly IFileStorageService _fileService;
+    private readonly INotificationService _notifications;
+    private readonly ILogger<VndApprovalService> _logger;
+
+    public VndApprovalService(
+        DelosferaDbContext db,
+        IFileStorageService fileService,
+        INotificationService notifications,
+        ILogger<VndApprovalService> logger)
+    {
+        _db = db;
+        _fileService = fileService;
+        _notifications = notifications;
+        _logger = logger;
+    }
+
+    public async Task<ApprovalProcessResponse> StartAsync(int vndId, StartApprovalRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var lastRedaction = await _db.VndRedactions
+                                .Where(r => r.VndId == vndId)
+                                .OrderByDescending(r => r.Number)
+                                .FirstOrDefaultAsync()
+                            ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
+
+        if (lastRedaction.ApprovalStatus != RedactionApprovalStatus.Draft)
+            throw new InvalidOperationException(
+                "На согласование можно отправить только редакцию в статусе черновика (ещё не отправленную)");
+
+        var alreadyRunning = await _db.VndApprovalProcesses
+            .AnyAsync(x => x.RedactionId == lastRedaction.Id && x.Status != ApprovalProcessStatus.Approved
+                                                             && x.Status != ApprovalProcessStatus.Cancelled);
+        if (alreadyRunning)
+            throw new InvalidOperationException("По этой редакции уже запущено согласование");
+
+        if (request.PrimaryDeadlineHours <= 0 || request.RepeatDeadlineHours <= 0 ||
+            request.FinalHoldDeadlineHours <= 0)
+            throw new InvalidOperationException("Все три норматива должны быть больше нуля часов");
+
+        var stages = await BuildAndValidateStagesAsync(request.Stages);
+
+        var process = new VndApprovalProcess
+        {
+            VndId = vndId,
+            RedactionId = lastRedaction.Id,
+            InitiatorUserId = currentUserId,
+            Status = ApprovalProcessStatus.Primary,
+            PrimaryDeadlineHours = request.PrimaryDeadlineHours,
+            RepeatDeadlineHours = request.RepeatDeadlineHours,
+            FinalHoldDeadlineHours = request.FinalHoldDeadlineHours,
+            PrimaryStartedAt = DateTime.UtcNow,
+            Stages = stages
+        };
+
+        _db.VndApprovalProcesses.Add(process);
+
+        lastRedaction.ApprovalStatus = RedactionApprovalStatus.Pending;
+        vnd.Status = VndStatus.Review;
+
+        await _db.SaveChangesAsync();
+
+        // --- Уведомления: задача на первичное согласование всем этапам маршрута
+        await NotifyAsync(
+            VndApprovalNotificationMessages.TaskPrimaryApproval(lastRedaction.Code, vnd.TitleRu),
+            NotificationCategory.Approval, vndId, currentUserId,
+            stages.Select(s => s.ApproverUserId).ToArray());
+
+        // --- Уведомление инициатору: редакция отправлена на согласование
+        await NotifyAsync(
+            VndApprovalNotificationMessages.SentToApproval(lastRedaction.Code, vnd.TitleRu),
+            NotificationCategory.Approval, vndId, currentUserId,
+            currentUserId);
+
+        return await LoadResponseAsync(process.Id);
+    }
+
+    public async Task<ApprovalProcessResponse> GetByVndIdAsync(int vndId)
+    {
+        var lastRedaction = await _db.VndRedactions
+                                .Where(r => r.VndId == vndId)
+                                .OrderByDescending(r => r.Number)
+                                .FirstOrDefaultAsync()
+                            ?? throw new KeyNotFoundException($"У ВНД с id={vndId} нет редакций");
+
+        var process = await _db.VndApprovalProcesses
+                          .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
+                      ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
+
+        return await LoadResponseAsync(process.Id);
+    }
+
+    public async Task<ApprovalProcessResponse> DecideAsync(
+        int vndId, int stageId, ApprovalDecisionRequest request, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        var stage = process.Stages.FirstOrDefault(x => x.Id == stageId)
+                    ?? throw new KeyNotFoundException($"Этап согласования с id={stageId} не найден");
+
+        if (stage.ApproverUserId != currentUserId)
+            throw new UnauthorizedAccessException("Вы не назначены согласующим на этом этапе");
+
+        if ((request.Decision == ApprovalDecisionType.ApproveWithComment
+             || request.Decision == ApprovalDecisionType.Reject)
+            && string.IsNullOrWhiteSpace(request.Comment))
+            throw new InvalidOperationException("Для этого решения необходимо оставить комментарий/сообщение");
+
+        var decision = request.Decision switch
+        {
+            ApprovalDecisionType.Approve => ApprovalStageDecision.Approved,
+            ApprovalDecisionType.ApproveWithComment => ApprovalStageDecision.ApprovedWithComment,
+            ApprovalDecisionType.Reject => ApprovalStageDecision.Rejected,
+            _ => throw new InvalidOperationException("Неизвестный тип решения")
+        };
+
+        switch (process.Status)
+        {
+            case ApprovalProcessStatus.Primary:
+                if (stage.PrimaryDecision != ApprovalStageDecision.Pending)
+                    throw new InvalidOperationException("Решение по первичному согласованию уже принято");
+
+                stage.PrimaryDecision = decision;
+                stage.PrimaryComment = request.Comment;
+                stage.PrimaryDecidedAt = DateTime.UtcNow;
+                stage.ParticipatesInRepeat = decision is ApprovalStageDecision.ApprovedWithComment
+                    or ApprovalStageDecision.Rejected;
+
+                await _db.SaveChangesAsync();
+
+                if (process.Stages.All(s => s.PrimaryDecision != ApprovalStageDecision.Pending))
+                    await CompletePrimaryPhaseAsync(process);
+                break;
+
+            case ApprovalProcessStatus.Repeated:
+                if (!stage.ParticipatesInRepeat)
+                    throw new InvalidOperationException("Этот согласующий не участвует в повторном согласовании");
+                if (stage.RepeatDecision is not null && stage.RepeatDecision != ApprovalStageDecision.Pending)
+                    throw new InvalidOperationException("Решение по повторному согласованию уже принято");
+
+                stage.RepeatDecision = decision;
+                stage.RepeatComment = request.Comment;
+                stage.RepeatDecidedAt = DateTime.UtcNow;
+
+                await _db.SaveChangesAsync();
+
+                var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
+                if (repeatStages.All(s =>
+                        s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending))
+                    await CompleteRepeatPhaseAsync(process);
+                break;
+
+            case ApprovalProcessStatus.FinalHold:
+                if (stage.FinalHoldDecision is not null && stage.FinalHoldDecision != ApprovalStageDecision.Pending)
+                    throw new InvalidOperationException("Решение по финальной выдержке уже принято");
+
+                stage.FinalHoldDecision = decision;
+                stage.FinalHoldComment = request.Comment;
+                stage.FinalHoldDecidedAt = DateTime.UtcNow;
+
+                await _db.SaveChangesAsync();
+
+                if (decision is ApprovalStageDecision.ApprovedWithComment or ApprovalStageDecision.Rejected)
+                {
+                    // Замечание на финальной выдержке — возвращаем на доработку.
+                    // Матрица разногласий предыдущего круга сохраняется как есть.
+                    await ReturnToRevisionFromFinalHoldAsync(process);
+                    await _db.SaveChangesAsync();
+                }
+                else if (process.Stages.All(s =>
+                             s.FinalHoldDecision is not null && s.FinalHoldDecision != ApprovalStageDecision.Pending))
+                {
+                    await FinalizeApprovalAsync(process, afterRevision: true);
+                    await _db.SaveChangesAsync();
+                }
+                break;
+
+            default:
+                throw new InvalidOperationException(
+                    "В текущем статусе процесса принятие решений недоступно");
+        }
+
+        // --- Уведомление инициатору о конкретном решении согласующего
+        // (общее для первичного, повторного и финального этапов — decision уже посчитан выше)
+        var approver = await _db.Users.FindAsync(currentUserId);
+        var approverName = approver?.FullName ?? "—";
+        var redactionCode = process.Redaction!.Code;
+        var vndTitle = process.Vnd!.TitleRu;
+
+        var decisionNotice = decision switch
+        {
+            ApprovalStageDecision.Approved =>
+                VndApprovalNotificationMessages.ApprovedByUser(approverName, redactionCode, vndTitle),
+            ApprovalStageDecision.ApprovedWithComment =>
+                VndApprovalNotificationMessages.ApprovedWithComment(approverName, redactionCode, vndTitle,
+                    request.Comment),
+            ApprovalStageDecision.Rejected =>
+                VndApprovalNotificationMessages.Rejected(approverName, redactionCode, vndTitle, request.Comment),
+            _ => throw new InvalidOperationException($"Неожиданное значение decision: {decision}")
+        };
+
+        await NotifyAsync(
+            decisionNotice, NotificationCategory.Approval, vndId, currentUserId, process.InitiatorUserId);
+
+        return await LoadResponseAsync(process.Id);
+    }
+
+    public async Task<ApprovalProcessResponse> ResubmitAfterRevisionAsync(
+        int vndId, ResubmitAfterRevisionRequest request, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        if (process.Status != ApprovalProcessStatus.RevisionNeeded)
+            throw new InvalidOperationException(
+                "Повторную отправку можно сделать только из статуса \"требуются правки\"");
+
+        if (process.InitiatorUserId != currentUserId)
+            throw new UnauthorizedAccessException("Отправить на повторное согласование может только инициатор");
+
+        if (!request.AgreesWithAllRemarks && process.DisagreementMatrixRows.Count == 0)
+            throw new InvalidOperationException(
+                "Если вы не согласны со всеми замечаниями, заполните матрицу разногласий (хотя бы одна строка)");
+
+        var redaction = process.Redaction!;
+
+        if (request.DocRu is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.DocRu, currentUserId);
+            redaction.DocFileRuId = saved.Id;
+        }
+
+        if (request.DocKg is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.DocKg, currentUserId);
+            redaction.DocFileKgId = saved.Id;
+        }
+
+        if (request.DocEn is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.DocEn, currentUserId);
+            redaction.DocFileEnId = saved.Id;
+        }
+
+        process.RepeatInitiatorComment = request.Comment;
+
+        if (request.AgreesWithAllRemarks)
+        {
+            // Замечания исправлены — обычное повторное согласование (только с теми, кто участвует в repeat)
+            foreach (var stage in process.Stages.Where(s => s.ParticipatesInRepeat))
+            {
+                stage.RepeatDecision = ApprovalStageDecision.Pending;
+                stage.RepeatComment = null;
+                stage.RepeatDecidedAt = null;
+            }
+
+            process.Status = ApprovalProcessStatus.Repeated;
+            process.RepeatStartedAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync();
+
+            var repeatApproverIds = process.Stages
+                .Where(s => s.ParticipatesInRepeat)
+                .Select(s => s.ApproverUserId)
+                .ToArray();
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.TaskRepeatApproval(redaction.Code, process.Vnd!.TitleRu),
+                NotificationCategory.Approval, vndId, currentUserId, repeatApproverIds);
+        }
+        else
+        {
+            // Составлена матрица разногласий — повторное согласование пропускаем,
+            // сразу идём на финальную выдержку (там решения принимают ВСЕ этапы)
+            foreach (var stage in process.Stages)
+            {
+                stage.FinalHoldDecision = ApprovalStageDecision.Pending;
+                stage.FinalHoldComment = null;
+                stage.FinalHoldDecidedAt = null;
+            }
+
+            process.Status = ApprovalProcessStatus.FinalHold;
+            process.FinalHoldStartedAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync();
+
+            var stageApproverIds = process.Stages.Select(s => s.ApproverUserId).ToArray();
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.FinalHoldForApprovers(redaction.Code, process.Vnd!.TitleRu),
+                NotificationCategory.Approval, vndId, currentUserId, stageApproverIds);
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.SentToFinalHold(redaction.Code),
+                NotificationCategory.Approval, vndId, currentUserId, currentUserId);
+        }
+
+        return await LoadResponseAsync(process.Id);
+    }
+
+    public async Task<DisagreementMatrixRowResponse> AddDisagreementMatrixRowAsync(
+        int vndId, AddDisagreementMatrixRowRequest request, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        if (process.InitiatorUserId != currentUserId)
+            throw new UnauthorizedAccessException("Заполнять матрицу разногласий может только инициатор");
+
+        if (process.Status != ApprovalProcessStatus.RevisionNeeded)
+            throw new InvalidOperationException(
+                "Матрицу разногласий можно заполнять только в статусе \"требуются правки\"");
+
+        var row = new VndDisagreementMatrixRow
+        {
+            ApprovalProcessId = process.Id,
+            DeveloperPosition = request.DeveloperPosition,
+            OpponentPosition = request.OpponentPosition,
+            DeveloperJustification = request.DeveloperJustification,
+            CreatedByUserId = currentUserId
+        };
+
+        _db.Set<VndDisagreementMatrixRow>().Add(row);
+        await _db.SaveChangesAsync();
+
+        return ToDisagreementRowResponse(row);
+    }
+
+    public async Task DeleteDisagreementMatrixRowAsync(int vndId, int rowId, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        if (process.InitiatorUserId != currentUserId)
+            throw new UnauthorizedAccessException("Удалять строки матрицы разногласий может только инициатор");
+
+        if (process.Status != ApprovalProcessStatus.RevisionNeeded)
+            throw new InvalidOperationException(
+                "Матрицу разногласий можно редактировать только в статусе \"требуются правки\"");
+
+        var row = await _db.Set<VndDisagreementMatrixRow>()
+                       .FirstOrDefaultAsync(x => x.Id == rowId && x.ApprovalProcessId == process.Id)
+                   ?? throw new KeyNotFoundException($"Строка матрицы разногласий с id={rowId} не найдена");
+
+        _db.Set<VndDisagreementMatrixRow>().Remove(row);
+        await _db.SaveChangesAsync();
+    }
+
+    public async Task ProcessTimeoutsAsync()
+    {
+        var now = DateTime.UtcNow;
+
+        // --- Первичный этап
+        var primaryProcesses = await _db.VndApprovalProcesses
+            .Include(x => x.Stages)
+            .Include(x => x.Redaction)
+            .Include(x => x.Vnd)
+            .Where(x => x.Status == ApprovalProcessStatus.Primary)
+            .ToListAsync();
+
+        foreach (var process in primaryProcesses.Where(p => p.PrimaryDeadlineAt <= now))
+        {
+            foreach (var stage in process.Stages.Where(s => s.PrimaryDecision == ApprovalStageDecision.Pending))
+            {
+                stage.PrimaryDecision = ApprovalStageDecision.AutoApprovedByTimeout;
+                stage.PrimaryDecidedAt = now;
+            }
+
+            await CompletePrimaryPhaseAsync(process, save: false);
+        }
+
+        // --- Повторный этап
+        var repeatedProcesses = await _db.VndApprovalProcesses
+            .Include(x => x.Stages)
+            .Include(x => x.Redaction)
+            .Include(x => x.Vnd)
+            .Where(x => x.Status == ApprovalProcessStatus.Repeated)
+            .ToListAsync();
+
+        foreach (var process in
+                 repeatedProcesses.Where(p => p.RepeatDeadlineAt is not null && p.RepeatDeadlineAt <= now))
+        {
+            foreach (var stage in process.Stages.Where(s =>
+                         s.ParticipatesInRepeat &&
+                         (s.RepeatDecision is null || s.RepeatDecision == ApprovalStageDecision.Pending)))
+            {
+                stage.RepeatDecision = ApprovalStageDecision.AutoApprovedByTimeout;
+                stage.RepeatDecidedAt = now;
+            }
+
+            await CompleteRepeatPhaseAsync(process, save: false);
+        }
+
+        // --- Финальная выдержка
+        var finalHoldProcesses = await _db.VndApprovalProcesses
+            .Include(x => x.Stages)
+            .Include(x => x.Redaction)
+            .Include(x => x.Vnd)
+            .Where(x => x.Status == ApprovalProcessStatus.FinalHold)
+            .ToListAsync();
+
+        foreach (var process in finalHoldProcesses.Where(p =>
+                     p.FinalHoldDeadlineAt is not null && p.FinalHoldDeadlineAt <= now))
+        {
+            foreach (var stage in process.Stages.Where(s =>
+                         s.FinalHoldDecision is null || s.FinalHoldDecision == ApprovalStageDecision.Pending))
+            {
+                stage.FinalHoldDecision = ApprovalStageDecision.AutoApprovedByTimeout;
+                stage.FinalHoldDecidedAt = now;
+            }
+
+            // Никто не оставил замечаний до дедлайна — завершаем (afterRevision: true,
+            // т.к. финальная выдержка бывает только после цикла с замечаниями)
+            await FinalizeApprovalAsync(process, afterRevision: true);
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task CompletePrimaryPhaseAsync(VndApprovalProcess process, bool save = true)
+    {
+        var hasRemarks = process.Stages.Any(s =>
+            s.PrimaryDecision is ApprovalStageDecision.ApprovedWithComment or ApprovalStageDecision.Rejected);
+
+        if (!hasRemarks)
+        {
+            // Если никто не оставил замечаний, то финальной выдержки не будет, ВНД сразу действующий
+            await FinalizeApprovalAsync(process, afterRevision: false);
+        }
+        else
+        {
+            process.Status = ApprovalProcessStatus.RevisionNeeded;
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
+                NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+        }
+
+        if (save) await _db.SaveChangesAsync();
+    }
+
+    private async Task CompleteRepeatPhaseAsync(VndApprovalProcess process, bool save = true)
+    {
+        process.Status = ApprovalProcessStatus.FinalHold;
+        process.FinalHoldStartedAt = DateTime.UtcNow;
+
+        foreach (var stage in process.Stages)
+        {
+            stage.FinalHoldDecision = ApprovalStageDecision.Pending;
+            stage.FinalHoldComment = null;
+            stage.FinalHoldDecidedAt = null;
+        }
+
+        var stageApproverIds = process.Stages.Select(s => s.ApproverUserId).ToArray();
+
+        // --- Всем согласующим: документ ушёл на финальную выдержку
+        await NotifyAsync(
+            VndApprovalNotificationMessages.FinalHoldForApprovers(process.Redaction!.Code, process.Vnd!.TitleRu),
+            NotificationCategory.Approval, process.VndId, null, stageApproverIds);
+
+        // --- Инициатору: его редакция отправлена на финальную выдержку
+        await NotifyAsync(
+            VndApprovalNotificationMessages.SentToFinalHold(process.Redaction!.Code),
+            NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+
+        if (save) await _db.SaveChangesAsync();
+    }
+
+    /// <summary>Кто-то на финальной выдержке оставил замечание/отклонил — возвращаем
+    /// процесс на доработку. Матрица разногласий предыдущего круга (если была) не трогается,
+    /// инициатор сможет дополнить/почистить её строки заново на фронте.</summary>
+    private async Task ReturnToRevisionFromFinalHoldAsync(VndApprovalProcess process)
+    {
+        process.Status = ApprovalProcessStatus.RevisionNeeded;
+
+        await NotifyAsync(
+            VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
+            NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+    }
+
+    private async Task FinalizeApprovalAsync(VndApprovalProcess process, bool afterRevision)
+    {
+        process.Status = ApprovalProcessStatus.Approved;
+        process.CompletedAt = DateTime.UtcNow;
+
+        var redaction = process.Redaction!;
+        var vnd = process.Vnd!;
+
+        redaction.ApprovalStatus = RedactionApprovalStatus.Approved;
+        vnd.CurrentRedactionId = redaction.Id;
+        vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        vnd.Status = VndStatus.Active;
+
+        var notice = afterRevision
+            ? VndApprovalNotificationMessages.ApprovedAfterRevision(redaction.Code, vnd.TitleRu)
+            : VndApprovalNotificationMessages.Approved(redaction.Code, vnd.TitleRu);
+
+        await NotifyAsync(notice, NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+    }
+
+    private async Task<List<VndApprovalStage>> BuildAndValidateStagesAsync(List<ApprovalStageRequest> requestStages)
+    {
+        if (requestStages.Count < 3)
+            throw new InvalidOperationException(
+                "Маршрут должен содержать минимум 3 этапа: Юр. управление, Риск-менеджмент и Комплаенс");
+
+        if (requestStages[0].Kind != ApprovalStageKind.Legal)
+            throw new InvalidOperationException("Первый этап маршрута всегда — Юридическое управление");
+        if (requestStages[1].Kind != ApprovalStageKind.RiskManagement)
+            throw new InvalidOperationException("Второй этап маршрута всегда — Управление риск-менеджмента");
+        if (requestStages[2].Kind != ApprovalStageKind.Compliance)
+            throw new InvalidOperationException("Третий этап маршрута всегда — Управление комплаенс-контроля");
+
+        for (var i = 3; i < requestStages.Count; i++)
+        {
+            if (requestStages[i].Kind != ApprovalStageKind.Custom
+                && requestStages[i].Kind != ApprovalStageKind.Methodology)
+                throw new InvalidOperationException(
+                    "Этапы после фиксированных (Юр. управление, Риск-менеджмент, Комплаенс) " +
+                    "должны иметь тип Custom или Методология");
+        }
+
+        var approverIds = requestStages.Select(s => s.ApproverUserId).ToList();
+        if (approverIds.Distinct().Count() != approverIds.Count)
+            throw new InvalidOperationException("Один пользователь не может занимать два этапа одновременно");
+
+        var users = await _db.Users.Where(u => approverIds.Contains(u.Id)).ToListAsync();
+        var missing = approverIds.Except(users.Select(u => u.Id)).ToList();
+        if (missing.Count > 0)
+            throw new KeyNotFoundException($"Пользователи с id={string.Join(", ", missing)} не найдены");
+
+        var usersById = users.ToDictionary(u => u.Id);
+
+        var stages = new List<VndApprovalStage>();
+        for (var i = 0; i < requestStages.Count; i++)
+        {
+            var reqStage = requestStages[i];
+            var approver = usersById[reqStage.ApproverUserId];
+
+            var expectedOrgUnitId = reqStage.Kind switch
+            {
+                ApprovalStageKind.Legal => FixedApprovalOrgUnits.LegalOrgUnitId,
+                ApprovalStageKind.RiskManagement => FixedApprovalOrgUnits.RiskManagementOrgUnitId,
+                ApprovalStageKind.Compliance => FixedApprovalOrgUnits.ComplianceOrgUnitId,
+                ApprovalStageKind.Methodology => FixedApprovalOrgUnits.MethodologyOrgUnitId,
+                _ => (int?)null
+            };
+
+            if (expectedOrgUnitId.HasValue && approver.OrgUnitId != expectedOrgUnitId)
+                throw new InvalidOperationException(
+                    $"Согласующий на этапе {i + 1} ({reqStage.Kind}) должен относиться к соответствующему подразделению");
+
+            stages.Add(new VndApprovalStage
+            {
+                Order = i + 1,
+                Kind = reqStage.Kind,
+                OrgUnitId = approver.OrgUnitId ?? expectedOrgUnitId
+                    ?? throw new InvalidOperationException("У согласующего не указано подразделение"),
+                ApproverUserId = approver.Id
+            });
+        }
+
+        return stages;
+    }
+
+    private async Task<VndApprovalProcess> LoadProcessForVndAsync(int vndId)
+    {
+        var lastRedaction = await _db.VndRedactions
+                                .Where(r => r.VndId == vndId)
+                                .OrderByDescending(r => r.Number)
+                                .FirstOrDefaultAsync()
+                            ?? throw new KeyNotFoundException($"У ВНД с id={vndId} нет редакций");
+
+        return await _db.VndApprovalProcesses
+                   .Include(x => x.Stages)
+                   .Include(x => x.Redaction)
+                   .Include(x => x.Vnd)
+                   .Include(x => x.DisagreementMatrixRows)
+                   .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
+               ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
+    }
+
+    private async Task<ApprovalProcessResponse> LoadResponseAsync(int processId)
+    {
+        var process = await _db.VndApprovalProcesses
+            .Include(x => x.Stages).ThenInclude(s => s.OrgUnit)
+            .Include(x => x.Stages).ThenInclude(s => s.ApproverUser)
+            .Include(x => x.DisagreementMatrixRows)
+            .FirstAsync(x => x.Id == processId);
+
+        var initiator = await _db.Users.FindAsync(process.InitiatorUserId);
+
+        return new ApprovalProcessResponse
+        {
+            Id = process.Id,
+            VndId = process.VndId,
+            RedactionId = process.RedactionId,
+            InitiatorUserId = process.InitiatorUserId,
+            InitiatorName = initiator?.FullName ?? "",
+            Status = MapStatus(process.Status),
+            PrimaryDeadlineHours = process.PrimaryDeadlineHours,
+            RepeatDeadlineHours = process.RepeatDeadlineHours,
+            FinalHoldDeadlineHours = process.FinalHoldDeadlineHours,
+            PrimaryStartedAt = process.PrimaryStartedAt,
+            PrimaryDeadlineAt = process.PrimaryDeadlineAt,
+            RepeatInitiatorComment = process.RepeatInitiatorComment,
+            RepeatStartedAt = process.RepeatStartedAt,
+            RepeatDeadlineAt = process.RepeatDeadlineAt,
+            FinalHoldStartedAt = process.FinalHoldStartedAt,
+            FinalHoldDeadlineAt = process.FinalHoldDeadlineAt,
+            CompletedAt = process.CompletedAt,
+            CreatedAt = process.CreatedAt,
+            UpdatedAt = process.UpdatedAt,
+            DisagreementMatrixRows = process.DisagreementMatrixRows
+                .OrderBy(r => r.CreatedAt)
+                .Select(ToDisagreementRowResponse)
+                .ToList(),
+            Stages = process.Stages.OrderBy(s => s.Order).Select(s => new ApprovalStageResponse
+            {
+                Id = s.Id,
+                Order = s.Order,
+                Kind = MapKind(s.Kind),
+                OrgUnitId = s.OrgUnitId,
+                OrgUnitName = s.OrgUnit?.TitleRu ?? "",
+                ApproverUserId = s.ApproverUserId,
+                ApproverName = s.ApproverUser?.FullName ?? "",
+                PrimaryDecision = MapDecision(s.PrimaryDecision),
+                PrimaryComment = s.PrimaryComment,
+                PrimaryDecidedAt = s.PrimaryDecidedAt,
+                ParticipatesInRepeat = s.ParticipatesInRepeat,
+                RepeatDecision = s.RepeatDecision.HasValue ? MapDecision(s.RepeatDecision.Value) : null,
+                RepeatComment = s.RepeatComment,
+                RepeatDecidedAt = s.RepeatDecidedAt,
+                FinalHoldDecision = s.FinalHoldDecision.HasValue ? MapDecision(s.FinalHoldDecision.Value) : null,
+                FinalHoldComment = s.FinalHoldComment,
+                FinalHoldDecidedAt = s.FinalHoldDecidedAt
+            }).ToList()
+        };
+    }
+
+    private static DisagreementMatrixRowResponse ToDisagreementRowResponse(VndDisagreementMatrixRow row) => new()
+    {
+        Id = row.Id,
+        DeveloperPosition = row.DeveloperPosition,
+        OpponentPosition = row.OpponentPosition,
+        DeveloperJustification = row.DeveloperJustification,
+        CreatedAt = row.CreatedAt
+    };
+
+    /// <summary>
+    /// Общий хелпер отправки уведомлений по событиям согласования.
+    /// Принимает уже переведённый на 3 языка текст (см. VndApprovalNotificationMessages).
+    /// Ошибка отправки не должна ронять сам процесс согласования — только логируется.
+    /// </summary>
+    private async Task NotifyAsync(
+        NotificationText text, NotificationCategory category,
+        int vndId, int? triggeredByUserId, params int[] recipientUserIds)
+    {
+        if (recipientUserIds.Length == 0) return;
+
+        try
+        {
+            await _notifications.CreateAsync(new CreateNotificationRequest
+            {
+                TitleRu = text.TitleRu,
+                TitleEn = text.TitleEn,
+                TitleKg = text.TitleKg,
+                BodyRu = text.BodyRu,
+                BodyEn = text.BodyEn,
+                BodyKg = text.BodyKg,
+                Category = category,
+                Severity = text.Severity,
+                EntityType = "Vnd",
+                EntityId = vndId,
+                UserIds = recipientUserIds.Distinct().ToList()
+            }, triggeredByUserId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Не удалось отправить уведомление по согласованию ВНД (vndId={VndId}, category={Category})",
+                vndId, category);
+        }
+    }
+
+    private static string MapStatus(ApprovalProcessStatus status) => status switch
+    {
+        ApprovalProcessStatus.Primary => "primary",
+        ApprovalProcessStatus.RevisionNeeded => "revision_needed",
+        ApprovalProcessStatus.Repeated => "repeated",
+        ApprovalProcessStatus.FinalHold => "final_hold",
+        ApprovalProcessStatus.Approved => "approved",
+        ApprovalProcessStatus.Cancelled => "cancelled",
+        _ => "primary"
+    };
+
+    private static string MapKind(ApprovalStageKind kind) => kind switch
+    {
+        ApprovalStageKind.Legal => "legal",
+        ApprovalStageKind.RiskManagement => "risk_management",
+        ApprovalStageKind.Compliance => "compliance",
+        ApprovalStageKind.Custom => "custom",
+        ApprovalStageKind.Methodology => "methodology",
+        _ => "custom"
+    };
+
+    private static string MapDecision(ApprovalStageDecision decision) => decision switch
+    {
+        ApprovalStageDecision.Pending => "pending",
+        ApprovalStageDecision.Approved => "approved",
+        ApprovalStageDecision.ApprovedWithComment => "approved_with_comment",
+        ApprovalStageDecision.Rejected => "rejected",
+        ApprovalStageDecision.AutoApprovedByTimeout => "auto_approved_timeout",
+        _ => "pending"
+    };
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Services\VndApprovalTimeoutBackgroundService.cs =====
+namespace delosfera_server.Modules.Vnd.Services;
+
+/// <summary>Раз в N минут проверяет просроченные этапы согласования и выдержку,
+/// автоматически их закрывает (просрочка = согласовано)</summary>
+public class VndApprovalTimeoutBackgroundService : BackgroundService
+{
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
+
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<VndApprovalTimeoutBackgroundService> _logger;
+
+    public VndApprovalTimeoutBackgroundService(
+        IServiceScopeFactory scopeFactory, ILogger<VndApprovalTimeoutBackgroundService> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(CheckInterval);
+
+        do
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var approvalService = scope.ServiceProvider.GetRequiredService<IVndApprovalService>();
+                await approvalService.ProcessTimeoutsAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при обработке просроченных согласований ВНД");
+            }
+        } while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+}
+
+===== D:\123\delosfera-server\delosfera-server\Modules\Vnd\Services\VndService.cs =====
+using Microsoft.EntityFrameworkCore;
+using delosfera_server.Data;
+using delosfera_server.Modules.Vnd.DTO.Request;
+using delosfera_server.Modules.Vnd.DTO.Response;
+using delosfera_server.Modules.Vnd.Models;
+using delosfera_server.Common.Extensions;
+using delosfera_server.Modules.Files.Services;
+
+namespace delosfera_server.Modules.Vnd.Services;
+
+public class VndService : IVndService
+{
+    private readonly DelosferaDbContext _db;
+    private readonly IFileStorageService _fileService;
+
+    public VndService(DelosferaDbContext db, IFileStorageService fileService)
+    {
+        _db = db;
+        _fileService = fileService;
+    }
+
+    public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
+    {
+        IQueryable<VndDocument> query = _db.VndDocuments
+            .Include(x => x.Type)
+            .Include(x => x.Developer)
+            .Include(x => x.CuratorDeveloper)
+            .Include(x => x.Organ)
+            .Include(x => x.ResponsibleExecutors)
+            .Include(x => x.Rubrics)
+            .Include(x => x.Keywords)
+            .Include(x => x.UserGroups)
+            .Include(x => x.Redactions);
+
+        if (!string.IsNullOrWhiteSpace(request.Code))
+            query = query.Where(x => EF.Functions.ILike(x.Code, $"%{request.Code}%"));
+
+        if (!string.IsNullOrWhiteSpace(request.Name))
+            query = query.Where(x =>
+                EF.Functions.ILike(x.TitleRu, $"%{request.Name}%") ||
+                (x.TitleEn != null && EF.Functions.ILike(x.TitleEn, $"%{request.Name}%")) ||
+                (x.TitleKg != null && EF.Functions.ILike(x.TitleKg, $"%{request.Name}%")));
+
+        if (request.Statuses.Count > 0)
+        {
+            var statuses = request.Statuses.Select(MapStatus).ToList();
+            query = query.Where(x => statuses.Contains(x.Status));
+        }
+
+        if (request.TypeIds.Count > 0)
+            query = query.Where(x => request.TypeIds.Contains(x.TypeId));
+
+        if (request.OrganIds.Count > 0)
+            query = query.Where(x => request.OrganIds.Contains(x.OrganId));
+
+        if (request.DeveloperIds.Count > 0)
+            query = query.Where(x => request.DeveloperIds.Contains(x.DeveloperId));
+
+        if (request.ResponsibleExecutorIds.Count > 0)
+            query = query.Where(x => x.ResponsibleExecutors.Any(e => request.ResponsibleExecutorIds.Contains(e.Id)));
+
+        if (request.KeywordIds.Count > 0)
+            query = query.Where(x => x.Keywords.Any(k => request.KeywordIds.Contains(k.Id)));
+
+        if (request.RubricIds.Count > 0)
+            query = query.Where(x => x.Rubrics.Any(r => request.RubricIds.Contains(r.Id)));
+
+        if (request.SecrecyLevelIds.Count > 0)
+            query = query.Where(x => request.SecrecyLevelIds.Contains(x.SecrecyLevelId));
+
+        if (request.UserGroupIds.Count > 0)
+            query = query.Where(x => x.UserGroups.Any(g => request.UserGroupIds.Contains(g.Id)));
+
+        if (!string.IsNullOrWhiteSpace(request.AdoptionCode))
+            query = query.Where(x =>
+                x.AdoptionCode != null && EF.Functions.ILike(x.AdoptionCode, $"%{request.AdoptionCode}%"));
+
+        if (!string.IsNullOrWhiteSpace(request.CancelCode))
+            query =
+                query.Where(x => x.CancelCode != null && EF.Functions.ILike(x.CancelCode, $"%{request.CancelCode}%"));
+
+        query = ApplyDateFilter(query, request.AdoptionDate, x => x.AdoptionDate);
+        query = ApplyDateFilter(query, request.EffectiveDate, x => x.EffectiveDate);
+        query = ApplyDateFilter(query, request.RequisitesChangedDate, x => x.RequisitesChangedDate);
+        query = ApplyDateFilter(query, request.RevisionChangedDate, x => x.RevisionChangedDate);
+        query = ApplyDateFilter(query, request.CancelDate, x => x.CancelDate);
+        query = ApplyDateFilter(query, request.DueActualizationDate, x => x.DueActualizationDate);
+        query = ApplyDateFilter(query, request.LastActualizationDate, x => x.LastActualizationDate);
+        query = ApplyDateFilter(query, request.ArchivedDate, x => x.ArchivedDate);
+
+        query = ApplyActualizationBucketFilter(query, request.ActualizationBuckets);
+
+        var entities = await query.ToListAsync();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return entities.Select(x => ToResponse(x, languageCode, today)).ToList();
+    }
+
+    public async Task<VndResponse> GetByIdAsync(int id, string languageCode)
+    {
+        var entity = await _db.VndDocuments
+                         .Include(x => x.Type)
+                         .Include(x => x.Developer)
+                         .Include(x => x.CuratorDeveloper)
+                         .Include(x => x.Organ)
+                         .Include(x => x.ResponsibleExecutors)
+                         .Include(x => x.Rubrics)
+                         .Include(x => x.Keywords)
+                         .Include(x => x.UserGroups)
+                         .Include(x => x.Redactions)
+                         .FirstOrDefaultAsync(x => x.Id == id)
+                     ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return ToResponse(entity, languageCode, today);
+    }
+
+    /// <summary>Сводка по срокам актуализации для дашборда планирования.
+    /// Документы без DueActualizationDate (архив/черновики) не учитываются.
+    /// Считается одним SQL-запросом через условные COUNT.</summary>
+    public async Task<VndActualizationSummaryResponse> GetActualizationSummaryAsync()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var criticalEnd = today.AddDays(ActualizationThresholds.CriticalDays);
+        var approachingEnd = today.AddDays(ActualizationThresholds.ApproachingDays);
+
+        var counts = await _db.VndDocuments
+            .Where(x => x.DueActualizationDate != null)
+            .GroupBy(x => 1)
+            .Select(g => new VndActualizationSummaryResponse
+            {
+                Overdue = g.Count(x => x.DueActualizationDate!.Value < today),
+                Critical = g.Count(x =>
+                    x.DueActualizationDate!.Value >= today && x.DueActualizationDate!.Value <= criticalEnd),
+                Approaching = g.Count(x =>
+                    x.DueActualizationDate!.Value > criticalEnd && x.DueActualizationDate!.Value <= approachingEnd),
+                Normal = g.Count(x => x.DueActualizationDate!.Value > approachingEnd)
+            })
+            .FirstOrDefaultAsync() ?? new VndActualizationSummaryResponse();
+
+        counts.Total = counts.Normal + counts.Approaching + counts.Critical + counts.Overdue;
+        return counts;
+    }
+
+    private static IQueryable<VndDocument> ApplyActualizationBucketFilter(
+        IQueryable<VndDocument> query, List<string> bucketKeys)
+    {
+        if (bucketKeys.Count == 0) return query;
+
+        var buckets = bucketKeys.Select(MapActualizationBucketKey).ToHashSet();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var criticalEnd = today.AddDays(ActualizationThresholds.CriticalDays);
+        var approachingEnd = today.AddDays(ActualizationThresholds.ApproachingDays);
+
+        var includeNormal = buckets.Contains(ActualizationBucket.Normal);
+        var includeApproaching = buckets.Contains(ActualizationBucket.Approaching);
+        var includeCritical = buckets.Contains(ActualizationBucket.Critical);
+        var includeOverdue = buckets.Contains(ActualizationBucket.Overdue);
+
+        return query.Where(x =>
+            x.DueActualizationDate != null && (
+                (includeOverdue && x.DueActualizationDate.Value < today) ||
+                (includeCritical && x.DueActualizationDate.Value >= today &&
+                 x.DueActualizationDate.Value <= criticalEnd) ||
+                (includeApproaching && x.DueActualizationDate.Value > criticalEnd &&
+                 x.DueActualizationDate.Value <= approachingEnd) ||
+                (includeNormal && x.DueActualizationDate.Value > approachingEnd)
+            ));
+    }
+
+    private static ActualizationBucket MapActualizationBucketKey(string key) => key.ToLowerInvariant() switch
+    {
+        "normal" => ActualizationBucket.Normal,
+        "approaching" => ActualizationBucket.Approaching,
+        "critical" => ActualizationBucket.Critical,
+        "overdue" => ActualizationBucket.Overdue,
+        _ => throw new InvalidOperationException($"Неизвестный статус срока актуализации: {key}")
+    };
+
+    private static string? MapActualizationBucketBack(ActualizationBucket? bucket) => bucket switch
+    {
+        ActualizationBucket.Normal => "normal",
+        ActualizationBucket.Approaching => "approaching",
+        ActualizationBucket.Critical => "critical",
+        ActualizationBucket.Overdue => "overdue",
+        _ => null
+    };
+
+    private static IQueryable<VndDocument> ApplyDateFilter(
+        IQueryable<VndDocument> query, DateRangeFilter? filter,
+        System.Linq.Expressions.Expression<Func<VndDocument, DateOnly?>> selector)
+    {
+        if (filter is null) return query;
+
+        var compiled = selector.Compile();
+
+        if (filter.Exact.HasValue)
+            return query.Where(x => compiled(x) == filter.Exact.Value);
+
+        if (filter.From.HasValue)
+            query = query.Where(x => compiled(x) != null && compiled(x) >= filter.From.Value);
+
+        if (filter.To.HasValue)
+            query = query.Where(x => compiled(x) != null && compiled(x) <= filter.To.Value);
+
+        return query;
+    }
+
+    private static VndStatus MapStatus(string key) => key switch
+    {
+        "active" => VndStatus.Active,
+        "onact" => VndStatus.OnActualization,
+        "review" => VndStatus.Review,
+        "consol" => VndStatus.Consolidation,
+        "arch" => VndStatus.Archived,
+        "draft" => VndStatus.Draft,
+        _ => throw new InvalidOperationException($"Неизвестный статус: {key}")
+    };
+
+    private static string MapStatusBack(VndStatus status) => status switch
+    {
+        VndStatus.Active => "active",
+        VndStatus.OnActualization => "onact",
+        VndStatus.Review => "review",
+        VndStatus.Consolidation => "consol",
+        VndStatus.Archived => "arch",
+        VndStatus.Draft => "draft",
+        _ => "onact"
+    };
+
+    private static VndResponse ToResponse(VndDocument x, string languageCode, DateOnly today) => new()
+    {
+        Id = x.Id,
+        Code = x.Code,
+        Name = x.ResolveTitle(languageCode),
+        TitleRu = x.TitleRu,
+        TitleEn = x.TitleEn,
+        TitleKg = x.TitleKg,
+        Status = MapStatusBack(x.Status),
+        TypeId = x.TypeId,
+        TypeName = x.Type?.TitleRu ?? "",
+        DeveloperId = x.DeveloperId,
+        DeveloperName = x.Developer?.TitleRu ?? "",
+        CuratorDeveloperId = x.CuratorDeveloperId,
+        CuratorDeveloperName = x.CuratorDeveloper?.FullName,
+        OrganId = x.OrganId,
+        OrganName = x.Organ?.TitleRu ?? "",
+        ResponsibleExecutorIds = x.ResponsibleExecutors.Select(e => e.Id).ToList(),
+        AdoptionDate = x.AdoptionDate,
+        AdoptionCode = x.AdoptionCode,
+        EffectiveDate = x.EffectiveDate,
+        RequisitesChangedDate = x.RequisitesChangedDate,
+        RevisionChangedDate = x.RevisionChangedDate,
+        CancelDate = x.CancelDate,
+        CancelCode = x.CancelCode,
+        CancelReason = x.CancelReason,
+        ArchivedDate = x.ArchivedDate,
+        DueActualizationDate = x.DueActualizationDate,
+        LastActualizationDate = x.LastActualizationDate,
+        LastActualizationHadChanges = x.LastActualizationHadChanges,
+        DaysInArchive = x.DaysInArchive,
+        ActualizationBucket = MapActualizationBucketBack(ActualizationThresholds.Resolve(x.DueActualizationDate, today)),
+        KeywordIds = x.Keywords.Select(k => k.Id).ToList(),
+        RubricIds = x.Rubrics.Select(r => r.Id).ToList(),
+        SecrecyLevelId = x.SecrecyLevelId,
+        UserGroupIds = x.UserGroups.Select(g => g.Id).ToList(),
+        RedactionIds = x.Redactions.Select(r => r.Id).ToList(),
+        CreatedAt = x.CreatedAt,
+        UpdatedAt = x.UpdatedAt
+    };
+
+    private static VndRedactionResponse ToRedactionResponse(VndRedaction x, int? currentRedactionId) => new()
+    {
+        Id = x.Id,
+        Code = x.Code,
+        Number = x.Number,
+        Description = x.Description,
+        IsCurrent = x.Id == currentRedactionId,
+        DocFileRuId = x.DocFileRuId,
+        DocFileKgId = x.DocFileKgId,
+        DocFileEnId = x.DocFileEnId,
+        RequiresApproval = x.RequiresApproval,
+        ApprovalStatus = x.ApprovalStatus.ToString(),
+        AttachmentFileIds = x.Attachments.Select(a => a.FileAttachmentId).ToList(),
+        CreatedAt = x.CreatedAt
+    };
+
+
+    public async Task<VndResponse> CreateAsync(CreateVndRequest request, int currentUserId, string languageCode)
+    {
+        var typeExists = await _db.TypesVnd.AnyAsync(x => x.Id == request.TypeId);
+        if (!typeExists) throw new KeyNotFoundException($"Вид ВНД с id={request.TypeId} не найден");
+
+        var organExists = await _db.ApprovalBodies.AnyAsync(x => x.Id == request.OrganId);
+        if (!organExists) throw new KeyNotFoundException($"Орган утверждения с id={request.OrganId} не найден");
+
+        var currentUser = await _db.Users.FindAsync(currentUserId)
+                          ?? throw new KeyNotFoundException("Текущий пользователь не найден");
+
+        var developerId = request.DeveloperId ?? currentUser.OrgUnitId
+            ?? throw new InvalidOperationException(
+                "Не указан разработчик (СП), и у текущего пользователя не назначено подразделение");
+
+        var developer = await _db.OrganizationUnits.FindAsync(developerId)
+                        ?? throw new KeyNotFoundException($"Структурное подразделение с id={developerId} не найдено");
+
+        var curatorDeveloperId = request.CuratorDeveloperId ?? developer.CuratorUserId;
+        if (curatorDeveloperId.HasValue)
+        {
+            var curatorExists = await _db.Users.AnyAsync(x => x.Id == curatorDeveloperId.Value);
+            if (!curatorExists) throw new KeyNotFoundException($"Куратор с id={curatorDeveloperId} не найден");
+        }
+
+        var responsibleExecutorIds = request.ResponsibleExecutorIds.Count > 0
+            ? request.ResponsibleExecutorIds
+            : [developerId];
+
+        var responsibleExecutors = await _db.OrganizationUnits
+            .Where(x => responsibleExecutorIds.Contains(x.Id)).ToListAsync();
+        var missingExecutors = responsibleExecutorIds.Except(responsibleExecutors.Select(x => x.Id)).ToList();
+        if (missingExecutors.Count > 0)
+            throw new KeyNotFoundException($"Подразделения с id={string.Join(", ", missingExecutors)} не найдены");
+
+        var keywords = await GetByIdsAsync(_db.Keywords, request.KeywordIds, "Ключевые слова");
+        var rubrics = await GetByIdsAsync(_db.Rubrics, request.RubricIds, "Рубрики");
+        var userGroups = await GetByIdsAsync(_db.UserGroups, request.UserGroupIds, "Группы пользователей");
+
+        if (request.SecrecyLevelId.HasValue)
+        {
+            var exists = await _db.SecurityLevels.AnyAsync(x => x.Id == request.SecrecyLevelId.Value);
+            if (!exists) throw new KeyNotFoundException($"Уровень секретности с id={request.SecrecyLevelId} не найден");
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var dueDate = ResolveDueDate(request.Period, request.DueActualizationDate, today);
+
+        var entity = new VndDocument
+        {
+            Code = await GenerateNextCodeAsync(),
+            TitleRu = request.TitleRu,
+            TitleEn = request.TitleEn,
+            TitleKg = request.TitleKg,
+            Status = VndStatus.Draft,
+            TypeId = request.TypeId,
+            DeveloperId = developerId,
+            CuratorDeveloperId = curatorDeveloperId,
+            OrganId = request.OrganId,
+            ResponsibleExecutors = responsibleExecutors,
+            Keywords = keywords,
+            Rubrics = rubrics,
+            UserGroups = userGroups,
+            SecrecyLevelId = request.SecrecyLevelId ?? 1, // дефолт "Открытый доступ" 
+            LastActualizationDate = today,
+            DueActualizationDate = dueDate,
+            LastActualizationHadChanges = false
+        };
+
+        _db.VndDocuments.Add(entity);
+        await _db.SaveChangesAsync();
+
+        return ToResponse(entity, languageCode, today);
+    }
+
+    private static DateOnly ResolveDueDate(ActualizationPeriod period, DateOnly? customDate, DateOnly today) =>
+        period switch
+        {
+            ActualizationPeriod.Custom => customDate
+                                          ?? throw new InvalidOperationException(
+                                              "Для периода Custom необходимо указать DueActualizationDate"),
+            ActualizationPeriod.Quarterly => today.AddMonths(3),
+            ActualizationPeriod.HalfYear => today.AddMonths(6),
+            ActualizationPeriod.Annual => today.AddMonths(12),
+            ActualizationPeriod.Biennial => today.AddMonths(24),
+            ActualizationPeriod.Triennial => today.AddMonths(36),
+            _ => throw new InvalidOperationException("Неизвестный период актуализации")
+        };
+
+    private async Task<string> GenerateNextCodeAsync()
+    {
+        const int startingNumber = 10210;
+
+        var maxExisting = await _db.VndDocuments
+            .Select(x => x.Code)
+            .ToListAsync(); // коды хранятся строкой — парсим на стороне клиента
+
+        var maxNum = maxExisting
+            .Select(c => int.TryParse(c, out var n) ? n : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return (Math.Max(maxNum, startingNumber - 1) + 1).ToString();
+    }
+
+    private async Task<List<T>> GetByIdsAsync<T>(DbSet<T> set, List<int> ids, string entityName) where T : class
+    {
+        if (ids.Count == 0) return [];
+        var items = await set.Where(x => ids.Contains(EF.Property<int>(x, "Id"))).ToListAsync();
+        if (items.Count != ids.Distinct().Count())
+            throw new KeyNotFoundException($"{entityName}: не все id найдены");
+        return items;
+    }
+
+    /*
+    Правила при загрузке новой редакции:
+    1. Первая редакция документа, RequiresApproval = false - сразу становится актуальной.
+    2. Первая редакция документа, RequiresApproval = true - создаётся, но актуальной
+     не становится; ждёт согласования.
+    3. Есть предыдущие редакции, новая с RequiresApproval = false - сразу
+     становится актуальной, прежняя актуальная автоматически "теряет" этот статус (вытеснена).
+    4. Есть предыдущие редакции, новая с RequiresApproval = true - создаётся,
+     но актуальной не становится; прежняя актуальная остаётся актуальной до исхода согласования.
+    5. Блокировка загрузки: если последняя по номеру редакция документа находится
+     в статусе "на согласовании" (Pending) — новую редакцию загрузить нельзя. Сначала нужно её согласовать/отклонить/отозвать.
+    */
+
+    public async Task<VndRedactionResponse> AddRedactionAsync(
+        int vndId, CreateVndRedactionRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        // Правило: последняя редакция не должна быть незавершённой (черновик или на согласовании)
+        var lastRedaction = await _db.VndRedactions
+            .Where(r => r.VndId == vndId)
+            .OrderByDescending(r => r.Number)
+            .FirstOrDefaultAsync();
+
+        if (lastRedaction is not null &&
+            (lastRedaction.ApprovalStatus == RedactionApprovalStatus.Draft ||
+             lastRedaction.ApprovalStatus == RedactionApprovalStatus.Pending))
+        {
+            var reason = lastRedaction.ApprovalStatus == RedactionApprovalStatus.Draft
+                ? "ещё не отправлена на согласование"
+                : "ожидает решения по согласованию";
+            throw new InvalidOperationException(
+                $"Редакция {lastRedaction.Code} {reason}. Завершите работу с ней, прежде чем загружать новую.");
+        }
+
+        var docRu = await _fileService.SaveAsync(request.DocRu, currentUserId);
+        var docKg = request.DocKg is not null ? await _fileService.SaveAsync(request.DocKg, currentUserId) : null;
+        var docEn = request.DocEn is not null ? await _fileService.SaveAsync(request.DocEn, currentUserId) : null;
+
+        var attachmentEntities = new List<VndRedactionAttachment>();
+        foreach (var file in request.Attachments ?? [])
+        {
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            attachmentEntities.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
+        }
+
+        var nextNumber = (lastRedaction?.Number ?? 0) + 1;
+
+        var redaction = new VndRedaction
+        {
+            VndId = vndId,
+            Number = nextNumber,
+            Code = $"{vnd.Code}-Р{nextNumber}",
+            Description = request.Description,
+            DocFileRuId = docRu.Id,
+            DocFileKgId = docKg?.Id,
+            DocFileEnId = docEn?.Id,
+            RequiresApproval = request.RequiresApproval,
+            ApprovalStatus = request.RequiresApproval
+                ? RedactionApprovalStatus.Draft
+                : RedactionApprovalStatus.NotRequired,
+            Attachments = attachmentEntities
+        };
+
+        _db.VndRedactions.Add(redaction);
+        await _db.SaveChangesAsync();
+
+        if (!request.RequiresApproval)
+        {
+            vnd.CurrentRedactionId = redaction.Id;
+            vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+            vnd.Status = VndStatus.Active;
+            await _db.SaveChangesAsync();
+        }
+
+        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+    }
+    
+    // Отправка на согласование (заглушка)
+    public async Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(int vndId, int redactionId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var redaction = await _db.VndRedactions
+                            .Include(x => x.Attachments)
+                            .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
+                        ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
+
+        if (redaction.ApprovalStatus != RedactionApprovalStatus.Draft)
+            throw new InvalidOperationException("Отправить на согласование можно только черновик редакции");
+        
+        // если RequiresApproval = true, то черновик редакции ещё
+        // не отправлен на согласование, остается черновиком
+        redaction.ApprovalStatus = RedactionApprovalStatus.Pending;
+        vnd.Status = VndStatus.Review; 
+        await _db.SaveChangesAsync();
+
+        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+    }
+    
+
+    public async Task<List<VndRedactionResponse>> GetRedactionsAsync(int vndId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var redactions = await _db.VndRedactions
+            .Where(x => x.VndId == vndId)
+            .Include(x => x.Attachments)
+            .OrderBy(x => x.Number)
+            .ToListAsync();
+
+        return redactions.Select(r => ToRedactionResponse(r, vnd.CurrentRedactionId)).ToList();
+    }
+    
+    public async Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request, string languageCode)
+    {
+        var entity = await _db.VndDocuments
+                         .Include(x => x.Type)
+                         .Include(x => x.Developer)
+                         .Include(x => x.CuratorDeveloper)
+                         .Include(x => x.Organ)
+                         .Include(x => x.ResponsibleExecutors)
+                         .Include(x => x.Rubrics)
+                         .Include(x => x.Keywords)
+                         .Include(x => x.UserGroups)
+                         .Include(x => x.Redactions)
+                         .FirstOrDefaultAsync(x => x.Id == id)
+                     ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
+
+        var typeExists = await _db.TypesVnd.AnyAsync(x => x.Id == request.TypeId);
+        if (!typeExists) throw new KeyNotFoundException($"Вид ВНД с id={request.TypeId} не найден");
+
+        var organExists = await _db.ApprovalBodies.AnyAsync(x => x.Id == request.OrganId);
+        if (!organExists) throw new KeyNotFoundException($"Орган утверждения с id={request.OrganId} не найден");
+
+        int developerId;
+        if (request.DeveloperId.HasValue)
+        {
+            var developerExists = await _db.OrganizationUnits.AnyAsync(x => x.Id == request.DeveloperId.Value);
+            if (!developerExists)
+                throw new KeyNotFoundException($"Структурное подразделение с id={request.DeveloperId} не найдено");
+            developerId = request.DeveloperId.Value;
+        }
+        else
+        {
+            developerId = entity.DeveloperId; // не меняем, если не передали
+        }
+
+        if (request.CuratorDeveloperId.HasValue)
+        {
+            var curatorExists = await _db.Users.AnyAsync(x => x.Id == request.CuratorDeveloperId.Value);
+            if (!curatorExists)
+                throw new KeyNotFoundException($"Куратор с id={request.CuratorDeveloperId} не найден");
+        }
+
+        var responsibleExecutorIds = request.ResponsibleExecutorIds.Count > 0
+            ? request.ResponsibleExecutorIds
+            : [developerId];
+
+        var responsibleExecutors = await _db.OrganizationUnits
+            .Where(x => responsibleExecutorIds.Contains(x.Id)).ToListAsync();
+        var missingExecutors = responsibleExecutorIds.Except(responsibleExecutors.Select(x => x.Id)).ToList();
+        if (missingExecutors.Count > 0)
+            throw new KeyNotFoundException($"Подразделения с id={string.Join(", ", missingExecutors)} не найдены");
+
+        var keywords = await GetByIdsAsync(_db.Keywords, request.KeywordIds, "Ключевые слова");
+        var rubrics = await GetByIdsAsync(_db.Rubrics, request.RubricIds, "Рубрики");
+        var userGroups = await GetByIdsAsync(_db.UserGroups, request.UserGroupIds, "Группы пользователей");
+
+        if (request.SecrecyLevelId.HasValue)
+        {
+            var secrecyExists = await _db.SecurityLevels.AnyAsync(x => x.Id == request.SecrecyLevelId.Value);
+            if (!secrecyExists)
+                throw new KeyNotFoundException($"Уровень секретности с id={request.SecrecyLevelId} не найден");
+        }
+
+        // --- Применяем изменения ---
+        entity.TypeId = request.TypeId;
+        entity.OrganId = request.OrganId;
+        entity.DeveloperId = developerId;
+        entity.CuratorDeveloperId = request.CuratorDeveloperId;
+
+        entity.ResponsibleExecutors.Clear();
+        foreach (var executor in responsibleExecutors)
+            entity.ResponsibleExecutors.Add(executor);
+
+        entity.TitleRu = request.TitleRu;
+        entity.TitleEn = request.TitleEn;
+        entity.TitleKg = request.TitleKg;
+
+        entity.AdoptionDate = request.AdoptionDate;
+        entity.AdoptionCode = request.AdoptionCode;
+        entity.EffectiveDate = request.EffectiveDate;
+
+        entity.DueActualizationDate = request.DueActualizationDate;
+        entity.LastActualizationDate = request.LastActualizationDate;
+        entity.LastActualizationHadChanges = request.LastActualizationHadChanges;
+
+        entity.CancelDate = request.CancelDate;
+        entity.CancelCode = request.CancelCode;
+        entity.CancelReason = request.CancelReason;
+        entity.ArchivedDate = request.ArchivedDate;
+
+        entity.Keywords.Clear();
+        foreach (var keyword in keywords)
+            entity.Keywords.Add(keyword);
+
+        entity.Rubrics.Clear();
+        foreach (var rubric in rubrics)
+            entity.Rubrics.Add(rubric);
+
+        entity.UserGroups.Clear();
+        foreach (var group in userGroups)
+            entity.UserGroups.Add(group);
+
+        entity.SecrecyLevelId = request.SecrecyLevelId ?? entity.SecrecyLevelId;
+
+        // Отмена/архивация — переводим статус, если реквизиты этого потребовали
+        if (entity.ArchivedDate.HasValue)
+            entity.Status = VndStatus.Archived;
+        else if (entity.CancelDate.HasValue && entity.Status != VndStatus.Draft)
+            entity.Status = entity.Status; // отмена сама по себе не архивирует — оставляем как есть
+
+        // "Изменение реквизитов" проставляется автоматически, руками эту дату задать нельзя
+        entity.RequisitesChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        await _db.SaveChangesAsync();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return ToResponse(entity, languageCode, today);
+    }
+}
+

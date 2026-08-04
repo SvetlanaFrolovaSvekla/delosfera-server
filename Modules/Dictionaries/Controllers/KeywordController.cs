@@ -1,8 +1,11 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using delosfera_server.Common.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Dictionaries.Services;
+using delosfera_server.Modules.Users.Models;
+using Microsoft.AspNetCore.Authorization;
 
 namespace delosfera_server.Modules.Dictionaries.Controllers;
 
@@ -10,8 +13,9 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник ключевых слов (иерархический)
 /// </summary>
 [ApiController]
-[Route("api/dictionaries/keyword")]
+[Route("dictionaries/keyword")]
 [Tags("Справочники — Ключевые слова")]
+[Authorize]
 public class KeywordController : ControllerBase
 {
     private readonly IKeywordService _service;
@@ -48,6 +52,7 @@ public class KeywordController : ControllerBase
     /// <response code="404">Указанное родительское ключевое слово не найдено</response>
     /// <response code="409">Превышена максимальная глубина вложенности</response>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(KeywordResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -79,6 +84,7 @@ public class KeywordController : ControllerBase
     /// <response code="404">Ключевое слово или родитель не найдены</response>
     /// <response code="409">Циклическая ссылка или превышена глубина вложенности</response>
     [HttpPut("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(KeywordResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -109,6 +115,7 @@ public class KeywordController : ControllerBase
     /// <response code="404">Ключевое слово не найдено</response>
     /// <response code="409">Есть дочерние записи или ссылки в других документах</response>
     [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

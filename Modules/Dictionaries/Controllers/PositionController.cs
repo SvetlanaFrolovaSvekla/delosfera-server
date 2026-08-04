@@ -1,8 +1,11 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using delosfera_server.Common.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Dictionaries.Services;
+using delosfera_server.Modules.Users.Models;
+using Microsoft.AspNetCore.Authorization;
 
 namespace delosfera_server.Modules.Dictionaries.Controllers;
 
@@ -10,8 +13,9 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник должностей сотрудников банка
 /// </summary>
 [ApiController]
-[Route("api/dictionaries/position")]
+[Route("dictionaries/position")]
 [Tags("Справочники — Должности")]
+[Authorize]
 public class PositionController : ControllerBase
 {
     private readonly IPositionService _service;
@@ -46,6 +50,7 @@ public class PositionController : ControllerBase
     /// <param name="request">Данные новой должности</param>
     /// <response code="201">Должность успешно создана</response>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(PositionResponse), StatusCodes.Status201Created)]
     public async Task<ActionResult<PositionResponse>> Create([FromBody] CreatePositionRequest request)
     {
@@ -62,6 +67,7 @@ public class PositionController : ControllerBase
     /// <response code="200">Должность успешно обновлена</response>
     /// <response code="404">Должность с указанным id не найдена</response>
     [HttpPut("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(PositionResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PositionResponse>> Update(int id, [FromBody] UpdatePositionRequest request)
@@ -87,6 +93,7 @@ public class PositionController : ControllerBase
     /// <response code="404">Должность с указанным id не найдена</response>
     /// <response code="409">Нельзя удалить — на должность есть ссылки в других документах</response>
     [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

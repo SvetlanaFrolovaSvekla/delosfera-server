@@ -1,8 +1,11 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using delosfera_server.Common.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Dictionaries.Services;
+using delosfera_server.Modules.Users.Models;
+using Microsoft.AspNetCore.Authorization;
 
 namespace delosfera_server.Modules.Dictionaries.Controllers;
 
@@ -10,8 +13,9 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник структурных подразделений банка (иерархический)
 /// </summary>
 [ApiController]
-[Route("api/dictionaries/organization-unit")]
+[Route("dictionaries/organization-unit")]
 [Tags("Справочники — Структурные подразделения")]
+[Authorize]
 public class OrganizationUnitController : ControllerBase
 {
     private readonly IOrganizationUnitService _service;
@@ -48,6 +52,7 @@ public class OrganizationUnitController : ControllerBase
     /// <response code="404">Указанное родительское подразделение не найдено</response>
     /// <response code="409">Превышена максимальная глубина вложенности</response>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(OrganizationUnitResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -79,6 +84,7 @@ public class OrganizationUnitController : ControllerBase
     /// <response code="404">Подразделение или родитель не найдены</response>
     /// <response code="409">Циклическая ссылка или превышена глубина вложенности</response>
     [HttpPut("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(OrganizationUnitResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -109,6 +115,7 @@ public class OrganizationUnitController : ControllerBase
     /// <response code="404">Подразделение не найдено</response>
     /// <response code="409">Есть дочерние записи или ссылки в других документах</response>
     [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

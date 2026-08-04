@@ -46,7 +46,6 @@ public class UserController : ControllerBase
     /// <param name="orgUnitIds">Фильтр по структурным подразделениям (можно указать несколько id)</param>
     /// <response code="200">Список пользователей получен успешно</response>
     [HttpGet]
-    [RequirePermission(PermissionCode.ManageUsers)]
     [ProducesResponseType(typeof(List<UserResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<UserResponse>>> GetAll(
         [FromQuery] UserSortBy sortBy = UserSortBy.CreatedAtAsc,

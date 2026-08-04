@@ -143,4 +143,41 @@ public class VndController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+    
+    /// <summary>Связи ВНД: ссылки на другие документы и документы, ссылающиеся на этот</summary>
+    [HttpGet("{vndId:int}/links")]
+    [ProducesResponseType(typeof(VndLinksResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndLinksResponse>> GetLinks(int vndId)
+    {
+        var language = _languageResolver.Resolve(Request);
+        try { return Ok(await _service.GetLinksAsync(vndId, language)); }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    }
+
+    /// <summary>Добавить ссылку на другой (только действующий) ВНД</summary>
+    [HttpPost("{vndId:int}/links")]
+    [ProducesResponseType(typeof(VndLinkResponse), StatusCodes.Status201Created)]
+    public async Task<ActionResult<VndLinkResponse>> AddLink(int vndId, [FromBody] AddVndLinkRequest request)
+    {
+        var language = _languageResolver.Resolve(Request);
+        try
+        {
+            var result = await _service.AddLinkAsync(vndId, request, language);
+            return CreatedAtAction(nameof(GetLinks), new { vndId }, result);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    /// <summary>Удалить связь ВНД (можно с любой из сторон связи)</summary>
+    [HttpDelete("{vndId:int}/links/{linkId:int}")]
+    public async Task<IActionResult> DeleteLink(int vndId, int linkId)
+    {
+        try
+        {
+            await _service.DeleteLinkAsync(vndId, linkId);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    }
 }

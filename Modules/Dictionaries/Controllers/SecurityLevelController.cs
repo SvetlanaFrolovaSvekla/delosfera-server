@@ -1,8 +1,11 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using delosfera_server.Common.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Dictionaries.Services;
+using delosfera_server.Modules.Users.Models;
+using Microsoft.AspNetCore.Authorization;
 
 namespace delosfera_server.Modules.Dictionaries.Controllers;
 
@@ -10,8 +13,9 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник уровней секретности документов
 /// </summary>
 [ApiController]
-[Route("api/dictionaries/security-level")]
+[Route("dictionaries/security-level")]
 [Tags("Справочники — Уровни секретности")]
+[Authorize]
 public class SecurityLevelController : ControllerBase
 {
     private readonly ISecurityLevelService _service;
@@ -40,6 +44,7 @@ public class SecurityLevelController : ControllerBase
     /// <param name="request">Данные нового уровня секретности</param>
     /// <response code="201">Уровень секретности успешно создан</response>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(SecurityLevelResponse), StatusCodes.Status201Created)]
     public async Task<ActionResult<SecurityLevelResponse>> Create([FromBody] CreateSecurityLevelRequest request)
     {
@@ -56,6 +61,7 @@ public class SecurityLevelController : ControllerBase
     /// <response code="200">Уровень секретности успешно обновлён</response>
     /// <response code="404">Уровень секретности с указанным id не найден</response>
     [HttpPut("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(typeof(SecurityLevelResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<SecurityLevelResponse>> Update(int id, [FromBody] UpdateSecurityLevelRequest request)
@@ -81,6 +87,7 @@ public class SecurityLevelController : ControllerBase
     /// <response code="404">Уровень секретности с указанным id не найден</response>
     /// <response code="409">Нельзя удалить — на уровень секретности есть ссылки в других документах</response>
     [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.ManageDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

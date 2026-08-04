@@ -259,7 +259,8 @@ public class VndService : IVndService
         LastActualizationDate = x.LastActualizationDate,
         LastActualizationHadChanges = x.LastActualizationHadChanges,
         DaysInArchive = x.DaysInArchive,
-        ActualizationBucket = MapActualizationBucketBack(ActualizationThresholds.Resolve(x.DueActualizationDate, today)),
+        ActualizationBucket =
+            MapActualizationBucketBack(ActualizationThresholds.Resolve(x.DueActualizationDate, today)),
         KeywordIds = x.Keywords.Select(k => k.Id).ToList(),
         RubricIds = x.Rubrics.Select(r => r.Id).ToList(),
         SecrecyLevelId = x.SecrecyLevelId,
@@ -478,7 +479,7 @@ public class VndService : IVndService
 
         return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
     }
-    
+
     // Отправка на согласование (заглушка)
     public async Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(int vndId, int redactionId)
     {
@@ -492,16 +493,16 @@ public class VndService : IVndService
 
         if (redaction.ApprovalStatus != RedactionApprovalStatus.Draft)
             throw new InvalidOperationException("Отправить на согласование можно только черновик редакции");
-        
+
         // если RequiresApproval = true, то черновик редакции ещё
         // не отправлен на согласование, остается черновиком
         redaction.ApprovalStatus = RedactionApprovalStatus.Pending;
-        vnd.Status = VndStatus.Review; 
+        vnd.Status = VndStatus.Review;
         await _db.SaveChangesAsync();
 
         return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
     }
-    
+
 
     public async Task<List<VndRedactionResponse>> GetRedactionsAsync(int vndId)
     {
@@ -516,8 +517,9 @@ public class VndService : IVndService
 
         return redactions.Select(r => ToRedactionResponse(r, vnd.CurrentRedactionId)).ToList();
     }
-    
-    public async Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request, string languageCode)
+
+    public async Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request,
+        string languageCode)
     {
         var entity = await _db.VndDocuments
                          .Include(x => x.Type)
@@ -620,11 +622,10 @@ public class VndService : IVndService
 
         entity.SecrecyLevelId = request.SecrecyLevelId ?? entity.SecrecyLevelId;
 
-        // Отмена/архивация — переводим статус, если реквизиты этого потребовали
         if (entity.ArchivedDate.HasValue)
             entity.Status = VndStatus.Archived;
         else if (entity.CancelDate.HasValue && entity.Status != VndStatus.Draft)
-            entity.Status = entity.Status; // отмена сама по себе не архивирует — оставляем как есть
+            entity.Status = entity.Status; 
 
         // "Изменение реквизитов" проставляется автоматически, руками эту дату задать нельзя
         entity.RequisitesChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -634,4 +635,73 @@ public class VndService : IVndService
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return ToResponse(entity, languageCode, today);
     }
+
+    public async Task<VndLinksResponse> GetLinksAsync(int vndId, string languageCode)
+    {
+        var exists = await _db.VndDocuments.AnyAsync(x => x.Id == vndId);
+        if (!exists) throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var outgoing = await _db.Set<VndLink>()
+            .Where(l => l.SourceVndId == vndId)
+            .Include(l => l.TargetVnd)
+            .ToListAsync();
+
+        var incoming = await _db.Set<VndLink>()
+            .Where(l => l.TargetVndId == vndId)
+            .Include(l => l.SourceVnd)
+            .ToListAsync();
+
+        return new VndLinksResponse
+        {
+            Outgoing = outgoing.Select(l => ToLinkResponse(l.Id, l.TargetVnd!, languageCode)).ToList(),
+            Incoming = incoming.Select(l => ToLinkResponse(l.Id, l.SourceVnd!, languageCode)).ToList()
+        };
+    }
+
+    public async Task<VndLinkResponse> AddLinkAsync(int vndId, AddVndLinkRequest request, string languageCode)
+    {
+        if (vndId == request.TargetVndId)
+            throw new InvalidOperationException("Документ не может ссылаться сам на себя");
+
+        var sourceExists = await _db.VndDocuments.AnyAsync(x => x.Id == vndId);
+        if (!sourceExists) throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var target = await _db.VndDocuments.FindAsync(request.TargetVndId)
+                     ?? throw new KeyNotFoundException($"ВНД с id={request.TargetVndId} не найден");
+
+        // Ограничение: привязать можно только действующий документ.
+        // Дальнейшая судьба target (архив/отклонение) на саму связь не влияет
+        if (target.Status != VndStatus.Active)
+            throw new InvalidOperationException("Ссылку можно добавить только на действующий ВНД");
+
+        var alreadyLinked = await _db.Set<VndLink>()
+            .AnyAsync(l => l.SourceVndId == vndId && l.TargetVndId == request.TargetVndId);
+        if (alreadyLinked)
+            throw new InvalidOperationException("Ссылка на этот документ уже добавлена");
+
+        var link = new VndLink { SourceVndId = vndId, TargetVndId = request.TargetVndId };
+        _db.Set<VndLink>().Add(link);
+        await _db.SaveChangesAsync();
+
+        return ToLinkResponse(link.Id, target, languageCode);
+    }
+
+    public async Task DeleteLinkAsync(int vndId, int linkId)
+    {
+        var link = await _db.Set<VndLink>()
+                       .FirstOrDefaultAsync(l => l.Id == linkId && (l.SourceVndId == vndId || l.TargetVndId == vndId))
+                   ?? throw new KeyNotFoundException($"Связь с id={linkId} не найдена");
+
+        _db.Set<VndLink>().Remove(link);
+        await _db.SaveChangesAsync();
+    }
+
+    private static VndLinkResponse ToLinkResponse(int linkId, VndDocument doc, string languageCode) => new()
+    {
+        Id = linkId,
+        VndId = doc.Id,
+        Code = doc.Code,
+        Title = doc.ResolveTitle(languageCode),
+        Status = MapStatusBack(doc.Status)
+    };
 }
