@@ -421,6 +421,8 @@ public class VndActualizationService : IVndActualizationService
         _ => "onact"
     };
 
+    // TODO: можно ли так запечатать тут путь URL? Потом убрать? 
+    
     private async Task NotifyAsync(
         Notifications.NotificationText text, int vndId, int? triggeredByUserId, params int[] recipientUserIds)
     {
@@ -440,6 +442,7 @@ public class VndActualizationService : IVndActualizationService
                 Severity = text.Severity,
                 EntityType = "Vnd",
                 EntityId = vndId,
+                Url = $"/basevnd/{vndId}",
                 UserIds = recipientUserIds.Distinct().ToList()
             }, triggeredByUserId);
         }

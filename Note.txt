@@ -2,7 +2,7 @@
 
 Актуализация.
 
-
+add the ability to navigate to a task—specifically to the corresponding tab—from notifications and tasks
 
 ВНД могут быть "в норме", "приближается срок", "кратчайший срок", "просрочено".
 Эти статусы считаются на беке в зависимости от установленной периодичности их необходимой актуализации.

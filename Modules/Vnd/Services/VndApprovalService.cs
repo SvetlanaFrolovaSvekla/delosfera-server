@@ -691,6 +691,7 @@ public class VndApprovalService : IVndApprovalService
                 Severity = text.Severity,
                 EntityType = "Vnd",
                 EntityId = vndId,
+                Url = $"/basevnd/{vndId}",
                 UserIds = recipientUserIds.Distinct().ToList()
             }, triggeredByUserId);
         }
