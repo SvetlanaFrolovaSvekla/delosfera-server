@@ -1,4 +1,6 @@
-﻿using delosfera_server.Common.Services;
+﻿using delosfera_server.Common.Authorization;
+using delosfera_server.Common.Services;
+using delosfera_server.Modules.Users.Models;
 using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Modules.Vnd.DTO.Request;
 using delosfera_server.Modules.Vnd.DTO.Response;
@@ -179,5 +181,23 @@ public class VndController : ControllerBase
             return NoContent();
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    }
+    
+    /// <summary>Прямое редактирование последней редакции (подмена файлов/описания) - без согласования,
+    /// без создания новой редакции, без изменения даты актуализации. Только для EditLastRevisionDirectly.</summary>
+    [HttpPut("{vndId:int}/redactions/last")]
+    [Consumes("multipart/form-data")]
+    [RequirePermission(PermissionCode.EditLastRevisionDirectly)]
+    [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<VndRedactionResponse>> EditLastRevisionDirectly(
+        int vndId, [FromForm] EditLastRevisionDirectlyRequest request)
+    {
+        try
+        {
+            return Ok(await _service.EditLastRevisionDirectlyAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 }

@@ -535,7 +535,7 @@ public class VndService : IVndService
         {
             vnd.CurrentRedactionId = redaction.Id;
             vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
-            
+
             // Если документ был в цикле актуализации - консолидация обязательна,
             // даже если конкретно эта редакция не требовала согласования.
             // Иначе (первая редакция нового ВНД, или обычное обновление активного
@@ -697,7 +697,7 @@ public class VndService : IVndService
         if (entity.ArchivedDate.HasValue)
             entity.Status = VndStatus.Archived;
         else if (entity.CancelDate.HasValue && entity.Status != VndStatus.Draft)
-            entity.Status = entity.Status; 
+            entity.Status = entity.Status;
 
         // "Изменение реквизитов" проставляется автоматически, руками эту дату задать нельзя
         entity.RequisitesChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -776,4 +776,58 @@ public class VndService : IVndService
         Title = doc.ResolveTitle(languageCode),
         Status = MapStatusBack(doc.Status)
     };
+
+    public async Task<VndRedactionResponse> EditLastRevisionDirectlyAsync(
+        int vndId, EditLastRevisionDirectlyRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var lastRedaction = await _db.VndRedactions
+                                .Where(r => r.VndId == vndId)
+                                .OrderByDescending(r => r.Number)
+                                .Include(r => r.Attachments)
+                                .FirstOrDefaultAsync()
+                            ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
+
+        var hasChanges = false;
+
+        if (request.DocRu is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.DocRu, currentUserId);
+            lastRedaction.DocFileRuId = saved.Id;
+            hasChanges = true;
+        }
+
+        if (request.DocKg is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.DocKg, currentUserId);
+            lastRedaction.DocFileKgId = saved.Id;
+            hasChanges = true;
+        }
+
+        if (request.DocEn is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.DocEn, currentUserId);
+            lastRedaction.DocFileEnId = saved.Id;
+            hasChanges = true;
+        }
+
+        if (request.Description is not null && request.Description != lastRedaction.Description)
+        {
+            lastRedaction.Description = request.Description;
+            hasChanges = true;
+        }
+
+        // RevisionChangedDate фиксирует факт правки содержимого редакции — обновляем,
+        // только если реально что-то поменялось (не на пустой запрос).
+        // DueActualizationDate, Period, ActualizationResponsibleUserId и статус ВНД
+        // намеренно не трогаем — это прямое редактирование "как есть", без цикла актуализации.
+        if (hasChanges)
+            vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        await _db.SaveChangesAsync();
+
+        return ToRedactionResponse(lastRedaction, vnd.CurrentRedactionId);
+    }
 }

@@ -16,4 +16,6 @@ public interface IVndService
     Task<VndLinksResponse> GetLinksAsync(int vndId, string languageCode);
     Task<VndLinkResponse> AddLinkAsync(int vndId, AddVndLinkRequest request, string languageCode);
     Task DeleteLinkAsync(int vndId, int linkId);
+    Task<VndRedactionResponse> EditLastRevisionDirectlyAsync(
+        int vndId, EditLastRevisionDirectlyRequest request, int currentUserId);
 }
