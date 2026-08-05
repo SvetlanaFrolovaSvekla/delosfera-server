@@ -337,6 +337,7 @@ public class VndService : IVndService
         DocFileRuId = x.DocFileRuId,
         DocFileKgId = x.DocFileKgId,
         DocFileEnId = x.DocFileEnId,
+        TidFileId = x.TidFileId,
         RequiresApproval = x.RequiresApproval,
         ApprovalStatus = x.ApprovalStatus.ToString(),
         AttachmentFileIds = x.Attachments.Select(a => a.FileAttachmentId).ToList(),
@@ -476,7 +477,7 @@ public class VndService : IVndService
      в статусе "на согласовании" (Pending) — новую редакцию загрузить нельзя. Сначала нужно её согласовать/отклонить/отозвать.
     */
 
-    public async Task<VndRedactionResponse> AddRedactionAsync(
+   public async Task<VndRedactionResponse> AddRedactionAsync(
         int vndId, CreateVndRedactionRequest request, int currentUserId)
     {
         var vnd = await _db.VndDocuments.FindAsync(vndId)
@@ -499,9 +500,17 @@ public class VndService : IVndService
                 $"Редакция {lastRedaction.Code} {reason}. Завершите работу с ней, прежде чем загружать новую.");
         }
 
+        // Если у ВНД уже есть предыдущая редакция — это актуализация документа, и ТИД обязателен.
+        // Для самой первой редакции нового ВНД (lastRedaction == null) ТИД не нужен.
+        var requiresTid = lastRedaction is not null;
+        if (requiresTid && request.Tid is null)
+            throw new InvalidOperationException(
+                "При актуализации ВНД необходимо приложить файл ТИД (Таблица изменений и дополнений)");
+
         var docRu = await _fileService.SaveAsync(request.DocRu, currentUserId);
         var docKg = request.DocKg is not null ? await _fileService.SaveAsync(request.DocKg, currentUserId) : null;
         var docEn = request.DocEn is not null ? await _fileService.SaveAsync(request.DocEn, currentUserId) : null;
+        var tid = request.Tid is not null ? await _fileService.SaveAsync(request.Tid, currentUserId) : null;
 
         var attachmentEntities = new List<VndRedactionAttachment>();
         foreach (var file in request.Attachments ?? [])
@@ -521,6 +530,7 @@ public class VndService : IVndService
             DocFileRuId = docRu.Id,
             DocFileKgId = docKg?.Id,
             DocFileEnId = docEn?.Id,
+            TidFileId = tid?.Id,
             RequiresApproval = request.RequiresApproval,
             ApprovalStatus = request.RequiresApproval
                 ? RedactionApprovalStatus.Draft

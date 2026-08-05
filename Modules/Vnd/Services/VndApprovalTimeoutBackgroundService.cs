@@ -4,7 +4,7 @@
 /// автоматически их закрывает (просрочка = согласовано)</summary>
 public class VndApprovalTimeoutBackgroundService : BackgroundService
 {
-    private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(1);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<VndApprovalTimeoutBackgroundService> _logger;

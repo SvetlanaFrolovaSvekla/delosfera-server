@@ -276,6 +276,13 @@ public class VndApprovalService : IVndApprovalService
 
         var redaction = process.Redaction!;
 
+        // ТИД обязателен на каждом круге доработки, если он был обязателен при первичной подаче
+        // редакции (Number > 1 — значит документ актуализируется, а не создаётся впервые).
+        var requiresTid = redaction.Number > 1;
+        if (requiresTid && request.Tid is null)
+            throw new InvalidOperationException(
+                "При актуализации ВНД необходимо приложить обновлённый файл ТИД вместе с исправленной редакцией");
+
         if (request.DocRu is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocRu, currentUserId);
@@ -294,11 +301,17 @@ public class VndApprovalService : IVndApprovalService
             redaction.DocFileEnId = saved.Id;
         }
 
+        if (request.Tid is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.Tid, currentUserId);
+            redaction.TidFileId = saved.Id;
+        }
+
         process.RepeatInitiatorComment = request.Comment;
 
         if (request.AgreesWithAllRemarks)
         {
-            // Замечания исправлены — обычное повторное согласование (только с теми, кто участвует в repeat)
+            // Замечания исправлены - обычное повторное согласование (только с теми, кто участвует в repeat)
             foreach (var stage in process.Stages.Where(s => s.ParticipatesInRepeat))
             {
                 stage.RepeatDecision = ApprovalStageDecision.Pending;

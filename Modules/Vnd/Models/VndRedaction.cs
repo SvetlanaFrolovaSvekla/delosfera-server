@@ -28,6 +28,13 @@ public class VndRedaction : IAuditableEntity
     public int? DocFileEnId { get; set; }
     public FileAttachment? DocFileEn { get; set; }
 
+    /// <summary>Таблица изменений и дополнений (ТИД) — Word-файл, обязателен, если у ВНД уже была
+    /// предыдущая редакция (Number > 1, то есть документ актуализируется, а не создаётся впервые).
+    /// При повторной отправке после замечаний (ResubmitAfterRevisionAsync) обновляется тем же файлом
+    /// или новым, если инициатор его заменил.</summary>
+    public int? TidFileId { get; set; }
+    public FileAttachment? TidFile { get; set; }
+
     // --- Согласование
     public bool RequiresApproval { get; set; }
     public RedactionApprovalStatus ApprovalStatus { get; set; } = RedactionApprovalStatus.NotRequired;
