@@ -6,8 +6,12 @@ public class VndTaskResponse
     public required string VndCode { get; set; }
     public required string VndTitle { get; set; }
 
-    /// <summary>"coordination" | "actualization" | "consolidation"</summary>
+    /// <summary>"coordination" | "actualization" | "consolidation" | "myVndApproval"</summary>
     public required string Scope { get; set; }
+
+    /// <summary>Человекочитаемый статус процесса (например, "В процессе согласования первой редакции ВНД").
+    /// Заполняется для myVndApproval и consolidation, где важно показать, на каком именно этапе сейчас ВНД.</summary>
+    public string? StatusLabel { get; set; }
 
     // --- Только для coordination ---
     public int? RedactionId { get; set; }

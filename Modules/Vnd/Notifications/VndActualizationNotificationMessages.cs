@@ -44,4 +44,22 @@ public static class VndActualizationNotificationMessages
         BodyKg: $"«{vndTitle}» документи актуалдаштыруудан кийин жарыяланды" +
                 (hadChanges ? " (өзгөртүүлөр менен)." : " (өзгөртүүсүз)."),
         Severity: NotificationSeverity.Success);
+    
+    public static NotificationText AccessRejectedDirectStart(string vndTitle, bool startedByChiefEditorThemself) => new(
+        TitleRu: "Доступ к актуализации отклонён",
+        TitleEn: "Actualization access rejected",
+        TitleKg: "Актуалдаштырууга кирүү четке кагылды",
+        BodyRu: $"Ваша заявка на актуализацию документа «{vndTitle}» отклонена: " +
+                (startedByChiefEditorThemself
+                    ? "актуализацию начал главный редактор ВНД."
+                    : "ответственным за актуализацию назначен другой пользователь."),
+        BodyEn: $"Your request to actualize the document \"{vndTitle}\" was rejected: " +
+                (startedByChiefEditorThemself
+                    ? "the actualization was started by the chief VND editor."
+                    : "another user was assigned as responsible for the actualization."),
+        BodyKg: $"«{vndTitle}» документин актуалдаштырууга болгон арызыңыз четке кагылды: " +
+                (startedByChiefEditorThemself
+                    ? "актуалдаштырууну ВНДдин башкы редактору баштады."
+                    : "актуалдаштырууга башка колдонуучу дайындалды."),
+        Severity: NotificationSeverity.Warning);
 }

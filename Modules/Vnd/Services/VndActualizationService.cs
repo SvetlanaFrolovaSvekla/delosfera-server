@@ -35,7 +35,7 @@ public class VndActualizationService : IVndActualizationService
         int vndId, StartActualizationRequest request, int currentUserId)
     {
         var vnd = await _db.VndDocuments.FindAsync(vndId)
-            ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         if (vnd.Status != VndStatus.Active)
             throw new InvalidOperationException("Начать актуализацию можно только для действующего ВНД");
@@ -72,7 +72,35 @@ public class VndActualizationService : IVndActualizationService
             DueActualizationDateBefore = vnd.DueActualizationDate
         });
 
+        // --- Закрываем все pending-заявки на доступ к актуализации этого ВНД: раз актуализация
+        // стартовала напрямую (главным редактором/админом), решать по этим заявкам уже нечего —
+        // либо заявитель сам стал ответственным (Approved), либо ответственным назначен кто-то
+        // другой (Rejected), заявителю в этом случае приходит уведомление с пояснением.
+        var pendingRequests = await _db.VndActualizationRequests
+            .Where(x => x.VndId == vndId && x.Status == ActualizationAccessStatus.Pending)
+            .ToListAsync();
+
+        foreach (var pending in pendingRequests)
+        {
+            pending.Status = pending.RequestedByUserId == responsibleUserId
+                ? ActualizationAccessStatus.Approved
+                : ActualizationAccessStatus.Rejected;
+            pending.DecidedByUserId = currentUserId;
+            pending.DecidedAt = DateTime.UtcNow;
+        }
+
         await _db.SaveChangesAsync();
+
+        // --- Уведомления заявителям о закрытых заявках
+        foreach (var pending in pendingRequests)
+        {
+            var notice = pending.Status == ActualizationAccessStatus.Approved
+                ? VndActualizationNotificationMessages.AccessApproved(vnd.TitleRu)
+                : VndActualizationNotificationMessages.AccessRejectedDirectStart(vnd.TitleRu,
+                    responsibleUserId == currentUserId);
+
+            await NotifyAsync(notice, vndId, currentUserId, pending.RequestedByUserId);
+        }
 
         return await BuildStateResponseAsync(vnd);
     }
@@ -81,7 +109,7 @@ public class VndActualizationService : IVndActualizationService
         int vndId, RequestActualizationAccessRequest request, int currentUserId)
     {
         var vnd = await _db.VndDocuments.FindAsync(vndId)
-            ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         if (vnd.Status != VndStatus.Active)
             throw new InvalidOperationException(
@@ -97,7 +125,7 @@ public class VndActualizationService : IVndActualizationService
 
         var alreadyPending = await _db.VndActualizationRequests.AnyAsync(x =>
             x.VndId == vndId && x.RequestedByUserId == currentUserId
-                              && x.Status == ActualizationAccessStatus.Pending);
+                             && x.Status == ActualizationAccessStatus.Pending);
         if (alreadyPending)
             throw new InvalidOperationException("У вас уже есть заявка по этому ВНД, ожидающая решения");
 
@@ -149,9 +177,9 @@ public class VndActualizationService : IVndActualizationService
             throw new UnauthorizedAccessException("Решения по заявкам принимает только главный редактор ВНД");
 
         var request = await _db.VndActualizationRequests
-            .Include(x => x.Vnd)
-            .FirstOrDefaultAsync(x => x.Id == requestId)
-            ?? throw new KeyNotFoundException($"Заявка с id={requestId} не найдена");
+                          .Include(x => x.Vnd)
+                          .FirstOrDefaultAsync(x => x.Id == requestId)
+                      ?? throw new KeyNotFoundException($"Заявка с id={requestId} не найдена");
 
         if (request.Status != ActualizationAccessStatus.Pending)
             throw new InvalidOperationException("Решение по этой заявке уже принято");
@@ -175,7 +203,7 @@ public class VndActualizationService : IVndActualizationService
         int vndId, ConfirmActualizationStartRequest request, int currentUserId)
     {
         var vnd = await _db.VndDocuments.FindAsync(vndId)
-            ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         if (vnd.Status != VndStatus.Active)
             throw new InvalidOperationException("Начать актуализацию можно только для действующего ВНД");
@@ -184,12 +212,12 @@ public class VndActualizationService : IVndActualizationService
         // NB: заявка не "гасится" после использования — если нужно ограничить
         // повторный запуск без новой заявки на следующий цикл, добавь сюда доп. флаг.
         var approvedRequest = await _db.VndActualizationRequests
-            .Where(x => x.VndId == vndId && x.RequestedByUserId == currentUserId
-                                          && x.Status == ActualizationAccessStatus.Approved)
-            .OrderByDescending(x => x.DecidedAt)
-            .FirstOrDefaultAsync()
-            ?? throw new InvalidOperationException(
-                "Нет одобренной заявки на актуализацию этого ВНД для текущего пользователя");
+                                  .Where(x => x.VndId == vndId && x.RequestedByUserId == currentUserId
+                                                               && x.Status == ActualizationAccessStatus.Approved)
+                                  .OrderByDescending(x => x.DecidedAt)
+                                  .FirstOrDefaultAsync()
+                              ?? throw new InvalidOperationException(
+                                  "Нет одобренной заявки на актуализацию этого ВНД для текущего пользователя");
 
         vnd.Status = VndStatus.OnActualization;
         vnd.ActualizationResponsibleUserId = currentUserId;
@@ -216,9 +244,9 @@ public class VndActualizationService : IVndActualizationService
         int vndId, PublishVndActualizationRequest request, int currentUserId)
     {
         var vnd = await _db.VndDocuments
-            .Include(x => x.Redactions)
-            .FirstOrDefaultAsync(x => x.Id == vndId)
-            ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+                      .Include(x => x.Redactions)
+                      .FirstOrDefaultAsync(x => x.Id == vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         if (vnd.Status != VndStatus.Consolidation)
             throw new InvalidOperationException("Опубликовать можно только ВНД в статусе консолидации");
@@ -422,7 +450,7 @@ public class VndActualizationService : IVndActualizationService
     };
 
     // TODO: можно ли так запечатать тут путь URL? Потом убрать? 
-    
+
     private async Task NotifyAsync(
         Notifications.NotificationText text, int vndId, int? triggeredByUserId, params int[] recipientUserIds)
     {

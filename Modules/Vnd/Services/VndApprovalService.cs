@@ -86,11 +86,16 @@ public class VndApprovalService : IVndApprovalService
             NotificationCategory.Approval, vndId, currentUserId,
             stages.Select(s => s.ApproverUserId).ToArray());
 
-        // --- Уведомление инициатору: редакция отправлена на согласование
+        // --- Уведомление инициатору (и ответственному за актуализацию, если согласование запущено
+        // в рамках открытого цикла актуализации): редакция отправлена на согласование
+        var sentToApprovalRecipients = new List<int> { currentUserId };
+        if (vnd.ActualizationResponsibleUserId.HasValue)
+            sentToApprovalRecipients.Add(vnd.ActualizationResponsibleUserId.Value);
+
         await NotifyAsync(
             VndApprovalNotificationMessages.SentToApproval(lastRedaction.Code, vnd.TitleRu),
             NotificationCategory.Approval, vndId, currentUserId,
-            currentUserId);
+            sentToApprovalRecipients.ToArray());
 
         return await LoadResponseAsync(process.Id);
     }
@@ -514,7 +519,14 @@ public class VndApprovalService : IVndApprovalService
             ? VndApprovalNotificationMessages.ApprovedAfterRevision(redaction.Code, vnd.TitleRu)
             : VndApprovalNotificationMessages.Approved(redaction.Code, vnd.TitleRu);
 
-        await NotifyAsync(notice, NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+        // --- Инициатору (и ответственному за актуализацию, если это цикл актуализации):
+        // документ перешёл в консолидацию
+        var consolidationRecipients = new List<int> { process.InitiatorUserId };
+        if (vnd.ActualizationResponsibleUserId.HasValue)
+            consolidationRecipients.Add(vnd.ActualizationResponsibleUserId.Value);
+
+        await NotifyAsync(
+            notice, NotificationCategory.Approval, process.VndId, null, consolidationRecipients.ToArray());
     }
 
     private async Task<List<VndApprovalStage>> BuildAndValidateStagesAsync(List<ApprovalStageRequest> requestStages)

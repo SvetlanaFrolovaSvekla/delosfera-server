@@ -35,7 +35,13 @@ public class TasksController : ControllerBase
     [HttpGet("consolidation")]
     public async Task<ActionResult<List<VndTaskResponse>>> GetConsolidation() =>
         Ok(await _service.GetConsolidationTasksAsync(_currentUser.UserId));
-    
+
+    /// <summary>Мои ВНД на согласовании — где пользователь инициатор согласования
+    /// или ответственный за актуализацию (но не согласующий)</summary>
+    [HttpGet("my-vnd-approval")]
+    public async Task<ActionResult<List<VndTaskResponse>>> GetMyVndApproval() =>
+        Ok(await _service.GetMyVndApprovalTasksAsync(_currentUser.UserId));
+
     /// <summary>Счётчики задач текущего пользователя по всем разделам</summary>
     [HttpGet("counts")]
     public async Task<ActionResult<VndTaskCountsResponse>> GetCounts() =>
