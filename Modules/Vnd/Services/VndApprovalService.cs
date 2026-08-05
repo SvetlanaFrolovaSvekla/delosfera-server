@@ -55,10 +55,25 @@ public class VndApprovalService : IVndApprovalService
             request.FinalHoldDeadlineHours <= 0)
             throw new InvalidOperationException("Все три норматива должны быть больше нуля часов");
 
-        if (request.Stages.Any(s => s.ApproverUserId == currentUserId))
-            throw new InvalidOperationException("Инициатор согласования не может быть указан как согласующий");
-        
+        // Себя можно указать согласующим только на фиксированном этапе (Legal/RiskManagement/
+        // Compliance/Methodology) — принадлежность инициатора нужному подразделению всё равно
+        // проверяется ниже в BuildAndValidateStagesAsync. На дополнительных (Custom) этапах,
+        // которые инициатор сам добавил, себя указывать нельзя.
+        if (request.Stages.Any(s => s.Kind == ApprovalStageKind.Custom && s.ApproverUserId == currentUserId))
+            throw new InvalidOperationException(
+                "Вы не можете быть согласующим на дополнительном этапе, который сами добавили");
+
         var stages = await BuildAndValidateStagesAsync(request.Stages);
+
+        // Этапы, где согласующий — сам инициатор (фиксированный этап его же подразделения),
+        // считаем согласованными автоматически, без ожидания решения.
+        var now = DateTime.UtcNow;
+        foreach (var selfStage in stages.Where(s => s.ApproverUserId == currentUserId))
+        {
+            selfStage.PrimaryDecision = ApprovalStageDecision.Approved;
+            selfStage.PrimaryComment = "Согласовано автоматически — инициатор является согласующим на этом этапе";
+            selfStage.PrimaryDecidedAt = now;
+        }
 
         var process = new VndApprovalProcess
         {
@@ -69,7 +84,7 @@ public class VndApprovalService : IVndApprovalService
             PrimaryDeadlineHours = request.PrimaryDeadlineHours,
             RepeatDeadlineHours = request.RepeatDeadlineHours,
             FinalHoldDeadlineHours = request.FinalHoldDeadlineHours,
-            PrimaryStartedAt = DateTime.UtcNow,
+            PrimaryStartedAt = now,
             Stages = stages
         };
 
@@ -80,11 +95,17 @@ public class VndApprovalService : IVndApprovalService
 
         await _db.SaveChangesAsync();
 
-        // --- Уведомления: задача на первичное согласование всем этапам маршрута
-        await NotifyAsync(
-            VndApprovalNotificationMessages.TaskPrimaryApproval(lastRedaction.Code, vnd.TitleRu),
-            NotificationCategory.Approval, vndId, currentUserId,
-            stages.Select(s => s.ApproverUserId).ToArray());
+        // --- Уведомления: задача на первичное согласование — только тем, кому реально нужно
+        // принять решение (этапы, автоматически согласованные самим инициатором, исключаем)
+        var pendingApproverIds = stages
+            .Where(s => s.ApproverUserId != currentUserId)
+            .Select(s => s.ApproverUserId)
+            .ToArray();
+
+        if (pendingApproverIds.Length > 0)
+            await NotifyAsync(
+                VndApprovalNotificationMessages.TaskPrimaryApproval(lastRedaction.Code, vnd.TitleRu),
+                NotificationCategory.Approval, vndId, currentUserId, pendingApproverIds);
 
         // --- Уведомление инициатору (и ответственному за актуализацию, если согласование запущено
         // в рамках открытого цикла актуализации): редакция отправлена на согласование
@@ -96,6 +117,12 @@ public class VndApprovalService : IVndApprovalService
             VndApprovalNotificationMessages.SentToApproval(lastRedaction.Code, vnd.TitleRu),
             NotificationCategory.Approval, vndId, currentUserId,
             sentToApprovalRecipients.ToArray());
+
+        // --- Если абсолютно все этапы оказались автоматически согласованы инициатором
+        // (маловероятно, но возможно на коротком маршруте) — первичная фаза уже завершена,
+        // сразу проверяем дальнейший переход (RevisionNeeded/Consolidation).
+        if (process.Stages.All(s => s.PrimaryDecision != ApprovalStageDecision.Pending))
+            await CompletePrimaryPhaseAsync(process);
 
         return await LoadResponseAsync(process.Id);
     }
@@ -198,6 +225,7 @@ public class VndApprovalService : IVndApprovalService
                     await FinalizeApprovalAsync(process, afterRevision: true);
                     await _db.SaveChangesAsync();
                 }
+
                 break;
 
             default:
@@ -361,8 +389,8 @@ public class VndApprovalService : IVndApprovalService
                 "Матрицу разногласий можно редактировать только в статусе \"требуются правки\"");
 
         var row = await _db.Set<VndDisagreementMatrixRow>()
-                       .FirstOrDefaultAsync(x => x.Id == rowId && x.ApprovalProcessId == process.Id)
-                   ?? throw new KeyNotFoundException($"Строка матрицы разногласий с id={rowId} не найдена");
+                      .FirstOrDefaultAsync(x => x.Id == rowId && x.ApprovalProcessId == process.Id)
+                  ?? throw new KeyNotFoundException($"Строка матрицы разногласий с id={rowId} не найдена");
 
         _db.Set<VndDisagreementMatrixRow>().Remove(row);
         await _db.SaveChangesAsync();
