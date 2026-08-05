@@ -10,12 +10,12 @@ public class StartApprovalRequest
     // Список этапов согласования
     public required List<ApprovalStageRequest> Stages { get; set; }
 
-    // Норматив первичного согласования
-    public required int PrimaryDeadlineHours { get; set; }
-    // Норматив согласования после исправленных замечаний
-    public required int RepeatDeadlineHours { get; set; }
-    // Норматив финальной выдержки
-    public required int FinalHoldDeadlineHours { get; set; }
+    // Норматив первичного согласования, в минутах
+    public required int PrimaryDeadlineMinutes { get; set; }
+    // Норматив согласования после исправленных замечаний, в минутах
+    public required int RepeatDeadlineMinutes { get; set; }
+    // Норматив финальной выдержки, в минутах
+    public required int FinalHoldDeadlineMinutes { get; set; }
 }
 
 public class ApprovalStageRequest

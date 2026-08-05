@@ -24,8 +24,8 @@ public class VndTaskResponse
     /// <summary>Инициатор редакции (кто отправил на согласование)</summary>
     public string? InitiatorName { get; set; }
 
-    /// <summary>Норматив в часах для текущей фазы согласования (Primary/Repeat)</summary>
-    public int? DeadlineHours { get; set; }
+    /// <summary>Норматив в минутах для текущей фазы согласования (Primary/Repeat)</summary>
+    public int? DeadlineMinutes { get; set; }
 
     // --- Только для actualization/consolidation ---
     public DateOnly? DueActualizationDate { get; set; }

@@ -52,7 +52,7 @@ public class TasksService : ITasksService
             StagePhase = isPrimaryPhase ? "primary" : "repeat",
             DeadlineAt = isPrimaryPhase ? process.PrimaryDeadlineAt : process.RepeatDeadlineAt,
             InitiatorName = initiators.GetValueOrDefault(process.InitiatorUserId, "—"),
-            DeadlineHours = isPrimaryPhase ? process.PrimaryDeadlineHours : process.RepeatDeadlineHours,
+            DeadlineMinutes = isPrimaryPhase ? process.PrimaryDeadlineMinutes : process.RepeatDeadlineMinutes,
             CreatedAt = isPrimaryPhase ? process.PrimaryStartedAt : (process.RepeatStartedAt ?? process.CreatedAt)
         };
     })

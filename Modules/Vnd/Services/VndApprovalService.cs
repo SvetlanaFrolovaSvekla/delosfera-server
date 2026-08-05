@@ -51,9 +51,9 @@ public class VndApprovalService : IVndApprovalService
         if (alreadyRunning)
             throw new InvalidOperationException("По этой редакции уже запущено согласование");
 
-        if (request.PrimaryDeadlineHours <= 0 || request.RepeatDeadlineHours <= 0 ||
-            request.FinalHoldDeadlineHours <= 0)
-            throw new InvalidOperationException("Все три норматива должны быть больше нуля часов");
+        if (request.PrimaryDeadlineMinutes <= 0 || request.RepeatDeadlineMinutes <= 0 ||
+            request.FinalHoldDeadlineMinutes <= 0)
+            throw new InvalidOperationException("Все три норматива должны быть больше нуля минут");
 
         // Себя можно указать согласующим только на фиксированном этапе (Legal/RiskManagement/
         // Compliance/Methodology) — принадлежность инициатора нужному подразделению всё равно
@@ -81,9 +81,9 @@ public class VndApprovalService : IVndApprovalService
             RedactionId = lastRedaction.Id,
             InitiatorUserId = currentUserId,
             Status = ApprovalProcessStatus.Primary,
-            PrimaryDeadlineHours = request.PrimaryDeadlineHours,
-            RepeatDeadlineHours = request.RepeatDeadlineHours,
-            FinalHoldDeadlineHours = request.FinalHoldDeadlineHours,
+            PrimaryDeadlineMinutes = request.PrimaryDeadlineMinutes,
+            RepeatDeadlineMinutes = request.RepeatDeadlineMinutes,
+            FinalHoldDeadlineMinutes = request.FinalHoldDeadlineMinutes,
             PrimaryStartedAt = now,
             Stages = stages
         };
@@ -657,9 +657,9 @@ public class VndApprovalService : IVndApprovalService
             InitiatorUserId = process.InitiatorUserId,
             InitiatorName = initiator?.FullName ?? "",
             Status = MapStatus(process.Status),
-            PrimaryDeadlineHours = process.PrimaryDeadlineHours,
-            RepeatDeadlineHours = process.RepeatDeadlineHours,
-            FinalHoldDeadlineHours = process.FinalHoldDeadlineHours,
+            PrimaryDeadlineMinutes = process.PrimaryDeadlineMinutes,
+            RepeatDeadlineMinutes = process.RepeatDeadlineMinutes,
+            FinalHoldDeadlineMinutes = process.FinalHoldDeadlineMinutes,
             PrimaryStartedAt = process.PrimaryStartedAt,
             PrimaryDeadlineAt = process.PrimaryDeadlineAt,
             RepeatInitiatorComment = process.RepeatInitiatorComment,

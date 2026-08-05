@@ -11,9 +11,9 @@ public class ApprovalProcessResponse
 
     public string? RepeatInitiatorComment { get; set; }
     
-    public int PrimaryDeadlineHours { get; set; }
-    public int RepeatDeadlineHours { get; set; }
-    public int FinalHoldDeadlineHours { get; set; }
+    public int PrimaryDeadlineMinutes { get; set; }
+    public int RepeatDeadlineMinutes { get; set; }
+    public int FinalHoldDeadlineMinutes { get; set; }
 
     public DateTime PrimaryStartedAt { get; set; }
     public DateTime PrimaryDeadlineAt { get; set; }

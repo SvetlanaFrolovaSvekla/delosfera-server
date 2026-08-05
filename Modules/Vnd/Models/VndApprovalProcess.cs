@@ -18,10 +18,10 @@ public class VndApprovalProcess : IAuditableEntity
     // --- Текущий статус ВНД (Primary/RevisionNeeded/Repeated/FinalHold/Approved/Cancelled/Rejected)
     public ApprovalProcessStatus Status { get; set; } = ApprovalProcessStatus.Primary;
 
-    // --- Нормативы в часах. Отсчёт каждого — от момента старта именно этого этапа
-    public int PrimaryDeadlineHours { get; set; } // Первичная выдержка 
-    public int RepeatDeadlineHours { get; set; } // Согласование после устранения замечаний
-    public int FinalHoldDeadlineHours { get; set; } // Финальная выдержка
+    // --- Нормативы в минутах. Отсчёт каждого — от момента старта именно этого этапа
+    public int PrimaryDeadlineMinutes  { get; set; } // Первичная выдержка 
+    public int RepeatDeadlineMinutes  { get; set; } // Согласование после устранения замечаний
+    public int FinalHoldDeadlineMinutes  { get; set; } // Финальная выдержка
 
     // Моменты отсчёта выдержек
     public DateTime PrimaryStartedAt { get; set; }
@@ -38,9 +38,9 @@ public class VndApprovalProcess : IAuditableEntity
     public DateTime UpdatedAt { get; set; }
 
     // Конкретные дедлайны для согласующих  
-    public DateTime PrimaryDeadlineAt => PrimaryStartedAt.AddHours(PrimaryDeadlineHours);
-    public DateTime? RepeatDeadlineAt => RepeatStartedAt?.AddHours(RepeatDeadlineHours);
-    public DateTime? FinalHoldDeadlineAt => FinalHoldStartedAt?.AddHours(FinalHoldDeadlineHours);
+    public DateTime PrimaryDeadlineAt => PrimaryStartedAt.AddMinutes(PrimaryDeadlineMinutes);
+    public DateTime? RepeatDeadlineAt => RepeatStartedAt?.AddMinutes(RepeatDeadlineMinutes);
+    public DateTime? FinalHoldDeadlineAt => FinalHoldStartedAt?.AddMinutes(FinalHoldDeadlineMinutes);
     
     // Матрица разногласий
     public ICollection<VndDisagreementMatrixRow> DisagreementMatrixRows { get; set; } = new List<VndDisagreementMatrixRow>();
