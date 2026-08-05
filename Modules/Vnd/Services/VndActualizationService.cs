@@ -61,6 +61,17 @@ public class VndActualizationService : IVndActualizationService
         vnd.ActualizationRequiresApproval = request.RequiresApproval;
         vnd.ActualizationShiftNextPeriod = request.ShiftNextPeriod;
 
+        // --- Открываем запись в истории циклов актуализации
+        _db.Set<VndActualizationRecord>().Add(new VndActualizationRecord
+        {
+            VndId = vndId,
+            ResponsibleUserId = responsibleUserId,
+            RequiresApproval = request.RequiresApproval,
+            ShiftNextPeriod = request.ShiftNextPeriod,
+            StartedAt = DateTime.UtcNow,
+            DueActualizationDateBefore = vnd.DueActualizationDate
+        });
+
         await _db.SaveChangesAsync();
 
         return await BuildStateResponseAsync(vnd);
@@ -185,6 +196,17 @@ public class VndActualizationService : IVndActualizationService
         vnd.ActualizationRequiresApproval = approvedRequest.RequiresApproval;
         vnd.ActualizationShiftNextPeriod = request.ShiftNextPeriod;
 
+        // --- Открываем запись в истории циклов актуализации
+        _db.Set<VndActualizationRecord>().Add(new VndActualizationRecord
+        {
+            VndId = vndId,
+            ResponsibleUserId = currentUserId,
+            RequiresApproval = approvedRequest.RequiresApproval,
+            ShiftNextPeriod = request.ShiftNextPeriod,
+            StartedAt = DateTime.UtcNow,
+            DueActualizationDateBefore = vnd.DueActualizationDate
+        });
+
         await _db.SaveChangesAsync();
 
         return await BuildStateResponseAsync(vnd);
@@ -249,6 +271,21 @@ public class VndActualizationService : IVndActualizationService
         vnd.RevisionChangedDate = today;
         vnd.Status = VndStatus.Active;
 
+        // --- Закрываем открытую запись истории (если публикация происходит в рамках цикла
+        // актуализации — при обычном согласовании вне актуализации открытой записи нет,
+        // и это ожидаемо: history здесь только про циклы актуализации).
+        var openRecord = await _db.Set<VndActualizationRecord>()
+            .Where(r => r.VndId == vndId && r.PublishedAt == null)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync();
+
+        if (openRecord is not null)
+        {
+            openRecord.PublishedAt = DateTime.UtcNow;
+            openRecord.HadChanges = request.HadChanges;
+            openRecord.DueActualizationDateAfter = vnd.DueActualizationDate;
+        }
+
         vnd.ActualizationResponsibleUserId = null;
         vnd.ActualizationRequiresApproval = false;
         vnd.ActualizationShiftNextPeriod = false;
@@ -266,6 +303,34 @@ public class VndActualizationService : IVndActualizationService
             developerHeadId.HasValue ? [developerHeadId.Value] : []);
 
         return await BuildStateResponseAsync(vnd);
+    }
+
+    /// <summary>История циклов актуализации документа, от самого нового к самому старому</summary>
+    public async Task<List<VndActualizationRecordResponse>> GetHistoryAsync(int vndId)
+    {
+        var exists = await _db.VndDocuments.AnyAsync(x => x.Id == vndId);
+        if (!exists) throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var records = await _db.Set<VndActualizationRecord>()
+            .Include(x => x.ResponsibleUser)
+            .Where(x => x.VndId == vndId)
+            .OrderByDescending(x => x.StartedAt)
+            .ToListAsync();
+
+        return records.Select(x => new VndActualizationRecordResponse
+        {
+            Id = x.Id,
+            ResponsibleUserId = x.ResponsibleUserId,
+            ResponsibleUserName = x.ResponsibleUser?.FullName ?? "—",
+            RequiresApproval = x.RequiresApproval,
+            ShiftNextPeriod = x.ShiftNextPeriod,
+            StartedAt = x.StartedAt,
+            PublishedAt = x.PublishedAt,
+            HadChanges = x.HadChanges,
+            DueActualizationDateBefore = x.DueActualizationDateBefore,
+            DueActualizationDateAfter = x.DueActualizationDateAfter,
+            IsCompleted = x.PublishedAt.HasValue
+        }).ToList();
     }
 
     private static DateOnly ResolveShiftedDueDate(ActualizationPeriod period, DateOnly today) => period switch

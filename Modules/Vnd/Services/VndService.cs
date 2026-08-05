@@ -4,7 +4,9 @@ using delosfera_server.Modules.Vnd.DTO.Request;
 using delosfera_server.Modules.Vnd.DTO.Response;
 using delosfera_server.Modules.Vnd.Models;
 using delosfera_server.Common.Extensions;
+using delosfera_server.Common.Services;
 using delosfera_server.Modules.Files.Services;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Vnd.Services;
 
@@ -12,11 +14,13 @@ public class VndService : IVndService
 {
     private readonly DelosferaDbContext _db;
     private readonly IFileStorageService _fileService;
+    private readonly ICurrentUserService _currentUser;
 
-    public VndService(DelosferaDbContext db, IFileStorageService fileService)
+    public VndService(DelosferaDbContext db, IFileStorageService fileService, ICurrentUserService currentUser)
     {
         _db = db;
         _fileService = fileService;
+        _currentUser = currentUser;
     }
 
     public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
@@ -30,7 +34,9 @@ public class VndService : IVndService
             .Include(x => x.Rubrics)
             .Include(x => x.Keywords)
             .Include(x => x.UserGroups)
-            .Include(x => x.Redactions);
+            .Include(x => x.Redactions)
+            .Include(x => x.CreatedByUser)
+            .Include(x => x.ActualizationResponsibleUser);
 
         if (!string.IsNullOrWhiteSpace(request.Code))
             query = query.Where(x => EF.Functions.ILike(x.Code, $"%{request.Code}%"));
@@ -58,6 +64,10 @@ public class VndService : IVndService
 
         if (request.ResponsibleExecutorIds.Count > 0)
             query = query.Where(x => x.ResponsibleExecutors.Any(e => request.ResponsibleExecutorIds.Contains(e.Id)));
+
+        if (request.CreatedByUserIds.Count > 0)
+            query = query.Where(x =>
+                x.CreatedByUserId != null && request.CreatedByUserIds.Contains(x.CreatedByUserId.Value));
 
         if (request.KeywordIds.Count > 0)
             query = query.Where(x => x.Keywords.Any(k => request.KeywordIds.Contains(k.Id)));
@@ -90,6 +100,9 @@ public class VndService : IVndService
 
         query = ApplyActualizationBucketFilter(query, request.ActualizationBuckets);
 
+        query = ApplyLinkedToMeFilter(query, request.LinkedToMeOnly);
+        query = ApplyDraftVisibilityFilter(query, request.DraftOwnerScope);
+
         var entities = await query.ToListAsync();
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return entities.Select(x => ToResponse(x, languageCode, today)).ToList();
@@ -107,6 +120,8 @@ public class VndService : IVndService
                          .Include(x => x.Keywords)
                          .Include(x => x.UserGroups)
                          .Include(x => x.Redactions)
+                         .Include(x => x.CreatedByUser)
+                         .Include(x => x.ActualizationResponsibleUser)
                          .FirstOrDefaultAsync(x => x.Id == id)
                      ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 
@@ -166,6 +181,44 @@ public class VndService : IVndService
                  x.DueActualizationDate.Value <= approachingEnd) ||
                 (includeNormal && x.DueActualizationDate.Value > approachingEnd)
             ));
+    }
+
+    /// <summary>"Только связанные со мной" — текущий пользователь является инициатором
+    /// согласования, согласующим на одном из этапов, либо ответственным за текущий цикл
+    /// актуализации (та же ответственность распространяется и на консолидацию — см.
+    /// VndActualizationService.PublishAsync, где для консолидации без активного цикла
+    /// актуализации проверяется именно инициатор согласования).</summary>
+    private IQueryable<VndDocument> ApplyLinkedToMeFilter(IQueryable<VndDocument> query, bool linkedToMeOnly)
+    {
+        if (!linkedToMeOnly) return query;
+
+        var userId = _currentUser.UserId;
+
+        return query.Where(x =>
+            x.ActualizationResponsibleUserId == userId ||
+            _db.VndApprovalProcesses.Any(p => p.VndId == x.Id && p.InitiatorUserId == userId) ||
+            _db.VndApprovalProcesses.Any(p => p.VndId == x.Id && p.Stages.Any(s => s.ApproverUserId == userId)));
+    }
+
+    /// <summary>Видимость черновиков: пользователь без права ViewOtherUsersDrafts никогда не
+    /// видит чужие черновики (проверка применяется всегда, а не только на вкладке "Черновики",
+    /// чтобы черновики других не просачивались, например, через вкладку "Все"). DraftOwnerScope
+    /// дополнительно сужает список ("mine"/"others") — "others" учитывается, только если право есть.</summary>
+    private IQueryable<VndDocument> ApplyDraftVisibilityFilter(IQueryable<VndDocument> query, string? draftOwnerScope)
+    {
+        var userId = _currentUser.UserId;
+        var canViewOtherDrafts = _currentUser.HasPermission(PermissionCode.ViewOtherUsersDrafts);
+
+        query = query.Where(x =>
+            x.Status != VndStatus.Draft || canViewOtherDrafts || x.CreatedByUserId == userId);
+
+        if (string.IsNullOrWhiteSpace(draftOwnerScope)) return query;
+
+        var wantsOthers = draftOwnerScope.Equals("others", StringComparison.OrdinalIgnoreCase) && canViewOtherDrafts;
+
+        return wantsOthers
+            ? query.Where(x => x.Status != VndStatus.Draft || x.CreatedByUserId != userId)
+            : query.Where(x => x.Status != VndStatus.Draft || x.CreatedByUserId == userId);
     }
 
     private static ActualizationBucket MapActualizationBucketKey(string key) => key.ToLowerInvariant() switch
@@ -246,6 +299,10 @@ public class VndService : IVndService
         OrganId = x.OrganId,
         OrganName = x.Organ?.TitleRu ?? "",
         ResponsibleExecutorIds = x.ResponsibleExecutors.Select(e => e.Id).ToList(),
+        CreatedByUserId = x.CreatedByUserId,
+        CreatedByUserName = x.CreatedByUser?.FullName,
+        ActualizationResponsibleUserId = x.ActualizationResponsibleUserId,
+        ActualizationResponsibleUserName = x.ActualizationResponsibleUser?.FullName,
         AdoptionDate = x.AdoptionDate,
         AdoptionCode = x.AdoptionCode,
         EffectiveDate = x.EffectiveDate,
@@ -354,12 +411,16 @@ public class VndService : IVndService
             Period = request.Period,
             LastActualizationDate = today,
             DueActualizationDate = dueDate,
-            LastActualizationHadChanges = false
+            LastActualizationHadChanges = false,
+            CreatedByUserId = currentUserId
         };
 
         _db.VndDocuments.Add(entity);
         await _db.SaveChangesAsync();
 
+        // currentUser уже отслеживается этим же DbContext (загружен выше),
+        // поэтому EF автоматически восстановит навигацию entity.CreatedByUser (relationship fixup) —
+        // отдельный Include/reload здесь не нужен.
         return ToResponse(entity, languageCode, today);
     }
 
@@ -540,6 +601,8 @@ public class VndService : IVndService
                          .Include(x => x.Keywords)
                          .Include(x => x.UserGroups)
                          .Include(x => x.Redactions)
+                         .Include(x => x.CreatedByUser)
+                         .Include(x => x.ActualizationResponsibleUser)
                          .FirstOrDefaultAsync(x => x.Id == id)
                      ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 

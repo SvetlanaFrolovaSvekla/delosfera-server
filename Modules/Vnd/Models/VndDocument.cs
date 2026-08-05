@@ -78,6 +78,11 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
     public ICollection<VndLink> OutgoingLinks { get; set; } = new List<VndLink>();
     public ICollection<VndLink> IncomingLinks { get; set; } = new List<VndLink>();
 
+    /// <summary>Пользователь, создавший этот ВНД (ИНИЦИАТОР) — используется для разграничения видимости
+    /// черновиков ("Мои черновики" / "Черновики других пользователей")</summary>
+    public int? CreatedByUserId { get; set; }
+    public User? CreatedByUser { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

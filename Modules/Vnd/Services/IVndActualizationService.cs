@@ -25,4 +25,8 @@ public interface IVndActualizationService
     /// <summary>Опубликовать новую редакцию — Consolidation → Active</summary>
     Task<VndActualizationStateResponse> PublishAsync(
         int vndId, PublishVndActualizationRequest request, int currentUserId);
+
+    /// <summary>История циклов актуализации документа — кто и когда актуализировал,
+    /// от самого нового к самому старому</summary>
+    Task<List<VndActualizationRecordResponse>> GetHistoryAsync(int vndId);
 }

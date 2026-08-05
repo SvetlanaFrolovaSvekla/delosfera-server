@@ -129,6 +129,12 @@ public static class PermissionCatalog
             TitleRu = "Возможность изменять маршрут согласования (удалять лишних пользователей)",
             TitleEn = "Ability to modify the approval route (remove unnecessary users)",
             TitleKg = "Макулдашуу маршрутун өзгөртүү мүмкүнчүлүгү (ашыкча колдонуучуларды алып салуу)"
+        },
+        [PermissionCode.ViewOtherUsersDrafts] = new PermissionDescription
+        {
+            TitleRu = "Возможность просматривать черновики других пользователей",
+            TitleEn = "Ability to view other users' drafts",
+            TitleKg = "Башка колдонуучулардын черновиктерин көрүү мүмкүнчүлүгү"
         }
     };
 

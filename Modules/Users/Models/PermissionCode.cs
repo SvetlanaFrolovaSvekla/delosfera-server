@@ -63,5 +63,8 @@ public enum PermissionCode
     ActAsApprover = 19,
 
     /// <summary>Возможность изменять маршрут согласования (удалять лишних пользователей)</summary>
-    ModifyApprovalRoute = 20
+    ModifyApprovalRoute = 20,
+
+    /// <summary>Возможность просматривать черновики других пользователей</summary>
+    ViewOtherUsersDrafts = 21
 }

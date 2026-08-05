@@ -23,8 +23,13 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
         builder.HasOne(x => x.ActualizationResponsibleUser)
             .WithMany()
             .HasForeignKey(x => x.ActualizationResponsibleUserId)
-            .OnDelete(DeleteBehavior.SetNull); 
-        
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.CreatedByUserId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.HasMany(x => x.Redactions)
             .WithOne(x => x.Vnd)
             .HasForeignKey(x => x.VndId)

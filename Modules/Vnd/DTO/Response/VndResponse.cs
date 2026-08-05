@@ -23,6 +23,17 @@ public class VndResponse
 
     public List<int> ResponsibleExecutorIds { get; set; } = [];
 
+    /// <summary>Инициатор — пользователь, создавший документ. Только для отображения, не редактируется.</summary>
+    public int? CreatedByUserId { get; set; }
+    public string? CreatedByUserName { get; set; }
+
+    //TODO: Сделать историю актуализации (сейчас поле сбрасывается)
+    /// <summary>Ответственный за ТЕКУЩИЙ цикл актуализации. Заполняется только пока документ
+    /// в статусе OnActualization/Consolidation — после публикации (PublishAsync) сбрасывается в null.
+    /// Не хранит историю прошлых циклов. Только для отображения, не редактируется.</summary>
+    public int? ActualizationResponsibleUserId { get; set; }
+    public string? ActualizationResponsibleUserName { get; set; }
+
     public DateOnly? AdoptionDate { get; set; }
     public string? AdoptionCode { get; set; }
     public DateOnly? EffectiveDate { get; set; }

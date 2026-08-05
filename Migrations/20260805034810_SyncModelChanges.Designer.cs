@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using delosfera_server.Data;
@@ -11,9 +12,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260805034810_SyncModelChanges")]
+    partial class SyncModelChanges
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2155,71 +2158,6 @@ namespace delosfera_server.Migrations
                         });
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRecord", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateOnly?>("DueActualizationDateAfter")
-                        .HasColumnType("date")
-                        .HasColumnName("due_actualization_date_after");
-
-                    b.Property<DateOnly?>("DueActualizationDateBefore")
-                        .HasColumnType("date")
-                        .HasColumnName("due_actualization_date_before");
-
-                    b.Property<bool?>("HadChanges")
-                        .HasColumnType("boolean")
-                        .HasColumnName("had_changes");
-
-                    b.Property<DateTime?>("PublishedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("published_at");
-
-                    b.Property<bool>("RequiresApproval")
-                        .HasColumnType("boolean")
-                        .HasColumnName("requires_approval");
-
-                    b.Property<int>("ResponsibleUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("responsible_user_id");
-
-                    b.Property<bool>("ShiftNextPeriod")
-                        .HasColumnType("boolean")
-                        .HasColumnName("shift_next_period");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("started_at");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("VndId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_actualization_record");
-
-                    b.HasIndex("ResponsibleUserId")
-                        .HasDatabaseName("ix_vnd_actualization_record_responsible_user_id");
-
-                    b.HasIndex("VndId", "StartedAt")
-                        .HasDatabaseName("ix_vnd_actualization_record_vnd_id_started_at");
-
-                    b.ToTable("vnd_actualization_record", (string)null);
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRequest", b =>
                 {
                     b.Property<int>("Id")
@@ -3448,27 +3386,6 @@ namespace delosfera_server.Migrations
                         .HasConstraintName("fk_vnd_coordination_default_approver_user_approver_user_id");
 
                     b.Navigation("ApproverUser");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRecord", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ResponsibleUser")
-                        .WithMany()
-                        .HasForeignKey("ResponsibleUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_record_user_responsible_user_id");
-
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", "Vnd")
-                        .WithMany()
-                        .HasForeignKey("VndId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_record_vnd_documents_vnd_id");
-
-                    b.Navigation("ResponsibleUser");
-
-                    b.Navigation("Vnd");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRequest", b =>

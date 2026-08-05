@@ -83,4 +83,17 @@ public class VndActualizationController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
+
+    /// <summary>История циклов актуализации документа — кто и когда актуализировал,
+    /// от самого нового к самому старому</summary>
+    [HttpGet("history")]
+    [ProducesResponseType(typeof(List<VndActualizationRecordResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<VndActualizationRecordResponse>>> GetHistory(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.GetHistoryAsync(vndId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    }
 }
