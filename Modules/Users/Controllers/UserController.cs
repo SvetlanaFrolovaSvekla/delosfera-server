@@ -28,7 +28,7 @@ public class UserController : ControllerBase
         _languageResolver = languageResolver;
         _currentUser = currentUser;
     }
-    
+
     /// <summary>Текущий авторизованный пользователь</summary>
     [HttpGet("me")]
     [ProducesResponseType(typeof(UserResponse), StatusCodes.Status200OK)]
@@ -42,25 +42,32 @@ public class UserController : ControllerBase
     /// Получить список всех пользователей
     /// </summary>
     /// <param name="sortBy">Способ сортировки результата</param>
-    /// <param name="search">Поиск по ФИО или email</param>
+    /// <param name="search">Поиск по ФИО или email/логину</param>
     /// <param name="orgUnitIds">Фильтр по структурным подразделениям (можно указать несколько id)</param>
+    /// <param name="positionIds">Фильтр по должностям (можно указать несколько id)</param>
+    /// <param name="roleIds">Фильтр по ролям (можно указать несколько id)</param>
+    /// <param name="source">Фильтр по источнику учётной записи</param>
+    /// <param name="isBlocked">Фильтр по статусу блокировки</param>
     /// <response code="200">Список пользователей получен успешно</response>
     [HttpGet]
     [ProducesResponseType(typeof(List<UserResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<UserResponse>>> GetAll(
         [FromQuery] UserSortBy sortBy = UserSortBy.CreatedAtAsc,
         [FromQuery] string? search = null,
-        [FromQuery] List<int>? orgUnitIds = null)
+        [FromQuery] List<int>? orgUnitIds = null,
+        [FromQuery] List<int>? positionIds = null,
+        [FromQuery] List<int>? roleIds = null,
+        [FromQuery] UserSource? source = null,
+        [FromQuery] bool? isBlocked = null)
     {
         var language = _languageResolver.Resolve(Request);
-        var result = await _service.GetAllAsync(sortBy, search, orgUnitIds, language);
+        var result = await _service.GetAllAsync(sortBy, search, orgUnitIds, positionIds, roleIds, source, isBlocked, language);
         return Ok(result);
     }
 
     /// <summary>
     /// Создать нового пользователя
     /// </summary>
-    /// <param name="request">Данные нового пользователя</param>
     /// <response code="201">Пользователь успешно создан</response>
     /// <response code="404">Указанная должность, подразделение или роль не найдены</response>
     /// <response code="409">Пользователь с таким email уже существует</response>
@@ -91,8 +98,6 @@ public class UserController : ControllerBase
     /// <summary>
     /// Обновить существующего пользователя
     /// </summary>
-    /// <param name="id">Идентификатор пользователя</param>
-    /// <param name="request">Новые данные пользователя</param>
     /// <response code="200">Пользователь успешно обновлён</response>
     /// <response code="404">Пользователь, должность, подразделение или роль не найдены</response>
     /// <response code="409">Пользователь с таким email уже существует</response>
@@ -121,9 +126,56 @@ public class UserController : ControllerBase
     }
 
     /// <summary>
+    /// Заблокировать учётную запись
+    /// </summary>
+    /// <response code="200">Пользователь заблокирован</response>
+    /// <response code="404">Пользователь не найден</response>
+    [HttpPost("{id:int}/block")]
+    [RequirePermission(PermissionCode.ManageUsers)]
+    [ProducesResponseType(typeof(UserResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UserResponse>> Block(int id, [FromBody] BlockUserRequest request)
+    {
+        var language = _languageResolver.Resolve(Request);
+
+        try
+        {
+            var result = await _service.BlockAsync(id, _currentUser.UserId, request.Reason, language);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Разблокировать учётную запись
+    /// </summary>
+    /// <response code="200">Пользователь разблокирован</response>
+    /// <response code="404">Пользователь не найден</response>
+    [HttpPost("{id:int}/unblock")]
+    [RequirePermission(PermissionCode.ManageUsers)]
+    [ProducesResponseType(typeof(UserResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UserResponse>> Unblock(int id)
+    {
+        var language = _languageResolver.Resolve(Request);
+
+        try
+        {
+            var result = await _service.UnblockAsync(id, language);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Удалить пользователя
     /// </summary>
-    /// <param name="id">Идентификатор пользователя</param>
     /// <response code="204">Пользователь успешно удалён</response>
     /// <response code="404">Пользователь не найден</response>
     /// <response code="409">Нельзя удалить - на пользователя есть ссылки в других данных</response>

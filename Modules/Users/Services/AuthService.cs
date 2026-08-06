@@ -30,6 +30,9 @@ public class AuthService : IAuthService
         if (!user.IsActive)
             throw new UnauthorizedAccessException("Учётная запись деактивирована");
 
+        if (user.BlockedAt.HasValue)
+            throw new UnauthorizedAccessException("Учётная запись заблокирована");
+
         if (!_passwordHasher.Verify(user.PasswordHash, request.Password))
             throw new UnauthorizedAccessException("Неверный email или пароль");
 
@@ -47,6 +50,7 @@ public class AuthService : IAuthService
             .Include(x => x.User!).ThenInclude(u => u.Position)
             .Include(x => x.User!).ThenInclude(u => u.OrgUnit)
             .Include(x => x.User!).ThenInclude(u => u.Roles)
+            .Include(x => x.User!).ThenInclude(u => u.BlockedByUser)
             .FirstOrDefaultAsync(x => x.RefreshToken == request.RefreshToken)
             ?? throw new UnauthorizedAccessException("Недействительный refresh-токен");
 
@@ -60,6 +64,11 @@ public class AuthService : IAuthService
 
         if (!user.IsActive)
             throw new UnauthorizedAccessException("Учётная запись деактивирована");
+
+        // Пользователя могли заблокировать уже после выдачи refresh-токена —
+        // проверяем блокировку и здесь, а не только при логине
+        if (user.BlockedAt.HasValue)
+            throw new UnauthorizedAccessException("Учётная запись заблокирована");
 
         var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
         await _db.SaveChangesAsync();
@@ -103,6 +112,7 @@ public class AuthService : IAuthService
             .Include(x => x.Position)
             .Include(x => x.OrgUnit)
             .Include(x => x.Roles)
+            .Include(x => x.BlockedByUser)
             .FirstOrDefaultAsync(predicate);
 
     private static UserResponse ToUserResponse(User entity, string languageCode) => new()
@@ -124,6 +134,10 @@ public class AuthService : IAuthService
         },
         IsActive = entity.IsActive,
         LastLoginAt = entity.LastLoginAt,
+        Source = entity.Source,
+        BlockedAt = entity.BlockedAt,
+        BlockedByUserName = entity.BlockedByUser?.FullName,
+        BlockReason = entity.BlockReason,
         Roles = entity.Roles.Select(r => new Users.DTO.Response.RoleResponse
         {
             Id = r.Id, Name = r.ResolveTitle(languageCode),

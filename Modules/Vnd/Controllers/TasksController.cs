@@ -21,29 +21,29 @@ public class TasksController : ControllerBase
         _currentUser = currentUser;
     }
 
-    /// <summary>Задачи текущего пользователя по согласованию редакций ВНД</summary>
     [HttpGet("coordination")]
     public async Task<ActionResult<List<VndTaskResponse>>> GetCoordination() =>
         Ok(await _service.GetCoordinationTasksAsync(_currentUser.UserId));
 
-    /// <summary>ВНД в статусе актуализации, где пользователь причастен</summary>
     [HttpGet("actualization")]
     public async Task<ActionResult<List<VndTaskResponse>>> GetActualization() =>
         Ok(await _service.GetActualizationTasksAsync(_currentUser.UserId));
 
-    /// <summary>ВНД в статусе консолидации, где пользователь причастен</summary>
     [HttpGet("consolidation")]
     public async Task<ActionResult<List<VndTaskResponse>>> GetConsolidation() =>
         Ok(await _service.GetConsolidationTasksAsync(_currentUser.UserId));
 
-    /// <summary>Мои ВНД на согласовании — где пользователь инициатор согласования
-    /// или ответственный за актуализацию (но не согласующий)</summary>
     [HttpGet("my-vnd-approval")]
     public async Task<ActionResult<List<VndTaskResponse>>> GetMyVndApproval() =>
         Ok(await _service.GetMyVndApprovalTasksAsync(_currentUser.UserId));
 
-    /// <summary>Счётчики задач текущего пользователя по всем разделам</summary>
     [HttpGet("counts")]
     public async Task<ActionResult<VndTaskCountsResponse>> GetCounts() =>
         Ok(await _service.GetCountsAsync(_currentUser.UserId));
+
+    /// <summary>Персональные KPI для карточек на главной странице</summary>
+    [HttpGet("home-summary")]
+    [ProducesResponseType(typeof(VndHomeSummaryResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndHomeSummaryResponse>> GetHomeSummary() =>
+        Ok(await _service.GetHomeSummaryAsync(_currentUser.UserId));
 }

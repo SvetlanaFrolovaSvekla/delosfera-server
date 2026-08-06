@@ -20,12 +20,21 @@ public class UserService : IUserService
         _passwordHasher = passwordHasher;
     }
 
-    public async Task<List<UserResponse>> GetAllAsync(UserSortBy sortBy, string? search, List<int>? orgUnitIds, string languageCode)
+    public async Task<List<UserResponse>> GetAllAsync(
+        UserSortBy sortBy,
+        string? search,
+        List<int>? orgUnitIds,
+        List<int>? positionIds,
+        List<int>? roleIds,
+        UserSource? source,
+        bool? isBlocked,
+        string languageCode)
     {
         IQueryable<User> query = _db.Users
             .Include(x => x.Position)
             .Include(x => x.OrgUnit)
-            .Include(x => x.Roles);
+            .Include(x => x.Roles)
+            .Include(x => x.BlockedByUser);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -37,6 +46,20 @@ public class UserService : IUserService
 
         if (orgUnitIds is { Count: > 0 })
             query = query.Where(x => x.OrgUnitId.HasValue && orgUnitIds.Contains(x.OrgUnitId.Value));
+
+        if (positionIds is { Count: > 0 })
+            query = query.Where(x => x.PositionId.HasValue && positionIds.Contains(x.PositionId.Value));
+
+        if (roleIds is { Count: > 0 })
+            query = query.Where(x => x.Roles.Any(r => roleIds.Contains(r.Id)));
+
+        if (source.HasValue)
+            query = query.Where(x => x.Source == source.Value);
+
+        if (isBlocked.HasValue)
+            query = isBlocked.Value
+                ? query.Where(x => x.BlockedAt != null)
+                : query.Where(x => x.BlockedAt == null);
 
         query = sortBy switch
         {
@@ -70,6 +93,7 @@ public class UserService : IUserService
             PasswordHash = _passwordHasher.Hash(request.Password),
             PositionId = request.PositionId,
             OrgUnitId = request.OrgUnitId,
+            Source = UserSource.Local, // через API всегда создаётся локальная УЗ; LDAP заводится синком
             Roles = roles
         };
 
@@ -134,10 +158,39 @@ public class UserService : IUserService
                          .Include(x => x.Position)
                          .Include(x => x.OrgUnit)
                          .Include(x => x.Roles)
+                         .Include(x => x.BlockedByUser)
                          .FirstOrDefaultAsync(x => x.Id == id)
                      ?? throw new KeyNotFoundException($"Пользователь с id={id} не найден");
 
         return ToResponse(entity, languageCode);
+    }
+
+    public async Task<UserResponse> BlockAsync(int id, int blockedByUserId, string? reason, string languageCode)
+    {
+        var entity = await _db.Users.FindAsync(id)
+            ?? throw new KeyNotFoundException($"Пользователь с id={id} не найден");
+
+        entity.BlockedAt = DateTime.UtcNow;
+        entity.BlockedByUserId = blockedByUserId;
+        entity.BlockReason = reason;
+
+        await _db.SaveChangesAsync();
+
+        return await GetByIdAsync(id, languageCode);
+    }
+
+    public async Task<UserResponse> UnblockAsync(int id, string languageCode)
+    {
+        var entity = await _db.Users.FindAsync(id)
+            ?? throw new KeyNotFoundException($"Пользователь с id={id} не найден");
+
+        entity.BlockedAt = null;
+        entity.BlockedByUserId = null;
+        entity.BlockReason = null;
+
+        await _db.SaveChangesAsync();
+
+        return await GetByIdAsync(id, languageCode);
     }
 
     private async Task EnsureEmailIsUniqueAsync(string email, int? excludeUserId = null)
@@ -205,6 +258,10 @@ public class UserService : IUserService
         },
         IsActive = entity.IsActive,
         LastLoginAt = entity.LastLoginAt,
+        Source = entity.Source,
+        BlockedAt = entity.BlockedAt,
+        BlockedByUserName = entity.BlockedByUser?.FullName,
+        BlockReason = entity.BlockReason,
         Roles = entity.Roles.Select(r => new Users.DTO.Response.RoleResponse
         {
             Id = r.Id,

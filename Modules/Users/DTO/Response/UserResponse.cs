@@ -1,4 +1,5 @@
 ﻿using delosfera_server.Modules.Dictionaries.DTO.Response;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Users.DTO.Response;
 
@@ -26,6 +27,21 @@ public class UserResponse
 
     /// <summary>Дата последнего входа (если был)</summary>
     public DateTime? LastLoginAt { get; set; }
+
+    /// <summary>Источник учётной записи: Local / Ldap</summary>
+    public UserSource Source { get; set; }
+
+    /// <summary>Заблокирована ли учётная запись</summary>
+    public bool IsBlocked => BlockedAt.HasValue;
+
+    /// <summary>Дата и время блокировки</summary>
+    public DateTime? BlockedAt { get; set; }
+
+    /// <summary>ФИО заблокировавшего</summary>
+    public string? BlockedByUserName { get; set; }
+
+    /// <summary>Причина блокировки</summary>
+    public string? BlockReason { get; set; }
 
     /// <summary>Роли пользователя</summary>
     public List<RoleResponse> Roles { get; set; } = [];
