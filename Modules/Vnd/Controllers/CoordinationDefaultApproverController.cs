@@ -34,7 +34,7 @@ public class CoordinationDefaultApproverController : ControllerBase
 
     /// <summary>Изменить согласующего по умолчанию для одного из этапов</summary>
     [HttpPut("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(typeof(CoordinationDefaultApproverResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

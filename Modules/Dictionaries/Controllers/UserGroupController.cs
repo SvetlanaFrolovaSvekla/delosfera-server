@@ -51,7 +51,7 @@ public class UserGroupController : ControllerBase
     /// <response code="201">Группа успешно создана</response>
     /// <response code="404">Один из указанных пользователей не найден</response>
     [HttpPost]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(typeof(UserGroupResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<UserGroupResponse>> Create([FromBody] CreateUserGroupRequest request)
@@ -77,7 +77,7 @@ public class UserGroupController : ControllerBase
     /// <response code="200">Группа успешно обновлена</response>
     /// <response code="404">Группа или один из пользователей не найдены</response>
     [HttpPut("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(typeof(UserGroupResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<UserGroupResponse>> Update(int id, [FromBody] UpdateUserGroupRequest request)
@@ -103,7 +103,7 @@ public class UserGroupController : ControllerBase
     /// <response code="404">Группа не найдена</response>
     /// <response code="409">Нельзя удалить — на группу есть ссылки в других данных</response>
     [HttpDelete("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

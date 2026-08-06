@@ -44,7 +44,7 @@ public class SecurityLevelController : ControllerBase
     /// <param name="request">Данные нового уровня секретности</param>
     /// <response code="201">Уровень секретности успешно создан</response>
     [HttpPost]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(typeof(SecurityLevelResponse), StatusCodes.Status201Created)]
     public async Task<ActionResult<SecurityLevelResponse>> Create([FromBody] CreateSecurityLevelRequest request)
     {
@@ -61,7 +61,7 @@ public class SecurityLevelController : ControllerBase
     /// <response code="200">Уровень секретности успешно обновлён</response>
     /// <response code="404">Уровень секретности с указанным id не найден</response>
     [HttpPut("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(typeof(SecurityLevelResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<SecurityLevelResponse>> Update(int id, [FromBody] UpdateSecurityLevelRequest request)
@@ -87,7 +87,7 @@ public class SecurityLevelController : ControllerBase
     /// <response code="404">Уровень секретности с указанным id не найден</response>
     /// <response code="409">Нельзя удалить — на уровень секретности есть ссылки в других документах</response>
     [HttpDelete("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

@@ -52,7 +52,7 @@ public class OrganizationUnitController : ControllerBase
     /// <response code="404">Указанное родительское подразделение не найдено</response>
     /// <response code="409">Превышена максимальная глубина вложенности</response>
     [HttpPost]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(typeof(OrganizationUnitResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -84,7 +84,7 @@ public class OrganizationUnitController : ControllerBase
     /// <response code="404">Подразделение или родитель не найдены</response>
     /// <response code="409">Циклическая ссылка или превышена глубина вложенности</response>
     [HttpPut("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(typeof(OrganizationUnitResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -115,7 +115,7 @@ public class OrganizationUnitController : ControllerBase
     /// <response code="404">Подразделение не найдено</response>
     /// <response code="409">Есть дочерние записи или ссылки в других документах</response>
     [HttpDelete("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

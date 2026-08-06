@@ -50,7 +50,7 @@ public class TypeVndController : ControllerBase
     /// <param name="request">Данные нового вида ВНД</param>
     /// <response code="201">Вид ВНД успешно создан</response>
     [HttpPost]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(typeof(TypeVndResponse), StatusCodes.Status201Created)]
     public async Task<ActionResult<TypeVndResponse>> Create([FromBody] CreateTypeVndRequest request)
     {
@@ -67,7 +67,7 @@ public class TypeVndController : ControllerBase
     /// <response code="200">Вид ВНД успешно обновлён</response>
     /// <response code="404">Вид ВНД с указанным id не найден</response>
     [HttpPut("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(typeof(TypeVndResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<TypeVndResponse>> Update(int id, [FromBody] UpdateTypeVndRequest request)
@@ -93,7 +93,7 @@ public class TypeVndController : ControllerBase
     /// <response code="404">Вид ВНД с указанным id не найден</response>
     /// <response code="409">Нельзя удалить — на вид ВНД есть ссылки в других документах</response>
     [HttpDelete("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

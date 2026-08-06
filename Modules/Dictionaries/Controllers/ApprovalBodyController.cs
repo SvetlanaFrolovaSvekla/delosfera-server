@@ -41,7 +41,7 @@ public class ApprovalBodyController : ControllerBase
 
     /// <summary>Создать новый орган утверждения</summary>
     [HttpPost]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(typeof(ApprovalBodyResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -59,7 +59,7 @@ public class ApprovalBodyController : ControllerBase
 
     /// <summary>Обновить существующий орган утверждения</summary>
     [HttpPut("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(typeof(ApprovalBodyResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -77,7 +77,7 @@ public class ApprovalBodyController : ControllerBase
 
     /// <summary>Удалить орган утверждения</summary>
     [HttpDelete("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

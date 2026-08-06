@@ -45,6 +45,7 @@ builder.Services.AddScoped<IVndActualizationService, VndActualizationService>();
 builder.AddDatabase();
 builder.AddDictionaryServices();
 builder.AddVndServices();
+builder.AddAnalyticsServices();
 
 
 builder.Services.AddCors(options =>

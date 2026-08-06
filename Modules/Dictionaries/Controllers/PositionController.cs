@@ -50,7 +50,7 @@ public class PositionController : ControllerBase
     /// <param name="request">Данные новой должности</param>
     /// <response code="201">Должность успешно создана</response>
     [HttpPost]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(typeof(PositionResponse), StatusCodes.Status201Created)]
     public async Task<ActionResult<PositionResponse>> Create([FromBody] CreatePositionRequest request)
     {
@@ -67,7 +67,7 @@ public class PositionController : ControllerBase
     /// <response code="200">Должность успешно обновлена</response>
     /// <response code="404">Должность с указанным id не найдена</response>
     [HttpPut("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(typeof(PositionResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PositionResponse>> Update(int id, [FromBody] UpdatePositionRequest request)
@@ -93,7 +93,7 @@ public class PositionController : ControllerBase
     /// <response code="404">Должность с указанным id не найдена</response>
     /// <response code="409">Нельзя удалить — на должность есть ссылки в других документах</response>
     [HttpDelete("{id:int}")]
-    [RequirePermission(PermissionCode.ManageDictionaries)]
+    [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

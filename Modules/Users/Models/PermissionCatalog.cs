@@ -135,9 +135,39 @@ public static class PermissionCatalog
             TitleRu = "Возможность просматривать черновики других пользователей",
             TitleEn = "Ability to view other users' drafts",
             TitleKg = "Башка колдонуучулардын черновиктерин көрүү мүмкүнчүлүгү"
+        },
+        [PermissionCode.ViewOtherUsersDrafts] = new PermissionDescription
+        {
+            TitleRu = "Возможность просматривать черновики других пользователей",
+            TitleEn = "Ability to view other users' drafts",
+            TitleKg = "Башка колдонуучулардын черновиктерин көрүү мүмкүнчүлүгү"
+        },
+        [PermissionCode.ManageVndDictionaries] = new PermissionDescription
+        {
+            TitleRu = "Управление справочниками ВНД",
+            TitleEn = "Manage VND dictionaries",
+            TitleKg = "ВНД маалымдамаларын башкаруу"
+        },
+        [PermissionCode.ManageGeneralDictionaries] = new PermissionDescription
+        {
+            TitleRu = "Управление общими справочниками",
+            TitleEn = "Manage general dictionaries",
+            TitleKg = "Жалпы маалымдамаларды башкаруу"
+        },
+        [PermissionCode.ManageSzDictionaries] = new PermissionDescription
+        {
+            TitleRu = "Управление справочниками служебных записок",
+            TitleEn = "Manage memo dictionaries",
+            TitleKg = "Кызматтык каттардын маалымдамаларын башкаруу"
+        },
+        [PermissionCode.ManageProcurementDictionaries] = new PermissionDescription
+        {
+            TitleRu = "Управление справочниками закупок",
+            TitleEn = "Manage procurement dictionaries",
+            TitleKg = "Сатып алуулардын маалымдамаларын башкаруу"
         }
     };
-
+    
     public static List<PermissionResponse> GetAll(string languageCode) =>
         Descriptions.Select(kv => new PermissionResponse
         {

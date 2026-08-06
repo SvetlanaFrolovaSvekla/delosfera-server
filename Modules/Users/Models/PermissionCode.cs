@@ -35,7 +35,10 @@ public enum PermissionCode
     /// <summary>Управление группами</summary>
     ManageGroups = 10,
 
-    /// <summary>Управление справочниками</summary>
+    /// <summary>Управление справочниками (устарело — используй ManageVndDictionaries /
+    /// ManageGeneralDictionaries / ManageSzDictionaries / ManageProcurementDictionaries).
+    /// Оставлено для обратной совместимости с уже выданными ролями.</summary>
+    [Obsolete("Используй справочники по категориям: ManageVndDictionaries, ManageGeneralDictionaries, ManageSzDictionaries, ManageProcurementDictionaries")]
     ManageDictionaries = 11,
 
     /// <summary>Просмотр ВНД</summary>
@@ -66,5 +69,18 @@ public enum PermissionCode
     ModifyApprovalRoute = 20,
 
     /// <summary>Возможность просматривать черновики других пользователей</summary>
-    ViewOtherUsersDrafts = 21
+    ViewOtherUsersDrafts = 21,
+
+    /// <summary>Управление справочниками ВНД (Виды ВНД, Уровни секретности, Группы пользователей,
+    /// Рубрикатор, Обязательные участники согласования)</summary>
+    ManageVndDictionaries = 22,
+
+    /// <summary>Управление общими справочниками (Органы утверждения, Структурные подразделения, Должности)</summary>
+    ManageGeneralDictionaries = 23,
+
+    /// <summary>Управление справочниками служебных записок (Категории СЗ)</summary>
+    ManageSzDictionaries = 24,
+
+    /// <summary>Управление справочниками закупок (Чёрный список контрагентов, Пороги закупок)</summary>
+    ManageProcurementDictionaries = 25
 }
