@@ -46,4 +46,8 @@ public interface IVndAnalyticsService
 
     /// <summary>Матрица "подразделение-разработчик × статус" — данные для тепловой карты</summary>
     Task<List<VndOrgUnitStatusMatrixItem>> GetOrgUnitStatusMatrixAsync(string language);
+
+    /// <summary>Сводный CSV-отчёт (KPI + основные распределения) для выгрузки со страницы отчётности.
+    /// Возвращает готовые байты файла с BOM, чтобы кириллица корректно открывалась в Excel</summary>
+    Task<byte[]> ExportOverviewCsvAsync(string language);
 }

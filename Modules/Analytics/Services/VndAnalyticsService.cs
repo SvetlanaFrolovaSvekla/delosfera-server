@@ -529,6 +529,69 @@ public class VndAnalyticsService : IVndAnalyticsService
         }).ToList();
     }
 
+    public async Task<byte[]> ExportOverviewCsvAsync(string language)
+    {
+        var overview = await GetOverviewAsync();
+        var statusDistribution = await GetStatusDistributionAsync(language);
+        var typeDistribution = await GetTypeDistributionAsync(language);
+        var developerDistribution = await GetDeveloperDistributionAsync(language, top: 15);
+        var securityLevelDistribution = await GetSecurityLevelDistributionAsync(language);
+        var rubricDistribution = await GetRubricDistributionAsync(language, top: 15);
+
+        var sb = new System.Text.StringBuilder();
+        const string sep = ";";
+
+        void WriteRow(params string[] cells) => sb.AppendLine(string.Join(sep, cells.Select(EscapeCsv)));
+        void WriteSection(string title, IEnumerable<ChartCategoryPoint> points)
+        {
+            sb.AppendLine();
+            WriteRow(title);
+            WriteRow("Показатель", "Количество", "Доля, %");
+            foreach (var p in points)
+                WriteRow(p.Label, p.Value.ToString(), p.Percent.ToString("0.0"));
+        }
+
+        WriteRow($"Отчёт по ВНД — сформирован {DateTime.UtcNow:dd.MM.yyyy HH:mm} UTC");
+
+        sb.AppendLine();
+        WriteRow("KPI-показатели");
+        WriteRow("Показатель", "Значение");
+        WriteRow("Всего документов", overview.Total.ToString());
+        WriteRow("Действующие", overview.Active.ToString());
+        WriteRow("На актуализации", overview.OnActualization.ToString());
+        WriteRow("На согласовании", overview.OnReview.ToString());
+        WriteRow("На консолидации", overview.OnConsolidation.ToString());
+        WriteRow("Архивированные", overview.Archived.ToString());
+        WriteRow("Черновики", overview.Draft.ToString());
+        WriteRow("Требуют внимания (критично + просрочено)", overview.RequiresAttention.ToString());
+        WriteRow("Просрочено по актуализации", overview.Overdue.ToString());
+        WriteRow("Активных согласований сейчас", overview.ApprovalsInProgress.ToString());
+        WriteRow("Создано за последние 30 дней", overview.CreatedLast30Days.ToString());
+        WriteRow("Опубликовано за последние 30 дней", overview.PublishedLast30Days.ToString());
+        WriteRow("Средняя длительность согласования, дн.", overview.AverageApprovalDurationDays.ToString("0.0"));
+        WriteRow("Доля решений по таймауту, %", overview.TimeoutDecisionRatePercent.ToString("0.0"));
+
+        WriteSection("Распределение по статусам", statusDistribution);
+        WriteSection("Распределение по видам документа", typeDistribution);
+        WriteSection("Топ подразделений-разработчиков", developerDistribution);
+        WriteSection("Распределение по уровням секретности", securityLevelDistribution);
+        WriteSection("Топ рубрик классификатора", rubricDistribution);
+
+        var preamble = System.Text.Encoding.UTF8.GetPreamble();
+        var body = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        var result = new byte[preamble.Length + body.Length];
+        Buffer.BlockCopy(preamble, 0, result, 0, preamble.Length);
+        Buffer.BlockCopy(body, 0, result, preamble.Length, body.Length);
+        return result;
+    }
+
+    private static string EscapeCsv(string value)
+    {
+        if (value.Contains(';') || value.Contains('"') || value.Contains('\n'))
+            return $"\"{value.Replace("\"", "\"\"")}\"";
+        return value;
+    }
+
     // --- Вспомогательные методы ---
 
     private static string StatusLabel(VndStatus status, string language) => (status, language) switch

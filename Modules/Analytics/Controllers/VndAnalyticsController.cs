@@ -116,4 +116,16 @@ public class VndAnalyticsController : ControllerBase
     [ProducesResponseType(typeof(List<VndOrgUnitStatusMatrixItem>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<VndOrgUnitStatusMatrixItem>>> GetOrgUnitStatusMatrix()
         => Ok(await _service.GetOrgUnitStatusMatrixAsync(_languageResolver.Resolve(Request)));
+
+    /// <summary>Выгрузка сводного CSV-отчёта (KPI + основные распределения) с кнопки "Скачать отчёт"
+    /// на странице отчётности. Требует отдельное право на экспорт статистики</summary>
+    [HttpGet("export")]
+    [RequirePermission(PermissionCode.ExportFullStatisticsReport)]
+    [Produces("text/csv")]
+    public async Task<IActionResult> ExportCsv()
+    {
+        var bytes = await _service.ExportOverviewCsvAsync(_languageResolver.Resolve(Request));
+        var fileName = $"vnd-report-{DateTime.UtcNow:yyyy-MM-dd}.csv";
+        return File(bytes, "text/csv; charset=utf-8", fileName);
+    }
 }
