@@ -31,7 +31,6 @@
     <ItemGroup>
         <Compile Remove="NotesDev/LdapComments.cs" />
         <Compile Remove="NotesDev/Note.txt" />
-        <None Include="NotesDev\Note.txt" />
         <Compile Remove="NotesDev/Ldap.cs" />
     </ItemGroup>
     
