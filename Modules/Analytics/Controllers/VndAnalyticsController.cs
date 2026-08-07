@@ -11,13 +11,11 @@ using Microsoft.AspNetCore.Mvc;
 namespace delosfera_server.Modules.Analytics.Controllers;
 
 /// <summary>
-/// Аналитика по модулю ВНД для страницы отчётности: KPI-сводки и данные для графиков
-/// (динамика жизненного цикла, распределения по справочникам, эффективность согласования,
-/// сроки актуализации). Все методы отдают только числа/агрегаты — без самих документов.
+/// Аналитика по модулю ВНД для страницы отчётности
 /// </summary>
 [ApiController]
 [Route("/analytics/vnd")]
-[Tags("Аналитика — ВНД")]
+[Tags("Аналитика - ВНД")]
 [Authorize]
 [RequirePermission(PermissionCode.ViewFullStatistics)]
 public class VndAnalyticsController : ControllerBase
@@ -31,7 +29,7 @@ public class VndAnalyticsController : ControllerBase
         _languageResolver = languageResolver;
     }
 
-    /// <summary>KPI-плашки для верхней части страницы отчётности: сколько ВНД в каждом статусе,
+    /// <summary>KPI для верхней части страницы отчётности: сколько ВНД в каждом статусе,
     /// сколько просрочено по актуализации, сколько согласований идёт прямо сейчас, средние сроки</summary>
     [HttpGet("overview")]
     [ProducesResponseType(typeof(VndOverviewResponse), StatusCodes.Status200OK)]
@@ -98,7 +96,7 @@ public class VndAnalyticsController : ControllerBase
     public async Task<ActionResult<VndApprovalPerformanceResponse>> GetApprovalPerformance([FromBody] AnalyticsPeriodRequest? request)
         => Ok(await _service.GetApprovalPerformanceAsync(request));
 
-    /// <summary>Загрузка согласующих подразделений — сколько этапов согласования прошло через
+    /// <summary>Загрузка согласующих подразделений - сколько этапов согласования прошло через
     /// каждое подразделение, доля решений по таймауту (индикатор "узких мест" маршрута)</summary>
     [HttpGet("approver-workload")]
     [ProducesResponseType(typeof(List<VndApproverWorkloadItem>), StatusCodes.Status200OK)]

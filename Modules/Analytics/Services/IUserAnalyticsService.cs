@@ -20,7 +20,7 @@ public interface IUserAnalyticsService
     Task<List<ChartCategoryPoint>> GetOrgUnitDistributionAsync(string language, int top = 10);
 
     /// <summary>Распределение по давности последнего входа: сегодня / 7 дней / 30 дней / 90 дней /
-    /// давно / никогда не входили — индикатор вовлечённости</summary>
+    /// давно / никогда не входили - индикатор вовлечённости</summary>
     Task<UserActivityBucketsResponse> GetActivityBucketsAsync();
 
     /// <summary>Топ пользователей-инициаторов по количеству созданных/актуализируемых ВНД</summary>

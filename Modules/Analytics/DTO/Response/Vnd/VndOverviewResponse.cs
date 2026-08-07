@@ -43,7 +43,7 @@ public class VndOverviewResponse
     /// до завершения), по завершённым процессам за всё время</summary>
     public double AverageApprovalDurationDays { get; set; }
 
-    /// <summary>Доля решений согласующих, зачтённых автоматически по таймауту (0-100%) —
+    /// <summary>Доля решений согласующих, зачтённых автоматически по таймауту (0-100%) -
     /// индикатор дисциплины согласования</summary>
     public double TimeoutDecisionRatePercent { get; set; }
 }

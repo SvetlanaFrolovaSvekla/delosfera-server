@@ -15,7 +15,7 @@ public class VndActualizationTrendPoint
     /// <summary>Сколько циклов завершено (опубликовано) в периоде</summary>
     public int Published { get; set; }
 
-    /// <summary>Из завершённых — сколько содержали реальные изменения (HadChanges == true)</summary>
+    /// <summary>Из завершённых - сколько содержали реальные изменения (HadChanges == true)</summary>
     public int PublishedWithChanges { get; set; }
 
     /// <summary>Средняя длительность цикла в днях (от старта до публикации), для циклов,

@@ -7,6 +7,7 @@ public interface IRoleService
 {
     Task<List<PermissionResponse>> GetAllPermissionsAsync(string languageCode);
     Task<List<RoleResponse>> GetAllAsync(RoleSortBy sortBy, string? search, string languageCode);
+    Task<RoleResponse> GetByIdAsync(int id, string languageCode); // новое
     Task<RoleResponse> CreateAsync(CreateRoleRequest request, string languageCode);
     Task<RoleResponse> UpdateAsync(int id, UpdateRoleRequest request, string languageCode);
     Task DeleteAsync(int id);

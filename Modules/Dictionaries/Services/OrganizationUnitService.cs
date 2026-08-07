@@ -1,4 +1,5 @@
 ﻿using delosfera_server.Common.Extensions;
+using delosfera_server.Common.Services;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
@@ -18,7 +19,8 @@ public class OrganizationUnitService : IOrganizationUnitService
         _db = db;
     }
 
-    public async Task<List<OrganizationUnitResponse>> GetAllAsync(OrganizationUnitSortBy sortBy, string? search, string languageCode)
+    public async Task<List<OrganizationUnitResponse>> GetAllAsync(OrganizationUnitSortBy sortBy, string? search,
+        string languageCode)
     {
         IQueryable<OrganizationUnit> query = _db.OrganizationUnits
             .Include(x => x.HeadUser)
@@ -50,8 +52,11 @@ public class OrganizationUnitService : IOrganizationUnitService
     {
         if (request.ParentId.HasValue)
         {
-            await EnsureParentExistsAsync(request.ParentId.Value);
-            await EnsureDepthNotExceededAsync(request.ParentId.Value);
+            await HierarchyValidation.EnsureParentExistsAsync(_db.OrganizationUnits, request.ParentId.Value,
+                pid => $"Родительское подразделение с id={pid} не найдено");
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.OrganizationUnits, request.ParentId.Value,
+                MaxDepth,
+                depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
         if (request.HeadUserId.HasValue)
@@ -61,12 +66,8 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         var entity = new OrganizationUnit
         {
-            TitleRu = request.TitleRu,
-            TitleEn = request.TitleEn,
-            TitleKg = request.TitleKg,
-            ParentId = request.ParentId,
-            HeadUserId = request.HeadUserId,
-            CuratorUserId = request.CuratorUserId
+            TitleRu = request.TitleRu, TitleEn = request.TitleEn, TitleKg = request.TitleKg,
+            ParentId = request.ParentId, HeadUserId = request.HeadUserId, CuratorUserId = request.CuratorUserId
         };
 
         _db.OrganizationUnits.Add(entity);
@@ -75,7 +76,8 @@ public class OrganizationUnitService : IOrganizationUnitService
         return await LoadResponseAsync(entity.Id, languageCode);
     }
 
-    public async Task<OrganizationUnitResponse> UpdateAsync(int id, UpdateOrganizationUnitRequest request, string languageCode)
+    public async Task<OrganizationUnitResponse> UpdateAsync(int id, UpdateOrganizationUnitRequest request,
+        string languageCode)
     {
         var entity = await _db.OrganizationUnits.FindAsync(id)
                      ?? throw new KeyNotFoundException($"Структурное подразделение с id={id} не найдено");
@@ -84,9 +86,14 @@ public class OrganizationUnitService : IOrganizationUnitService
         {
             if (request.ParentId.Value == id)
                 throw new InvalidOperationException("Подразделение не может быть родителем самого себя");
-            await EnsureParentExistsAsync(request.ParentId.Value);
-            await EnsureNoCircularReferenceAsync(id, request.ParentId.Value);
-            await EnsureDepthNotExceededAsync(request.ParentId.Value);
+
+            await HierarchyValidation.EnsureParentExistsAsync(_db.OrganizationUnits, request.ParentId.Value,
+                pid => $"Родительское подразделение с id={pid} не найдено");
+            await HierarchyValidation.EnsureNoCircularReferenceAsync(_db.OrganizationUnits, id, request.ParentId.Value,
+                "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.OrganizationUnits, request.ParentId.Value,
+                MaxDepth,
+                depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
         if (request.HeadUserId.HasValue)
@@ -104,7 +111,7 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         return await LoadResponseAsync(id, languageCode);
     }
-    
+
     private async Task EnsureUserExistsAsync(int userId, string role)
     {
         var exists = await _db.Users.AnyAsync(x => x.Id == userId);
@@ -119,12 +126,12 @@ public class OrganizationUnitService : IOrganizationUnitService
             .FirstAsync(x => x.Id == id);
         return ToResponse(entity, languageCode);
     }
-    
+
 
     public async Task DeleteAsync(int id)
     {
         var entity = await _db.OrganizationUnits.FindAsync(id)
-            ?? throw new KeyNotFoundException($"Структурное подразделение с id={id} не найдено");
+                     ?? throw new KeyNotFoundException($"Структурное подразделение с id={id} не найдено");
 
         var hasChildren = await _db.OrganizationUnits.AnyAsync(x => x.ParentId == id);
         if (hasChildren)
@@ -141,53 +148,6 @@ public class OrganizationUnitService : IOrganizationUnitService
         {
             throw new InvalidOperationException(
                 "Нельзя удалить подразделение — на него есть ссылки в других документах");
-        }
-    }
-
-    private async Task EnsureParentExistsAsync(int parentId)
-    {
-        var exists = await _db.OrganizationUnits.AnyAsync(x => x.Id == parentId);
-        if (!exists)
-            throw new KeyNotFoundException($"Родительское подразделение с id={parentId} не найдено");
-    }
-
-    private async Task EnsureNoCircularReferenceAsync(int nodeId, int newParentId)
-    {
-        var currentId = (int?)newParentId;
-        var visited = new HashSet<int>();
-
-        while (currentId.HasValue)
-        {
-            if (currentId.Value == nodeId)
-                throw new InvalidOperationException(
-                    "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
-
-            if (!visited.Add(currentId.Value))
-                break;
-
-            currentId = await _db.OrganizationUnits
-                .Where(x => x.Id == currentId.Value)
-                .Select(x => x.ParentId)
-                .FirstOrDefaultAsync();
-        }
-    }
-
-    private async Task EnsureDepthNotExceededAsync(int parentId)
-    {
-        var depth = 1;
-        var currentId = (int?)parentId;
-
-        while (currentId.HasValue)
-        {
-            depth++;
-            if (depth > MaxDepth)
-                throw new InvalidOperationException(
-                    $"Превышена максимальная глубина вложенности ({MaxDepth} уровней)");
-
-            currentId = await _db.OrganizationUnits
-                .Where(x => x.Id == currentId.Value)
-                .Select(x => x.ParentId)
-                .FirstOrDefaultAsync();
         }
     }
 

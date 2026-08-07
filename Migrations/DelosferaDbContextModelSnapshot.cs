@@ -1480,6 +1480,880 @@ namespace delosfera_server.Migrations
                         });
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.CoordinationDefaultApprover", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ApproverUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("approver_user_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_coordination_default_approver");
+
+                    b.HasIndex("ApproverUserId")
+                        .HasDatabaseName("ix_vnd_coordination_default_approver_approver_user_id");
+
+                    b.HasIndex("Kind")
+                        .IsUnique()
+                        .HasDatabaseName("ix_vnd_coordination_default_approver_kind");
+
+                    b.ToTable("vnd_coordination_default_approver", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            ApproverUserId = 16,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Kind = 0,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 2,
+                            ApproverUserId = 14,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Kind = 1,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 3,
+                            ApproverUserId = 15,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Kind = 2,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 4,
+                            ApproverUserId = 3,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Kind = 4,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndActualizationRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateOnly?>("DueActualizationDateAfter")
+                        .HasColumnType("date")
+                        .HasColumnName("due_actualization_date_after");
+
+                    b.Property<DateOnly?>("DueActualizationDateBefore")
+                        .HasColumnType("date")
+                        .HasColumnName("due_actualization_date_before");
+
+                    b.Property<bool?>("HadChanges")
+                        .HasColumnType("boolean")
+                        .HasColumnName("had_changes");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at");
+
+                    b.Property<bool>("RequiresApproval")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_approval");
+
+                    b.Property<int>("ResponsibleUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("responsible_user_id");
+
+                    b.Property<bool>("ShiftNextPeriod")
+                        .HasColumnType("boolean")
+                        .HasColumnName("shift_next_period");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("VndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_actualization_record");
+
+                    b.HasIndex("ResponsibleUserId")
+                        .HasDatabaseName("ix_vnd_actualization_record_responsible_user_id");
+
+                    b.HasIndex("VndId", "StartedAt")
+                        .HasDatabaseName("ix_vnd_actualization_record_vnd_id_started_at");
+
+                    b.ToTable("vnd_actualization_record", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndActualizationRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("decided_by_user_id");
+
+                    b.Property<int>("RequestedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("requested_by_user_id");
+
+                    b.Property<bool>("RequiresApproval")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_approval");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("VndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_actualization_request");
+
+                    b.HasIndex("DecidedByUserId")
+                        .HasDatabaseName("ix_vnd_actualization_request_decided_by_user_id");
+
+                    b.HasIndex("RequestedByUserId")
+                        .HasDatabaseName("ix_vnd_actualization_request_requested_by_user_id");
+
+                    b.HasIndex("VndId", "RequestedByUserId", "Status")
+                        .HasDatabaseName("ix_vnd_actualization_request_vnd_id_requested_by_user_id_status");
+
+                    b.ToTable("vnd_actualization_request", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("FinalHoldDeadlineMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("final_hold_deadline_minutes");
+
+                    b.Property<DateTime?>("FinalHoldStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("final_hold_started_at");
+
+                    b.Property<int>("InitiatorUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("initiator_user_id");
+
+                    b.Property<int>("PrimaryDeadlineMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("primary_deadline_minutes");
+
+                    b.Property<DateTime>("PrimaryStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("primary_started_at");
+
+                    b.Property<int>("RedactionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("redaction_id");
+
+                    b.Property<int>("RepeatDeadlineMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("repeat_deadline_minutes");
+
+                    b.Property<string>("RepeatInitiatorComment")
+                        .HasColumnType("text")
+                        .HasColumnName("repeat_initiator_comment");
+
+                    b.Property<DateTime?>("RepeatStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("repeat_started_at");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("VndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_approval_process");
+
+                    b.HasIndex("RedactionId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_vnd_approval_process_redaction_id");
+
+                    b.HasIndex("VndId")
+                        .HasDatabaseName("ix_vnd_approval_process_vnd_id");
+
+                    b.ToTable("vnd_approval_process", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalStage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ApprovalProcessId")
+                        .HasColumnType("integer")
+                        .HasColumnName("approval_process_id");
+
+                    b.Property<int>("ApproverUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("approver_user_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FinalHoldComment")
+                        .HasColumnType("text")
+                        .HasColumnName("final_hold_comment");
+
+                    b.Property<DateTime?>("FinalHoldDecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("final_hold_decided_at");
+
+                    b.Property<int?>("FinalHoldDecision")
+                        .HasColumnType("integer")
+                        .HasColumnName("final_hold_decision");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer")
+                        .HasColumnName("order");
+
+                    b.Property<int>("OrgUnitId")
+                        .HasColumnType("integer")
+                        .HasColumnName("org_unit_id");
+
+                    b.Property<bool>("ParticipatesInRepeat")
+                        .HasColumnType("boolean")
+                        .HasColumnName("participates_in_repeat");
+
+                    b.Property<string>("PrimaryComment")
+                        .HasColumnType("text")
+                        .HasColumnName("primary_comment");
+
+                    b.Property<DateTime?>("PrimaryDecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("primary_decided_at");
+
+                    b.Property<int>("PrimaryDecision")
+                        .HasColumnType("integer")
+                        .HasColumnName("primary_decision");
+
+                    b.Property<string>("RepeatComment")
+                        .HasColumnType("text")
+                        .HasColumnName("repeat_comment");
+
+                    b.Property<DateTime?>("RepeatDecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("repeat_decided_at");
+
+                    b.Property<int?>("RepeatDecision")
+                        .HasColumnType("integer")
+                        .HasColumnName("repeat_decision");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_approval_stage");
+
+                    b.HasIndex("ApproverUserId")
+                        .HasDatabaseName("ix_vnd_approval_stage_approver_user_id");
+
+                    b.HasIndex("OrgUnitId")
+                        .HasDatabaseName("ix_vnd_approval_stage_org_unit_id");
+
+                    b.HasIndex("ApprovalProcessId", "Order")
+                        .IsUnique()
+                        .HasDatabaseName("ix_vnd_approval_stage_approval_process_id_order");
+
+                    b.ToTable("vnd_approval_stage", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndDisagreementMatrixRow", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ApprovalProcessId")
+                        .HasColumnType("integer")
+                        .HasColumnName("approval_process_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<string>("DeveloperJustification")
+                        .HasColumnType("text")
+                        .HasColumnName("developer_justification");
+
+                    b.Property<string>("DeveloperPosition")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("developer_position");
+
+                    b.Property<string>("OpponentPosition")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("opponent_position");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_disagreement_matrix_row");
+
+                    b.HasIndex("ApprovalProcessId")
+                        .HasDatabaseName("ix_vnd_disagreement_matrix_row_approval_process_id");
+
+                    b.ToTable("vnd_disagreement_matrix_row", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndDocument", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("ActualizationRequiresApproval")
+                        .HasColumnType("boolean")
+                        .HasColumnName("actualization_requires_approval");
+
+                    b.Property<int?>("ActualizationResponsibleUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("actualization_responsible_user_id");
+
+                    b.Property<bool>("ActualizationShiftNextPeriod")
+                        .HasColumnType("boolean")
+                        .HasColumnName("actualization_shift_next_period");
+
+                    b.Property<string>("AdoptionCode")
+                        .HasColumnType("text")
+                        .HasColumnName("adoption_code");
+
+                    b.Property<DateOnly?>("AdoptionDate")
+                        .HasColumnType("date")
+                        .HasColumnName("adoption_date");
+
+                    b.Property<DateOnly?>("ArchivedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("archived_date");
+
+                    b.Property<string>("CancelCode")
+                        .HasColumnType("text")
+                        .HasColumnName("cancel_code");
+
+                    b.Property<DateOnly?>("CancelDate")
+                        .HasColumnType("date")
+                        .HasColumnName("cancel_date");
+
+                    b.Property<string>("CancelReason")
+                        .HasColumnType("text")
+                        .HasColumnName("cancel_reason");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<int?>("CuratorDeveloperId")
+                        .HasColumnType("integer")
+                        .HasColumnName("curator_developer_id");
+
+                    b.Property<int?>("CurrentRedactionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("current_redaction_id");
+
+                    b.Property<int>("DeveloperId")
+                        .HasColumnType("integer")
+                        .HasColumnName("developer_id");
+
+                    b.Property<DateOnly?>("DueActualizationDate")
+                        .HasColumnType("date")
+                        .HasColumnName("due_actualization_date");
+
+                    b.Property<DateOnly?>("EffectiveDate")
+                        .HasColumnType("date")
+                        .HasColumnName("effective_date");
+
+                    b.Property<DateOnly?>("LastActualizationDate")
+                        .HasColumnType("date")
+                        .HasColumnName("last_actualization_date");
+
+                    b.Property<bool>("LastActualizationHadChanges")
+                        .HasColumnType("boolean")
+                        .HasColumnName("last_actualization_had_changes");
+
+                    b.Property<int>("OrganId")
+                        .HasColumnType("integer")
+                        .HasColumnName("organ_id");
+
+                    b.Property<int>("Period")
+                        .HasColumnType("integer")
+                        .HasColumnName("period");
+
+                    b.Property<DateOnly?>("RequisitesChangedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("requisites_changed_date");
+
+                    b.Property<DateOnly?>("RevisionChangedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("revision_changed_date");
+
+                    b.Property<int>("SecrecyLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("secrecy_level_id");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TitleEn")
+                        .HasColumnType("text")
+                        .HasColumnName("title_en");
+
+                    b.Property<string>("TitleKg")
+                        .HasColumnType("text")
+                        .HasColumnName("title_kg");
+
+                    b.Property<string>("TitleRu")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title_ru");
+
+                    b.Property<int>("TypeId")
+                        .HasColumnType("integer")
+                        .HasColumnName("type_id");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_document");
+
+                    b.HasIndex("ActualizationResponsibleUserId")
+                        .HasDatabaseName("ix_vnd_document_actualization_responsible_user_id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_vnd_document_code");
+
+                    b.HasIndex("CreatedByUserId")
+                        .HasDatabaseName("ix_vnd_document_created_by_user_id");
+
+                    b.HasIndex("CuratorDeveloperId")
+                        .HasDatabaseName("ix_vnd_document_curator_developer_id");
+
+                    b.HasIndex("CurrentRedactionId")
+                        .HasDatabaseName("ix_vnd_document_current_redaction_id");
+
+                    b.HasIndex("DeveloperId")
+                        .HasDatabaseName("ix_vnd_document_developer_id");
+
+                    b.HasIndex("OrganId")
+                        .HasDatabaseName("ix_vnd_document_organ_id");
+
+                    b.HasIndex("SecrecyLevelId")
+                        .HasDatabaseName("ix_vnd_document_secrecy_level_id");
+
+                    b.HasIndex("TypeId")
+                        .HasDatabaseName("ix_vnd_document_type_id");
+
+                    b.ToTable("vnd_document", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            ActualizationRequiresApproval = false,
+                            ActualizationShiftNextPeriod = false,
+                            AdoptionCode = "пр. №4(2)",
+                            AdoptionDate = new DateOnly(2023, 2, 9),
+                            Code = "10062",
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CreatedByUserId = 14,
+                            CuratorDeveloperId = 1,
+                            DeveloperId = 26,
+                            DueActualizationDate = new DateOnly(2026, 8, 9),
+                            EffectiveDate = new DateOnly(2023, 2, 16),
+                            LastActualizationDate = new DateOnly(2025, 8, 9),
+                            LastActualizationHadChanges = true,
+                            OrganId = 3,
+                            Period = 2,
+                            RequisitesChangedDate = new DateOnly(2026, 1, 12),
+                            RevisionChangedDate = new DateOnly(2026, 7, 20),
+                            SecrecyLevelId = 3,
+                            Status = 3,
+                            TitleRu = "Порядок работы с обеспечением (залогами)",
+                            TypeId = 13,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 2,
+                            ActualizationRequiresApproval = false,
+                            ActualizationShiftNextPeriod = false,
+                            AdoptionCode = "пр. №9(1)",
+                            AdoptionDate = new DateOnly(2021, 3, 14),
+                            Code = "10084",
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CreatedByUserId = 14,
+                            CuratorDeveloperId = 1,
+                            DeveloperId = 26,
+                            DueActualizationDate = new DateOnly(2026, 7, 22),
+                            EffectiveDate = new DateOnly(2021, 4, 1),
+                            LastActualizationDate = new DateOnly(2025, 7, 22),
+                            LastActualizationHadChanges = false,
+                            OrganId = 7,
+                            Period = 2,
+                            RequisitesChangedDate = new DateOnly(2025, 5, 5),
+                            RevisionChangedDate = new DateOnly(2026, 6, 18),
+                            SecrecyLevelId = 2,
+                            Status = 0,
+                            TitleRu = "Политика управления кредитными рисками",
+                            TypeId = 11,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 3,
+                            ActualizationRequiresApproval = false,
+                            ActualizationShiftNextPeriod = false,
+                            AdoptionCode = "пр. №2(5)",
+                            AdoptionDate = new DateOnly(2020, 1, 20),
+                            Code = "10011",
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CreatedByUserId = 7,
+                            CuratorDeveloperId = 11,
+                            DeveloperId = 38,
+                            DueActualizationDate = new DateOnly(2026, 7, 25),
+                            EffectiveDate = new DateOnly(2020, 2, 1),
+                            LastActualizationDate = new DateOnly(2025, 7, 25),
+                            LastActualizationHadChanges = true,
+                            OrganId = 3,
+                            Period = 2,
+                            RequisitesChangedDate = new DateOnly(2024, 10, 10),
+                            RevisionChangedDate = new DateOnly(2026, 7, 1),
+                            SecrecyLevelId = 1,
+                            Status = 1,
+                            TitleRu = "Регламент кассовых операций",
+                            TypeId = 17,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 4,
+                            ActualizationRequiresApproval = false,
+                            ActualizationShiftNextPeriod = false,
+                            AdoptionCode = "пр. ОСА-1",
+                            AdoptionDate = new DateOnly(2019, 5, 5),
+                            Code = "10201",
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CreatedByUserId = 15,
+                            CuratorDeveloperId = 9,
+                            DeveloperId = 32,
+                            DueActualizationDate = new DateOnly(2026, 9, 28),
+                            EffectiveDate = new DateOnly(2019, 6, 1),
+                            LastActualizationDate = new DateOnly(2025, 9, 28),
+                            LastActualizationHadChanges = false,
+                            OrganId = 2,
+                            Period = 2,
+                            RequisitesChangedDate = new DateOnly(2024, 3, 1),
+                            RevisionChangedDate = new DateOnly(2025, 9, 14),
+                            SecrecyLevelId = 1,
+                            Status = 0,
+                            TitleRu = "Кодекс корпоративной этики",
+                            TypeId = 5,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 5,
+                            ActualizationRequiresApproval = false,
+                            ActualizationShiftNextPeriod = false,
+                            AdoptionCode = "пр. №1(4)",
+                            AdoptionDate = new DateOnly(2019, 1, 10),
+                            ArchivedDate = new DateOnly(2024, 3, 20),
+                            CancelCode = "пр. №8(3)",
+                            CancelDate = new DateOnly(2024, 3, 14),
+                            CancelReason = "Заменён новой редакцией ВНД-037 v4.1",
+                            Code = "10037",
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CreatedByUserId = 12,
+                            CuratorDeveloperId = 12,
+                            DeveloperId = 4,
+                            EffectiveDate = new DateOnly(2019, 2, 1),
+                            LastActualizationHadChanges = false,
+                            OrganId = 3,
+                            Period = 2,
+                            RequisitesChangedDate = new DateOnly(2019, 2, 1),
+                            RevisionChangedDate = new DateOnly(2019, 2, 1),
+                            SecrecyLevelId = 2,
+                            Status = 4,
+                            TitleRu = "Регламент управления ликвидностью (ред. 2019)",
+                            TypeId = 17,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 6,
+                            ActualizationRequiresApproval = false,
+                            ActualizationShiftNextPeriod = false,
+                            Code = "10210",
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CreatedByUserId = 17,
+                            DeveloperId = 33,
+                            DueActualizationDate = new DateOnly(2027, 8, 4),
+                            LastActualizationDate = new DateOnly(2026, 8, 4),
+                            LastActualizationHadChanges = false,
+                            OrganId = 2,
+                            Period = 2,
+                            SecrecyLevelId = 3,
+                            Status = 5,
+                            TitleRu = "Тест",
+                            TypeId = 1,
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("SourceVndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("source_vnd_id");
+
+                    b.Property<int>("TargetVndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("target_vnd_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_link");
+
+                    b.HasIndex("SourceVndId")
+                        .HasDatabaseName("ix_vnd_link_source_vnd_id");
+
+                    b.HasIndex("TargetVndId")
+                        .HasDatabaseName("ix_vnd_link_target_vnd_id");
+
+                    b.ToTable("vnd_link", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedaction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ApprovalStatus")
+                        .HasColumnType("integer")
+                        .HasColumnName("approval_status");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<int?>("DocFileEnId")
+                        .HasColumnType("integer")
+                        .HasColumnName("doc_file_en_id");
+
+                    b.Property<int?>("DocFileKgId")
+                        .HasColumnType("integer")
+                        .HasColumnName("doc_file_kg_id");
+
+                    b.Property<int>("DocFileRuId")
+                        .HasColumnType("integer")
+                        .HasColumnName("doc_file_ru_id");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer")
+                        .HasColumnName("number");
+
+                    b.Property<bool>("RequiresApproval")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_approval");
+
+                    b.Property<int?>("TidFileId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tid_file_id");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("VndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_redaction");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_vnd_redaction_code");
+
+                    b.HasIndex("DocFileEnId")
+                        .HasDatabaseName("ix_vnd_redaction_doc_file_en_id");
+
+                    b.HasIndex("DocFileKgId")
+                        .HasDatabaseName("ix_vnd_redaction_doc_file_kg_id");
+
+                    b.HasIndex("DocFileRuId")
+                        .HasDatabaseName("ix_vnd_redaction_doc_file_ru_id");
+
+                    b.HasIndex("TidFileId")
+                        .HasDatabaseName("ix_vnd_redaction_tid_file_id");
+
+                    b.HasIndex("VndId", "Number")
+                        .IsUnique()
+                        .HasDatabaseName("ix_vnd_redaction_vnd_id_number");
+
+                    b.ToTable("vnd_redaction", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionAttachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("FileAttachmentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("file_attachment_id");
+
+                    b.Property<int>("VndRedactionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_redaction_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_redaction_attachment");
+
+                    b.HasIndex("FileAttachmentId")
+                        .HasDatabaseName("ix_vnd_redaction_attachment_file_attachment_id");
+
+                    b.HasIndex("VndRedactionId", "FileAttachmentId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_vnd_redaction_attachment_vnd_redaction_id_file_attachment_id");
+
+                    b.ToTable("vnd_redaction_attachment", (string)null);
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Files.Models.FileAttachment", b =>
                 {
                     b.Property<int>("Id")
@@ -1725,7 +2599,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 2,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 12, 16 },
+                            PermissionCodes = new[] { 11, 15 },
                             TitleEn = "Regular User",
                             TitleKg = "Жөнөкөй колдонуучу",
                             TitleRu = "Рядовой пользователь",
@@ -1735,7 +2609,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 3,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 4, 5, 6, 10, 11, 12, 13, 17, 18, 19 },
+                            PermissionCodes = new[] { 1, 4, 5, 6, 10, 21, 11, 12, 16, 17, 18, 25 },
                             TitleEn = "VND Editor",
                             TitleKg = "ВНД редактору",
                             TitleRu = "Редактор ВНД",
@@ -2126,873 +3000,6 @@ namespace delosfera_server.Migrations
                         });
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.CoordinationDefaultApprover", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("ApproverUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("approver_user_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("Kind")
-                        .HasColumnType("integer")
-                        .HasColumnName("kind");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_coordination_default_approver");
-
-                    b.HasIndex("ApproverUserId")
-                        .HasDatabaseName("ix_vnd_coordination_default_approver_approver_user_id");
-
-                    b.HasIndex("Kind")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_coordination_default_approver_kind");
-
-                    b.ToTable("vnd_coordination_default_approver", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            ApproverUserId = 2,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 0,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 2,
-                            ApproverUserId = 14,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 1,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 3,
-                            ApproverUserId = 15,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 4,
-                            ApproverUserId = 3,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 4,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        });
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRecord", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateOnly?>("DueActualizationDateAfter")
-                        .HasColumnType("date")
-                        .HasColumnName("due_actualization_date_after");
-
-                    b.Property<DateOnly?>("DueActualizationDateBefore")
-                        .HasColumnType("date")
-                        .HasColumnName("due_actualization_date_before");
-
-                    b.Property<bool?>("HadChanges")
-                        .HasColumnType("boolean")
-                        .HasColumnName("had_changes");
-
-                    b.Property<DateTime?>("PublishedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("published_at");
-
-                    b.Property<bool>("RequiresApproval")
-                        .HasColumnType("boolean")
-                        .HasColumnName("requires_approval");
-
-                    b.Property<int>("ResponsibleUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("responsible_user_id");
-
-                    b.Property<bool>("ShiftNextPeriod")
-                        .HasColumnType("boolean")
-                        .HasColumnName("shift_next_period");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("started_at");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("VndId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_actualization_record");
-
-                    b.HasIndex("ResponsibleUserId")
-                        .HasDatabaseName("ix_vnd_actualization_record_responsible_user_id");
-
-                    b.HasIndex("VndId", "StartedAt")
-                        .HasDatabaseName("ix_vnd_actualization_record_vnd_id_started_at");
-
-                    b.ToTable("vnd_actualization_record", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRequest", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateTime?>("DecidedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("decided_at");
-
-                    b.Property<int?>("DecidedByUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("decided_by_user_id");
-
-                    b.Property<int>("RequestedByUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("requested_by_user_id");
-
-                    b.Property<bool>("RequiresApproval")
-                        .HasColumnType("boolean")
-                        .HasColumnName("requires_approval");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("VndId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_actualization_request");
-
-                    b.HasIndex("DecidedByUserId")
-                        .HasDatabaseName("ix_vnd_actualization_request_decided_by_user_id");
-
-                    b.HasIndex("RequestedByUserId")
-                        .HasDatabaseName("ix_vnd_actualization_request_requested_by_user_id");
-
-                    b.HasIndex("VndId", "RequestedByUserId", "Status")
-                        .HasDatabaseName("ix_vnd_actualization_request_vnd_id_requested_by_user_id_status");
-
-                    b.ToTable("vnd_actualization_request", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndApprovalProcess", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("completed_at");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("FinalHoldDeadlineMinutes")
-                        .HasColumnType("integer")
-                        .HasColumnName("final_hold_deadline_minutes");
-
-                    b.Property<DateTime?>("FinalHoldStartedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("final_hold_started_at");
-
-                    b.Property<int>("InitiatorUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("initiator_user_id");
-
-                    b.Property<int>("PrimaryDeadlineMinutes")
-                        .HasColumnType("integer")
-                        .HasColumnName("primary_deadline_minutes");
-
-                    b.Property<DateTime>("PrimaryStartedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("primary_started_at");
-
-                    b.Property<int>("RedactionId")
-                        .HasColumnType("integer")
-                        .HasColumnName("redaction_id");
-
-                    b.Property<int>("RepeatDeadlineMinutes")
-                        .HasColumnType("integer")
-                        .HasColumnName("repeat_deadline_minutes");
-
-                    b.Property<string>("RepeatInitiatorComment")
-                        .HasColumnType("text")
-                        .HasColumnName("repeat_initiator_comment");
-
-                    b.Property<DateTime?>("RepeatStartedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("repeat_started_at");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("VndId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_approval_process");
-
-                    b.HasIndex("RedactionId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_approval_process_redaction_id");
-
-                    b.HasIndex("VndId")
-                        .HasDatabaseName("ix_vnd_approval_process_vnd_id");
-
-                    b.ToTable("vnd_approval_process", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndApprovalStage", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ApprovalProcessId")
-                        .HasColumnType("integer")
-                        .HasColumnName("approval_process_id");
-
-                    b.Property<int>("ApproverUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("approver_user_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("FinalHoldComment")
-                        .HasColumnType("text")
-                        .HasColumnName("final_hold_comment");
-
-                    b.Property<DateTime?>("FinalHoldDecidedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("final_hold_decided_at");
-
-                    b.Property<int?>("FinalHoldDecision")
-                        .HasColumnType("integer")
-                        .HasColumnName("final_hold_decision");
-
-                    b.Property<int>("Kind")
-                        .HasColumnType("integer")
-                        .HasColumnName("kind");
-
-                    b.Property<int>("Order")
-                        .HasColumnType("integer")
-                        .HasColumnName("order");
-
-                    b.Property<int>("OrgUnitId")
-                        .HasColumnType("integer")
-                        .HasColumnName("org_unit_id");
-
-                    b.Property<bool>("ParticipatesInRepeat")
-                        .HasColumnType("boolean")
-                        .HasColumnName("participates_in_repeat");
-
-                    b.Property<string>("PrimaryComment")
-                        .HasColumnType("text")
-                        .HasColumnName("primary_comment");
-
-                    b.Property<DateTime?>("PrimaryDecidedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("primary_decided_at");
-
-                    b.Property<int>("PrimaryDecision")
-                        .HasColumnType("integer")
-                        .HasColumnName("primary_decision");
-
-                    b.Property<string>("RepeatComment")
-                        .HasColumnType("text")
-                        .HasColumnName("repeat_comment");
-
-                    b.Property<DateTime?>("RepeatDecidedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("repeat_decided_at");
-
-                    b.Property<int?>("RepeatDecision")
-                        .HasColumnType("integer")
-                        .HasColumnName("repeat_decision");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_approval_stage");
-
-                    b.HasIndex("ApproverUserId")
-                        .HasDatabaseName("ix_vnd_approval_stage_approver_user_id");
-
-                    b.HasIndex("OrgUnitId")
-                        .HasDatabaseName("ix_vnd_approval_stage_org_unit_id");
-
-                    b.HasIndex("ApprovalProcessId", "Order")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_approval_stage_approval_process_id_order");
-
-                    b.ToTable("vnd_approval_stage", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndDisagreementMatrixRow", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ApprovalProcessId")
-                        .HasColumnType("integer")
-                        .HasColumnName("approval_process_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("CreatedByUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("created_by_user_id");
-
-                    b.Property<string>("DeveloperJustification")
-                        .HasColumnType("text")
-                        .HasColumnName("developer_justification");
-
-                    b.Property<string>("DeveloperPosition")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("developer_position");
-
-                    b.Property<string>("OpponentPosition")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("opponent_position");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_disagreement_matrix_row");
-
-                    b.HasIndex("ApprovalProcessId")
-                        .HasDatabaseName("ix_vnd_disagreement_matrix_row_approval_process_id");
-
-                    b.ToTable("vnd_disagreement_matrix_row", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndDocument", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<bool>("ActualizationRequiresApproval")
-                        .HasColumnType("boolean")
-                        .HasColumnName("actualization_requires_approval");
-
-                    b.Property<int?>("ActualizationResponsibleUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("actualization_responsible_user_id");
-
-                    b.Property<bool>("ActualizationShiftNextPeriod")
-                        .HasColumnType("boolean")
-                        .HasColumnName("actualization_shift_next_period");
-
-                    b.Property<string>("AdoptionCode")
-                        .HasColumnType("text")
-                        .HasColumnName("adoption_code");
-
-                    b.Property<DateOnly?>("AdoptionDate")
-                        .HasColumnType("date")
-                        .HasColumnName("adoption_date");
-
-                    b.Property<DateOnly?>("ArchivedDate")
-                        .HasColumnType("date")
-                        .HasColumnName("archived_date");
-
-                    b.Property<string>("CancelCode")
-                        .HasColumnType("text")
-                        .HasColumnName("cancel_code");
-
-                    b.Property<DateOnly?>("CancelDate")
-                        .HasColumnType("date")
-                        .HasColumnName("cancel_date");
-
-                    b.Property<string>("CancelReason")
-                        .HasColumnType("text")
-                        .HasColumnName("cancel_reason");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("code");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int?>("CreatedByUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("created_by_user_id");
-
-                    b.Property<int?>("CuratorDeveloperId")
-                        .HasColumnType("integer")
-                        .HasColumnName("curator_developer_id");
-
-                    b.Property<int?>("CurrentRedactionId")
-                        .HasColumnType("integer")
-                        .HasColumnName("current_redaction_id");
-
-                    b.Property<int>("DeveloperId")
-                        .HasColumnType("integer")
-                        .HasColumnName("developer_id");
-
-                    b.Property<DateOnly?>("DueActualizationDate")
-                        .HasColumnType("date")
-                        .HasColumnName("due_actualization_date");
-
-                    b.Property<DateOnly?>("EffectiveDate")
-                        .HasColumnType("date")
-                        .HasColumnName("effective_date");
-
-                    b.Property<DateOnly?>("LastActualizationDate")
-                        .HasColumnType("date")
-                        .HasColumnName("last_actualization_date");
-
-                    b.Property<bool>("LastActualizationHadChanges")
-                        .HasColumnType("boolean")
-                        .HasColumnName("last_actualization_had_changes");
-
-                    b.Property<int>("OrganId")
-                        .HasColumnType("integer")
-                        .HasColumnName("organ_id");
-
-                    b.Property<int>("Period")
-                        .HasColumnType("integer")
-                        .HasColumnName("period");
-
-                    b.Property<DateOnly?>("RequisitesChangedDate")
-                        .HasColumnType("date")
-                        .HasColumnName("requisites_changed_date");
-
-                    b.Property<DateOnly?>("RevisionChangedDate")
-                        .HasColumnType("date")
-                        .HasColumnName("revision_changed_date");
-
-                    b.Property<int>("SecrecyLevelId")
-                        .HasColumnType("integer")
-                        .HasColumnName("secrecy_level_id");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer")
-                        .HasColumnName("status");
-
-                    b.Property<string>("TitleEn")
-                        .HasColumnType("text")
-                        .HasColumnName("title_en");
-
-                    b.Property<string>("TitleKg")
-                        .HasColumnType("text")
-                        .HasColumnName("title_kg");
-
-                    b.Property<string>("TitleRu")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("title_ru");
-
-                    b.Property<int>("TypeId")
-                        .HasColumnType("integer")
-                        .HasColumnName("type_id");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_document");
-
-                    b.HasIndex("ActualizationResponsibleUserId")
-                        .HasDatabaseName("ix_vnd_document_actualization_responsible_user_id");
-
-                    b.HasIndex("Code")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_document_code");
-
-                    b.HasIndex("CreatedByUserId")
-                        .HasDatabaseName("ix_vnd_document_created_by_user_id");
-
-                    b.HasIndex("CuratorDeveloperId")
-                        .HasDatabaseName("ix_vnd_document_curator_developer_id");
-
-                    b.HasIndex("CurrentRedactionId")
-                        .HasDatabaseName("ix_vnd_document_current_redaction_id");
-
-                    b.HasIndex("DeveloperId")
-                        .HasDatabaseName("ix_vnd_document_developer_id");
-
-                    b.HasIndex("OrganId")
-                        .HasDatabaseName("ix_vnd_document_organ_id");
-
-                    b.HasIndex("SecrecyLevelId")
-                        .HasDatabaseName("ix_vnd_document_secrecy_level_id");
-
-                    b.HasIndex("TypeId")
-                        .HasDatabaseName("ix_vnd_document_type_id");
-
-                    b.ToTable("vnd_document", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
-                            AdoptionCode = "пр. №4(2)",
-                            AdoptionDate = new DateOnly(2023, 2, 9),
-                            Code = "10062",
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CuratorDeveloperId = 1,
-                            DeveloperId = 26,
-                            DueActualizationDate = new DateOnly(2026, 8, 9),
-                            EffectiveDate = new DateOnly(2023, 2, 16),
-                            LastActualizationDate = new DateOnly(2025, 8, 9),
-                            LastActualizationHadChanges = true,
-                            OrganId = 3,
-                            Period = 2,
-                            RequisitesChangedDate = new DateOnly(2026, 1, 12),
-                            RevisionChangedDate = new DateOnly(2026, 7, 20),
-                            SecrecyLevelId = 3,
-                            Status = 3,
-                            TitleRu = "Порядок работы с обеспечением (залогами)",
-                            TypeId = 13,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 2,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
-                            AdoptionCode = "пр. №9(1)",
-                            AdoptionDate = new DateOnly(2021, 3, 14),
-                            Code = "10084",
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CuratorDeveloperId = 1,
-                            DeveloperId = 26,
-                            DueActualizationDate = new DateOnly(2026, 7, 22),
-                            EffectiveDate = new DateOnly(2021, 4, 1),
-                            LastActualizationDate = new DateOnly(2025, 7, 22),
-                            LastActualizationHadChanges = false,
-                            OrganId = 7,
-                            Period = 2,
-                            RequisitesChangedDate = new DateOnly(2025, 5, 5),
-                            RevisionChangedDate = new DateOnly(2026, 6, 18),
-                            SecrecyLevelId = 2,
-                            Status = 0,
-                            TitleRu = "Политика управления кредитными рисками",
-                            TypeId = 11,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 3,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
-                            AdoptionCode = "пр. №2(5)",
-                            AdoptionDate = new DateOnly(2020, 1, 20),
-                            Code = "10011",
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CuratorDeveloperId = 11,
-                            DeveloperId = 38,
-                            DueActualizationDate = new DateOnly(2026, 7, 25),
-                            EffectiveDate = new DateOnly(2020, 2, 1),
-                            LastActualizationDate = new DateOnly(2025, 7, 25),
-                            LastActualizationHadChanges = true,
-                            OrganId = 3,
-                            Period = 2,
-                            RequisitesChangedDate = new DateOnly(2024, 10, 10),
-                            RevisionChangedDate = new DateOnly(2026, 7, 1),
-                            SecrecyLevelId = 1,
-                            Status = 1,
-                            TitleRu = "Регламент кассовых операций",
-                            TypeId = 17,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 4,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
-                            AdoptionCode = "пр. ОСА-1",
-                            AdoptionDate = new DateOnly(2019, 5, 5),
-                            Code = "10201",
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CuratorDeveloperId = 9,
-                            DeveloperId = 32,
-                            DueActualizationDate = new DateOnly(2026, 9, 28),
-                            EffectiveDate = new DateOnly(2019, 6, 1),
-                            LastActualizationDate = new DateOnly(2025, 9, 28),
-                            LastActualizationHadChanges = false,
-                            OrganId = 2,
-                            Period = 2,
-                            RequisitesChangedDate = new DateOnly(2024, 3, 1),
-                            RevisionChangedDate = new DateOnly(2025, 9, 14),
-                            SecrecyLevelId = 1,
-                            Status = 0,
-                            TitleRu = "Кодекс корпоративной этики",
-                            TypeId = 5,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 5,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
-                            AdoptionCode = "пр. №1(4)",
-                            AdoptionDate = new DateOnly(2019, 1, 10),
-                            ArchivedDate = new DateOnly(2024, 3, 20),
-                            CancelCode = "пр. №8(3)",
-                            CancelDate = new DateOnly(2024, 3, 14),
-                            CancelReason = "Заменён новой редакцией ВНД-037 v4.1",
-                            Code = "10037",
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CuratorDeveloperId = 12,
-                            DeveloperId = 4,
-                            EffectiveDate = new DateOnly(2019, 2, 1),
-                            LastActualizationHadChanges = false,
-                            OrganId = 3,
-                            Period = 2,
-                            RequisitesChangedDate = new DateOnly(2019, 2, 1),
-                            SecrecyLevelId = 2,
-                            Status = 4,
-                            TitleRu = "Регламент управления ликвидностью (ред. 2019)",
-                            TypeId = 17,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        },
-                        new
-                        {
-                            Id = 6,
-                            ActualizationRequiresApproval = false,
-                            ActualizationShiftNextPeriod = false,
-                            Code = "10210",
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DeveloperId = 33,
-                            DueActualizationDate = new DateOnly(2027, 8, 4),
-                            LastActualizationDate = new DateOnly(2026, 8, 4),
-                            LastActualizationHadChanges = false,
-                            OrganId = 2,
-                            Period = 2,
-                            SecrecyLevelId = 3,
-                            Status = 5,
-                            TitleRu = "Тест",
-                            TypeId = 1,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        });
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndLink", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("SourceVndId")
-                        .HasColumnType("integer")
-                        .HasColumnName("source_vnd_id");
-
-                    b.Property<int>("TargetVndId")
-                        .HasColumnType("integer")
-                        .HasColumnName("target_vnd_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_link");
-
-                    b.HasIndex("SourceVndId")
-                        .HasDatabaseName("ix_vnd_link_source_vnd_id");
-
-                    b.HasIndex("TargetVndId")
-                        .HasDatabaseName("ix_vnd_link_target_vnd_id");
-
-                    b.ToTable("vnd_link", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndRedaction", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ApprovalStatus")
-                        .HasColumnType("integer")
-                        .HasColumnName("approval_status");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("code");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text")
-                        .HasColumnName("description");
-
-                    b.Property<int?>("DocFileEnId")
-                        .HasColumnType("integer")
-                        .HasColumnName("doc_file_en_id");
-
-                    b.Property<int?>("DocFileKgId")
-                        .HasColumnType("integer")
-                        .HasColumnName("doc_file_kg_id");
-
-                    b.Property<int>("DocFileRuId")
-                        .HasColumnType("integer")
-                        .HasColumnName("doc_file_ru_id");
-
-                    b.Property<int>("Number")
-                        .HasColumnType("integer")
-                        .HasColumnName("number");
-
-                    b.Property<bool>("RequiresApproval")
-                        .HasColumnType("boolean")
-                        .HasColumnName("requires_approval");
-
-                    b.Property<int?>("TidFileId")
-                        .HasColumnType("integer")
-                        .HasColumnName("tid_file_id");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("VndId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_redaction");
-
-                    b.HasIndex("Code")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_redaction_code");
-
-                    b.HasIndex("DocFileEnId")
-                        .HasDatabaseName("ix_vnd_redaction_doc_file_en_id");
-
-                    b.HasIndex("DocFileKgId")
-                        .HasDatabaseName("ix_vnd_redaction_doc_file_kg_id");
-
-                    b.HasIndex("DocFileRuId")
-                        .HasDatabaseName("ix_vnd_redaction_doc_file_ru_id");
-
-                    b.HasIndex("TidFileId")
-                        .HasDatabaseName("ix_vnd_redaction_tid_file_id");
-
-                    b.HasIndex("VndId", "Number")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_redaction_vnd_id_number");
-
-                    b.ToTable("vnd_redaction", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndRedactionAttachment", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("FileAttachmentId")
-                        .HasColumnType("integer")
-                        .HasColumnName("file_attachment_id");
-
-                    b.Property<int>("VndRedactionId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_redaction_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_redaction_attachment");
-
-                    b.HasIndex("FileAttachmentId")
-                        .HasDatabaseName("ix_vnd_redaction_attachment_file_attachment_id");
-
-                    b.HasIndex("VndRedactionId", "FileAttachmentId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_redaction_attachment_vnd_redaction_id_file_attachment_id");
-
-                    b.ToTable("vnd_redaction_attachment", (string)null);
-                });
-
             modelBuilder.Entity("user_group_member", b =>
                 {
                     b.Property<int>("UserGroupId")
@@ -3105,7 +3112,7 @@ namespace delosfera_server.Migrations
                         },
                         new
                         {
-                            RolesId = 2,
+                            RolesId = 3,
                             UsersId = 2
                         },
                         new
@@ -3426,6 +3433,287 @@ namespace delosfera_server.Migrations
                     b.Navigation("Parent");
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.CoordinationDefaultApprover", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ApproverUser")
+                        .WithMany()
+                        .HasForeignKey("ApproverUserId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_vnd_coordination_default_approver_users_approver_user_id");
+
+                    b.Navigation("ApproverUser");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndActualizationRecord", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_actualization_record_users_responsible_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "Vnd")
+                        .WithMany()
+                        .HasForeignKey("VndId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_actualization_record_vnd_documents_vnd_id");
+
+                    b.Navigation("ResponsibleUser");
+
+                    b.Navigation("Vnd");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndActualizationRequest", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "DecidedByUser")
+                        .WithMany()
+                        .HasForeignKey("DecidedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_vnd_actualization_request_users_decided_by_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "RequestedByUser")
+                        .WithMany()
+                        .HasForeignKey("RequestedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_actualization_request_users_requested_by_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "Vnd")
+                        .WithMany()
+                        .HasForeignKey("VndId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_actualization_request_vnd_documents_vnd_id");
+
+                    b.Navigation("DecidedByUser");
+
+                    b.Navigation("RequestedByUser");
+
+                    b.Navigation("Vnd");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndRedaction", "Redaction")
+                        .WithMany()
+                        .HasForeignKey("RedactionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_approval_process_vnd_redactions_redaction_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "Vnd")
+                        .WithMany()
+                        .HasForeignKey("VndId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_approval_process_vnd_documents_vnd_id");
+
+                    b.Navigation("Redaction");
+
+                    b.Navigation("Vnd");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalStage", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", "ApprovalProcess")
+                        .WithMany("Stages")
+                        .HasForeignKey("ApprovalProcessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_approval_stage_vnd_approval_process_approval_process_id");
+
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ApproverUser")
+                        .WithMany()
+                        .HasForeignKey("ApproverUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_approval_stage_users_approver_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.OrganizationUnit", "OrgUnit")
+                        .WithMany()
+                        .HasForeignKey("OrgUnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_approval_stage_dictionary_organization_unit_org_unit_id");
+
+                    b.Navigation("ApprovalProcess");
+
+                    b.Navigation("ApproverUser");
+
+                    b.Navigation("OrgUnit");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndDisagreementMatrixRow", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", "ApprovalProcess")
+                        .WithMany("DisagreementMatrixRows")
+                        .HasForeignKey("ApprovalProcessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_disagreement_matrix_row_vnd_approval_processes_approval");
+
+                    b.Navigation("ApprovalProcess");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndDocument", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ActualizationResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ActualizationResponsibleUserId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_vnd_document_users_actualization_responsible_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_vnd_document_users_created_by_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "CuratorDeveloper")
+                        .WithMany()
+                        .HasForeignKey("CuratorDeveloperId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_vnd_document_users_curator_developer_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndRedaction", "CurrentRedaction")
+                        .WithMany()
+                        .HasForeignKey("CurrentRedactionId")
+                        .HasConstraintName("fk_vnd_document_vnd_redactions_current_redaction_id");
+
+                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.OrganizationUnit", "Developer")
+                        .WithMany()
+                        .HasForeignKey("DeveloperId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_document_dictionary_organization_unit_developer_id");
+
+                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.ApprovalBody", "Organ")
+                        .WithMany()
+                        .HasForeignKey("OrganId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_document_dictionary_approval_body_organ_id");
+
+                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.SecurityLevel", "SecrecyLevel")
+                        .WithMany()
+                        .HasForeignKey("SecrecyLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_document_dictionary_security_level_secrecy_level_id");
+
+                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.TypeVnd", "Type")
+                        .WithMany()
+                        .HasForeignKey("TypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_document_dictionary_type_vnd_type_id");
+
+                    b.Navigation("ActualizationResponsibleUser");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("CuratorDeveloper");
+
+                    b.Navigation("CurrentRedaction");
+
+                    b.Navigation("Developer");
+
+                    b.Navigation("Organ");
+
+                    b.Navigation("SecrecyLevel");
+
+                    b.Navigation("Type");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndLink", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "SourceVnd")
+                        .WithMany("OutgoingLinks")
+                        .HasForeignKey("SourceVndId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_link_vnd_document_source_vnd_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "TargetVnd")
+                        .WithMany("IncomingLinks")
+                        .HasForeignKey("TargetVndId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_link_vnd_document_target_vnd_id");
+
+                    b.Navigation("SourceVnd");
+
+                    b.Navigation("TargetVnd");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedaction", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileEn")
+                        .WithMany()
+                        .HasForeignKey("DocFileEnId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_vnd_redaction_file_attachments_doc_file_en_id");
+
+                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileKg")
+                        .WithMany()
+                        .HasForeignKey("DocFileKgId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_vnd_redaction_file_attachments_doc_file_kg_id");
+
+                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileRu")
+                        .WithMany()
+                        .HasForeignKey("DocFileRuId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_redaction_file_attachments_doc_file_ru_id");
+
+                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "TidFile")
+                        .WithMany()
+                        .HasForeignKey("TidFileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_vnd_redaction_file_attachments_tid_file_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "Vnd")
+                        .WithMany("Redactions")
+                        .HasForeignKey("VndId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_redaction_vnd_document_vnd_id");
+
+                    b.Navigation("DocFileEn");
+
+                    b.Navigation("DocFileKg");
+
+                    b.Navigation("DocFileRu");
+
+                    b.Navigation("TidFile");
+
+                    b.Navigation("Vnd");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionAttachment", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "FileAttachment")
+                        .WithMany()
+                        .HasForeignKey("FileAttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_redaction_attachment_file_attachments_file_attachment_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndRedaction", "VndRedaction")
+                        .WithMany("Attachments")
+                        .HasForeignKey("VndRedactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_redaction_attachment_vnd_redactions_vnd_redaction_id");
+
+                    b.Navigation("FileAttachment");
+
+                    b.Navigation("VndRedaction");
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Notifications.Models.Notification", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Users.Models.User", "CreatedByUser")
@@ -3497,287 +3785,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("Position");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.CoordinationDefaultApprover", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ApproverUser")
-                        .WithMany()
-                        .HasForeignKey("ApproverUserId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_vnd_coordination_default_approver_user_approver_user_id");
-
-                    b.Navigation("ApproverUser");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRecord", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ResponsibleUser")
-                        .WithMany()
-                        .HasForeignKey("ResponsibleUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_record_user_responsible_user_id");
-
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", "Vnd")
-                        .WithMany()
-                        .HasForeignKey("VndId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_record_vnd_documents_vnd_id");
-
-                    b.Navigation("ResponsibleUser");
-
-                    b.Navigation("Vnd");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndActualizationRequest", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "DecidedByUser")
-                        .WithMany()
-                        .HasForeignKey("DecidedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_actualization_request_user_decided_by_user_id");
-
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "RequestedByUser")
-                        .WithMany()
-                        .HasForeignKey("RequestedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_request_user_requested_by_user_id");
-
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", "Vnd")
-                        .WithMany()
-                        .HasForeignKey("VndId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_request_vnd_documents_vnd_id");
-
-                    b.Navigation("DecidedByUser");
-
-                    b.Navigation("RequestedByUser");
-
-                    b.Navigation("Vnd");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndApprovalProcess", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndRedaction", "Redaction")
-                        .WithMany()
-                        .HasForeignKey("RedactionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_approval_process_vnd_redactions_redaction_id");
-
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", "Vnd")
-                        .WithMany()
-                        .HasForeignKey("VndId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_approval_process_vnd_documents_vnd_id");
-
-                    b.Navigation("Redaction");
-
-                    b.Navigation("Vnd");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndApprovalStage", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndApprovalProcess", "ApprovalProcess")
-                        .WithMany("Stages")
-                        .HasForeignKey("ApprovalProcessId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_approval_stage_vnd_approval_process_approval_process_id");
-
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ApproverUser")
-                        .WithMany()
-                        .HasForeignKey("ApproverUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_approval_stage_user_approver_user_id");
-
-                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.OrganizationUnit", "OrgUnit")
-                        .WithMany()
-                        .HasForeignKey("OrgUnitId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_approval_stage_dictionary_organization_unit_org_unit_id");
-
-                    b.Navigation("ApprovalProcess");
-
-                    b.Navigation("ApproverUser");
-
-                    b.Navigation("OrgUnit");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndDisagreementMatrixRow", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndApprovalProcess", "ApprovalProcess")
-                        .WithMany("DisagreementMatrixRows")
-                        .HasForeignKey("ApprovalProcessId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_disagreement_matrix_row_vnd_approval_processes_approval");
-
-                    b.Navigation("ApprovalProcess");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndDocument", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "ActualizationResponsibleUser")
-                        .WithMany()
-                        .HasForeignKey("ActualizationResponsibleUserId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_vnd_document_user_actualization_responsible_user_id");
-
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "CreatedByUser")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_vnd_document_user_created_by_user_id");
-
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "CuratorDeveloper")
-                        .WithMany()
-                        .HasForeignKey("CuratorDeveloperId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_document_user_curator_developer_id");
-
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndRedaction", "CurrentRedaction")
-                        .WithMany()
-                        .HasForeignKey("CurrentRedactionId")
-                        .HasConstraintName("fk_vnd_document_vnd_redactions_current_redaction_id");
-
-                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.OrganizationUnit", "Developer")
-                        .WithMany()
-                        .HasForeignKey("DeveloperId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_document_dictionary_organization_unit_developer_id");
-
-                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.ApprovalBody", "Organ")
-                        .WithMany()
-                        .HasForeignKey("OrganId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_document_dictionary_approval_body_organ_id");
-
-                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.SecurityLevel", "SecrecyLevel")
-                        .WithMany()
-                        .HasForeignKey("SecrecyLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_document_dictionary_security_level_secrecy_level_id");
-
-                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.TypeVnd", "Type")
-                        .WithMany()
-                        .HasForeignKey("TypeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_document_dictionary_type_vnd_type_id");
-
-                    b.Navigation("ActualizationResponsibleUser");
-
-                    b.Navigation("CreatedByUser");
-
-                    b.Navigation("CuratorDeveloper");
-
-                    b.Navigation("CurrentRedaction");
-
-                    b.Navigation("Developer");
-
-                    b.Navigation("Organ");
-
-                    b.Navigation("SecrecyLevel");
-
-                    b.Navigation("Type");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndLink", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", "SourceVnd")
-                        .WithMany("OutgoingLinks")
-                        .HasForeignKey("SourceVndId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_link_vnd_document_source_vnd_id");
-
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", "TargetVnd")
-                        .WithMany("IncomingLinks")
-                        .HasForeignKey("TargetVndId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_link_vnd_document_target_vnd_id");
-
-                    b.Navigation("SourceVnd");
-
-                    b.Navigation("TargetVnd");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndRedaction", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileEn")
-                        .WithMany()
-                        .HasForeignKey("DocFileEnId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_redaction_file_attachments_doc_file_en_id");
-
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileKg")
-                        .WithMany()
-                        .HasForeignKey("DocFileKgId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_redaction_file_attachments_doc_file_kg_id");
-
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileRu")
-                        .WithMany()
-                        .HasForeignKey("DocFileRuId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_redaction_file_attachments_doc_file_ru_id");
-
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "TidFile")
-                        .WithMany()
-                        .HasForeignKey("TidFileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_redaction_file_attachments_tid_file_id");
-
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", "Vnd")
-                        .WithMany("Redactions")
-                        .HasForeignKey("VndId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_redaction_vnd_document_vnd_id");
-
-                    b.Navigation("DocFileEn");
-
-                    b.Navigation("DocFileKg");
-
-                    b.Navigation("DocFileRu");
-
-                    b.Navigation("TidFile");
-
-                    b.Navigation("Vnd");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndRedactionAttachment", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "FileAttachment")
-                        .WithMany()
-                        .HasForeignKey("FileAttachmentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_redaction_attachment_file_attachments_file_attachment_id");
-
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndRedaction", "VndRedaction")
-                        .WithMany("Attachments")
-                        .HasForeignKey("VndRedactionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_redaction_attachment_vnd_redactions_vnd_redaction_id");
-
-                    b.Navigation("FileAttachment");
-
-                    b.Navigation("VndRedaction");
-                });
-
             modelBuilder.Entity("user_group_member", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Dictionaries.Models.UserGroup", null)
@@ -3821,7 +3828,7 @@ namespace delosfera_server.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_vnd_keyword_dictionary_keyword_keyword_id");
 
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", null)
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", null)
                         .WithMany()
                         .HasForeignKey("VndId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -3838,7 +3845,7 @@ namespace delosfera_server.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_vnd_responsible_executor_dictionary_organization_unit_organ");
 
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", null)
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", null)
                         .WithMany()
                         .HasForeignKey("VndId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -3855,7 +3862,7 @@ namespace delosfera_server.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_vnd_rubric_dictionary_rubric_rubric_id");
 
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", null)
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", null)
                         .WithMany()
                         .HasForeignKey("VndId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -3872,7 +3879,7 @@ namespace delosfera_server.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_vnd_user_group_dictionary_user_group_user_group_id");
 
-                    b.HasOne("delosfera_server.Modules.Vnd.Models.VndDocument", null)
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", null)
                         .WithMany()
                         .HasForeignKey("VndId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -3900,19 +3907,14 @@ namespace delosfera_server.Migrations
                     b.Navigation("Children");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Notifications.Models.Notification", b =>
-                {
-                    b.Navigation("Recipients");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndApprovalProcess", b =>
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", b =>
                 {
                     b.Navigation("DisagreementMatrixRows");
 
                     b.Navigation("Stages");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndDocument", b =>
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndDocument", b =>
                 {
                     b.Navigation("IncomingLinks");
 
@@ -3921,9 +3923,14 @@ namespace delosfera_server.Migrations
                     b.Navigation("Redactions");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Vnd.Models.VndRedaction", b =>
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedaction", b =>
                 {
                     b.Navigation("Attachments");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Notifications.Models.Notification", b =>
+                {
+                    b.Navigation("Recipients");
                 });
 #pragma warning restore 612, 618
         }

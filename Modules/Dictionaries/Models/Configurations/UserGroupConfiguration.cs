@@ -36,14 +36,14 @@ public class UserGroupConfiguration : IEntityTypeConfiguration<UserGroup>
                     // 9-Жумаева, 10-Ормонов, 11-Ибраева, 12-Усенов, 13-Администратор
 
                     j.HasData(
-                        // Группа 1 — Согласующие ВНД: Сыдыков, Маматова, Кадыров, Ибраева, Усенов
+                        // Группа 1 - Согласующие ВНД: Сыдыков, Маматова, Кадыров, Ибраева, Усенов
                         new { UserGroupId = 1, UsersId = 5 },
                         new { UserGroupId = 1, UsersId = 6 },
                         new { UserGroupId = 1, UsersId = 7 },
                         new { UserGroupId = 1, UsersId = 11 },
                         new { UserGroupId = 1, UsersId = 12 },
 
-                        // Группа 2 — Редакторы ВНД: Токтосунова, Сыдыков, Маматова, Кадыров, Ибраева, Усенов
+                        // Группа 2 - Редакторы ВНД: Токтосунова, Сыдыков, Маматова, Кадыров, Ибраева, Усенов
                         new { UserGroupId = 2, UsersId = 3 },
                         new { UserGroupId = 2, UsersId = 5 },
                         new { UserGroupId = 2, UsersId = 6 },
@@ -51,7 +51,7 @@ public class UserGroupConfiguration : IEntityTypeConfiguration<UserGroup>
                         new { UserGroupId = 2, UsersId = 11 },
                         new { UserGroupId = 2, UsersId = 12 },
 
-                        // Группа 3 — ИТ-администраторы: Абдиев, Администратор СЭД
+                        // Группа 3 - ИТ-администраторы: Абдиев, Администратор СЭД
                         new { UserGroupId = 3, UsersId = 8 },
                         new { UserGroupId = 3, UsersId = 13 }
                     );

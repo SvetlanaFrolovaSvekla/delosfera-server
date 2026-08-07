@@ -10,7 +10,7 @@ namespace delosfera_server.Modules.Dictionaries.Models;
 "Совет директоров", "Тарифный комитет"
 */
 
-public class ApprovalBody : IAuditableEntity, ITranslatableEntity
+public class ApprovalBody : IAuditableEntity, ITranslatableEntity, IHierarchicalEntity
 {
     public int Id { get; set; }
     public required string TitleRu { get; set; }

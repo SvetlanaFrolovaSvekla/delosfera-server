@@ -158,7 +158,7 @@ public class NotificationService : INotificationService
 
         var now = DateTime.UtcNow;
 
-        // ExecuteUpdateAsync — без загрузки сущностей в память, быстрее для массовой операции
+        // ExecuteUpdateAsync - без загрузки сущностей в память, быстрее для массовой операции
         var affected = await query.ExecuteUpdateAsync(setters => setters
             .SetProperty(x => x.IsRead, true)
             .SetProperty(x => x.ReadAt, now));

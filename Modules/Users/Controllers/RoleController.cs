@@ -12,8 +12,8 @@ namespace delosfera_server.Modules.Users.Controllers;
 /// Управление ролями и правами доступа
 /// </summary>
 [ApiController]
-[Route("api/users/roles")]
-[Tags("Пользователи — Роли")]
+[Route("/users/roles")]
+[Tags("Пользователи - Роли")]
 public class RoleController : ControllerBase
 {
     private readonly IRoleService _service;
@@ -55,6 +55,30 @@ public class RoleController : ControllerBase
         var result = await _service.GetAllAsync(sortBy, search, language);
         return Ok(result);
     }
+    
+    /// <summary>
+    /// Получить роль по id
+    /// </summary>
+    /// <param name="id">Идентификатор роли</param>
+    /// <response code="200">Роль найдена</response>
+    /// <response code="404">Роль с указанным id не найдена</response>
+    [HttpGet("{id:int}")]
+    [RequirePermission(PermissionCode.ManageRoles)]
+    [ProducesResponseType(typeof(RoleResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RoleResponse>> GetById(int id)
+    {
+        var language = _languageResolver.Resolve(Request);
+
+        try
+        {
+            return Ok(await _service.GetByIdAsync(id, language));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
 
     /// <summary>
     /// Создать новую роль
@@ -73,7 +97,7 @@ public class RoleController : ControllerBase
         try
         {
             var result = await _service.CreateAsync(request, language);
-            return CreatedAtAction(nameof(GetAll), new { id = result.Id }, result);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result); 
         }
         catch (InvalidOperationException ex)
         {

@@ -10,7 +10,7 @@ namespace delosfera_server.Modules.Users.Controllers;
 /// Аутентификация пользователей
 /// </summary>
 [ApiController]
-[Route("api/auth")]
+[Route("/auth")]
 [Tags("Аутентификация")]
 public class AuthController : ControllerBase
 {
@@ -70,7 +70,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Выход из системы — отзывает refresh-токен
+    /// Выход из системы - отзывает refresh-токен
     /// </summary>
     /// <response code="204">Выход выполнен успешно</response>
     [HttpPost("logout")]

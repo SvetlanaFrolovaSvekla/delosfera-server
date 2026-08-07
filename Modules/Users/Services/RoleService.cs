@@ -44,6 +44,14 @@ public class RoleService : IRoleService
         var entities = await query.ToListAsync();
         return entities.Select(x => ToResponse(x, languageCode)).ToList();
     }
+    
+    public async Task<RoleResponse> GetByIdAsync(int id, string languageCode)
+    {
+        var entity = await _db.Roles.FindAsync(id)
+                     ?? throw new KeyNotFoundException($"Роль с id={id} не найдена");
+
+        return ToResponse(entity, languageCode);
+    }
 
     public async Task<RoleResponse> CreateAsync(CreateRoleRequest request, string languageCode)
     {
@@ -93,7 +101,7 @@ public class RoleService : IRoleService
         catch (DbUpdateException)
         {
             throw new InvalidOperationException(
-                "Нельзя удалить роль — она назначена одному или нескольким пользователям");
+                "Нельзя удалить роль - она назначена одному или нескольким пользователям");
         }
     }
 

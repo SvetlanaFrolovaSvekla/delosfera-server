@@ -6,7 +6,7 @@ using Scalar.AspNetCore;
 using System.Text;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Notifications.Services;
-using delosfera_server.Modules.Vnd.Services;
+using delosfera_server.Modules.Documents.VND.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Minio;

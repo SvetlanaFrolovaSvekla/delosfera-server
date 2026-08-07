@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Users.Controllers;
 /// Управление пользователями системы
 /// </summary>
 [ApiController]
-[Route("api/users")]
+[Route("users")]
 [Tags("Пользователи")]
 [Authorize]
 public class UserController : ControllerBase
@@ -36,6 +36,26 @@ public class UserController : ControllerBase
     {
         var language = _languageResolver.Resolve(Request);
         return Ok(await _service.GetByIdAsync(_currentUser.UserId, language));
+    }
+    
+    /// <summary>Получить пользователя по id</summary>
+    /// <response code="200">Пользователь найден</response>
+    /// <response code="404">Пользователь не найден</response>
+    [HttpGet("{id:int}")]
+    [ProducesResponseType(typeof(UserResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UserResponse>> GetById(int id)
+    {
+        var language = _languageResolver.Resolve(Request);
+
+        try
+        {
+            return Ok(await _service.GetByIdAsync(id, language));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -83,7 +103,7 @@ public class UserController : ControllerBase
         try
         {
             var result = await _service.CreateAsync(request, language);
-            return CreatedAtAction(nameof(GetAll), new { id = result.Id }, result);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
         catch (KeyNotFoundException ex)
         {

@@ -91,7 +91,7 @@ public class PositionController : ControllerBase
     /// <param name="id">Идентификатор должности</param>
     /// <response code="204">Должность успешно удалена</response>
     /// <response code="404">Должность с указанным id не найдена</response>
-    /// <response code="409">Нельзя удалить — на должность есть ссылки в других документах</response>
+    /// <response code="409">Нельзя удалить - на должность есть ссылки в других документах</response>
     [HttpDelete("{id:int}")]
     [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

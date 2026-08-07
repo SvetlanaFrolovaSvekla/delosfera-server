@@ -1,6 +1,6 @@
 namespace delosfera_server.Modules.Analytics.DTO.Response.Users;
 
-/// <summary>Распределение пользователей по давности последнего входа — для диаграммы "вовлечённость"</summary>
+/// <summary>Распределение пользователей по давности последнего входа - для диаграммы "вовлечённость"</summary>
 public class UserActivityBucketsResponse
 {
     /// <summary>Заходили сегодня</summary>

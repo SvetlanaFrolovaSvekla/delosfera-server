@@ -12,12 +12,12 @@ namespace delosfera_server.Modules.Analytics.Controllers;
 
 /// <summary>
 /// Аналитика по модулю "Пользователи" для страницы отчётности: сводки по составу и вовлечённости
-/// пользователей, а также их активность в связанных модулях (например, в ВНД — кто больше всех
+/// пользователей, а также их активность в связанных модулях (например, в ВНД - кто больше всех
 /// инициирует документы и как быстро согласующие принимают решения).
 /// </summary>
 [ApiController]
 [Route("/analytics/users")]
-[Tags("Аналитика — Пользователи")]
+[Tags("Аналитика - Пользователи")]
 [Authorize]
 [RequirePermission(PermissionCode.ViewFullStatistics)]
 public class UserAnalyticsController : ControllerBase

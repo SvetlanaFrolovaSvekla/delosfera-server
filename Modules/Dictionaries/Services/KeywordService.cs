@@ -1,4 +1,5 @@
 ﻿using delosfera_server.Common.Extensions;
+using delosfera_server.Common.Services;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
@@ -48,15 +49,15 @@ public class KeywordService : IKeywordService
     {
         if (request.ParentId.HasValue)
         {
-            await EnsureParentExistsAsync(request.ParentId.Value);
-            await EnsureDepthNotExceededAsync(request.ParentId.Value);
+            await HierarchyValidation.EnsureParentExistsAsync(_db.Keywords, request.ParentId.Value,
+                pid => $"Родительское ключевое слово с id={pid} не найдено");
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Keywords, request.ParentId.Value, MaxDepth,
+                depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
         var entity = new Keyword
         {
-            TitleRu = request.TitleRu,
-            TitleEn = request.TitleEn,
-            TitleKg = request.TitleKg,
+            TitleRu = request.TitleRu, TitleEn = request.TitleEn, TitleKg = request.TitleKg,
             ParentId = request.ParentId
         };
 
@@ -69,16 +70,19 @@ public class KeywordService : IKeywordService
     public async Task<KeywordResponse> UpdateAsync(int id, UpdateKeywordRequest request, string languageCode)
     {
         var entity = await _db.Keywords.FindAsync(id)
-            ?? throw new KeyNotFoundException($"Ключевое слово с id={id} не найдено");
+                     ?? throw new KeyNotFoundException($"Ключевое слово с id={id} не найдено");
 
         if (request.ParentId.HasValue)
         {
             if (request.ParentId.Value == id)
                 throw new InvalidOperationException("Ключевое слово не может быть родителем самого себя");
 
-            await EnsureParentExistsAsync(request.ParentId.Value);
-            await EnsureNoCircularReferenceAsync(id, request.ParentId.Value);
-            await EnsureDepthNotExceededAsync(request.ParentId.Value);
+            await HierarchyValidation.EnsureParentExistsAsync(_db.Keywords, request.ParentId.Value,
+                pid => $"Родительское ключевое слово с id={pid} не найдено");
+            await HierarchyValidation.EnsureNoCircularReferenceAsync(_db.Keywords, id, request.ParentId.Value,
+                "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Keywords, request.ParentId.Value, MaxDepth,
+                depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
         entity.TitleRu = request.TitleRu;
@@ -93,7 +97,7 @@ public class KeywordService : IKeywordService
     public async Task DeleteAsync(int id)
     {
         var entity = await _db.Keywords.FindAsync(id)
-            ?? throw new KeyNotFoundException($"Ключевое слово с id={id} не найдено");
+                     ?? throw new KeyNotFoundException($"Ключевое слово с id={id} не найдено");
 
         var hasChildren = await _db.Keywords.AnyAsync(x => x.ParentId == id);
         if (hasChildren)
@@ -112,54 +116,7 @@ public class KeywordService : IKeywordService
                 "Нельзя удалить ключевое слово — на него есть ссылки в других документах");
         }
     }
-
-    private async Task EnsureParentExistsAsync(int parentId)
-    {
-        var exists = await _db.Keywords.AnyAsync(x => x.Id == parentId);
-        if (!exists)
-            throw new KeyNotFoundException($"Родительское ключевое слово с id={parentId} не найдено");
-    }
-
-    private async Task EnsureNoCircularReferenceAsync(int nodeId, int newParentId)
-    {
-        var currentId = (int?)newParentId;
-        var visited = new HashSet<int>();
-
-        while (currentId.HasValue)
-        {
-            if (currentId.Value == nodeId)
-                throw new InvalidOperationException(
-                    "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
-
-            if (!visited.Add(currentId.Value))
-                break;
-
-            currentId = await _db.Keywords
-                .Where(x => x.Id == currentId.Value)
-                .Select(x => x.ParentId)
-                .FirstOrDefaultAsync();
-        }
-    }
-
-    private async Task EnsureDepthNotExceededAsync(int parentId)
-    {
-        var depth = 1;
-        var currentId = (int?)parentId;
-
-        while (currentId.HasValue)
-        {
-            depth++;
-            if (depth > MaxDepth)
-                throw new InvalidOperationException(
-                    $"Превышена максимальная глубина вложенности ({MaxDepth} уровней)");
-
-            currentId = await _db.Keywords
-                .Where(x => x.Id == currentId.Value)
-                .Select(x => x.ParentId)
-                .FirstOrDefaultAsync();
-        }
-    }
-
+    
     private static KeywordResponse ToResponse(Keyword entity, string languageCode) => new()
     {
         Id = entity.Id,

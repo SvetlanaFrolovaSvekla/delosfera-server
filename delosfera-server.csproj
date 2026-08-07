@@ -24,9 +24,15 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Folder Include="Modules\Files\Models\Configurations\" />
-      <Folder Include="Modules\Sz\" />
-      <Folder Include="Modules\Zakupki\" />
+      <Folder Include="Modules\Documents\SZ\" />
+      <Folder Include="Modules\Documents\Procurement\" />
     </ItemGroup>
 
+    <ItemGroup>
+        <Compile Remove="NotesDev/LdapComments.cs" />
+        <Compile Remove="NotesDev/Note.txt" />
+        <None Include="NotesDev\Note.txt" />
+        <Compile Remove="NotesDev/Ldap.cs" />
+    </ItemGroup>
+    
 </Project>

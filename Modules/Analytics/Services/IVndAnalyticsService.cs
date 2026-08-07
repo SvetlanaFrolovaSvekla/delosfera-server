@@ -40,11 +40,11 @@ public interface IVndAnalyticsService
     /// средняя/медианная длительность и тренд по периодам</summary>
     Task<VndApprovalPerformanceResponse> GetApprovalPerformanceAsync(AnalyticsPeriodRequest? request);
 
-    /// <summary>Загрузка согласующих подразделений (или конкретных согласующих пользователей) —
+    /// <summary>Загрузка согласующих подразделений (или конкретных согласующих пользователей) -
     /// поиск "узких мест" маршрута согласования по доле решений, зачтённых по таймауту</summary>
     Task<List<VndApproverWorkloadItem>> GetApproverWorkloadAsync(bool byUser = false);
 
-    /// <summary>Матрица "подразделение-разработчик × статус" — данные для тепловой карты</summary>
+    /// <summary>Матрица "подразделение-разработчик × статус" - данные для тепловой карты</summary>
     Task<List<VndOrgUnitStatusMatrixItem>> GetOrgUnitStatusMatrixAsync(string language);
 
     /// <summary>Сводный CSV-отчёт (KPI + основные распределения) для выгрузки со страницы отчётности.

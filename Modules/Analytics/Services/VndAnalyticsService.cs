@@ -5,7 +5,7 @@ using delosfera_server.Modules.Analytics.Common;
 using delosfera_server.Modules.Analytics.DTO.Request;
 using delosfera_server.Modules.Analytics.DTO.Response;
 using delosfera_server.Modules.Analytics.DTO.Response.Vnd;
-using delosfera_server.Modules.Vnd.Models;
+using delosfera_server.Modules.Documents.VND.Models;
 
 namespace delosfera_server.Modules.Analytics.Services;
 
@@ -213,7 +213,7 @@ public class VndAnalyticsService : IVndAnalyticsService
     public async Task<List<ChartCategoryPoint>> GetRubricDistributionAsync(string language, int top = 10)
     {
         var counts = await _db.VndDocuments
-            .SelectMany(v => v.Rubrics, (v, r) => r.Id)
+            .SelectMany(v => v.Rubrics.Select(r => r.Id))
             .GroupBy(id => id)
             .Select(g => new { RubricId = g.Key, Count = g.Count() })
             .OrderByDescending(x => x.Count)
@@ -243,7 +243,7 @@ public class VndAnalyticsService : IVndAnalyticsService
     public async Task<List<ChartCategoryPoint>> GetKeywordCloudAsync(string language, int top = 30)
     {
         var counts = await _db.VndDocuments
-            .SelectMany(v => v.Keywords, (v, k) => k.Id)
+            .SelectMany(v => v.Keywords.Select(k => k.Id))
             .GroupBy(id => id)
             .Select(g => new { KeywordId = g.Key, Count = g.Count() })
             .OrderByDescending(x => x.Count)
@@ -273,7 +273,7 @@ public class VndAnalyticsService : IVndAnalyticsService
     public async Task<List<VndDynamicsPoint>> GetDynamicsAsync(AnalyticsPeriodRequest request)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var from = request.DateFrom ?? DefaultFrom(today, request.Granularity);
+        var from = request.DateFrom ?? AnalyticsPeriodBucketing.DefaultFrom(today, request.Granularity);
         var to = request.DateTo ?? today;
         var fromDt = from.ToDateTime(TimeOnly.MinValue);
         var toDt = to.ToDateTime(TimeOnly.MaxValue);
@@ -298,23 +298,27 @@ public class VndAnalyticsService : IVndAnalyticsService
             .Select(v => v.ArchivedDate!.Value)
             .ToListAsync();
 
-        var buckets = GeneratePeriods(from, to, request.Granularity);
+        var buckets = AnalyticsPeriodBucketing.GeneratePeriods(from, to, request.Granularity);
 
         return buckets.Select(b => new VndDynamicsPoint
         {
             PeriodStart = b.Start,
             PeriodLabel = b.Label,
-            Created = created.Count(d => BucketStart(DateOnly.FromDateTime(d), request.Granularity) == b.Start),
-            SentToApproval = sentToApproval.Count(d => BucketStart(DateOnly.FromDateTime(d), request.Granularity) == b.Start),
-            Published = published.Count(d => BucketStart(DateOnly.FromDateTime(d), request.Granularity) == b.Start),
-            Archived = archived.Count(d => BucketStart(d, request.Granularity) == b.Start)
+            Created = created.Count(d =>
+                AnalyticsPeriodBucketing.BucketStart(DateOnly.FromDateTime(d), request.Granularity) == b.Start),
+            SentToApproval = sentToApproval.Count(d =>
+                AnalyticsPeriodBucketing.BucketStart(DateOnly.FromDateTime(d), request.Granularity) == b.Start),
+            Published = published.Count(d =>
+                AnalyticsPeriodBucketing.BucketStart(DateOnly.FromDateTime(d), request.Granularity) == b.Start),
+            Archived = archived.Count(d =>
+                AnalyticsPeriodBucketing.BucketStart(d, request.Granularity) == b.Start)
         }).ToList();
     }
 
     public async Task<List<VndActualizationTrendPoint>> GetActualizationTrendAsync(AnalyticsPeriodRequest request)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var from = request.DateFrom ?? DefaultFrom(today, request.Granularity);
+        var from = request.DateFrom ?? AnalyticsPeriodBucketing.DefaultFrom(today, request.Granularity);
         var to = request.DateTo ?? today;
         var fromDt = from.ToDateTime(TimeOnly.MinValue);
         var toDt = to.ToDateTime(TimeOnly.MaxValue);
@@ -325,14 +329,16 @@ public class VndAnalyticsService : IVndAnalyticsService
             .Select(r => new { r.StartedAt, r.PublishedAt, r.HadChanges })
             .ToListAsync();
 
-        var buckets = GeneratePeriods(from, to, request.Granularity);
+        var buckets = AnalyticsPeriodBucketing.GeneratePeriods(from, to, request.Granularity);
 
         return buckets.Select(b =>
         {
-            var started = records.Count(r => BucketStart(DateOnly.FromDateTime(r.StartedAt), request.Granularity) == b.Start);
+            var started = records.Count(r =>
+                AnalyticsPeriodBucketing.BucketStart(DateOnly.FromDateTime(r.StartedAt), request.Granularity) == b.Start);
 
             var publishedInBucket = records
-                .Where(r => r.PublishedAt != null && BucketStart(DateOnly.FromDateTime(r.PublishedAt.Value), request.Granularity) == b.Start)
+                .Where(r => r.PublishedAt != null &&
+                    AnalyticsPeriodBucketing.BucketStart(DateOnly.FromDateTime(r.PublishedAt.Value), request.Granularity) == b.Start)
                 .ToList();
 
             var avgDuration = publishedInBucket.Count > 0
@@ -355,7 +361,7 @@ public class VndAnalyticsService : IVndAnalyticsService
     {
         var granularity = request?.Granularity ?? AnalyticsGranularity.Month;
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var from = request?.DateFrom ?? DefaultFrom(today, granularity);
+        var from = request?.DateFrom ?? AnalyticsPeriodBucketing.DefaultFrom(today, granularity);
         var to = request?.DateTo ?? today;
         var fromDt = from.ToDateTime(TimeOnly.MinValue);
         var toDt = to.ToDateTime(TimeOnly.MaxValue);
@@ -395,7 +401,7 @@ public class VndAnalyticsService : IVndAnalyticsService
         var avgDuration = durations.Count > 0 ? Math.Round(durations.Average(), 1) : 0;
         var medianDuration = durations.Count > 0 ? Math.Round(Median(durations), 1) : 0;
 
-        var buckets = GeneratePeriods(from, to, granularity);
+        var buckets = AnalyticsPeriodBucketing.GeneratePeriods(from, to, granularity);
         var completedWithDates = processes
             .Where(p => p.CompletedAt != null)
             .Select(p => new { p.CompletedAt, Duration = (p.CompletedAt!.Value - p.PrimaryStartedAt).TotalDays })
@@ -404,7 +410,7 @@ public class VndAnalyticsService : IVndAnalyticsService
         var trend = buckets.Select(b =>
         {
             var inBucket = completedWithDates
-                .Where(p => BucketStart(DateOnly.FromDateTime(p.CompletedAt!.Value), granularity) == b.Start)
+                .Where(p => AnalyticsPeriodBucketing.BucketStart(DateOnly.FromDateTime(p.CompletedAt!.Value), granularity) == b.Start)
                 .ToList();
 
             return new ChartTimePoint
@@ -439,11 +445,14 @@ public class VndAnalyticsService : IVndAnalyticsService
                 s.ApproverUserId,
                 s.PrimaryDecision,
                 s.PrimaryDecidedAt,
-                s.CreatedAt,
+                s.ApprovalProcess!.PrimaryStartedAt,
                 s.RepeatDecision,
                 s.RepeatDecidedAt,
+                s.ApprovalProcess!.RepeatStartedAt,
                 s.FinalHoldDecision,
-                s.FinalHoldDecidedAt
+                s.FinalHoldDecidedAt,
+                s.ApprovalProcess!.FinalHoldStartedAt,
+                s.ParticipatesInRepeat
             })
             .ToListAsync();
 
@@ -469,15 +478,21 @@ public class VndAnalyticsService : IVndAnalyticsService
             foreach (var s in group)
             {
                 if (s.PrimaryDecision != ApprovalStageDecision.Pending)
-                    decided.Add((s.PrimaryDecision, (s.PrimaryDecidedAt!.Value - s.CreatedAt).TotalHours));
+                    decided.Add((s.PrimaryDecision, (s.PrimaryDecidedAt!.Value - s.PrimaryStartedAt).TotalHours));
                 else
                     pending++;
 
-                if (s.RepeatDecision.HasValue && s.RepeatDecision != ApprovalStageDecision.Pending)
-                    decided.Add((s.RepeatDecision.Value, (s.RepeatDecidedAt!.Value - s.CreatedAt).TotalHours));
+                if (s.RepeatDecision.HasValue && s.RepeatDecision != ApprovalStageDecision.Pending
+                    && s.RepeatStartedAt.HasValue)
+                    decided.Add((s.RepeatDecision.Value, (s.RepeatDecidedAt!.Value - s.RepeatStartedAt.Value).TotalHours));
+                else if (s.ParticipatesInRepeat && (s.RepeatDecision is null or ApprovalStageDecision.Pending))
+                    pending++;
 
-                if (s.FinalHoldDecision.HasValue && s.FinalHoldDecision != ApprovalStageDecision.Pending)
-                    decided.Add((s.FinalHoldDecision.Value, (s.FinalHoldDecidedAt!.Value - s.CreatedAt).TotalHours));
+                if (s.FinalHoldDecision.HasValue && s.FinalHoldDecision != ApprovalStageDecision.Pending
+                    && s.FinalHoldStartedAt.HasValue)
+                    decided.Add((s.FinalHoldDecision.Value, (s.FinalHoldDecidedAt!.Value - s.FinalHoldStartedAt.Value).TotalHours));
+                else if (s.FinalHoldStartedAt.HasValue && (s.FinalHoldDecision is null or ApprovalStageDecision.Pending))
+                    pending++;
             }
 
             var onTime = decided.Where(d => d.Decision != ApprovalStageDecision.AutoApprovedByTimeout).ToList();
@@ -621,64 +636,6 @@ public class VndAnalyticsService : IVndAnalyticsService
         VndStatus.Draft => "draft",
         _ => "onact"
     };
-
-    private static DateOnly DefaultFrom(DateOnly today, AnalyticsGranularity granularity) => granularity switch
-    {
-        AnalyticsGranularity.Day => today.AddDays(-29),
-        AnalyticsGranularity.Week => today.AddDays(-7 * 11),
-        AnalyticsGranularity.Month => today.AddMonths(-11),
-        AnalyticsGranularity.Quarter => today.AddMonths(-3 * 7),
-        AnalyticsGranularity.Year => today.AddYears(-4),
-        _ => today.AddMonths(-11)
-    };
-
-    private static DateOnly BucketStart(DateOnly date, AnalyticsGranularity granularity) => granularity switch
-    {
-        AnalyticsGranularity.Day => date,
-        AnalyticsGranularity.Week => date.AddDays(-(((int)date.DayOfWeek + 6) % 7)),
-        AnalyticsGranularity.Month => new DateOnly(date.Year, date.Month, 1),
-        AnalyticsGranularity.Quarter => new DateOnly(date.Year, ((date.Month - 1) / 3) * 3 + 1, 1),
-        AnalyticsGranularity.Year => new DateOnly(date.Year, 1, 1),
-        _ => new DateOnly(date.Year, date.Month, 1)
-    };
-
-    private static string BucketLabel(DateOnly bucketStart, AnalyticsGranularity granularity) => granularity switch
-    {
-        AnalyticsGranularity.Day => bucketStart.ToString("dd.MM.yyyy"),
-        AnalyticsGranularity.Week => $"{bucketStart:dd.MM} — {bucketStart.AddDays(6):dd.MM.yyyy}",
-        AnalyticsGranularity.Month => bucketStart.ToString("MMMM yyyy"),
-        AnalyticsGranularity.Quarter => $"Q{((bucketStart.Month - 1) / 3) + 1} {bucketStart.Year}",
-        AnalyticsGranularity.Year => bucketStart.Year.ToString(),
-        _ => bucketStart.ToString("MMMM yyyy")
-    };
-
-    /// <summary>Генерирует непрерывный список периодов от from до to с заданным шагом,
-    /// чтобы на графике не было "дыр" там, где данных не было</summary>
-    private static List<(DateOnly Start, string Label)> GeneratePeriods(DateOnly from, DateOnly to, AnalyticsGranularity granularity)
-    {
-        var result = new List<(DateOnly, string)>();
-        var cursor = BucketStart(from, granularity);
-        var end = BucketStart(to, granularity);
-        var guard = 0;
-
-        while (cursor <= end && guard < 500)
-        {
-            result.Add((cursor, BucketLabel(cursor, granularity)));
-
-            cursor = granularity switch
-            {
-                AnalyticsGranularity.Day => cursor.AddDays(1),
-                AnalyticsGranularity.Week => cursor.AddDays(7),
-                AnalyticsGranularity.Month => cursor.AddMonths(1),
-                AnalyticsGranularity.Quarter => cursor.AddMonths(3),
-                AnalyticsGranularity.Year => cursor.AddYears(1),
-                _ => cursor.AddMonths(1)
-            };
-            guard++;
-        }
-
-        return result;
-    }
 
     private static double Median(List<double> sorted)
     {

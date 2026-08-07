@@ -15,7 +15,8 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("source")
             .HasConversion<string>()
             .HasMaxLength(20)
-            .HasDefaultValue(UserSource.Local);
+            .HasDefaultValue(UserSource.Local)
+            .HasSentinel(UserSource.Local);
 
         builder.Property(x => x.BlockedAt).HasColumnName("blocked_at");
         builder.Property(x => x.BlockedByUserId).HasColumnName("blocked_by_user_id");
@@ -39,7 +40,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         // Пароль каждого пользователя = его логин (до @). Хеши вычислены заранее
-        // и захардкожены как константы — HasData требует детерминированных значений,
+        // и захардкожены как константы - HasData требует детерминированных значений,
         // а PasswordHasher.HashPassword() каждый раз генерирует новую случайную соль,
         // из-за чего модель считалась бы "меняющейся" при каждой сборке.
         builder.HasData(
@@ -157,7 +158,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
                 PositionId = (int?)2, OrgUnitId = (int?)34,
                 IsActive = true, LastLoginAt = (DateTime?)null, Source = UserSource.Local,
                 CreatedAt = seedDate, UpdatedAt = seedDate
-            }, // Юр. управление (замена Гульнары), пароль: mbekbolotov
+            }, // Юр. Управление (замена Гульнары), пароль: mbekbolotov
             new
             {
                 Id = 17, FullName = "Нурбек Осконов", Email = "noskonov@keremetbank.kg",
@@ -197,7 +198,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
                     // Роли: 1-Администратор, 2-Рядовой пользователь, 3-Редактор ВНД, 4-Главный редактор ВНД
                     j.HasData(
                         new { UsersId = 1, RolesId = 2 },
-                        new { UsersId = 2, RolesId = 2 },
+                        new { UsersId = 2, RolesId = 3 },
                         new { UsersId = 3, RolesId = 1 },
                         new { UsersId = 3, RolesId = 4 },
                         new { UsersId = 4, RolesId = 2 },

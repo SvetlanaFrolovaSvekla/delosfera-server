@@ -1,4 +1,5 @@
 ﻿using delosfera_server.Common.Extensions;
+using delosfera_server.Common.Services;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
@@ -48,15 +49,15 @@ public class RubricService : IRubricService
     {
         if (request.ParentId.HasValue)
         {
-            await EnsureParentExistsAsync(request.ParentId.Value);
-            await EnsureDepthNotExceededAsync(request.ParentId.Value);
+            await HierarchyValidation.EnsureParentExistsAsync(_db.Rubrics, request.ParentId.Value,
+                pid => $"Родительская рубрика с id={pid} не найдена");
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Rubrics, request.ParentId.Value, MaxDepth,
+                depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
         var entity = new Rubric
         {
-            TitleRu = request.TitleRu,
-            TitleEn = request.TitleEn,
-            TitleKg = request.TitleKg,
+            TitleRu = request.TitleRu, TitleEn = request.TitleEn, TitleKg = request.TitleKg,
             ParentId = request.ParentId
         };
 
@@ -69,16 +70,19 @@ public class RubricService : IRubricService
     public async Task<RubricResponse> UpdateAsync(int id, UpdateRubricRequest request, string languageCode)
     {
         var entity = await _db.Rubrics.FindAsync(id)
-            ?? throw new KeyNotFoundException($"Рубрика с id={id} не найдена");
+                     ?? throw new KeyNotFoundException($"Рубрика с id={id} не найдена");
 
         if (request.ParentId.HasValue)
         {
             if (request.ParentId.Value == id)
                 throw new InvalidOperationException("Рубрика не может быть родителем самой себя");
 
-            await EnsureParentExistsAsync(request.ParentId.Value);
-            await EnsureNoCircularReferenceAsync(id, request.ParentId.Value);
-            await EnsureDepthNotExceededAsync(request.ParentId.Value);
+            await HierarchyValidation.EnsureParentExistsAsync(_db.Rubrics, request.ParentId.Value,
+                pid => $"Родительская рубрика с id={pid} не найдена");
+            await HierarchyValidation.EnsureNoCircularReferenceAsync(_db.Rubrics, id, request.ParentId.Value,
+                "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Rubrics, request.ParentId.Value, MaxDepth,
+                depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
         entity.TitleRu = request.TitleRu;
@@ -93,7 +97,7 @@ public class RubricService : IRubricService
     public async Task DeleteAsync(int id)
     {
         var entity = await _db.Rubrics.FindAsync(id)
-            ?? throw new KeyNotFoundException($"Рубрика с id={id} не найдена");
+                     ?? throw new KeyNotFoundException($"Рубрика с id={id} не найдена");
 
         var hasChildren = await _db.Rubrics.AnyAsync(x => x.ParentId == id);
         if (hasChildren)
@@ -110,53 +114,6 @@ public class RubricService : IRubricService
         {
             throw new InvalidOperationException(
                 "Нельзя удалить рубрику — на неё есть ссылки в других документах");
-        }
-    }
-
-    private async Task EnsureParentExistsAsync(int parentId)
-    {
-        var exists = await _db.Rubrics.AnyAsync(x => x.Id == parentId);
-        if (!exists)
-            throw new KeyNotFoundException($"Родительская рубрика с id={parentId} не найдена");
-    }
-
-    private async Task EnsureNoCircularReferenceAsync(int nodeId, int newParentId)
-    {
-        var currentId = (int?)newParentId;
-        var visited = new HashSet<int>();
-
-        while (currentId.HasValue)
-        {
-            if (currentId.Value == nodeId)
-                throw new InvalidOperationException(
-                    "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
-
-            if (!visited.Add(currentId.Value))
-                break;
-
-            currentId = await _db.Rubrics
-                .Where(x => x.Id == currentId.Value)
-                .Select(x => x.ParentId)
-                .FirstOrDefaultAsync();
-        }
-    }
-
-    private async Task EnsureDepthNotExceededAsync(int parentId)
-    {
-        var depth = 1;
-        var currentId = (int?)parentId;
-
-        while (currentId.HasValue)
-        {
-            depth++;
-            if (depth > MaxDepth)
-                throw new InvalidOperationException(
-                    $"Превышена максимальная глубина вложенности ({MaxDepth} уровней)");
-
-            currentId = await _db.Rubrics
-                .Where(x => x.Id == currentId.Value)
-                .Select(x => x.ParentId)
-                .FirstOrDefaultAsync();
         }
     }
 

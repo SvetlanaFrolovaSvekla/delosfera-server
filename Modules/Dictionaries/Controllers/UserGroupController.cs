@@ -101,7 +101,7 @@ public class UserGroupController : ControllerBase
     /// <param name="id">Идентификатор группы</param>
     /// <response code="204">Группа успешно удалена</response>
     /// <response code="404">Группа не найдена</response>
-    /// <response code="409">Нельзя удалить — на группу есть ссылки в других данных</response>
+    /// <response code="409">Нельзя удалить - на группу есть ссылки в других данных</response>
     [HttpDelete("{id:int}")]
     [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

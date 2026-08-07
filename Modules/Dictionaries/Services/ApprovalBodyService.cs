@@ -1,4 +1,5 @@
 ﻿using delosfera_server.Common.Extensions;
+using delosfera_server.Common.Services;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
@@ -9,7 +10,7 @@ namespace delosfera_server.Modules.Dictionaries.Services;
 
 public class ApprovalBodyService : IApprovalBodyService
 {
-    // Максимальная глубина вложенности — защита от случайных бесконечных цепочек,
+    // Максимальная глубина вложенности - защита от случайных бесконечных цепочек,
     // с запасом покрывает любую реальную оргструктуру банка
     private const int MaxDepth = 5;
 
@@ -20,7 +21,8 @@ public class ApprovalBodyService : IApprovalBodyService
         _db = db;
     }
 
-    public async Task<List<ApprovalBodyResponse>> GetAllAsync(ApprovalBodySortBy sortBy, string? search, string languageCode)
+    public async Task<List<ApprovalBodyResponse>> GetAllAsync(ApprovalBodySortBy sortBy, string? search,
+        string languageCode)
     {
         IQueryable<ApprovalBody> query = _db.ApprovalBodies;
 
@@ -50,15 +52,15 @@ public class ApprovalBodyService : IApprovalBodyService
     {
         if (request.ParentId.HasValue)
         {
-            await EnsureParentExistsAsync(request.ParentId.Value);
-            await EnsureDepthNotExceededAsync(request.ParentId.Value);
+            await HierarchyValidation.EnsureParentExistsAsync(_db.ApprovalBodies, request.ParentId.Value,
+                pid => $"Родительский орган утверждения с id={pid} не найден");
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.ApprovalBodies, request.ParentId.Value, MaxDepth,
+                depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
         var entity = new ApprovalBody
         {
-            TitleRu = request.TitleRu,
-            TitleEn = request.TitleEn,
-            TitleKg = request.TitleKg,
+            TitleRu = request.TitleRu, TitleEn = request.TitleEn, TitleKg = request.TitleKg,
             ParentId = request.ParentId
         };
 
@@ -71,16 +73,19 @@ public class ApprovalBodyService : IApprovalBodyService
     public async Task<ApprovalBodyResponse> UpdateAsync(int id, UpdateApprovalBodyRequest request, string languageCode)
     {
         var entity = await _db.ApprovalBodies.FindAsync(id)
-            ?? throw new KeyNotFoundException($"Орган утверждения с id={id} не найден");
+                     ?? throw new KeyNotFoundException($"Орган утверждения с id={id} не найден");
 
         if (request.ParentId.HasValue)
         {
             if (request.ParentId.Value == id)
                 throw new InvalidOperationException("Орган утверждения не может быть родителем самого себя");
 
-            await EnsureParentExistsAsync(request.ParentId.Value);
-            await EnsureNoCircularReferenceAsync(id, request.ParentId.Value);
-            await EnsureDepthNotExceededAsync(request.ParentId.Value);
+            await HierarchyValidation.EnsureParentExistsAsync(_db.ApprovalBodies, request.ParentId.Value,
+                pid => $"Родительский орган утверждения с id={pid} не найден");
+            await HierarchyValidation.EnsureNoCircularReferenceAsync(_db.ApprovalBodies, id, request.ParentId.Value,
+                "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.ApprovalBodies, request.ParentId.Value, MaxDepth,
+                depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
         entity.TitleRu = request.TitleRu;
@@ -95,7 +100,7 @@ public class ApprovalBodyService : IApprovalBodyService
     public async Task DeleteAsync(int id)
     {
         var entity = await _db.ApprovalBodies.FindAsync(id)
-            ?? throw new KeyNotFoundException($"Орган утверждения с id={id} не найден");
+                     ?? throw new KeyNotFoundException($"Орган утверждения с id={id} не найден");
 
         var hasChildren = await _db.ApprovalBodies.AnyAsync(x => x.ParentId == id);
         if (hasChildren)
@@ -115,52 +120,6 @@ public class ApprovalBodyService : IApprovalBodyService
         }
     }
 
-    private async Task EnsureParentExistsAsync(int parentId)
-    {
-        var exists = await _db.ApprovalBodies.AnyAsync(x => x.Id == parentId);
-        if (!exists)
-            throw new KeyNotFoundException($"Родительский орган утверждения с id={parentId} не найден");
-    }
-
-    private async Task EnsureNoCircularReferenceAsync(int nodeId, int newParentId)
-    {
-        var currentId = (int?)newParentId;
-        var visited = new HashSet<int>();
-
-        while (currentId.HasValue)
-        {
-            if (currentId.Value == nodeId)
-                throw new InvalidOperationException(
-                    "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
-
-            if (!visited.Add(currentId.Value))
-                break;
-
-            currentId = await _db.ApprovalBodies
-                .Where(x => x.Id == currentId.Value)
-                .Select(x => x.ParentId)
-                .FirstOrDefaultAsync();
-        }
-    }
-
-    private async Task EnsureDepthNotExceededAsync(int parentId)
-    {
-        var depth = 1;
-        var currentId = (int?)parentId;
-
-        while (currentId.HasValue)
-        {
-            depth++;
-            if (depth > MaxDepth)
-                throw new InvalidOperationException(
-                    $"Превышена максимальная глубина вложенности ({MaxDepth} уровней)");
-
-            currentId = await _db.ApprovalBodies
-                .Where(x => x.Id == currentId.Value)
-                .Select(x => x.ParentId)
-                .FirstOrDefaultAsync();
-        }
-    }
 
     private static ApprovalBodyResponse ToResponse(ApprovalBody entity, string languageCode) => new()
     {

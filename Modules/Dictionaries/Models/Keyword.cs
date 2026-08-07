@@ -7,7 +7,7 @@ namespace delosfera_server.Modules.Dictionaries.Models;
  ключевое слово может иметь родителя (ParentId).
 */
 
-public class Keyword : IAuditableEntity, ITranslatableEntity
+public class Keyword : IAuditableEntity, ITranslatableEntity, IHierarchicalEntity
 {
     public int Id { get; set; }
     public required string TitleRu { get; set; }

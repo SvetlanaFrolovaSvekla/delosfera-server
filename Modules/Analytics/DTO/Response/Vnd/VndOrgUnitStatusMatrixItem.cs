@@ -1,6 +1,6 @@
 namespace delosfera_server.Modules.Analytics.DTO.Response.Vnd;
 
-/// <summary>Ячейка матрицы "подразделение-разработчик × статус ВНД" — данные для тепловой карты
+/// <summary>Ячейка матрицы "подразделение-разработчик × статус ВНД" - данные для тепловой карты
 /// или сгруппированной столбчатой диаграммы</summary>
 public class VndOrgUnitStatusMatrixItem
 {

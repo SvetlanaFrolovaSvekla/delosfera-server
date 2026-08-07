@@ -26,7 +26,7 @@ public class User : IAuditableEntity
     /// <summary>Источник учётной записи: локальная или LDAP</summary>
     public UserSource Source { get; set; } = UserSource.Local;
 
-    /// <summary>Дата и время блокировки. Null — учётная запись не заблокирована</summary>
+    /// <summary>Дата и время блокировки. Null - учётная запись не заблокирована</summary>
     public DateTime? BlockedAt { get; set; }
 
     /// <summary>Кто заблокировал</summary>

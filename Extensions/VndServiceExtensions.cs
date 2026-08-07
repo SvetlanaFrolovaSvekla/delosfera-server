@@ -1,4 +1,4 @@
-﻿using delosfera_server.Modules.Vnd.Services;
+﻿using delosfera_server.Modules.Documents.VND.Services;
 
 namespace delosfera_server.Extensions;
 

@@ -1,7 +1,7 @@
 ﻿namespace delosfera_server.Modules.Dictionaries.DTO.Response;
 
 /// <summary>
-/// Краткая информация о пользователе — участнике группы
+/// Краткая информация о пользователе - участнике группы
 /// </summary>
 public class UserGroupMemberResponse
 {

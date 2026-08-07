@@ -6,7 +6,7 @@ public enum AnalyticsGranularity
     /// <summary>По дням</summary>
     Day = 0,
 
-    /// <summary>По неделям (начало недели — понедельник)</summary>
+    /// <summary>По неделям (начало недели - понедельник)</summary>
     Week = 1,
 
     /// <summary>По месяцам</summary>

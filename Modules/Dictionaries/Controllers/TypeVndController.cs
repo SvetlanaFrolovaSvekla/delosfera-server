@@ -91,7 +91,7 @@ public class TypeVndController : ControllerBase
     /// <param name="id">Идентификатор вида ВНД</param>
     /// <response code="204">Вид ВНД успешно удалён</response>
     /// <response code="404">Вид ВНД с указанным id не найден</response>
-    /// <response code="409">Нельзя удалить — на вид ВНД есть ссылки в других документах</response>
+    /// <response code="409">Нельзя удалить - на вид ВНД есть ссылки в других документах</response>
     [HttpDelete("{id:int}")]
     [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

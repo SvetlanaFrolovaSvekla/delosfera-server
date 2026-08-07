@@ -7,7 +7,7 @@ namespace delosfera_server.Modules.Dictionaries.Models;
  рубрика может иметь родителя (ParentId).
 */
 
-public class Rubric : IAuditableEntity, ITranslatableEntity
+public class Rubric : IAuditableEntity, ITranslatableEntity, IHierarchicalEntity
 {
     public int Id { get; set; }
     public required string TitleRu { get; set; }

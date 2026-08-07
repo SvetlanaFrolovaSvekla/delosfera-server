@@ -70,12 +70,6 @@ public static class PermissionCatalog
             TitleEn = "Manage groups",
             TitleKg = "Топторду башкаруу"
         },
-        [PermissionCode.ManageDictionaries] = new PermissionDescription
-        {
-            TitleRu = "Управление справочниками",
-            TitleEn = "Manage dictionaries",
-            TitleKg = "Маалымдамаларды башкаруу"
-        },
         [PermissionCode.ViewVnd] = new PermissionDescription
         {
             TitleRu = "Просмотр ВНД",
@@ -136,12 +130,6 @@ public static class PermissionCatalog
             TitleEn = "Ability to view other users' drafts",
             TitleKg = "Башка колдонуучулардын черновиктерин көрүү мүмкүнчүлүгү"
         },
-        [PermissionCode.ViewOtherUsersDrafts] = new PermissionDescription
-        {
-            TitleRu = "Возможность просматривать черновики других пользователей",
-            TitleEn = "Ability to view other users' drafts",
-            TitleKg = "Башка колдонуучулардын черновиктерин көрүү мүмкүнчүлүгү"
-        },
         [PermissionCode.ManageVndDictionaries] = new PermissionDescription
         {
             TitleRu = "Управление справочниками ВНД",
@@ -165,6 +153,12 @@ public static class PermissionCatalog
             TitleRu = "Управление справочниками закупок",
             TitleEn = "Manage procurement dictionaries",
             TitleKg = "Сатып алуулардын маалымдамаларын башкаруу"
+        },
+        [PermissionCode.EditVndRequisites] = new PermissionDescription
+        {
+            TitleRu = "Изменение реквизитов существующей ВНД и её связей с другими документами",
+            TitleEn = "Edit requisites of an existing VND and its links to other documents",
+            TitleKg = "Учурдагы ВНДдин реквизиттерин жана башка документтер менен байланышын өзгөртүү"
         }
     };
     

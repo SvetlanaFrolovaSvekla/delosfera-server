@@ -4,7 +4,7 @@ using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Files.Models;
 using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Users.Models;
-using delosfera_server.Modules.Vnd.Models;
+using delosfera_server.Modules.Documents.VND.Models;
 
 namespace delosfera_server.Data;
 

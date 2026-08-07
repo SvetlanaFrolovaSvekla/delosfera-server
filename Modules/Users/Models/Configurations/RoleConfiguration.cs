@@ -31,12 +31,13 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
             (int)PermissionCode.ActualizeVndWithoutApprovalByRequest,
             (int)PermissionCode.CreateVndWithApproval,
             (int)PermissionCode.ManageGroups,
-            (int)PermissionCode.ManageDictionaries,
+            (int)PermissionCode.ManageVndDictionaries,
             (int)PermissionCode.ViewVnd,
             (int)PermissionCode.ExportVnd,
             (int)PermissionCode.ExportFullStatisticsReport,
             (int)PermissionCode.ViewFullStatistics,
-            (int)PermissionCode.ActAsApprover
+            (int)PermissionCode.ActAsApprover,
+            (int)PermissionCode.EditVndRequisites
         };
 
         builder.HasData(

@@ -1,6 +1,6 @@
 namespace delosfera_server.Modules.Analytics.DTO.Response.Users;
 
-/// <summary>Пользователь-инициатор ВНД и статистика по созданным им документам — связка модулей
+/// <summary>Пользователь-инициатор ВНД и статистика по созданным им документам - связка модулей
 /// "Пользователи" и "ВНД" (кто больше всех создаёт/актуализирует документы)</summary>
 public class UserTopInitiatorItem
 {

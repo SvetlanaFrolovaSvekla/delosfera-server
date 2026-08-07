@@ -1,6 +1,6 @@
 namespace delosfera_server.Modules.Analytics.DTO.Response.Users;
 
-/// <summary>Персональная статистика пользователя как согласующего по ВНД — рейтинг
+/// <summary>Персональная статистика пользователя как согласующего по ВНД - рейтинг
 /// самых быстрых/самых медленных согласующих</summary>
 public class UserApproverPerformanceItem
 {

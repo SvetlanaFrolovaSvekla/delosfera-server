@@ -85,7 +85,7 @@ public class SecurityLevelController : ControllerBase
     /// <param name="id">Идентификатор уровня секретности</param>
     /// <response code="204">Уровень секретности успешно удалён</response>
     /// <response code="404">Уровень секретности с указанным id не найден</response>
-    /// <response code="409">Нельзя удалить — на уровень секретности есть ссылки в других документах</response>
+    /// <response code="409">Нельзя удалить - на уровень секретности есть ссылки в других документах</response>
     [HttpDelete("{id:int}")]
     [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

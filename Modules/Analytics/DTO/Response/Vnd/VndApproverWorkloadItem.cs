@@ -1,6 +1,6 @@
 namespace delosfera_server.Modules.Analytics.DTO.Response.Vnd;
 
-/// <summary>Загрузка и скорость реакции согласующего подразделения/пользователя — для поиска
+/// <summary>Загрузка и скорость реакции согласующего подразделения/пользователя - для поиска
 /// "узких мест" в маршруте согласования</summary>
 public class VndApproverWorkloadItem
 {
@@ -34,7 +34,7 @@ public class VndApproverWorkloadItem
     /// <summary>Среднее время принятия решения в часах (для решений, принятых не по таймауту)</summary>
     public double AverageDecisionHours { get; set; }
 
-    /// <summary>Доля решений, зачтённых по таймауту, % — чем выше, тем больше подразделение
+    /// <summary>Доля решений, зачтённых по таймауту, % - чем выше, тем больше подразделение
     /// "тормозит" процесс согласования</summary>
     public double TimeoutRatePercent { get; set; }
 }

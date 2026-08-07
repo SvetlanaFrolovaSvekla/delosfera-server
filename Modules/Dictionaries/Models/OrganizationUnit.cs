@@ -8,7 +8,7 @@ namespace delosfera_server.Modules.Dictionaries.Models;
  Иерархический справочник - подразделение может иметь родителя.
 */
 
-public class OrganizationUnit : IAuditableEntity, ITranslatableEntity
+public class OrganizationUnit : IAuditableEntity, ITranslatableEntity, IHierarchicalEntity
 {
     public int Id { get; set; }
     public required string TitleRu { get; set; }
@@ -16,11 +16,11 @@ public class OrganizationUnit : IAuditableEntity, ITranslatableEntity
     public string? TitleKg { get; set; }
     public int? ParentId { get; set; }
 
-    /// <summary>Начальник подразделения — используется как ответственный исполнитель по умолчанию</summary>
+    /// <summary>Начальник подразделения - используется как ответственный исполнитель по умолчанию</summary>
     public int? HeadUserId { get; set; }
     public User? HeadUser { get; set; }
 
-    /// <summary>Куратор подразделения — используется как куратор-разработчик ВНД по умолчанию</summary>
+    /// <summary>Куратор подразделения - используется как куратор-разработчик ВНД по умолчанию</summary>
     public int? CuratorUserId { get; set; }
     public User? CuratorUser { get; set; }
 
