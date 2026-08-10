@@ -1,5 +1,6 @@
 using delosfera_server.Data;
 using delosfera_server.Extensions;
+using delosfera_server.Common.Middleware;
 using delosfera_server.Common.Services;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
@@ -165,6 +166,7 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+app.UseMiddleware<ExceptionHandlingMiddleware>(); // единая обработка ошибок, без утечки стектрейсов
 app.UseHttpsRedirection(); // Перенаправляет все входящие HTTP-запросы на HTTPS
 app.UseCors("AllowFrontend");
 app.UseRateLimiter();
