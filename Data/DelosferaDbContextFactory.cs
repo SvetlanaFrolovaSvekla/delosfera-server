@@ -11,6 +11,8 @@ public class DelosferaDbContextFactory : IDesignTimeDbContextFactory<DelosferaDb
             .SetBasePath(Directory.GetCurrentDirectory())
             .AddJsonFile("appsettings.json")
             .AddJsonFile("appsettings.Development.json", optional: true)
+            .AddUserSecrets<DelosferaDbContextFactory>(optional: true)
+            .AddEnvironmentVariables()
             .Build();
 
         var optionsBuilder = new DbContextOptionsBuilder<DelosferaDbContext>();

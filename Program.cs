@@ -15,6 +15,21 @@ using Minio.DataModel.Args;
 /*Создается построитель приложения, собирает настройки, переменные окружения*/
 var builder = WebApplication.CreateBuilder(args);
 
+// Fail-fast: критичные секреты должны быть заданы (env / user-secrets), а не захардкожены.
+// JWT-ключ подписывает все токены — слабый или пустой ключ = возможность подделать любой токен.
+static string RequireSecret(IConfiguration cfg, string key, int minLength = 1)
+{
+    var value = cfg[key];
+    if (string.IsNullOrWhiteSpace(value) || value.Length < minLength)
+        throw new InvalidOperationException(
+            $"Конфигурация '{key}' не задана или короче {minLength} символов. " +
+            "Задайте её через переменные окружения или dotnet user-secrets (см. appsettings.example.json).");
+    return value;
+}
+
+var jwtKey = RequireSecret(builder.Configuration, "Jwt:Key", minLength: 32);
+RequireSecret(builder.Configuration, "ConnectionStrings:DefaultConnection");
+
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
         options.JsonSerializerOptions.Converters.Add(
@@ -83,8 +98,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuerSigningKey = true,
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
         };
     });
 
