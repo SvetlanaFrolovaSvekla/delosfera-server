@@ -14,6 +14,19 @@ public class UserPasswordHasher : IUserPasswordHasher
 
     public string Hash(string password) => _hasher.HashPassword(new object(), password);
 
-    public bool Verify(string hash, string password) =>
-        _hasher.VerifyHashedPassword(new object(), hash, password) != PasswordVerificationResult.Failed;
+    public bool Verify(string hash, string password)
+    {
+        // Пустой/повреждённый хеш (например, инвалидированный сид-аккаунт) не должен
+        // ронять запрос исключением — это просто неуспешная проверка пароля.
+        if (string.IsNullOrEmpty(hash)) return false;
+
+        try
+        {
+            return _hasher.VerifyHashedPassword(new object(), hash, password) != PasswordVerificationResult.Failed;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
 }

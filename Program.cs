@@ -139,6 +139,24 @@ using (var scope = app.Services.CreateScope())
         // В проде - только применяются новые миграции, ничего более не удаляется
         db.Database.Migrate();
     }
+
+    // Bootstrap администратора из конфигурации (env/secrets), а НЕ из захардкоженного хеша.
+    // Пароли сид-аккаунтов инвалидированы миграцией InvalidateSeededPasswords; этот блок —
+    // единственный способ выдать рабочий пароль администратору, без коммита хеша в репозиторий.
+    var adminEmail = app.Configuration["Bootstrap:AdminEmail"];
+    var adminPassword = app.Configuration["Bootstrap:AdminPassword"];
+    if (!string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword))
+    {
+        var hasher = scope.ServiceProvider.GetRequiredService<IUserPasswordHasher>();
+        var admin = db.Users.FirstOrDefault(u => u.Email == adminEmail);
+        if (admin is not null)
+        {
+            admin.PasswordHash = hasher.Hash(adminPassword);
+            admin.IsActive = true;
+            admin.BlockedAt = null;
+            db.SaveChanges();
+        }
+    }
 }
 
 // Создаём бакет MinIO при старте, если его ещё нет
