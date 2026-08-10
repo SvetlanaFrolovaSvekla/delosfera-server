@@ -26,6 +26,7 @@
     <ItemGroup>
       <Folder Include="Modules\Documents\SZ\" />
       <Folder Include="Modules\Documents\Procurement\" />
+      <Folder Include="NotesDev\" />
     </ItemGroup>
 
     <ItemGroup>
