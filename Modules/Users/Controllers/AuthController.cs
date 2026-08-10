@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
@@ -12,6 +13,7 @@ namespace delosfera_server.Modules.Users.Controllers;
 [ApiController]
 [Route("/auth")]
 [Tags("Аутентификация")]
+[EnableRateLimiting("auth")]
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
