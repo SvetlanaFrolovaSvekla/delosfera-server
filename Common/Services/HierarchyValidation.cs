@@ -10,7 +10,7 @@ namespace delosfera_server.Common.Services;
 /// </summary>
 public static class HierarchyValidation
 {
-    public const int DefaultMaxDepth = 5; // Максимальная длина иерархии (кол-во узлов)
+    private const int DefaultMaxDepth = 5; // Максимальная длина иерархии (кол-во узлов)
 
     public static async Task EnsureParentExistsAsync<T>(
         DbSet<T> set, int parentId, Func<int, string> notFoundMessage)
@@ -22,7 +22,7 @@ public static class HierarchyValidation
     }
 
     /// <summary>Идёт вверх по цепочке ParentId от newParentId и проверяет, что nodeId
-    /// не встречается на пути — иначе выбор такого родителя создал бы цикл.</summary>
+    /// не встречается на пути - иначе выбор такого родителя создал бы цикл.</summary>
     public static async Task EnsureNoCircularReferenceAsync<T>(
         DbSet<T> set, int nodeId, int newParentId, string circularReferenceMessage)
         where T : class, IHierarchicalEntity
@@ -36,17 +36,18 @@ public static class HierarchyValidation
                 throw new InvalidOperationException(circularReferenceMessage);
 
             if (!visited.Add(currentId.Value))
-                break; // защита от зависания, если в данных уже случайно оказался цикл
+                break; // Защита от зависания, если в данных уже оказался цикл
 
+            var idToCheck = currentId.Value; 
             currentId = await set
-                .Where(x => x.Id == currentId.Value)
+                .Where(x => x.Id == idToCheck)
                 .Select(x => x.ParentId)
                 .FirstOrDefaultAsync();
         }
     }
 
     public static async Task EnsureDepthNotExceededAsync<T>(
-        DbSet<T> set, int parentId, int maxDepth, Func<int, string> depthExceededMessage)
+        DbSet<T> set, int parentId, Func<int, string> depthExceededMessage, int maxDepth = DefaultMaxDepth)
         where T : class, IHierarchicalEntity
     {
         var depth = 1;
@@ -58,8 +59,9 @@ public static class HierarchyValidation
             if (depth > maxDepth)
                 throw new InvalidOperationException(depthExceededMessage(maxDepth));
 
+            var idToCheck = currentId.Value; 
             currentId = await set
-                .Where(x => x.Id == currentId.Value)
+                .Where(x => x.Id == idToCheck)
                 .Select(x => x.ParentId)
                 .FirstOrDefaultAsync();
         }

@@ -1,5 +1,6 @@
 ﻿using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.VND.Services;
 using delosfera_server.Modules.Users.Models;
 using Microsoft.AspNetCore.Mvc;

@@ -1,4 +1,4 @@
-﻿namespace delosfera_server.Common.Services;
+﻿namespace delosfera_server.Common.Services.Authorization;
 
 public interface ICurrentUserService
 {

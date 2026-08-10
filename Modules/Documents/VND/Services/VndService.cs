@@ -5,6 +5,7 @@ using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
 using delosfera_server.Common.Extensions;
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Users.Models;
 

@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Extensions;
-using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Common.Services.Authorization.Ldap;
 using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Users.DTO.Request;
@@ -14,30 +15,38 @@ public class AuthService : IAuthService
     private readonly DelosferaDbContext _db;
     private readonly IUserPasswordHasher _passwordHasher;
     private readonly IJwtTokenService _jwtTokenService;
+    private readonly ILdapAuthenticator _ldapAuthenticator;
 
-    public AuthService(DelosferaDbContext db, IUserPasswordHasher passwordHasher, IJwtTokenService jwtTokenService)
+    public AuthService(
+        DelosferaDbContext db,
+        IUserPasswordHasher passwordHasher,
+        IJwtTokenService jwtTokenService,
+        ILdapAuthenticator ldapAuthenticator) 
     {
         _db = db;
         _passwordHasher = passwordHasher;
         _jwtTokenService = jwtTokenService;
+        _ldapAuthenticator = ldapAuthenticator; 
     }
 
     public async Task<LoginResponse> LoginAsync(LoginRequest request, string languageCode)
     {
         var user = await LoadUserAsync(x => x.Email == request.Email)
-            ?? throw new UnauthorizedAccessException("Неверный email или пароль");
+                   ?? throw new UnauthorizedAccessException("Неверный email или пароль");
 
-        if (!user.IsActive)
-            throw new UnauthorizedAccessException("Учётная запись деактивирована");
+        if (!user.IsActive) throw new UnauthorizedAccessException("Учётная запись деактивирована");
+        if (user.BlockedAt.HasValue) throw new UnauthorizedAccessException("Учётная запись заблокирована");
 
-        if (user.BlockedAt.HasValue)
-            throw new UnauthorizedAccessException("Учётная запись заблокирована");
+        bool passwordOk = user.Source == UserSource.Ldap
+            ? await _ldapAuthenticator.VerifyPasswordAsync(
+                user.LdapLogin ?? throw new UnauthorizedAccessException("У учётной записи не задан LDAP-логин"),
+                request.Password)
+            : _passwordHasher.Verify(user.PasswordHash, request.Password);
 
-        if (!_passwordHasher.Verify(user.PasswordHash, request.Password))
+        if (!passwordOk)
             throw new UnauthorizedAccessException("Неверный email или пароль");
 
         user.LastLoginAt = DateTime.UtcNow;
-
         var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
         await _db.SaveChangesAsync();
 

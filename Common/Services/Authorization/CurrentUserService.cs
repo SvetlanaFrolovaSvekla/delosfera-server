@@ -1,7 +1,7 @@
 ﻿using System.Security.Claims;
 using delosfera_server.Modules.Users.Models;
 
-namespace delosfera_server.Common.Services;
+namespace delosfera_server.Common.Services.Authorization;
 
 public class CurrentUserService : ICurrentUserService
 {
