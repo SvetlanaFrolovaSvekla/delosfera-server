@@ -106,6 +106,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
+// Health-check для мониторинга/оркестратора (liveness).
+builder.Services.AddHealthChecks();
+
+// Логирование HTTP-запросов: только метод/путь/код/длительность.
+// НЕ логируем заголовки и тело — иначе в логи попадут токены и персональные данные.
+builder.Services.AddHttpLogging(o =>
+{
+    o.LoggingFields = Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.RequestMethod
+                      | Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.RequestPath
+                      | Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.ResponseStatusCode
+                      | Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.Duration;
+});
+
 // Ограничение частоты запросов к аутентификации — защита от перебора паролей.
 // Ключ — IP-адрес: не более 10 попыток в минуту на адрес.
 builder.Services.AddRateLimiter(options =>
@@ -186,10 +199,12 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<ExceptionHandlingMiddleware>(); // единая обработка ошибок, без утечки стектрейсов
+app.UseHttpLogging();
 app.UseHttpsRedirection(); // Перенаправляет все входящие HTTP-запросы на HTTPS
 app.UseCors("AllowFrontend");
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHealthChecks("/health").AllowAnonymous(); // liveness-проба, без авторизации
 app.Run();

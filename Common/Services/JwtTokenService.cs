@@ -49,6 +49,11 @@ public class JwtTokenService : IJwtTokenService
 
     private string BuildToken(List<Claim> claims, TimeSpan lifetime)
     {
+        // jti делает каждый выпущенный токен уникальным. Без него два токена, выданных
+        // в одну и ту же секунду (одинаковые sub/iat/exp), байт-в-байт совпадают — и их
+        // SHA-256 хеши в БД коллизируют, ломая ротацию refresh-токенов.
+        claims.Add(new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()));
+
         var credentials = new SigningCredentials(GetSigningKey(), SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
