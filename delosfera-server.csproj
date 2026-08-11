@@ -28,5 +28,13 @@
       <Folder Include="Modules\Documents\SZ\" />
       <Folder Include="Modules\Documents\Procurement\" />
     </ItemGroup>
+
+    <!-- Тест-проект лежит внутри дерева веб-проекта — исключаем его из компиляции веба -->
+    <ItemGroup>
+      <Compile Remove="tests/**/*.cs" />
+      <Content Remove="tests/**/*" />
+      <EmbeddedResource Remove="tests/**/*" />
+      <None Remove="tests/**/*" />
+    </ItemGroup>
     
 </Project>
