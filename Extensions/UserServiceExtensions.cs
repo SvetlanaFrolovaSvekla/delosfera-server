@@ -9,6 +9,7 @@ public static class UserServiceExtensions
     {
         builder.Services.AddScoped<IRoleService, RoleService>();
         builder.Services.AddScoped<IUserService, UserService>();
+        builder.Services.AddScoped<IUserActivityService, UserActivityService>();
         builder.Services.AddScoped<IUserPasswordHasher, UserPasswordHasher>();
         builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
         builder.Services.AddScoped<IAuthService, AuthService>();

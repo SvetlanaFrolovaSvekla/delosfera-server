@@ -19,12 +19,18 @@ namespace delosfera_server.Modules.Users.Controllers;
 public class UserController : ControllerBase
 {
     private readonly IUserService _service;
+    private readonly IUserActivityService _activityService;
     private readonly ILanguageResolver _languageResolver;
     private readonly ICurrentUserService _currentUser;
 
-    public UserController(IUserService service, ILanguageResolver languageResolver, ICurrentUserService currentUser)
+    public UserController(
+        IUserService service,
+        IUserActivityService activityService,
+        ILanguageResolver languageResolver,
+        ICurrentUserService currentUser)
     {
         _service = service;
+        _activityService = activityService;
         _languageResolver = languageResolver;
         _currentUser = currentUser;
     }
@@ -56,6 +62,22 @@ public class UserController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+    }
+
+    /// <summary>Лента активности пользователя (созданные ВНД, решения по согласованию, инициированные согласования)</summary>
+    /// <response code="200">Активность получена</response>
+    /// <response code="403">Нет права смотреть чужую активность</response>
+    [HttpGet("{id:int}/activity")]
+    [ProducesResponseType(typeof(UserActivityResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<UserActivityResponse>> GetActivity(int id)
+    {
+        // Свою активность видит каждый; чужую — только с правом управления пользователями.
+        if (id != _currentUser.UserId && !_currentUser.HasPermission(PermissionCode.ManageUsers))
+            return Forbid();
+
+        var language = _languageResolver.Resolve(Request);
+        return Ok(await _activityService.GetActivityAsync(id, language));
     }
 
     /// <summary>
