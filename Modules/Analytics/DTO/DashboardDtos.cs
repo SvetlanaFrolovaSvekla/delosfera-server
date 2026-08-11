@@ -22,6 +22,7 @@ public class ActiveSubstitutionDto
     public int Id { get; set; }
 
     /// <summary>Кого замещает текущий пользователь.</summary>
+    public int UserId { get; set; }
     public required string UserName { get; set; }
 
     public DateOnly StartsOn { get; set; }

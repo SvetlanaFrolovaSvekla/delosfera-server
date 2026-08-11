@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
+using delosfera_server.Modules.Users.Services;
 using delosfera_server.Modules.Workflow.Models;
 
 namespace delosfera_server.Modules.Workflow.Services;
@@ -17,14 +18,17 @@ public class RouteEngine : IRouteEngine
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
     private readonly IEnumerable<IRouteCompletionHandler> _completionHandlers;
+    private readonly ISubstitutionService _substitutions;
 
     public RouteEngine(
         DelosferaDbContext db, IAuditService audit,
-        IEnumerable<IRouteCompletionHandler> completionHandlers)
+        IEnumerable<IRouteCompletionHandler> completionHandlers,
+        ISubstitutionService substitutions)
     {
         _db = db;
         _audit = audit;
         _completionHandlers = completionHandlers;
+        _substitutions = substitutions;
     }
 
     private IQueryable<RouteInstance> InstanceQuery() =>
@@ -147,6 +151,17 @@ public class RouteEngine : IRouteEngine
 
         if (p.State != ParticipantState.Active)
             throw new InvalidOperationException("Участник не находится в состоянии ожидания решения");
+
+        // Резолюцию выносит сам согласующий либо тот, кто его сейчас замещает (GEN-14).
+        // Без этой проверки решение мог принять любой аутентифицированный пользователь,
+        // а подпись под резолюцией теряет смысл. Системные вызовы (автоакцепт) идут с id 0.
+        if (actorUserId != 0 && p.UserId is { } assignee && assignee != actorUserId)
+        {
+            var actingFor = await _substitutions.GetActingForUserIdsAsync(actorUserId);
+            if (!actingFor.Contains(assignee))
+                throw new InvalidOperationException(
+                    "Решение по этому этапу выносит назначенный согласующий или его замещающий");
+        }
 
         if ((type is ResolutionType.ApprovedWithRemarks or ResolutionType.Rejected) && string.IsNullOrWhiteSpace(comment))
             throw new InvalidOperationException("Комментарий обязателен для замечаний и отклонения");

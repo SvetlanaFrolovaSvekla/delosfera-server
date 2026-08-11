@@ -90,6 +90,7 @@ public class DashboardService : IDashboardService
             ActingFor = actingFor.Select(s => new ActiveSubstitutionDto
             {
                 Id = s.Id,
+                UserId = s.UserId,
                 UserName = s.User?.FullName ?? "—",
                 StartsOn = s.StartsOn,
                 EndsOn = s.EndsOn,
@@ -98,6 +99,7 @@ public class DashboardService : IDashboardService
             ReplacedBy = replacedBy.Select(s => new ActiveSubstitutionDto
             {
                 Id = s.Id,
+                UserId = s.SubstituteUserId,
                 UserName = s.SubstituteUser?.FullName ?? "—",
                 StartsOn = s.StartsOn,
                 EndsOn = s.EndsOn,

@@ -286,6 +286,7 @@ public class ProcurementRequestService : IProcurementRequestService
             MinProposals = r.Method.MinProposals,
             CreatedAt = r.CreatedAt,
             UpdatedAt = r.UpdatedAt,
+            RouteInstanceId = r.Document.CurrentRouteInstanceId,
         };
 
         var link = await _db.DocumentLinks

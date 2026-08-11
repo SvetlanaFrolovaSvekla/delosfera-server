@@ -107,6 +107,9 @@ public class ProcurementCardDto
     public string? SourceSzRegNumber { get; set; }
     public int? SourceSzId { get; set; }
 
+    /// <summary>Запущенный маршрут согласования (PRC-08), если заявка отправлена.</summary>
+    public int? RouteInstanceId { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
