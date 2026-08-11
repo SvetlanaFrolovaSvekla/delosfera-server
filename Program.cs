@@ -63,6 +63,12 @@ builder.AddDictionaryServices();
 builder.AddVndServices();
 builder.AddAnalyticsServices();
 
+// Контур СЗ: фундамент документов → движок согласования → ЭП → служебные записки
+builder.AddDocumentServices();
+builder.AddWorkflowServices();
+builder.AddSigningServices();
+builder.AddSzServices();
+
 
 builder.Services.AddCors(options =>
 {

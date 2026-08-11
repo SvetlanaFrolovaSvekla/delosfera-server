@@ -24,6 +24,12 @@ public class OrganizationUnit : IAuditableEntity, ITranslatableEntity, IHierarch
     public int? CuratorUserId { get; set; }
     public User? CuratorUser { get; set; }
 
+    /// <summary>
+    /// Подразделению служебные записки нужны на бумаге (SZ-PAP-01): признак бумажного
+    /// носителя включается по виду записки либо по адресату — сработать должен любой из них.
+    /// </summary>
+    public bool RequiresPaperSz { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

@@ -5,6 +5,10 @@ using delosfera_server.Modules.Files.Models;
 using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Documents.VND.Models;
+using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Workflow.Models;
+using delosfera_server.Modules.Signing.Models;
+using delosfera_server.Modules.Sz.Models;
 
 namespace delosfera_server.Data;
 
@@ -40,7 +44,39 @@ public class DelosferaDbContext : DbContext
     
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
-    
+
+    // --- Контур СЗ: справочники архивного хранения (SZ-07 / GEN-09) ---
+    public DbSet<StorageTerm> StorageTerms => Set<StorageTerm>(); // Справочник: Сроки хранения
+    public DbSet<NomenclatureCase> NomenclatureCases => Set<NomenclatureCase>(); // Справочник: Номенклатура дел
+
+    // --- Фундамент документов (GEN-05/09/13): карточка, вложения, связи, нумераторы, аудит ---
+    public DbSet<Document> Documents => Set<Document>();
+    public DbSet<DocumentAttachment> DocumentAttachments => Set<DocumentAttachment>();
+    public DbSet<DocumentLink> DocumentLinks => Set<DocumentLink>();
+    public DbSet<Numerator> Numerators => Set<Numerator>();
+    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+
+    // --- Движок согласования (TID-01..14, SZ-01, PRC-08) ---
+    public DbSet<RouteInstance> RouteInstances => Set<RouteInstance>();
+    public DbSet<RouteStep> RouteSteps => Set<RouteStep>();
+    public DbSet<RouteParticipant> RouteParticipants => Set<RouteParticipant>();
+    public DbSet<Resolution> Resolutions => Set<Resolution>();
+    public DbSet<Remark> Remarks => Set<Remark>();
+    public DbSet<WorkflowTask> WorkflowTasks => Set<WorkflowTask>();
+    public DbSet<RouteTemplate> RouteTemplates => Set<RouteTemplate>();
+    public DbSet<RouteTemplateStep> RouteTemplateSteps => Set<RouteTemplateStep>();
+    public DbSet<RouteTemplateParticipant> RouteTemplateParticipants => Set<RouteTemplateParticipant>();
+
+    // --- ЭП (SIG-01..05) ---
+    public DbSet<Signature> Signatures => Set<Signature>();
+
+    // --- Служебные записки (контур 4 ТЗ) ---
+    public DbSet<SzDocument> SzDocuments => Set<SzDocument>();
+    public DbSet<SzKind> SzKinds => Set<SzKind>();
+    public DbSet<SzHrKind> SzHrKinds => Set<SzHrKind>();
+    public DbSet<SzAssignment> SzAssignments => Set<SzAssignment>();
+
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
