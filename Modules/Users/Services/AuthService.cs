@@ -34,7 +34,7 @@ public class AuthService : IAuthService
     private static string HashToken(string token) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 
-    public async Task<LoginResponse> LoginAsync(LoginRequest request, string languageCode)
+    public async Task<AuthResult> LoginAsync(LoginRequest request, string languageCode)
     {
         var user = await LoadUserAsync(x => x.Email == request.Email)
             ?? throw new UnauthorizedAccessException("Неверный email или пароль");
@@ -53,12 +53,14 @@ public class AuthService : IAuthService
         var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
         await _db.SaveChangesAsync();
 
-        return new LoginResponse { Token = accessToken, RefreshToken = refreshToken, User = ToUserResponse(user, languageCode) };
+        return new AuthResult(
+            new LoginResponse { Token = accessToken, User = ToUserResponse(user, languageCode) },
+            refreshToken);
     }
 
-    public async Task<LoginResponse> RefreshAsync(RefreshTokenRequest request, string languageCode)
+    public async Task<AuthResult> RefreshAsync(string refreshToken, string languageCode)
     {
-        var refreshTokenHash = HashToken(request.RefreshToken);
+        var refreshTokenHash = HashToken(refreshToken);
 
         var tokenEntity = await _db.Tokens
             .Include(x => x.User!).ThenInclude(u => u.Position)
@@ -84,10 +86,12 @@ public class AuthService : IAuthService
         if (user.BlockedAt.HasValue)
             throw new UnauthorizedAccessException("Учётная запись заблокирована");
 
-        var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
+        var (accessToken, newRefreshToken) = await IssueNewTokenPairAsync(user);
         await _db.SaveChangesAsync();
 
-        return new LoginResponse { Token = accessToken, RefreshToken = refreshToken, User = ToUserResponse(user, languageCode) };
+        return new AuthResult(
+            new LoginResponse { Token = accessToken, User = ToUserResponse(user, languageCode) },
+            newRefreshToken);
     }
 
     public async Task LogoutAsync(string refreshToken)
