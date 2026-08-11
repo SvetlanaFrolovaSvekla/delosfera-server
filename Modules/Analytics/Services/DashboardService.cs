@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Analytics.DTO;
 using delosfera_server.Modules.Documents.Models;
@@ -24,12 +25,17 @@ public interface IDashboardService
 public class DashboardService : IDashboardService
 {
     private readonly DelosferaDbContext _db;
+    private readonly IBankClock _clock;
 
-    public DashboardService(DelosferaDbContext db) => _db = db;
+    public DashboardService(DelosferaDbContext db, IBankClock clock)
+    {
+        _db = db;
+        _clock = clock;
+    }
 
     public async Task<DashboardSummaryDto> GetSummaryAsync(int userId)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var now = DateTime.UtcNow;
 
         var actingFor = await _db.Substitutions

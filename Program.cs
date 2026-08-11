@@ -50,6 +50,10 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddScoped<ILanguageResolver, LanguageResolver>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+
+// Календарные даты (сроки, периоды замещения, даты документов) считаются по времени
+// банка, а не по UTC: иначе «сегодня» наступает с шестичасовым сдвигом.
+builder.Services.AddSingleton<IBankClock, BankClock>();
 builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
 builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();

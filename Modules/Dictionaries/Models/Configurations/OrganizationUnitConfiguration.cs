@@ -29,7 +29,7 @@ public class OrganizationUnitConfiguration : IEntityTypeConfiguration<Organizati
             new { Id = 1, TitleRu = "Управление делами", TitleEn = "Administrative Affairs Department", TitleKg = "Иштерди башкаруу", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 2, TitleRu = "Начальник УД", TitleEn = "Head of Administrative Affairs Department", TitleKg = "ИБ башчысы", ParentId = (int?)1, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
 
-            new { Id = 3, TitleRu = "Управление информационных технологий", TitleEn = "Information Technology Department", TitleKg = "Маалыматтык технологиялар башкармасы", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
+            new { Id = 3, TitleRu = "Управление информационных технологий", TitleEn = "Information Technology Department", TitleKg = "Маалыматтык технологиялар башкармасы", ParentId = (int?)null, HeadUserId = (int?)8, CuratorUserId = (int?)14, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 4, TitleRu = "Управление казначейских операций", TitleEn = "Treasury Operations Department", TitleKg = "Казыналык операциялар башкармасы", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
 
             new { Id = 5, TitleRu = "Управление комплаенс контроля", TitleEn = "Compliance Control Department", TitleKg = "Комплаенс контролдоо башкармасы", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
@@ -65,15 +65,15 @@ public class OrganizationUnitConfiguration : IEntityTypeConfiguration<Organizati
             new { Id = 28, TitleRu = "Управление риск-менеджмента", TitleEn = "Risk Management Office", TitleKg = "Тобокелдик-менеджмент башкармасы", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 29, TitleRu = "Управление розничных продаж", TitleEn = "Retail Sales Department", TitleKg = "Чекене сатуулар башкармасы", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 30, TitleRu = "Управление розничных продуктов", TitleEn = "Retail Products Department", TitleKg = "Чекене продукттар башкармасы", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
-            new { Id = 31, TitleRu = "Управление стратегического планирования и бюджетирования", TitleEn = "Strategic Planning and Budgeting Department", TitleKg = "Стратегиялык пландоо жана бюджеттөө башкармасы", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
+            new { Id = 31, TitleRu = "Управление стратегического планирования и бюджетирования", TitleEn = "Strategic Planning and Budgeting Department", TitleKg = "Стратегиялык пландоо жана бюджеттөө башкармасы", ParentId = (int?)null, HeadUserId = (int?)7, CuratorUserId = (int?)5, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 32, TitleRu = "Управление человеческими ресурсами", TitleEn = "Human Resources Department", TitleKg = "Адам ресурстарын башкаруу", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 33, TitleRu = "Управление методологии", TitleEn = "Methodology and Products Department", TitleKg = "Методология жана продукттар башкармасы", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 34, TitleRu = "Юридическое управление", TitleEn = "Legal Department", TitleKg = "Юридикалык башкарма", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
 
-            new { Id = 35, TitleRu = "Административный отдел", TitleEn = "Administrative Division", TitleKg = "Административдик бөлүм", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
-            new { Id = 36, TitleRu = "Правление", TitleEn = "Management Board", TitleKg = "Башкарма", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
+            new { Id = 35, TitleRu = "Административный отдел", TitleEn = "Administrative Division", TitleKg = "Административдик бөлүм", ParentId = (int?)null, HeadUserId = (int?)4, CuratorUserId = (int?)5, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
+            new { Id = 36, TitleRu = "Правление", TitleEn = "Management Board", TitleKg = "Башкарма", ParentId = (int?)null, HeadUserId = (int?)5, CuratorUserId = (int?)5, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 37, TitleRu = "Канцелярия", TitleEn = "Chancellery", TitleKg = "Канцелярия", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
-            new { Id = 38, TitleRu = "УБУиО", TitleEn = "Accounting and Reporting Department", TitleKg = "ЭБжО башкармасы", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
+            new { Id = 38, TitleRu = "УБУиО", TitleEn = "Accounting and Reporting Department", TitleKg = "ЭБжО башкармасы", ParentId = (int?)null, HeadUserId = (int?)11, CuratorUserId = (int?)7, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate },
             new { Id = 39, TitleRu = "Департамент безопасности", TitleEn = "Security Department", TitleKg = "Коопсуздук департаменти", ParentId = (int?)null, RequiresPaperSz = false, CreatedAt = seedDate, UpdatedAt = seedDate }
         );
     }

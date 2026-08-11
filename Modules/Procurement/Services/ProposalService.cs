@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Procurement.DTO;
@@ -27,11 +28,13 @@ public class ProposalService : IProposalService
 {
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
+    private readonly IBankClock _clock;
 
-    public ProposalService(DelosferaDbContext db, IAuditService audit)
+    public ProposalService(DelosferaDbContext db, IAuditService audit, IBankClock clock)
     {
         _db = db;
         _audit = audit;
+        _clock = clock;
     }
 
     public async Task<ProposalComparisonDto> GetComparisonAsync(int requestId) =>
@@ -64,7 +67,7 @@ public class ProposalService : IProposalService
             WarrantyMonths = request.WarrantyMonths,
             PaymentTerms = request.PaymentTerms?.Trim(),
             Specification = request.Specification?.Trim(),
-            ReceivedOn = request.ReceivedOn ?? DateOnly.FromDateTime(DateTime.UtcNow),
+            ReceivedOn = request.ReceivedOn ?? _clock.Today,
         };
 
         _db.CommercialProposals.Add(proposal);

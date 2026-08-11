@@ -35,14 +35,17 @@ public class ProcurementRequestService : IProcurementRequestService
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
     private readonly IAuthorityMatrixService _matrix;
+    private readonly IProcurementRouteService _routes;
 
     public ProcurementRequestService(
-        DelosferaDbContext db, IDocumentService documents, IAuditService audit, IAuthorityMatrixService matrix)
+        DelosferaDbContext db, IDocumentService documents, IAuditService audit,
+        IAuthorityMatrixService matrix, IProcurementRouteService routes)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
         _matrix = matrix;
+        _routes = routes;
     }
 
     public async Task<PagedResult<ProcurementListItemDto>> SearchAsync(
@@ -224,11 +227,19 @@ public class ProcurementRequestService : IProcurementRequestService
         var number = entity.Document.RegNumber
                      ?? await _documents.RegisterAsync(entity.DocumentId, "Procurement", "global", NumberPattern, actorUserId);
 
+        // Маршрут строится до смены статуса: если согласующих определить не удалось,
+        // заявка должна остаться черновиком, а не повиснуть «на согласовании» без задач.
+        var route = await _routes.StartAsync(entity, actorUserId);
+        entity.Document.CurrentRouteInstanceId = route.Id;
+
         await _documents.ChangeStatusAsync(entity.DocumentId, ProcurementStatus.OnApproval, actorUserId);
+        await _db.SaveChangesAsync();
+
         await _audit.LogAsync("ProcurementRequest", entity.Id, "SubmittedForApproval", actorUserId, new
         {
             number,
             entity.ApprovalChain,
+            routeInstanceId = route.Id,
         });
 
         return await BuildCardAsync(await LoadAsync(id));

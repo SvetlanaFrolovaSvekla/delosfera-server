@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Procurement.DTO;
@@ -32,12 +33,15 @@ public class ProtocolService : IProtocolService
     private readonly DelosferaDbContext _db;
     private readonly IProposalService _proposals;
     private readonly IAuditService _audit;
+    private readonly IBankClock _clock;
 
-    public ProtocolService(DelosferaDbContext db, IProposalService proposals, IAuditService audit)
+    public ProtocolService(
+        DelosferaDbContext db, IProposalService proposals, IAuditService audit, IBankClock clock)
     {
         _db = db;
         _proposals = proposals;
         _audit = audit;
+        _clock = clock;
     }
 
     public async Task<ProtocolDto?> GetAsync(int requestId)
@@ -73,7 +77,7 @@ public class ProtocolService : IProtocolService
         protocol ??= new ProcurementProtocol
         {
             RequestId = requestId,
-            ProtocolDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            ProtocolDate = _clock.Today,
             MethodTitle = request.Method!.TitleRu,
             Subject = request.Subject,
             ContentHash = string.Empty,
@@ -248,7 +252,7 @@ public class ProtocolService : IProtocolService
 
     private async Task<string> NextNumberAsync()
     {
-        var year = DateTime.UtcNow.Year;
+        var year = _clock.Today.Year;
         var prefix = $"ПЗ-{year}-";
 
         var last = await _db.ProcurementProtocols

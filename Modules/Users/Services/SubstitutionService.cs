@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Common.Services;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Users.DTO;
 using delosfera_server.Modules.Users.Models;
@@ -27,11 +28,13 @@ public class SubstitutionService : ISubstitutionService
 {
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
+    private readonly IBankClock _clock;
 
-    public SubstitutionService(DelosferaDbContext db, IAuditService audit)
+    public SubstitutionService(DelosferaDbContext db, IAuditService audit, IBankClock clock)
     {
         _db = db;
         _audit = audit;
+        _clock = clock;
     }
 
     public async Task<List<SubstitutionDto>> ListAsync(int? userId)
@@ -44,7 +47,7 @@ public class SubstitutionService : ISubstitutionService
         if (userId is { } id)
             q = q.Where(s => s.UserId == id || s.SubstituteUserId == id);
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         return await q
             .OrderByDescending(s => s.StartsOn)
@@ -127,7 +130,7 @@ public class SubstitutionService : ISubstitutionService
 
     public async Task<List<int>> GetActingForUserIdsAsync(int substituteUserId)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         return await _db.Substitutions
             .Where(s => s.SubstituteUserId == substituteUserId && !s.IsCancelled
