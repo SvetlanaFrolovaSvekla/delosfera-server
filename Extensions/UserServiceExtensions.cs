@@ -13,6 +13,7 @@ public static class UserServiceExtensions
         builder.Services.AddScoped<IUserPasswordHasher, UserPasswordHasher>();
         builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
         builder.Services.AddScoped<IAuthService, AuthService>();
+        builder.Services.AddScoped<ISubstitutionService, SubstitutionService>();
         return builder;
     }
 }

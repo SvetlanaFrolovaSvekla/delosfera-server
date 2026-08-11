@@ -29,6 +29,7 @@ public class DelosferaDbContext : DbContext
     public DbSet<Role> Roles => Set<Role>(); // Роли пользователей
     public DbSet<User> Users => Set<User>(); // Пользователи
     public DbSet<Token> Tokens => Set<Token>(); // Токены
+    public DbSet<Substitution> Substitutions => Set<Substitution>(); // Замещение на период отсутствия (GEN-14)
     
     public DbSet<FileAttachment> FileAttachments { get; set; }
     public DbSet<VndRedaction> VndRedactions { get; set; }
