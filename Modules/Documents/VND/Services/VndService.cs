@@ -616,7 +616,7 @@ public class VndService : IVndService
         return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
     }
 
-    // Отправка на согласование (заглушка)
+    // Отправка редакции на согласование: переводит черновик редакции в Pending и ВНД в Review.
     public async Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(
         int vndId, int redactionId, int currentUserId)
     {

@@ -273,6 +273,57 @@ public class VndApprovalService : IVndApprovalService
         return await LoadResponseAsync(process.Id);
     }
 
+    /// <summary>
+    /// Отзыв согласования инициатором (или главным редактором). Незавершённый процесс
+    /// переводится в Cancelled, редакция и документ возвращаются в черновик, согласующим
+    /// уходит уведомление, что задача снята. Заполняет пробел статуса Cancelled.
+    /// </summary>
+    public async Task<ApprovalProcessResponse> CancelAsync(int vndId, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        var isChiefEditor = _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
+                            || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
+                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
+                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
+
+        if (process.InitiatorUserId != currentUserId && !isChiefEditor)
+            throw new UnauthorizedAccessException(
+                "Отозвать согласование может только инициатор или главный редактор");
+
+        if (process.Status is ApprovalProcessStatus.Approved
+            or ApprovalProcessStatus.Cancelled
+            or ApprovalProcessStatus.Rejected)
+            throw new InvalidOperationException("Согласование уже завершено — отозвать нельзя");
+
+        process.Status = ApprovalProcessStatus.Cancelled;
+        process.CompletedAt = DateTime.UtcNow;
+
+        var redaction = process.Redaction!;
+        var vnd = process.Vnd!;
+
+        // Редакция снова становится черновиком (её можно править, переотправить или удалить).
+        redaction.ApprovalStatus = RedactionApprovalStatus.Draft;
+
+        // Документ: если это была первая редакция — возвращаем в черновик; если это цикл
+        // актуализации существующего ВНД — возвращаем на актуализацию, а не в черновик.
+        vnd.Status = redaction.Number <= 1 ? VndStatus.Draft : VndStatus.OnActualization;
+
+        await _db.SaveChangesAsync();
+
+        var approverIds = process.Stages
+            .Select(s => s.ApproverUserId)
+            .Where(id => id != currentUserId)
+            .Distinct()
+            .ToArray();
+
+        await NotifyAsync(
+            VndApprovalNotificationMessages.Cancelled(redaction.Code, vnd.TitleRu),
+            NotificationCategory.Approval, vndId, currentUserId, approverIds);
+
+        return await LoadResponseAsync(process.Id);
+    }
+
     public async Task<ApprovalProcessResponse> ResubmitAfterRevisionAsync(
         int vndId, ResubmitAfterRevisionRequest request, int currentUserId)
     {

@@ -113,6 +113,46 @@ public class VndApprovalServiceTests
     }
 
     [Fact]
+    public async Task Cancel_ByInitiator_SetsCancelledAndRevertsToDraft()
+    {
+        using var db = TestSupport.NewDb();
+        SeedTwoStageProcess(db);
+        var svc = NewService(db);
+
+        await svc.CancelAsync(1, 100); // 100 = InitiatorUserId
+
+        var process = await db.VndApprovalProcesses.SingleAsync();
+        var redaction = await db.VndRedactions.SingleAsync();
+        var vnd = await db.VndDocuments.SingleAsync();
+        Assert.Equal(ApprovalProcessStatus.Cancelled, process.Status);
+        Assert.NotNull(process.CompletedAt);
+        Assert.Equal(RedactionApprovalStatus.Draft, redaction.ApprovalStatus);
+        Assert.Equal(VndStatus.Draft, vnd.Status); // редакция №1 → черновик
+    }
+
+    [Fact]
+    public async Task Cancel_ByNonInitiatorWithoutPrivilege_Throws()
+    {
+        using var db = TestSupport.NewDb();
+        SeedTwoStageProcess(db);
+        var svc = NewService(db); // FakeCurrentUser = Approver1, без прав главного редактора
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.CancelAsync(1, 999));
+    }
+
+    [Fact]
+    public async Task Cancel_AlreadyApproved_Throws()
+    {
+        using var db = TestSupport.NewDb();
+        var process = SeedTwoStageProcess(db);
+        process.Status = ApprovalProcessStatus.Approved;
+        await db.SaveChangesAsync();
+        var svc = NewService(db);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.CancelAsync(1, 100));
+    }
+
+    [Fact]
     public async Task Decide_ApproveWithComment_MarksStageForRepeat()
     {
         using var db = TestSupport.NewDb();

@@ -135,4 +135,16 @@ public static class VndApprovalNotificationMessages
         BodyKg: $"«{vndTitle}» документинин {redactionCode} редакциясы боюнча эскертүүлөр бар. " +
                 "Оңдоолорду киргизип, кайра макулдашууга жибериңиз.",
         Severity: NotificationSeverity.Warning); // требует доработки, но не критично
+
+    public static NotificationText Cancelled(string redactionCode, string vndTitle) => new(
+        TitleRu: "Согласование отозвано",
+        TitleEn: "Approval withdrawn",
+        TitleKg: "Макулдашуу артка алынды",
+        BodyRu: $"Инициатор отозвал согласование редакции {redactionCode} документа «{vndTitle}». " +
+                "Задача по согласованию больше не актуальна.",
+        BodyEn: $"The initiator withdrew the approval of revision {redactionCode} of the document \"{vndTitle}\". " +
+                "The approval task is no longer relevant.",
+        BodyKg: $"Демилгечи «{vndTitle}» документинин {redactionCode} редакциясынын макулдашуусун артка алды. " +
+                "Макулдашуу тапшырмасы мындан ары актуалдуу эмес.",
+        Severity: NotificationSeverity.Info);
 }

@@ -68,6 +68,21 @@ public class VndApprovalController : ControllerBase
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
+    /// <summary>Инициатор отзывает согласование — редакция и документ возвращаются в черновик</summary>
+    [HttpPost("cancel")]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Cancel(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.CancelAsync(vndId, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
     /// <summary>Инициатор отправляет исправленную редакцию на повторное согласование</summary>
     [HttpPost("resubmit")]
     [Consumes("multipart/form-data")]
