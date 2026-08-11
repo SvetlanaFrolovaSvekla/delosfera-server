@@ -8,6 +8,7 @@ public static class ProcurementServiceExtensions
     public static WebApplicationBuilder AddProcurementServices(this WebApplicationBuilder builder)
     {
         builder.Services.AddScoped<IAuthorityMatrixService, AuthorityMatrixService>();
+        builder.Services.AddScoped<IProcurementRequestService, ProcurementRequestService>();
         return builder;
     }
 }

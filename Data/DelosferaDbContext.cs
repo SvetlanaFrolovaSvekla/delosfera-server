@@ -75,6 +75,7 @@ public class DelosferaDbContext : DbContext
     public DbSet<ProcurementMethod> ProcurementMethods => Set<ProcurementMethod>();
     public DbSet<AuthorityMatrixRule> AuthorityMatrixRules => Set<AuthorityMatrixRule>();
     public DbSet<ProcurementParameter> ProcurementParameters => Set<ProcurementParameter>();
+    public DbSet<ProcurementRequest> ProcurementRequests => Set<ProcurementRequest>();
 
     // --- Служебные записки (контур 4 ТЗ) ---
     public DbSet<SzDocument> SzDocuments => Set<SzDocument>();
