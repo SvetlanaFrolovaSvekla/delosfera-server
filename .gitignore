@@ -485,3 +485,5 @@ N o t e s D e v / 
  
 
 NotesDev/
+# oh-my-claudecode session state (не коммитить)
+.omc/

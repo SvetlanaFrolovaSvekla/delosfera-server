@@ -20,7 +20,8 @@ public class MinioFileStorageService : IFileStorageService
 
     public async Task<FileAttachment> SaveAsync(IFormFile file, int userId, CancellationToken ct = default)
     {
-        ValidateFile(file);
+        var ext = ValidateFile(file);
+        await ValidateContentSignatureAsync(file, ext, ct);
 
         var objectName = $"{Guid.NewGuid()}/{file.FileName}";
 
@@ -78,7 +79,13 @@ public class MinioFileStorageService : IFileStorageService
     private static readonly string[] AllowedExtensions =
         [".doc", ".docx", ".pdf", ".xls", ".xlsx", ".ppt", ".pptx"];
 
-    private static void ValidateFile(IFormFile file)
+    // Сигнатуры содержимого (magic bytes) — расширение можно подделать, поэтому проверяем и начало файла.
+    private static readonly byte[] PdfSignature = "%PDF"u8.ToArray();                        // .pdf
+    private static readonly byte[] ZipSignature = [0x50, 0x4B, 0x03, 0x04];                   // OOXML .docx/.xlsx/.pptx (zip)
+    private static readonly byte[] OleSignature = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]; // legacy .doc/.xls/.ppt
+
+    /// <returns>Нормализованное расширение (в нижнем регистре).</returns>
+    private static string ValidateFile(IFormFile file)
     {
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
         if (!AllowedExtensions.Contains(ext))
@@ -86,5 +93,30 @@ public class MinioFileStorageService : IFileStorageService
 
         if (file.Length > 50 * 1024 * 1024) // 50 МБ
             throw new InvalidOperationException("Файл превышает допустимый размер (50 МБ)");
+
+        return ext;
+    }
+
+    /// <summary>
+    /// Проверяет, что фактическое содержимое файла соответствует расширению
+    /// (защита от загрузки исполняемого/произвольного файла под видом документа).
+    /// </summary>
+    private static async Task ValidateContentSignatureAsync(IFormFile file, string ext, CancellationToken ct)
+    {
+        var expected = ext switch
+        {
+            ".pdf" => PdfSignature,
+            ".docx" or ".xlsx" or ".pptx" => ZipSignature,
+            ".doc" or ".xls" or ".ppt" => OleSignature,
+            _ => throw new InvalidOperationException($"Недопустимый формат файла: {ext}")
+        };
+
+        var header = new byte[expected.Length];
+        await using (var stream = file.OpenReadStream())
+        {
+            var read = await stream.ReadAsync(header, ct);
+            if (read < expected.Length || !header.AsSpan().SequenceEqual(expected))
+                throw new InvalidOperationException("Содержимое файла не соответствует его расширению");
+        }
     }
 }
