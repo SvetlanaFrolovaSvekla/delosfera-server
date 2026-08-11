@@ -10,6 +10,7 @@ public static class ProcurementServiceExtensions
         builder.Services.AddScoped<IAuthorityMatrixService, AuthorityMatrixService>();
         builder.Services.AddScoped<IProcurementRequestService, ProcurementRequestService>();
         builder.Services.AddScoped<IProposalService, ProposalService>();
+        builder.Services.AddScoped<IProtocolService, ProtocolService>();
         return builder;
     }
 }

@@ -78,6 +78,9 @@ public class DelosferaDbContext : DbContext
     public DbSet<ProcurementRequest> ProcurementRequests => Set<ProcurementRequest>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<CommercialProposal> CommercialProposals => Set<CommercialProposal>();
+    public DbSet<ProcurementProtocol> ProcurementProtocols => Set<ProcurementProtocol>();
+    public DbSet<ProtocolRow> ProtocolRows => Set<ProtocolRow>();
+    public DbSet<ProtocolSignature> ProtocolSignatures => Set<ProtocolSignature>();
 
     // --- Служебные записки (контур 4 ТЗ) ---
     public DbSet<SzDocument> SzDocuments => Set<SzDocument>();
