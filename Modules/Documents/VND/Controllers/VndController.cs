@@ -85,6 +85,26 @@ public class VndController : ControllerBase
         }
     }
 
+    /// <summary>Удаление ВНД (только черновик, создателем или главным редактором)</summary>
+    /// <response code="204">ВНД удалён</response>
+    /// <response code="409">Удалять можно только черновик</response>
+    [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.DeleteVnd)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Delete(int id)
+    {
+        try
+        {
+            await _service.DeleteAsync(id, _currentUser.UserId);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
     /// <summary>Добавление новой редакции ВНД</summary>
     [HttpPost("{vndId:int}/redactions")]
     [RequirePermission(PermissionCode.ViewVnd)]

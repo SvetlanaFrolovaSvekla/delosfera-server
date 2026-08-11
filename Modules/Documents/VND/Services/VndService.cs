@@ -657,6 +657,62 @@ public class VndService : IVndService
         return redactions.Select(r => ToRedactionResponse(r, vnd.CurrentRedactionId)).ToList();
     }
 
+    /// <summary>
+    /// Удаление ВНД. Разрешено только для черновика (действующие/архивные/на согласовании
+    /// удалять нельзя) и только создателю или главному редактору. Явно чистит связанные
+    /// редакции, вложения, ссылки, процессы согласования и файлы в хранилище.
+    /// </summary>
+    public async Task DeleteAsync(int id, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments
+                      .Include(x => x.Redactions).ThenInclude(r => r.Attachments)
+                      .FirstOrDefaultAsync(x => x.Id == id)
+                  ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
+
+        if (vnd.Status != VndStatus.Draft)
+            throw new InvalidOperationException("Удалить можно только ВНД в статусе черновика");
+
+        if (vnd.CreatedByUserId != currentUserId && !IsChiefEditor())
+            throw new UnauthorizedAccessException("Удалить ВНД может только его создатель или главный редактор");
+
+        // Собираем id файлов редакций для последующего удаления из хранилища.
+        var fileIds = new List<int>();
+        foreach (var r in vnd.Redactions)
+        {
+            fileIds.Add(r.DocFileRuId);
+            if (r.DocFileKgId.HasValue) fileIds.Add(r.DocFileKgId.Value);
+            if (r.DocFileEnId.HasValue) fileIds.Add(r.DocFileEnId.Value);
+            if (r.TidFileId.HasValue) fileIds.Add(r.TidFileId.Value);
+            fileIds.AddRange(r.Attachments.Select(a => a.FileAttachmentId));
+        }
+
+        var links = await _db.VndLinks
+            .Where(l => l.SourceVndId == id || l.TargetVndId == id)
+            .ToListAsync();
+        _db.VndLinks.RemoveRange(links);
+
+        var processes = await _db.VndApprovalProcesses
+            .Where(p => p.VndId == id)
+            .Include(p => p.Stages)
+            .Include(p => p.DisagreementMatrixRows)
+            .ToListAsync();
+        _db.VndApprovalProcesses.RemoveRange(processes);
+
+        foreach (var r in vnd.Redactions)
+            _db.VndRedactionAttachments.RemoveRange(r.Attachments);
+        _db.VndRedactions.RemoveRange(vnd.Redactions);
+        _db.VndDocuments.Remove(vnd);
+        await _db.SaveChangesAsync();
+
+        // Файлы удаляем после метаданных, best-effort — недоступность хранилища не должна
+        // откатывать уже выполненное удаление документа.
+        foreach (var fileId in fileIds.Distinct())
+        {
+            try { await _fileService.DeleteAsync(fileId); }
+            catch { /* файл уже удалён или хранилище недоступно — не критично */ }
+        }
+    }
+
     public async Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request,
         string languageCode)
     {
