@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Linq.Expressions;
+using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
@@ -249,20 +250,37 @@ public class VndService : IVndService
 
     private static IQueryable<VndDocument> ApplyDateFilter(
         IQueryable<VndDocument> query, DateRangeFilter? filter,
-        System.Linq.Expressions.Expression<Func<VndDocument, DateOnly?>> selector)
+        Expression<Func<VndDocument, DateOnly?>> selector)
     {
         if (filter is null) return query;
 
-        var compiled = selector.Compile();
+        // Строим предикат из дерева выражений selector, а НЕ из скомпилированного делегата:
+        // вызов Compile()+делегата внутри Where EF Core не может транслировать в SQL и падает.
+        var param = selector.Parameters[0];
+        var value = selector.Body;                                   // DateOnly? (столбец)
+        var nonNull = Expression.Property(value, nameof(Nullable<DateOnly>.Value)); // DateOnly
+        var isNotNull = Expression.NotEqual(value, Expression.Constant(null, typeof(DateOnly?)));
+
+        Expression<Func<VndDocument, bool>> Lambda(Expression body) =>
+            Expression.Lambda<Func<VndDocument, bool>>(body, param);
 
         if (filter.Exact.HasValue)
-            return query.Where(x => compiled(x) == filter.Exact.Value);
+        {
+            var eq = Expression.Equal(nonNull, Expression.Constant(filter.Exact.Value, typeof(DateOnly)));
+            return query.Where(Lambda(Expression.AndAlso(isNotNull, eq)));
+        }
 
         if (filter.From.HasValue)
-            query = query.Where(x => compiled(x) != null && compiled(x) >= filter.From.Value);
+        {
+            var ge = Expression.GreaterThanOrEqual(nonNull, Expression.Constant(filter.From.Value, typeof(DateOnly)));
+            query = query.Where(Lambda(Expression.AndAlso(isNotNull, ge)));
+        }
 
         if (filter.To.HasValue)
-            query = query.Where(x => compiled(x) != null && compiled(x) <= filter.To.Value);
+        {
+            var le = Expression.LessThanOrEqual(nonNull, Expression.Constant(filter.To.Value, typeof(DateOnly)));
+            query = query.Where(Lambda(Expression.AndAlso(isNotNull, le)));
+        }
 
         return query;
     }
