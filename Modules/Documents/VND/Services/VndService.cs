@@ -221,6 +221,14 @@ public class VndService : IVndService
             : query.Where(x => x.Status != VndStatus.Draft || x.CreatedByUserId == userId);
     }
 
+    /// <summary>Главный редактор — пользователь с любым из «сквозных» прав на создание/актуализацию
+    /// ВНД; такой пользователь причастен к любому документу без явной привязки.</summary>
+    private bool IsChiefEditor() =>
+        _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
+
     private static ActualizationBucket MapActualizationBucketKey(string key) => key.ToLowerInvariant() switch
     {
         "normal" => ActualizationBucket.Normal,
@@ -508,12 +516,7 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var isChiefEditor = _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
-
-        if (!isChiefEditor && !await IsLinkedToVndAsync(vnd, currentUserId))
+        if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
             throw new UnauthorizedAccessException(
                 "Загружать новую редакцию может только разработчик, куратор, ответственный исполнитель, " +
                 "инициатор, ответственный за актуализацию или главный редактор ВНД");
@@ -602,12 +605,7 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var isChiefEditor = _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
-
-        if (!isChiefEditor && !await IsLinkedToVndAsync(vnd, currentUserId))
+        if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
             throw new UnauthorizedAccessException(
                 "Отправить редакцию на согласование может только причастный к этому ВНД пользователь");
 

@@ -9,6 +9,9 @@ public class TokenConfiguration : IEntityTypeConfiguration<Token>
     {
         builder.ToTable("token");
 
+        // Поиск refresh-сессии идёт по хешу токена — индексируем.
+        builder.HasIndex(x => x.RefreshTokenHash);
+
         builder.HasOne(x => x.User)
             .WithMany()
             .HasForeignKey(x => x.UserId)

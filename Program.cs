@@ -1,5 +1,6 @@
 using delosfera_server.Data;
 using delosfera_server.Extensions;
+using delosfera_server.Common.Middleware;
 using delosfera_server.Common.Services;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
@@ -14,6 +15,21 @@ using Minio.DataModel.Args;
 
 /*Создается построитель приложения, собирает настройки, переменные окружения*/
 var builder = WebApplication.CreateBuilder(args);
+
+// Fail-fast: критичные секреты должны быть заданы (env / user-secrets), а не захардкожены.
+// JWT-ключ подписывает все токены — слабый или пустой ключ = возможность подделать любой токен.
+static string RequireSecret(IConfiguration cfg, string key, int minLength = 1)
+{
+    var value = cfg[key];
+    if (string.IsNullOrWhiteSpace(value) || value.Length < minLength)
+        throw new InvalidOperationException(
+            $"Конфигурация '{key}' не задана или короче {minLength} символов. " +
+            "Задайте её через переменные окружения или dotnet user-secrets (см. appsettings.example.json).");
+    return value;
+}
+
+var jwtKey = RequireSecret(builder.Configuration, "Jwt:Key", minLength: 32);
+RequireSecret(builder.Configuration, "ConnectionStrings:DefaultConnection");
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -54,7 +70,8 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials(); // нужно для httpOnly refresh-cookie (origin'ы заданы явно, не *)
     });
 });
 
@@ -83,12 +100,27 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuerSigningKey = true,
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
         };
     });
 
 builder.Services.AddAuthorization();
+
+// Ограничение частоты запросов к аутентификации — защита от перебора паролей.
+// Ключ — IP-адрес: не более 10 попыток в минуту на адрес.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("auth", httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
+});
 
 var app = builder.Build();
 
@@ -107,6 +139,24 @@ using (var scope = app.Services.CreateScope())
     {
         // В проде - только применяются новые миграции, ничего более не удаляется
         db.Database.Migrate();
+    }
+
+    // Bootstrap администратора из конфигурации (env/secrets), а НЕ из захардкоженного хеша.
+    // Пароли сид-аккаунтов инвалидированы миграцией InvalidateSeededPasswords; этот блок —
+    // единственный способ выдать рабочий пароль администратору, без коммита хеша в репозиторий.
+    var adminEmail = app.Configuration["Bootstrap:AdminEmail"];
+    var adminPassword = app.Configuration["Bootstrap:AdminPassword"];
+    if (!string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword))
+    {
+        var hasher = scope.ServiceProvider.GetRequiredService<IUserPasswordHasher>();
+        var admin = db.Users.FirstOrDefault(u => u.Email == adminEmail);
+        if (admin is not null)
+        {
+            admin.PasswordHash = hasher.Hash(adminPassword);
+            admin.IsActive = true;
+            admin.BlockedAt = null;
+            db.SaveChanges();
+        }
     }
 }
 
@@ -135,8 +185,10 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+app.UseMiddleware<ExceptionHandlingMiddleware>(); // единая обработка ошибок, без утечки стектрейсов
 app.UseHttpsRedirection(); // Перенаправляет все входящие HTTP-запросы на HTTPS
 app.UseCors("AllowFrontend");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

@@ -1,4 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Security.Cryptography;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Extensions;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
@@ -14,15 +16,25 @@ public class AuthService : IAuthService
     private readonly DelosferaDbContext _db;
     private readonly IUserPasswordHasher _passwordHasher;
     private readonly IJwtTokenService _jwtTokenService;
+    private readonly int _refreshTokenExpiryDays;
 
-    public AuthService(DelosferaDbContext db, IUserPasswordHasher passwordHasher, IJwtTokenService jwtTokenService)
+    public AuthService(
+        DelosferaDbContext db,
+        IUserPasswordHasher passwordHasher,
+        IJwtTokenService jwtTokenService,
+        IConfiguration configuration)
     {
         _db = db;
         _passwordHasher = passwordHasher;
         _jwtTokenService = jwtTokenService;
+        _refreshTokenExpiryDays = int.Parse(configuration["Jwt:RefreshTokenExpiryDays"] ?? "30");
     }
 
-    public async Task<LoginResponse> LoginAsync(LoginRequest request, string languageCode)
+    /// <summary>SHA-256 (hex) от токена — в БД хранится только хеш.</summary>
+    private static string HashToken(string token) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+
+    public async Task<AuthResult> LoginAsync(LoginRequest request, string languageCode)
     {
         var user = await LoadUserAsync(x => x.Email == request.Email)
             ?? throw new UnauthorizedAccessException("Неверный email или пароль");
@@ -41,23 +53,27 @@ public class AuthService : IAuthService
         var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
         await _db.SaveChangesAsync();
 
-        return new LoginResponse { Token = accessToken, RefreshToken = refreshToken, User = ToUserResponse(user, languageCode) };
+        return new AuthResult(
+            new LoginResponse { Token = accessToken, User = ToUserResponse(user, languageCode) },
+            refreshToken);
     }
 
-    public async Task<LoginResponse> RefreshAsync(RefreshTokenRequest request, string languageCode)
+    public async Task<AuthResult> RefreshAsync(string refreshToken, string languageCode)
     {
+        var refreshTokenHash = HashToken(refreshToken);
+
         var tokenEntity = await _db.Tokens
             .Include(x => x.User!).ThenInclude(u => u.Position)
             .Include(x => x.User!).ThenInclude(u => u.OrgUnit)
             .Include(x => x.User!).ThenInclude(u => u.Roles)
             .Include(x => x.User!).ThenInclude(u => u.BlockedByUser)
-            .FirstOrDefaultAsync(x => x.RefreshToken == request.RefreshToken)
+            .FirstOrDefaultAsync(x => x.RefreshTokenHash == refreshTokenHash)
             ?? throw new UnauthorizedAccessException("Недействительный refresh-токен");
 
         if (tokenEntity.IsLoggedOut)
             throw new UnauthorizedAccessException("Refresh-токен отозван");
 
-        if (_jwtTokenService.IsExpired(tokenEntity.RefreshToken))
+        if (tokenEntity.ExpiresAt < DateTime.UtcNow)
             throw new UnauthorizedAccessException("Refresh-токен истёк");
 
         var user = tokenEntity.User!;
@@ -70,15 +86,18 @@ public class AuthService : IAuthService
         if (user.BlockedAt.HasValue)
             throw new UnauthorizedAccessException("Учётная запись заблокирована");
 
-        var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
+        var (accessToken, newRefreshToken) = await IssueNewTokenPairAsync(user);
         await _db.SaveChangesAsync();
 
-        return new LoginResponse { Token = accessToken, RefreshToken = refreshToken, User = ToUserResponse(user, languageCode) };
+        return new AuthResult(
+            new LoginResponse { Token = accessToken, User = ToUserResponse(user, languageCode) },
+            newRefreshToken);
     }
 
     public async Task LogoutAsync(string refreshToken)
     {
-        var tokenEntity = await _db.Tokens.FirstOrDefaultAsync(x => x.RefreshToken == refreshToken);
+        var refreshTokenHash = HashToken(refreshToken);
+        var tokenEntity = await _db.Tokens.FirstOrDefaultAsync(x => x.RefreshTokenHash == refreshTokenHash);
         if (tokenEntity is null) return;
 
         tokenEntity.IsLoggedOut = true;
@@ -98,8 +117,8 @@ public class AuthService : IAuthService
 
         _db.Tokens.Add(new Token
         {
-            AccessToken = accessToken,
-            RefreshToken = refreshToken,
+            RefreshTokenHash = HashToken(refreshToken),
+            ExpiresAt = DateTime.UtcNow.AddDays(_refreshTokenExpiryDays),
             IsLoggedOut = false,
             UserId = user.Id
         });

@@ -28,7 +28,7 @@ public class RequirePermissionAttribute : Attribute, IAuthorizationFilter
 
         var hasPermission = user.Claims
             .Where(c => c.Type == "permission")
-            .Select(c => int.Parse(c.Value))
+            .Select(c => int.TryParse(c.Value, out var code) ? code : (int?)null)
             .Contains((int)_permission);
 
         if (!hasPermission)
