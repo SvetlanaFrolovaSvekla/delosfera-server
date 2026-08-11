@@ -9,6 +9,7 @@ using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Workflow.Models;
 using delosfera_server.Modules.Signing.Models;
 using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Procurement.Models;
 
 namespace delosfera_server.Data;
 
@@ -69,6 +70,11 @@ public class DelosferaDbContext : DbContext
 
     // --- ЭП (SIG-01..05) ---
     public DbSet<Signature> Signatures => Set<Signature>();
+
+    // --- Закупки (контур 6 ТЗ): матрица полномочий и её параметры ---
+    public DbSet<ProcurementMethod> ProcurementMethods => Set<ProcurementMethod>();
+    public DbSet<AuthorityMatrixRule> AuthorityMatrixRules => Set<AuthorityMatrixRule>();
+    public DbSet<ProcurementParameter> ProcurementParameters => Set<ProcurementParameter>();
 
     // --- Служебные записки (контур 4 ТЗ) ---
     public DbSet<SzDocument> SzDocuments => Set<SzDocument>();

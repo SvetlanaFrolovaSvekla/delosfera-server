@@ -68,6 +68,7 @@ builder.AddDocumentServices();
 builder.AddWorkflowServices();
 builder.AddSigningServices();
 builder.AddSzServices();
+builder.AddProcurementServices();
 
 
 builder.Services.AddCors(options =>

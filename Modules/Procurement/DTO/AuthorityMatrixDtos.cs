@@ -1,0 +1,91 @@
+using delosfera_server.Modules.Procurement.Models;
+
+namespace delosfera_server.Modules.Procurement.DTO;
+
+/// <summary>Запрос на подбор способа закупки по Матрице полномочий (PRC-04).</summary>
+public class MatrixResolveRequest
+{
+    /// <summary>Сумма закупки в сомах.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>Сделка с аффилированным лицом — переключает шкалу на проценты ЧСК.</summary>
+    public bool IsAffiliated { get; set; }
+
+    /// <summary>
+    /// Способ, выбранный инициатором. Пусто — система подбирает сама.
+    /// Прямое заключение выбирается вручную и только с обоснованием.
+    /// </summary>
+    public ProcurementMethodCode? PreferredMethod { get; set; }
+}
+
+/// <summary>Строка «факта» под карточкой результата: порог, от которого сработало правило.</summary>
+public record MatrixFactDto(string Key, string Value, bool IsHighlighted);
+
+/// <summary>Результат подбора: способ, состав согласования, комиссия, орган утверждения.</summary>
+public class MatrixResolveResponse
+{
+    public required string MethodCode { get; set; }
+    public required string MethodTitle { get; set; }
+    public required string MethodShortTitle { get; set; }
+
+    /// <summary>Альтернативный допустимый способ при той же сумме — например прямое заключение по основанию.</summary>
+    public string? AlternativeMethodTitle { get; set; }
+
+    public required string ApprovalChain { get; set; }
+    public bool CommissionRequired { get; set; }
+    public int? CommissionSize { get; set; }
+    public int? CommissionMinBoardMembers { get; set; }
+    public required string CommissionNote { get; set; }
+
+    public ApprovalAuthority ApprovalAuthority { get; set; }
+    public required string ApprovalAuthorityTitle { get; set; }
+
+    /// <summary>Нужен ли протокол закупки (PRC-10) при этой сумме.</summary>
+    public bool ProtocolRequired { get; set; }
+    public decimal ProtocolThreshold { get; set; }
+
+    public int MinProposals { get; set; }
+    public bool RequiresJustification { get; set; }
+    public bool RequiresPublication { get; set; }
+
+    /// <summary>Пороги и база расчёта — показываются под результатом, чтобы решение было проверяемым.</summary>
+    public List<MatrixFactDto> Facts { get; set; } = [];
+
+    /// <summary>Дополнительные требования: УБУиО в комиссии, председатель — член Правления.</summary>
+    public List<string> Notes { get; set; } = [];
+
+    /// <summary>Id сработавшего правила — на него ссылается заявка, чтобы решение было воспроизводимо.</summary>
+    public int? RuleId { get; set; }
+}
+
+/// <summary>Строка приложения №1 для табличного вывода матрицы.</summary>
+public class MatrixRuleDto
+{
+    public int Id { get; set; }
+    public required string MethodTitle { get; set; }
+    public required string MethodShortTitle { get; set; }
+    public bool IsAffiliated { get; set; }
+
+    /// <summary>Диапазон человекочитаемо: «от 500 000 сом до 20% активов».</summary>
+    public required string RangeTitle { get; set; }
+
+    /// <summary>Границы, пересчитанные в сомы на текущие баланс и ЧСК.</summary>
+    public decimal? MinAmount { get; set; }
+    public decimal? MaxAmount { get; set; }
+
+    public required string ApprovalChain { get; set; }
+    public required string CommissionNote { get; set; }
+    public required string ApprovalAuthorityTitle { get; set; }
+    public int SortOrder { get; set; }
+}
+
+/// <summary>Матрица целиком плюс параметры, от которых считаются пороги.</summary>
+public class MatrixTableDto
+{
+    public List<MatrixRuleDto> Regular { get; set; } = [];
+    public List<MatrixRuleDto> Affiliated { get; set; } = [];
+
+    public decimal BalanceAssets { get; set; }
+    public decimal Nsk { get; set; }
+    public decimal ProtocolThreshold { get; set; }
+}
