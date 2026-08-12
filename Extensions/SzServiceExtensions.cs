@@ -12,6 +12,10 @@ public static class SzServiceExtensions
         builder.Services.AddScoped<ISzPaperService, SzPaperService>();
         builder.Services.AddScoped<ISzArchiveService, SzArchiveService>();
         builder.Services.AddScoped<ISzProcurementService, SzProcurementService>();
+
+        // Напоминания о сроках исполнения поручений в 9:00 по времени банка (SZ-03)
+        builder.Services.AddScoped<ISzDeadlineNotifier, SzDeadlineNotifier>();
+        builder.Services.AddHostedService<SzDeadlineWorker>();
         builder.Services.AddScoped<IRouteCompletionHandler, SzRouteCompletionHandler>();
         return builder;
     }

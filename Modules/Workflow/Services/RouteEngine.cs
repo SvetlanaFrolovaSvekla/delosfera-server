@@ -19,16 +19,19 @@ public class RouteEngine : IRouteEngine
     private readonly IAuditService _audit;
     private readonly IEnumerable<IRouteCompletionHandler> _completionHandlers;
     private readonly ISubstitutionService _substitutions;
+    private readonly IWorkflowNotifier _notifier;
 
     public RouteEngine(
         DelosferaDbContext db, IAuditService audit,
         IEnumerable<IRouteCompletionHandler> completionHandlers,
-        ISubstitutionService substitutions)
+        ISubstitutionService substitutions,
+        IWorkflowNotifier notifier)
     {
         _db = db;
         _audit = audit;
         _completionHandlers = completionHandlers;
         _substitutions = substitutions;
+        _notifier = notifier;
     }
 
     private IQueryable<RouteInstance> InstanceQuery() =>
@@ -100,29 +103,38 @@ public class RouteEngine : IRouteEngine
         inst.StartedAt = DateTime.UtcNow;
         inst.CurrentStepOrder = steps[0].Order;
 
-        ActivateStep(steps[0]);
+        var activated = ActivateStep(steps[0]);
         await _db.SaveChangesAsync();
         await _audit.LogAsync(Entity, inst.Id, "RouteStarted", actorUserId);
+        await _notifier.TaskAssignedAsync(activated);
     }
 
-    private void ActivateStep(RouteStep step)
+    /// <summary>
+    /// Активирует этап и возвращает участников, которым появилась задача — их
+    /// оповещают после сохранения, когда задачи уже есть в базе.
+    /// </summary>
+    private List<int> ActivateStep(RouteStep step)
     {
         step.ActivatedAt = DateTime.UtcNow;
         var due = step.TimeNormHours.HasValue ? DateTime.UtcNow.AddHours(step.TimeNormHours.Value) : (DateTime?)null;
 
+        var activated = new List<int>();
         var participants = step.Participants.OrderBy(p => p.Id).ToList();
+
         if (step.Mode == StepMode.Parallel)
         {
-            foreach (var p in participants) ActivateParticipant(p, due);
+            foreach (var p in participants) activated.AddRange(ActivateParticipant(p, due));
         }
         else
         {
             var first = participants.FirstOrDefault(p => p.State == ParticipantState.Pending);
-            if (first != null) ActivateParticipant(first, due);
+            if (first != null) activated.AddRange(ActivateParticipant(first, due));
         }
+
+        return activated;
     }
 
-    private void ActivateParticipant(RouteParticipant p, DateTime? due)
+    private List<int> ActivateParticipant(RouteParticipant p, DateTime? due)
     {
         p.State = ParticipantState.Active;
         p.ActivatedAt = DateTime.UtcNow;
@@ -138,7 +150,12 @@ public class RouteEngine : IRouteEngine
                 State = WorkflowTaskState.Open,
                 CreatedAt = DateTime.UtcNow
             });
+
+            return [p.Id];
         }
+
+        // Этап без конкретного исполнителя (роль/подразделение) оповещать некому.
+        return [];
     }
 
     public async Task ResolveAsync(int participantId, ResolutionType type, string? comment, int actorUserId, int? signatureId = null)
@@ -197,6 +214,7 @@ public class RouteEngine : IRouteEngine
                 await _db.SaveChangesAsync();
                 await _audit.LogAsync(Entity, inst.Id, "Rejected", actorUserId);
                 await NotifyStatusAsync(inst, actorUserId);
+                await _notifier.RouteFinishedAsync(inst.Id, RouteInstanceStatus.Rejected, comment);
                 return;
 
             case ResolutionType.Veto:
@@ -227,8 +245,9 @@ public class RouteEngine : IRouteEngine
             if (next != null)
             {
                 var due = step.TimeNormHours.HasValue ? DateTime.UtcNow.AddHours(step.TimeNormHours.Value) : (DateTime?)null;
-                ActivateParticipant(next, due);
+                var activatedNext = ActivateParticipant(next, due);
                 await _db.SaveChangesAsync();
+                await _notifier.TaskAssignedAsync(activatedNext);
                 return;
             }
         }
@@ -249,6 +268,7 @@ public class RouteEngine : IRouteEngine
             await _db.SaveChangesAsync();
             await _audit.LogAsync(Entity, inst.Id, "OnRevision", actorUserId);
             await NotifyStatusAsync(inst, actorUserId);
+            await _notifier.RouteFinishedAsync(inst.Id, RouteInstanceStatus.OnRevision, null);
             return;
         }
 
@@ -270,13 +290,15 @@ public class RouteEngine : IRouteEngine
             foreach (var handler in _completionHandlers)
                 await handler.OnRouteApprovedAsync(inst.Id, inst.DocumentId, actorUserId);
 
+            await _notifier.RouteFinishedAsync(inst.Id, RouteInstanceStatus.Approved, null);
             return;
         }
 
         inst.CurrentStepOrder = next.Order;
-        ActivateStep(next);
+        var activatedStep = ActivateStep(next);
         await _db.SaveChangesAsync();
         await _audit.LogAsync(Entity, inst.Id, "StepAdvanced", actorUserId, new { toStep = next.Order });
+        await _notifier.TaskAssignedAsync(activatedStep);
     }
 
     public async Task ConfirmRemarkResolvedAsync(int remarkId, int actorUserId)
@@ -332,8 +354,13 @@ public class RouteEngine : IRouteEngine
                 var task = await _db.WorkflowTasks.FirstOrDefaultAsync(t => t.RouteParticipantId == p.Id && t.State == WorkflowTaskState.Open);
                 if (task != null) { task.State = WorkflowTaskState.Escalated; await _db.SaveChangesAsync(); }
                 await _audit.LogAsync("RouteParticipant", p.Id, "EscalatedFinalControl", null);
+                await _notifier.OverdueAsync(p.Id, escalated: true);
                 continue;
             }
+
+            // Оповещаем до автоакцепта: после него участник уже не активен, и письмо
+            // «срок истёк» строилось бы по закрытому этапу.
+            await _notifier.OverdueAsync(p.Id, escalated: false);
             await ResolveAsync(p.Id, ResolutionType.AutoAccept, "Автоакцепт по нормативу времени", actorUserId: 0);
         }
     }
@@ -357,6 +384,7 @@ public class RouteEngine : IRouteEngine
         inst.FinishedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         await _audit.LogAsync(Entity, inst.Id, "Interrupted", actorUserId);
+        await _notifier.RouteFinishedAsync(inst.Id, RouteInstanceStatus.Interrupted, null);
     }
 
     private void CloseTask(int participantId, WorkflowTaskState state = WorkflowTaskState.Done)
