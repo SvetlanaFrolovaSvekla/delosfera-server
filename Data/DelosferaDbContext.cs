@@ -10,6 +10,7 @@ using delosfera_server.Modules.Workflow.Models;
 using delosfera_server.Modules.Signing.Models;
 using delosfera_server.Modules.Sz.Models;
 using delosfera_server.Modules.Procurement.Models;
+using delosfera_server.Modules.Meetings.Models;
 
 namespace delosfera_server.Data;
 
@@ -97,6 +98,13 @@ public class DelosferaDbContext : DbContext
     public DbSet<SzKind> SzKinds => Set<SzKind>();
     public DbSet<SzHrKind> SzHrKinds => Set<SzHrKind>();
     public DbSet<SzAssignment> SzAssignments => Set<SzAssignment>();
+
+    // --- Заседания Правления, КПА и комитетов (ТЗ «Исполнение решений КПА, Правления и Комитетов») ---
+    public DbSet<Meeting> Meetings => Set<Meeting>();
+    public DbSet<AgendaItem> AgendaItems => Set<AgendaItem>();
+    public DbSet<AgendaGuest> AgendaGuests => Set<AgendaGuest>();
+    public DbSet<AgendaAssignment> AgendaAssignments => Set<AgendaAssignment>();
+    public DbSet<AgendaFile> AgendaFiles => Set<AgendaFile>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

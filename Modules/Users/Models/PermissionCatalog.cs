@@ -159,6 +159,60 @@ public static class PermissionCatalog
             TitleRu = "Изменение реквизитов существующей ВНД и её связей с другими документами",
             TitleEn = "Edit requisites of an existing VND and its links to other documents",
             TitleKg = "Учурдагы ВНДдин реквизиттерин жана башка документтер менен байланышын өзгөртүү"
+        },
+        [PermissionCode.ViewMeetings] = new PermissionDescription
+        {
+            TitleRu = "Просмотр журнала заседаний Правления, КПА и комитетов",
+            TitleEn = "View the register of Board, PAC and committee meetings",
+            TitleKg = "Башкармалыктын, КПАнын жана комитеттердин жыйналыштарынын журналын көрүү"
+        },
+        [PermissionCode.ManageBoardMeetings] = new PermissionDescription
+        {
+            TitleRu = "Ведение заседаний Правления (Секретарь Правления)",
+            TitleEn = "Maintain Board meetings (Board Secretary)",
+            TitleKg = "Башкармалыктын жыйналыштарын жүргүзүү (Башкармалыктын катчысы)"
+        },
+        [PermissionCode.ManageKpaMeetings] = new PermissionDescription
+        {
+            TitleRu = "Ведение заседаний Комитета по проблемным активам (Секретарь КПА)",
+            TitleEn = "Maintain Problem Assets Committee meetings (PAC Secretary)",
+            TitleKg = "Көйгөйлүү активдер боюнча комитеттин жыйналыштарын жүргүзүү (КПА катчысы)"
+        },
+        [PermissionCode.ManageCreditCommitteeMeetings] = new PermissionDescription
+        {
+            TitleRu = "Ведение заседаний Кредитного комитета",
+            TitleEn = "Maintain Credit Committee meetings",
+            TitleKg = "Кредиттик комитеттин жыйналыштарын жүргүзүү"
+        },
+        [PermissionCode.ReportMeetingExecution] = new PermissionDescription
+        {
+            TitleRu = "Заполнение отчёта об исполнении и статуса поручений по протоколам",
+            TitleEn = "Fill in execution reports and statuses for protocol assignments",
+            TitleKg = "Протоколдор боюнча тапшырмалардын аткарылышы жөнүндө отчётту жана статусту толтуруу"
+        },
+        [PermissionCode.ExportMeetingRegistry] = new PermissionDescription
+        {
+            TitleRu = "Выгрузка реестра решений комитетов в Excel",
+            TitleEn = "Export the committee decisions register to Excel",
+            TitleKg = "Комитеттердин чечимдеринин реестрин Excelге жүктөө"
+        },
+        [PermissionCode.MemberOfBoard] = new PermissionDescription
+        {
+            TitleRu = "Член Правления — полная повестка заседаний Правления",
+            TitleEn = "Board member — full agenda of Board meetings",
+            TitleKg = "Башкармалыктын мүчөсү — Башкармалыктын жыйналыштарынын толук күн тартиби"
+        },
+        [PermissionCode.MemberOfKpa] = new PermissionDescription
+        {
+            TitleRu = "Член КПА — полная повестка заседаний Комитета по проблемным активам",
+            TitleEn = "PAC member — full agenda of Problem Assets Committee meetings",
+            TitleKg = "КПА мүчөсү — комитеттин жыйналыштарынын толук күн тартиби"
+        },
+        [PermissionCode.MemberOfCreditCommittee] = new PermissionDescription
+        {
+            TitleRu = "Член Кредитного комитета — полная повестка заседаний КИТ",
+            TitleEn = "Credit Committee member — full agenda of Credit Committee meetings",
+            TitleKg = "Кредиттик комитеттин мүчөсү — жыйналыштардын толук күн тартиби"
         }
     };
     

@@ -289,6 +289,20 @@ public class ProcurementRequestService : IProcurementRequestService
             RouteInstanceId = r.Document.CurrentRouteInstanceId,
         };
 
+        // Конкурс и договор нужны карточке, чтобы показать обеспечения и претензии:
+        // ГОКЗ относится к конкурсу, ГОИД и претензии — к договору.
+        card.TenderId = await _db.Tenders
+            .Where(t => t.RequestId == r.Id && t.Status != TenderStatus.Cancelled)
+            .OrderByDescending(t => t.Id)
+            .Select(t => (int?)t.Id)
+            .FirstOrDefaultAsync();
+
+        card.ContractId = await _db.ProcurementContracts
+            .Where(c => c.RequestId == r.Id && c.Status != ContractStatus.Terminated)
+            .OrderByDescending(c => c.Id)
+            .Select(c => (int?)c.Id)
+            .FirstOrDefaultAsync();
+
         var link = await _db.DocumentLinks
             .Where(l => l.ToDocumentId == r.DocumentId && l.LinkType == SzLinkType)
             .Select(l => new {l.FromDocumentId, RegNumber = l.FromDocument!.RegNumber})

@@ -110,6 +110,12 @@ public class ProcurementCardDto
     /// <summary>Запущенный маршрут согласования (PRC-08), если заявка отправлена.</summary>
     public int? RouteInstanceId { get; set; }
 
+    /// <summary>Действующий конкурс по закупке (PRC-13) — к нему относится ГОКЗ.</summary>
+    public int? TenderId { get; set; }
+
+    /// <summary>Действующий договор (PRC-18) — к нему относятся ГОИД и претензии.</summary>
+    public int? ContractId { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

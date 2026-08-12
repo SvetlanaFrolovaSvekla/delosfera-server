@@ -73,6 +73,7 @@ builder.AddWorkflowServices();
 builder.AddSigningServices();
 builder.AddSzServices();
 builder.AddProcurementServices();
+builder.AddMeetingServices();
 
 
 builder.Services.AddCors(options =>
