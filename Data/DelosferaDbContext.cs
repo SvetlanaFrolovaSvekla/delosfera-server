@@ -11,6 +11,7 @@ using delosfera_server.Modules.Signing.Models;
 using delosfera_server.Modules.Sz.Models;
 using delosfera_server.Modules.Procurement.Models;
 using delosfera_server.Modules.Meetings.Models;
+using delosfera_server.Modules.Integrations.Mail;
 
 namespace delosfera_server.Data;
 
@@ -105,6 +106,9 @@ public class DelosferaDbContext : DbContext
     public DbSet<AgendaGuest> AgendaGuests => Set<AgendaGuest>();
     public DbSet<AgendaAssignment> AgendaAssignments => Set<AgendaAssignment>();
     public DbSet<AgendaFile> AgendaFiles => Set<AgendaFile>();
+
+    // --- Интеграции (раздел 8 ТЗ) ---
+    public DbSet<OutgoingEmail> OutgoingEmails => Set<OutgoingEmail>(); // очередь исходящих писем (INT-02)
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

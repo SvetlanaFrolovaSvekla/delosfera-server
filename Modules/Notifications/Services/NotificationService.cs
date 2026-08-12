@@ -3,6 +3,7 @@ using delosfera_server.Common.Extensions;
 using delosfera_server.Data;
 using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.DTO.Response;
+using delosfera_server.Modules.Integrations.Mail;
 using delosfera_server.Modules.Notifications.Models;
 
 namespace delosfera_server.Modules.Notifications.Services;
@@ -10,10 +11,12 @@ namespace delosfera_server.Modules.Notifications.Services;
 public class NotificationService : INotificationService
 {
     private readonly DelosferaDbContext _db;
+    private readonly IMailQueue _mail;
 
-    public NotificationService(DelosferaDbContext db)
+    public NotificationService(DelosferaDbContext db, IMailQueue mail)
     {
         _db = db;
+        _mail = mail;
     }
 
     public async Task<int> CreateAsync(CreateNotificationRequest request, int? currentUserId)
@@ -64,6 +67,11 @@ public class NotificationService : INotificationService
 
         _db.Notifications.Add(notification);
         await _db.SaveChangesAsync();
+
+        // Копия уведомления уходит на корпоративную почту (INT-02). Ставим в очередь,
+        // а не отправляем здесь: иначе согласование ждало бы почтовый сервер.
+        await _mail.EnqueueAsync(
+            recipientIds, request.TitleRu, request.BodyRu, request.Url, notification.Id);
 
         return notification.Id;
     }
