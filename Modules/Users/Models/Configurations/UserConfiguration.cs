@@ -18,6 +18,10 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasDefaultValue(UserSource.Local)
             .HasSentinel(UserSource.Local);
 
+        // Счётчик неудачных попыток имеет значение по умолчанию: он появился позже
+        // сид-данных, и требовать его в каждой засеянной записи — лишний шум (NFR-03).
+        builder.Property(x => x.FailedLoginAttempts).HasDefaultValue(0);
+
         builder.Property(x => x.BlockedAt).HasColumnName("blocked_at");
         builder.Property(x => x.BlockedByUserId).HasColumnName("blocked_by_user_id");
         builder.Property(x => x.BlockReason).HasColumnName("block_reason").HasMaxLength(500);

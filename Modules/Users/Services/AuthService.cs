@@ -7,6 +7,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
+using delosfera_server.Common.Security;
 using delosfera_server.Modules.Integrations.Directory;
 using delosfera_server.Modules.Users.Models;
 
@@ -18,6 +19,7 @@ public class AuthService : IAuthService
     private readonly IUserPasswordHasher _passwordHasher;
     private readonly IJwtTokenService _jwtTokenService;
     private readonly ILdapDirectory _directory;
+    private readonly IPasswordPolicy _passwordPolicy;
     private readonly int _refreshTokenExpiryDays;
 
     public AuthService(
@@ -25,12 +27,14 @@ public class AuthService : IAuthService
         IUserPasswordHasher passwordHasher,
         IJwtTokenService jwtTokenService,
         ILdapDirectory directory,
+        IPasswordPolicy passwordPolicy,
         IConfiguration configuration)
     {
         _db = db;
         _passwordHasher = passwordHasher;
         _jwtTokenService = jwtTokenService;
         _directory = directory;
+        _passwordPolicy = passwordPolicy;
         _refreshTokenExpiryDays = int.Parse(configuration["Jwt:RefreshTokenExpiryDays"] ?? "30");
     }
 
@@ -56,9 +60,32 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException(
                 "Учётная запись доменная — используйте вход через службу каталогов");
 
-        if (!_passwordHasher.Verify(user.PasswordHash, request.Password))
-            throw new UnauthorizedAccessException("Неверный email или пароль");
+        // Блокировка после серии неудачных попыток (NFR-03). Ограничение по адресу
+        // уже стоит, но оно не спасает от подбора с разных адресов по одной учётке.
+        if (user.LockedUntil is { } lockedUntil && lockedUntil > DateTime.UtcNow)
+        {
+            var minutes = Math.Max(1, (int)Math.Ceiling((lockedUntil - DateTime.UtcNow).TotalMinutes));
+            throw new UnauthorizedAccessException(
+                $"Вход временно заблокирован после неудачных попыток. Повторите через {minutes} мин.");
+        }
 
+        if (!_passwordHasher.Verify(user.PasswordHash, request.Password))
+        {
+            user.FailedLoginAttempts++;
+
+            if (user.FailedLoginAttempts >= _passwordPolicy.MaxFailedAttempts)
+            {
+                user.LockedUntil = DateTime.UtcNow.Add(_passwordPolicy.LockoutDuration);
+                user.FailedLoginAttempts = 0;
+            }
+
+            await _db.SaveChangesAsync();
+            throw new UnauthorizedAccessException("Неверный email или пароль");
+        }
+
+        // Успешный вход снимает счётчик: он про подбор пароля, а не про рассеянность.
+        user.FailedLoginAttempts = 0;
+        user.LockedUntil = null;
         user.LastLoginAt = DateTime.UtcNow;
 
         var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);

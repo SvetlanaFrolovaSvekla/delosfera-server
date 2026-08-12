@@ -5,15 +5,22 @@ using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
 using delosfera_server.Modules.Users.Models;
 
+using delosfera_server.Common.Services;
+using delosfera_server.Modules.Documents.Services;
+
 namespace delosfera_server.Modules.Users.Services;
 
 public class RoleService : IRoleService
 {
     private readonly DelosferaDbContext _db;
+    private readonly IAuditService _audit;
+    private readonly ICurrentUserService _currentUser;
 
-    public RoleService(DelosferaDbContext db)
+    public RoleService(DelosferaDbContext db, IAuditService audit, ICurrentUserService currentUser)
     {
         _db = db;
+        _audit = audit;
+        _currentUser = currentUser;
     }
 
     public Task<List<PermissionResponse>> GetAllPermissionsAsync(string languageCode) =>
@@ -68,6 +75,12 @@ public class RoleService : IRoleService
         _db.Roles.Add(entity);
         await _db.SaveChangesAsync();
 
+        await LogAdminAsync(entity.Id, "RoleCreated", new
+        {
+            title = entity.TitleRu,
+            permissions = entity.PermissionCodes,
+        });
+
         return ToResponse(entity, languageCode);
     }
 
@@ -78,11 +91,24 @@ public class RoleService : IRoleService
 
         EnsureValidPermissionCodes(request.PermissionCodes);
 
+        // Состав прав до правки — главное, что нужно в разборе «откуда у сотрудника
+        // этот доступ»: сама по себе новая версия роли на вопрос не отвечает.
+        var permissionsBefore = entity.PermissionCodes.ToArray();
+
         entity.TitleRu = request.TitleRu;
         entity.TitleEn = request.TitleEn;
         entity.TitleKg = request.TitleKg;
         entity.PermissionCodes = request.PermissionCodes.Distinct().ToArray();
         await _db.SaveChangesAsync();
+
+        await LogAdminAsync(entity.Id, "RolePermissionsChanged", new
+        {
+            title = entity.TitleRu,
+            before = permissionsBefore,
+            after = entity.PermissionCodes,
+            granted = entity.PermissionCodes.Except(permissionsBefore).ToArray(),
+            revoked = permissionsBefore.Except(entity.PermissionCodes).ToArray(),
+        });
 
         return ToResponse(entity, languageCode);
     }
@@ -93,10 +119,12 @@ public class RoleService : IRoleService
             ?? throw new KeyNotFoundException($"Роль с id={id} не найдена");
 
         _db.Roles.Remove(entity);
+        var removedTitle = entity.TitleRu;
 
         try
         {
             await _db.SaveChangesAsync();
+            await LogAdminAsync(id, "RoleDeleted", new {title = removedTitle});
         }
         catch (DbUpdateException)
         {
@@ -104,6 +132,10 @@ public class RoleService : IRoleService
                 "Нельзя удалить роль - она назначена одному или нескольким пользователям");
         }
     }
+
+    /// <summary>Журнал действий администратора по ролям (NFR-03).</summary>
+    private Task LogAdminAsync(int roleId, string action, object? payload = null) =>
+        _audit.LogAsync("Role", roleId, action, _currentUser.UserId == 0 ? null : _currentUser.UserId, payload);
 
     private static void EnsureValidPermissionCodes(List<int> codes)
     {

@@ -54,6 +54,12 @@ builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 // Календарные даты (сроки, периоды замещения, даты документов) считаются по времени
 // банка, а не по UTC: иначе «сегодня» наступает с шестичасовым сдвигом.
 builder.Services.AddSingleton<IBankClock, BankClock>();
+
+// Парольная политика и блокировка после неудачных попыток (NFR-03)
+builder.Services.Configure<delosfera_server.Common.Security.PasswordPolicyOptions>(
+    builder.Configuration.GetSection(delosfera_server.Common.Security.PasswordPolicyOptions.Section));
+builder.Services.AddSingleton<delosfera_server.Common.Security.IPasswordPolicy,
+    delosfera_server.Common.Security.PasswordPolicy>();
 builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
 builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();
@@ -214,6 +220,14 @@ if (app.Environment.IsDevelopment())
 
 app.UseMiddleware<ExceptionHandlingMiddleware>(); // единая обработка ошибок, без утечки стектрейсов
 app.UseHttpLogging();
+// Заголовки безопасности ответов (NFR-03) — ставятся раньше всего, чтобы попасть
+// и в ответы об ошибках, а не только в успешные.
+app.UseMiddleware<SecurityHeadersMiddleware>();
+
+// HSTS говорит браузеру ходить только по HTTPS. В разработке не включаем: там
+// сертификата нет, и браузер запомнил бы недоступный адрес надолго.
+if (!app.Environment.IsDevelopment()) app.UseHsts();
+
 app.UseHttpsRedirection(); // Перенаправляет все входящие HTTP-запросы на HTTPS
 app.UseCors("AllowFrontend");
 app.UseRateLimiter();
