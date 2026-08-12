@@ -45,6 +45,12 @@ public class DelosferaDbContext : DbContext
     public DbSet<VndLink> VndLinks => Set<VndLink>();
     
     public DbSet<VndApprovalProcess> VndApprovalProcesses => Set<VndApprovalProcess>();
+
+    // --- Годовой план актуализации ВНД (PLN-01..07) ---
+    public DbSet<ActualizationPlan> ActualizationPlans => Set<ActualizationPlan>();
+    public DbSet<ActualizationPlanItem> ActualizationPlanItems => Set<ActualizationPlanItem>();
+    public DbSet<PlanItemEvent> PlanItemEvents => Set<PlanItemEvent>();
+    public DbSet<ActualizationSettings> ActualizationSettings => Set<ActualizationSettings>();
     public DbSet<VndApprovalStage> VndApprovalStages => Set<VndApprovalStage>();
     
     public DbSet<Notification> Notifications => Set<Notification>();

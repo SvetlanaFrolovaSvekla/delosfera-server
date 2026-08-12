@@ -20,15 +20,20 @@ public class VndActualizationService : IVndActualizationService
     private readonly INotificationService _notifications;
     private readonly ILogger<VndActualizationService> _logger;
 
+    /// <summary>План актуализации сам следит за циклом (PLN-06) — контур только сообщает ему о событиях.</summary>
+    private readonly IPlanItemSync _planSync;
+
     public VndActualizationService(
         DelosferaDbContext db,
         ICurrentUserService currentUser,
         INotificationService notifications,
+        IPlanItemSync planSync,
         ILogger<VndActualizationService> logger)
     {
         _db = db;
         _currentUser = currentUser;
         _notifications = notifications;
+        _planSync = planSync;
         _logger = logger;
     }
 
@@ -102,6 +107,10 @@ public class VndActualizationService : IVndActualizationService
 
             await NotifyAsync(notice, vndId, currentUserId, pending.RequestedByUserId);
         }
+
+        // Позиция годового плана переходит в «На актуализации» сама (PLN-06):
+        // отмечать это руками — значит однажды получить план, расходящийся с делом.
+        await _planSync.OnVndActualizationStartedAsync(vndId, currentUserId);
 
         return await BuildStateResponseAsync(vnd);
     }
@@ -330,6 +339,9 @@ public class VndActualizationService : IVndActualizationService
             VndActualizationNotificationMessages.Published(vnd.TitleRu, request.HadChanges),
             vndId, currentUserId,
             developerHeadId.HasValue ? [developerHeadId.Value] : []);
+
+        // Изменения утверждены — закрываем позицию плана и проставляем новый срок (PLN-06).
+        await _planSync.OnVndActualizationPublishedAsync(vndId, currentUserId);
 
         return await BuildStateResponseAsync(vnd);
     }
