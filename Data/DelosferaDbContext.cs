@@ -26,6 +26,7 @@ public class DelosferaDbContext : DbContext
     public DbSet<OrganizationUnit> OrganizationUnits => Set<OrganizationUnit>(); // Справочник: Структурные подразделения
     public DbSet<Keyword> Keywords => Set<Keyword>(); // Справочник: Ключевые слова
     public DbSet<Position> Positions => Set<Position>(); // Справочник: Должности
+    public DbSet<OrganizationUnitHistory> OrganizationUnitHistory => Set<OrganizationUnitHistory>(); // Историчность оргструктуры (GEN-08)
     public DbSet<UserGroup> UserGroups => Set<UserGroup>(); // Справочник: Группы пользователей
     
     public DbSet<Rubric> Rubrics => Set<Rubric>(); // Справочник: Рубрикатор

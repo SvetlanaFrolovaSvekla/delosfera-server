@@ -32,6 +32,9 @@ public class RouteTemplateStep
     public bool IsFinalMethodology { get; set; }
     public int? TimeNormHours { get; set; }
 
+    /// <summary>Требуемый уровень подписи на этапе (SIG-04); переносится в маршрут при создании.</summary>
+    public Signing.Models.SignatureLevel? RequiredSignatureLevel { get; set; }
+
     public ICollection<RouteTemplateParticipant> Participants { get; set; } = new List<RouteTemplateParticipant>();
 }
 

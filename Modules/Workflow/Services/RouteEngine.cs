@@ -60,6 +60,7 @@ public class RouteEngine : IRouteEngine
                 Kind = ts.Kind,
                 IsFinalMethodology = ts.IsFinalMethodology,
                 TimeNormHours = ts.TimeNormHours,
+                RequiredSignatureLevel = ts.RequiredSignatureLevel,
                 Participants = ts.Participants.Select(tp => new RouteParticipant
                 {
                     UserId = tp.UserId,
@@ -184,6 +185,8 @@ public class RouteEngine : IRouteEngine
             throw new InvalidOperationException("Комментарий обязателен для замечаний и отклонения");
 
         var step = p.RouteStep!;
+
+        await RequireSignatureAsync(step, type, actorUserId, signatureId);
         var inst = await InstanceQuery().FirstAsync(i => i.Id == step.RouteInstanceId);
 
         var resolution = new Resolution
@@ -342,12 +345,24 @@ public class RouteEngine : IRouteEngine
     {
         // TID-08: просроченные активные участники → автоакцепт; на финальном этапе ОМ — эскалация.
         var overdue = await _db.RouteParticipants
-            .Include(p => p.RouteStep)
+            .Include(p => p.RouteStep!).ThenInclude(s => s.RouteInstance)
+            .Include(p => p.RouteStep!).ThenInclude(s => s.Participants)
+                .ThenInclude(x => x.Resolution).ThenInclude(r => r!.Remarks)
             .Where(p => p.State == ParticipantState.Active && p.DueAt != null && p.DueAt < now)
             .ToListAsync();
 
         foreach (var p in overdue)
         {
+            // TID-10: при противоречии автоакцепта и строгого режима приоритет — блокировке.
+            // Документ, возвращённый на доработку или имеющий открытые замечания, не может
+            // «досогласоваться сам по себе»: молчание согласующего здесь не согласие, а
+            // ожидание правок от инициатора.
+            if (IsBlockedByRemarks(p))
+            {
+                await _audit.LogAsync("RouteParticipant", p.Id, "AutoAcceptSuppressedByRemarks", null);
+                continue;
+            }
+
             if (p.RouteStep!.IsFinalMethodology)
             {
                 // Эскалация вместо автоакцепта.
@@ -385,6 +400,63 @@ public class RouteEngine : IRouteEngine
         await _db.SaveChangesAsync();
         await _audit.LogAsync(Entity, inst.Id, "Interrupted", actorUserId);
         await _notifier.RouteFinishedAsync(inst.Id, RouteInstanceStatus.Interrupted, null);
+    }
+
+    /// <summary>
+    /// Заблокирован ли процесс строгим режимом: маршрут на доработке либо на этапе
+    /// есть неснятые замечания.
+    /// </summary>
+    private static bool IsBlockedByRemarks(RouteParticipant participant)
+    {
+        var step = participant.RouteStep;
+        if (step is null) return false;
+
+        if (step.RouteInstance?.Status == RouteInstanceStatus.OnRevision) return true;
+
+        return step.Participants
+            .Select(x => x.Resolution)
+            .Where(r => r is not null)
+            .SelectMany(r => r!.Remarks)
+            .Any(rm => rm.State == RemarkState.Open);
+    }
+
+    /// <summary>
+    /// Проверяет подпись, которой закрывается этап (SIG-04).
+    ///
+    /// Подпись обязательна только для согласующих резолюций: отклонение и возврат на
+    /// доработку ничего не удостоверяют, и требовать под ними ЭЦП значит мешать
+    /// остановить процесс. Автоакцепт идёт от системы и подписи не имеет по определению.
+    /// </summary>
+    private async Task RequireSignatureAsync(
+        RouteStep step, ResolutionType type, int actorUserId, int? signatureId)
+    {
+        if (step.RequiredSignatureLevel is not { } required) return;
+        if (type is ResolutionType.Rejected or ResolutionType.AutoAccept or ResolutionType.Veto) return;
+
+        var levelTitle = required == Signing.Models.SignatureLevel.Qualified
+            ? "квалифицированной электронной подписью"
+            : "электронной подписью";
+
+        if (signatureId is not { } id)
+            throw new InvalidOperationException($"Этап закрывается {levelTitle} — подпись не приложена");
+
+        var signature = await _db.Signatures.FirstOrDefaultAsync(x => x.Id == id)
+            ?? throw new InvalidOperationException("Приложенная подпись не найдена");
+
+        if (signature.Revoked)
+            throw new InvalidOperationException(
+                "Подпись аннулирована — файл изменился после подписания, требуется подписать заново");
+
+        // Подписывает тот, кто выносит резолюцию: чужая подпись под своей визой
+        // превращает маршрут в формальность.
+        if (signature.UserId != actorUserId)
+            throw new InvalidOperationException("Подпись принадлежит другому пользователю");
+
+        // Квалифицированная подпись сильнее простой и закрывает этап, требующий простую;
+        // обратное неверно.
+        if (required == Signing.Models.SignatureLevel.Qualified &&
+            signature.Level != Signing.Models.SignatureLevel.Qualified)
+            throw new InvalidOperationException($"Этап закрывается {levelTitle}, приложена простая подпись");
     }
 
     private void CloseTask(int participantId, WorkflowTaskState state = WorkflowTaskState.Done)
