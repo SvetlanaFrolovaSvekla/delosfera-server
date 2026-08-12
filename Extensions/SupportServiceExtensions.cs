@@ -8,6 +8,9 @@ public static class SupportServiceExtensions
     public static WebApplicationBuilder AddSigningServices(this WebApplicationBuilder builder)
     {
         builder.Services.AddScoped<ISignatureService, SignatureService>();
+
+        // КЭП: проверка подписи хеша версии и реквизитов сертификата (SIG-02, INT-03)
+        builder.Services.AddScoped<IQualifiedSignatureService, QualifiedSignatureService>();
         return builder;
     }
 
