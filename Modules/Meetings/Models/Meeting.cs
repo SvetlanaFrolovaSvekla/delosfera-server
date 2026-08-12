@@ -3,6 +3,8 @@ using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Files.Models;
 using delosfera_server.Modules.Users.Models;
 
+using NpgsqlTypes;
+
 namespace delosfera_server.Modules.Meetings.Models;
 
 /// <summary>
@@ -66,6 +68,9 @@ public class AgendaItem : IAuditableEntity
     public int Order { get; set; }
 
     public required string Topic { get; set; }
+
+    /// <summary>Поисковый вектор по теме, решению и номеру протокола (GEN-04).</summary>
+    public NpgsqlTsVector? SearchVector { get; set; }
 
     /// <summary>
     /// Номер протокола по маске [гггг-хх-х]: год, порядковый номер заседания и признак,

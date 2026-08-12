@@ -12,6 +12,7 @@ using delosfera_server.Modules.Sz.Models;
 using delosfera_server.Modules.Procurement.Models;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Modules.Integrations.Mail;
+using delosfera_server.Modules.Search.Models;
 
 namespace delosfera_server.Data;
 
@@ -109,6 +110,7 @@ public class DelosferaDbContext : DbContext
 
     // --- Интеграции (раздел 8 ТЗ) ---
     public DbSet<OutgoingEmail> OutgoingEmails => Set<OutgoingEmail>(); // очередь исходящих писем (INT-02)
+    public DbSet<SavedSearch> SavedSearches => Set<SavedSearch>(); // сохранённые фильтры поиска (GEN-04)
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

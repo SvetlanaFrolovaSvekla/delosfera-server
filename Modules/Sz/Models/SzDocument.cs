@@ -4,6 +4,8 @@ using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Users.Models;
 
+using NpgsqlTypes;
+
 namespace delosfera_server.Modules.Sz.Models;
 
 /// <summary>
@@ -24,6 +26,9 @@ public class SzDocument : IAuditableEntity
 
     /// <summary>Текст служебной записки.</summary>
     public string? Body { get; set; }
+
+    /// <summary>Поисковый вектор по тексту записки и резолюции (GEN-04).</summary>
+    public NpgsqlTsVector? SearchVector { get; set; }
 
     /// <summary>СП автора.</summary>
     public int? AuthorUnitId { get; set; }

@@ -51,6 +51,14 @@ public class SzDocumentConfiguration : IEntityTypeConfiguration<SzDocument>
     {
         b.ToTable("sz_document");
 
+        // Поисковый вектор по тексту записки и резолюции — вычисляется базой (GEN-04).
+        b.Property(x => x.SearchVector)
+            .HasComputedColumnSql(
+                "to_tsvector('russian', coalesce(body, '') || ' ' || coalesce(execution_resolution, ''))",
+                stored: true);
+
+        b.HasIndex(x => x.SearchVector).HasMethod("GIN");
+
         b.Property(x => x.Amount).HasPrecision(18, 2);
         b.Property(x => x.ExtraFields).HasColumnType("jsonb");
 

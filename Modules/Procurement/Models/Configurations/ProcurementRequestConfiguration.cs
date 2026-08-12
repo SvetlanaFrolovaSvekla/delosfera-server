@@ -9,6 +9,14 @@ public class ProcurementRequestConfiguration : IEntityTypeConfiguration<Procurem
     {
         b.ToTable("procurement_request");
 
+        // Поисковый вектор по предмету, обоснованию и позиции плана — вычисляется базой (GEN-04).
+        b.Property(x => x.SearchVector)
+            .HasComputedColumnSql(
+                "to_tsvector('russian', coalesce(subject, '') || ' ' || coalesce(justification, '') || ' ' || coalesce(plan_item, ''))",
+                stored: true);
+
+        b.HasIndex(x => x.SearchVector).HasMethod("GIN");
+
         // Заявка 1:1 с карточкой документа: номер и статус живут там (GEN-05).
         b.HasIndex(x => x.DocumentId).IsUnique();
 

@@ -38,6 +38,14 @@ public class AgendaItemConfiguration : IEntityTypeConfiguration<AgendaItem>
     {
         b.ToTable("meeting_agenda_item");
 
+        // Поисковый вектор по теме, решению и номеру протокола — вычисляется базой (GEN-04).
+        b.Property(x => x.SearchVector)
+            .HasComputedColumnSql(
+                "to_tsvector('russian', coalesce(topic, '') || ' ' || coalesce(decision, '') || ' ' || coalesce(protocol_number, ''))",
+                stored: true);
+
+        b.HasIndex(x => x.SearchVector).HasMethod("GIN");
+
         b.HasIndex(x => new { x.MeetingId, x.Order });
 
         b.HasOne(x => x.Speaker).WithMany()

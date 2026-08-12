@@ -9,6 +9,17 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
     {
         builder.ToTable("document");
 
+        // Поисковый вектор считает сама база (GENERATED ... STORED): отдельная
+        // синхронизация индекса рано или поздно расходится с данными, а генерируемая
+        // колонка не может устареть. Словарь задан константой — иначе выражение не
+        // immutable и Postgres не примет его в вычисляемую колонку.
+        builder.Property(x => x.SearchVector)
+            .HasComputedColumnSql(
+                "to_tsvector('russian', coalesce(title, '') || ' ' || coalesce(reg_number, ''))",
+                stored: true);
+
+        builder.HasIndex(x => x.SearchVector).HasMethod("GIN");
+
         builder.Property(x => x.Type).HasConversion<string>();
 
         builder.HasOne(x => x.Author)

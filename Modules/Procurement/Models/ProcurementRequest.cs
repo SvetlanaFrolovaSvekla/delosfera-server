@@ -3,6 +3,8 @@ using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Users.Models;
 
+using NpgsqlTypes;
+
 namespace delosfera_server.Modules.Procurement.Models;
 
 /// <summary>
@@ -26,6 +28,9 @@ public class ProcurementRequest : IAuditableEntity
 
     /// <summary>Обоснование необходимости: цель, риски при непринятии решения, эффективность.</summary>
     public string? Justification { get; set; }
+
+    /// <summary>Поисковый вектор по предмету, обоснованию и позиции плана (GEN-04).</summary>
+    public NpgsqlTsVector? SearchVector { get; set; }
 
     /// <summary>Тип предмета — от него зависит ветвление маршрута (PRC-08, вопрос В-5).</summary>
     public ProcurementSubjectKind SubjectKind { get; set; }

@@ -75,6 +75,7 @@ builder.AddSzServices();
 builder.AddProcurementServices();
 builder.AddMeetingServices();
 builder.AddIntegrationServices();
+builder.AddSearchServices();
 
 
 builder.Services.AddCors(options =>

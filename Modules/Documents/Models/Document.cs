@@ -2,6 +2,8 @@ using delosfera_server.Common.Models;
 using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Users.Models;
 
+using NpgsqlTypes;
+
 namespace delosfera_server.Modules.Documents.Models;
 
 /// <summary>
@@ -19,6 +21,13 @@ public class Document : IAuditableEntity
     public string? RegNumber { get; set; }
 
     public required string Title { get; set; }
+
+    /// <summary>
+    /// Поисковый вектор по наименованию и регистрационному номеру (GEN-04).
+    /// Вычисляется самой базой: отдельная синхронизация индекса рано или поздно
+    /// расходится с данными, а генерируемая колонка не может устареть.
+    /// </summary>
+    public NpgsqlTsVector? SearchVector { get; set; }
 
     /// <summary>Текущий статус (строковый код, набор зависит от типа документа).</summary>
     public required string StatusCode { get; set; }
