@@ -21,13 +21,24 @@ public class WorkflowController : ControllerBase
     private readonly DelosferaDbContext _db;
     private readonly IRouteEngine _engine;
     private readonly ICurrentUserService _currentUser;
+    private readonly ITaskInboxService _inbox;
 
-    public WorkflowController(DelosferaDbContext db, IRouteEngine engine, ICurrentUserService currentUser)
+    public WorkflowController(
+        DelosferaDbContext db, IRouteEngine engine, ICurrentUserService currentUser, ITaskInboxService inbox)
     {
         _db = db;
         _engine = engine;
         _currentUser = currentUser;
+        _inbox = inbox;
     }
+
+    /// <summary>
+    /// Сводный реестр задач текущего пользователя по всем контурам (GEN-11),
+    /// включая полученные по замещению. Фильтр documentType — Sz, Procurement, Vnd.
+    /// </summary>
+    [HttpGet("inbox")]
+    public async Task<IActionResult> Inbox([FromQuery] string? documentType = null) =>
+        Ok(await _inbox.GetAsync(_currentUser.UserId, documentType));
 
     /// <summary>Список шаблонов маршрутов (опц. фильтр по типу документа) — для выбора при отправке.</summary>
     [HttpGet("templates")]

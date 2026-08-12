@@ -152,18 +152,18 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<DelosferaDbContext>();
 
-    if (app.Environment.IsDevelopment())
+    // Пересоздание БД включается явным флагом, а не самим фактом dev-среды: иначе
+    // каждый перезапуск API стирал заведённые документы и сессии, а на демонстрации
+    // и при отладке данные должны переживать рестарт.
+    // Включить: Database:RecreateOnStartup=true (env DATABASE__RECREATEONSTARTUP=true).
+    var recreate = app.Configuration.GetValue<bool>("Database:RecreateOnStartup");
+
+    if (recreate && app.Environment.IsDevelopment())
     {
-        // В dev - полностью пересоздаём БД при каждом запуске
-        // сносим всё и накатываем миграции заново
         db.Database.EnsureDeleted();
-        db.Database.Migrate();
     }
-    else
-    {
-        // В проде - только применяются новые миграции, ничего более не удаляется
-        db.Database.Migrate();
-    }
+
+    db.Database.Migrate();
 
     // Bootstrap администратора из конфигурации (env/secrets), а НЕ из захардкоженного хеша.
     // Пароли сид-аккаунтов инвалидированы миграцией InvalidateSeededPasswords; этот блок —
