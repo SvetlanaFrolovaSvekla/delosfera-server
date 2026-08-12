@@ -127,3 +127,41 @@ public class SzDetails : SzListItem
     public string? ExecutionSummary { get; set; }
     public DateTime? ExecutedAt { get; set; }
 }
+
+// ── Статистика по служебным запискам (SZ-06) ─────────────────────────────────
+
+public class SzStatisticsFilter
+{
+    public DateOnly? From { get; set; }
+    public DateOnly? To { get; set; }
+    public int? OrgUnitId { get; set; }
+    public int? KindId { get; set; }
+}
+
+/// <summary>Разрез сводки: сколько записок в каждом состоянии.</summary>
+public class SzStatisticsCell
+{
+    public int Total { get; set; }
+    public int InWork { get; set; }
+    public int Overdue { get; set; }
+    public int Executed { get; set; }
+    public int Other { get; set; }
+}
+
+public class SzStatisticsDto
+{
+    public DateOnly? From { get; set; }
+    public DateOnly? To { get; set; }
+
+    public int Total { get; set; }
+    public int InWork { get; set; }
+    public int Overdue { get; set; }
+    public int Executed { get; set; }
+
+    /// <summary>Черновики, отозванные и забракованные — в работу не считаются.</summary>
+    public int Other { get; set; }
+
+    public Dictionary<string, SzStatisticsCell> ByUnit { get; set; } = [];
+    public Dictionary<string, SzStatisticsCell> ByKind { get; set; } = [];
+    public Dictionary<string, SzStatisticsCell> ByMonth { get; set; } = [];
+}

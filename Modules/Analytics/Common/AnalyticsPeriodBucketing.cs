@@ -30,16 +30,27 @@ public static class AnalyticsPeriodBucketing
         _ => new DateOnly(date.Year, date.Month, 1)
     };
 
-    /// <summary>Готовая подпись бакета для оси X графика</summary>
+    /// <summary>
+    /// Готовая подпись бакета для оси X графика и колонки отчёта.
+    ///
+    /// Культура задана явно: у сервиса она инвариантная, и месяцы выходили как
+    /// «January 2026» — в отчёте, который уходит Правлению, это выглядит небрежно.
+    /// </summary>
     public static string BucketLabel(DateOnly bucketStart, AnalyticsGranularity granularity) => granularity switch
     {
-        AnalyticsGranularity.Day => bucketStart.ToString("dd.MM.yyyy"),
-        AnalyticsGranularity.Week => $"{bucketStart:dd.MM} — {bucketStart.AddDays(6):dd.MM.yyyy}",
-        AnalyticsGranularity.Month => bucketStart.ToString("MMMM yyyy"),
-        AnalyticsGranularity.Quarter => $"Q{((bucketStart.Month - 1) / 3) + 1} {bucketStart.Year}",
+        AnalyticsGranularity.Day => bucketStart.ToString("dd.MM.yyyy", Ru),
+        AnalyticsGranularity.Week => $"{bucketStart.ToString("dd.MM", Ru)} — {bucketStart.AddDays(6).ToString("dd.MM.yyyy", Ru)}",
+        AnalyticsGranularity.Month => Capitalize(bucketStart.ToString("MMMM yyyy", Ru)),
+        AnalyticsGranularity.Quarter => $"{((bucketStart.Month - 1) / 3) + 1} кв. {bucketStart.Year}",
         AnalyticsGranularity.Year => bucketStart.Year.ToString(),
-        _ => bucketStart.ToString("MMMM yyyy")
+        _ => Capitalize(bucketStart.ToString("MMMM yyyy", Ru))
     };
+
+    private static readonly System.Globalization.CultureInfo Ru = new("ru-RU");
+
+    /// <summary>«август 2026» → «Август 2026»: подпись стоит в начале ячейки.</summary>
+    private static string Capitalize(string value) =>
+        value.Length == 0 ? value : char.ToUpper(value[0], Ru) + value[1..];
 
     /// <summary>Генерирует непрерывный список периодов от from до to с заданным шагом,
     /// чтобы на графике не было "дыр" там, где данных не было</summary>

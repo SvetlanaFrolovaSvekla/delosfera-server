@@ -15,6 +15,9 @@ public static class SzServiceExtensions
 
         // Напоминания о сроках исполнения поручений в 9:00 по времени банка (SZ-03)
         builder.Services.AddScoped<ISzDeadlineNotifier, SzDeadlineNotifier>();
+
+        // Статистика по запискам и её выгрузка (SZ-06)
+        builder.Services.AddScoped<ISzStatisticsService, SzStatisticsService>();
         builder.Services.AddHostedService<SzDeadlineWorker>();
         builder.Services.AddScoped<IRouteCompletionHandler, SzRouteCompletionHandler>();
         return builder;
