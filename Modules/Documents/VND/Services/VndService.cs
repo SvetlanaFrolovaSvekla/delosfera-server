@@ -884,4 +884,32 @@ public class VndService : IVndService
 
         return ToRedactionResponse(lastRedaction, vnd.CurrentRedactionId);
     }
+    
+    public async Task<List<VndQuickSearchResponse>> QuickSearchAsync(string query, string languageCode, int limit)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return [];
+
+        IQueryable<VndDocument> dbQuery = _db.VndDocuments.AsNoTracking();
+
+        dbQuery = dbQuery.Where(x =>
+            EF.Functions.ILike(x.Code, $"%{query}%") ||
+            EF.Functions.ILike(x.TitleRu, $"%{query}%") ||
+            (x.TitleEn != null && EF.Functions.ILike(x.TitleEn, $"%{query}%")) ||
+            (x.TitleKg != null && EF.Functions.ILike(x.TitleKg, $"%{query}%")));
+
+        dbQuery = ApplyDraftVisibilityFilter(dbQuery, null);
+
+        var entities = await dbQuery
+            .OrderByDescending(x => x.UpdatedAt)
+            .Take(limit)
+            .ToListAsync();
+
+        return entities.Select(x => new VndQuickSearchResponse
+        {
+            Id = x.Id,
+            Code = x.Code,
+            Name = x.ResolveTitle(languageCode),
+            Status = MapStatusBack(x.Status)
+        }).ToList();
+    }
 }

@@ -2079,7 +2079,7 @@ namespace delosfera_server.Migrations
                             RevisionChangedDate = new DateOnly(2026, 7, 20),
                             SecrecyLevelId = 3,
                             Status = 3,
-                            TitleRu = "Порядок работы с обеспечением (залогами)",
+                            TitleRu = "Порядок работы с обеспечением (залогами) (тестовое)",
                             TypeId = 13,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
@@ -2105,7 +2105,7 @@ namespace delosfera_server.Migrations
                             RevisionChangedDate = new DateOnly(2026, 6, 18),
                             SecrecyLevelId = 2,
                             Status = 0,
-                            TitleRu = "Политика управления кредитными рисками",
+                            TitleRu = "Политика управления кредитными рисками (тестовое)",
                             TypeId = 11,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
@@ -2131,7 +2131,7 @@ namespace delosfera_server.Migrations
                             RevisionChangedDate = new DateOnly(2026, 7, 1),
                             SecrecyLevelId = 1,
                             Status = 1,
-                            TitleRu = "Регламент кассовых операций",
+                            TitleRu = "Регламент кассовых операций (тестовое)",
                             TypeId = 17,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
@@ -2157,7 +2157,7 @@ namespace delosfera_server.Migrations
                             RevisionChangedDate = new DateOnly(2025, 9, 14),
                             SecrecyLevelId = 1,
                             Status = 0,
-                            TitleRu = "Кодекс корпоративной этики",
+                            TitleRu = "Кодекс корпоративной этики (тестовое)",
                             TypeId = 5,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
@@ -2185,7 +2185,7 @@ namespace delosfera_server.Migrations
                             RevisionChangedDate = new DateOnly(2019, 2, 1),
                             SecrecyLevelId = 2,
                             Status = 4,
-                            TitleRu = "Регламент управления ликвидностью (ред. 2019)",
+                            TitleRu = "Регламент управления ликвидностью (ред. 2019) (тестовое)",
                             TypeId = 17,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         },

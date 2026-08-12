@@ -218,4 +218,15 @@ public class VndController : ControllerBase
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
+    
+    /// <summary>Быстрый поиск ВНД для выпадающего списка в шапке — лёгкий ответ, без фильтров и пагинации</summary>
+    [HttpGet("quick-search")]
+    [RequirePermission(PermissionCode.ViewVnd)]
+    [ProducesResponseType(typeof(List<VndQuickSearchResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<VndQuickSearchResponse>>> QuickSearch(
+        [FromQuery] string q, [FromQuery] int limit = 8)
+    {
+        var language = _languageResolver.Resolve(Request);
+        return Ok(await _service.QuickSearchAsync(q, language, Math.Clamp(limit, 1, 20)));
+    }
 }
