@@ -18,5 +18,12 @@ public enum DocumentType
     Procurement = 4,
 
     /// <summary>Договор</summary>
-    Contract = 5
+    Contract = 5,
+
+    /// <summary>
+    /// Тип, заведённый администратором заказчика (GEN-06). Какой именно — сказано
+    /// в Document.DefinitionId: одно значение перечисления на все настраиваемые типы,
+    /// иначе каждый новый тип требовал бы правки кода и миграции.
+    /// </summary>
+    Custom = 6
 }

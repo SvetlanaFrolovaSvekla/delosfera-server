@@ -21,6 +21,12 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
         builder.HasIndex(x => x.SearchVector).HasMethod("GIN");
 
         builder.Property(x => x.Type).HasConversion<string>();
+        builder.Property(x => x.FieldValues).HasColumnType("jsonb");
+
+        builder.HasOne(x => x.Definition)
+            .WithMany()
+            .HasForeignKey(x => x.DefinitionId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(x => x.Author)
             .WithMany()

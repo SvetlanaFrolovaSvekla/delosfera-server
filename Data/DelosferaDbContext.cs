@@ -66,6 +66,13 @@ public class DelosferaDbContext : DbContext
     public DbSet<DocumentAttachment> DocumentAttachments => Set<DocumentAttachment>();
     public DbSet<DocumentLink> DocumentLinks => Set<DocumentLink>();
     public DbSet<Numerator> Numerators => Set<Numerator>();
+
+    // --- Администрируемость: типы документов, справочники, представления (GEN-06/07/10) ---
+    public DbSet<DocumentTypeDefinition> DocumentTypeDefinitions => Set<DocumentTypeDefinition>();
+    public DbSet<DocumentTypeField> DocumentTypeFields => Set<DocumentTypeField>();
+    public DbSet<ListView> ListViews => Set<ListView>();
+    public DbSet<CustomDictionary> CustomDictionaries => Set<CustomDictionary>();
+    public DbSet<CustomDictionaryItem> CustomDictionaryItems => Set<CustomDictionaryItem>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
 
     // --- Движок согласования (TID-01..14, SZ-01, PRC-08) ---

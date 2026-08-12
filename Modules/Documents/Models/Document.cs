@@ -22,6 +22,17 @@ public class Document : IAuditableEntity
 
     public required string Title { get; set; }
 
+    /// <summary>Настраиваемый тип документа, если Type = Custom (GEN-06).</summary>
+    public int? DefinitionId { get; set; }
+    public DocumentTypeDefinition? Definition { get; set; }
+
+    /// <summary>
+    /// Значения полей настраиваемой карточки — json по кодам полей. Хранятся одним
+    /// документом, а не таблицей «поле-значение»: набор полей задаёт администратор,
+    /// и колонка на каждое поле означала бы миграцию на каждую правку настроек.
+    /// </summary>
+    public string? FieldValues { get; set; }
+
     /// <summary>
     /// Поисковый вектор по наименованию и регистрационному номеру (GEN-04).
     /// Вычисляется самой базой: отдельная синхронизация индекса рано или поздно
