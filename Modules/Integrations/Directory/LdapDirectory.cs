@@ -1,0 +1,189 @@
+using Microsoft.Extensions.Options;
+using Novell.Directory.Ldap;
+
+namespace delosfera_server.Modules.Integrations.Directory;
+
+/// <summary>Сотрудник, как его видит служба каталогов.</summary>
+public record DirectoryEntry(
+    string Login,
+    string? Email,
+    string? FullName,
+    string? Position,
+    string? OrgUnit,
+    bool IsDisabled);
+
+public interface ILdapDirectory
+{
+    bool Enabled { get; }
+
+    /// <summary>Выгрузить сотрудников из каталога.</summary>
+    Task<List<DirectoryEntry>> ListUsersAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Проверить логин и пароль привязкой к каталогу. Возвращает запись сотрудника
+    /// либо null, если пара не подошла.
+    /// </summary>
+    Task<DirectoryEntry?> AuthenticateAsync(string login, string password, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Служба каталогов AD/LDAP (INT-01).
+///
+/// Пароль не проверяется сравнением хешей: система привязывается к каталогу от имени
+/// самого сотрудника. Так пароль остаётся в домене — банк не хранит его копию и не
+/// обходит доменные политики блокировки и смены.
+/// </summary>
+public class LdapDirectory : ILdapDirectory
+{
+    private readonly LdapOptions _options;
+    private readonly ILogger<LdapDirectory> _logger;
+
+    public LdapDirectory(IOptions<LdapOptions> options, ILogger<LdapDirectory> logger)
+    {
+        _options = options.Value;
+        _logger = logger;
+    }
+
+    public bool Enabled => _options.Enabled;
+
+    public async Task<List<DirectoryEntry>> ListUsersAsync(CancellationToken ct = default)
+    {
+        RequireEnabled();
+
+        using var connection = await ConnectAsync(_options.BindDn, _options.BindPassword, ct);
+
+        var entries = await SearchRawAsync(connection, _options.UserFilter, ct);
+        return entries.Select(Map).ToList();
+    }
+
+    public async Task<DirectoryEntry?> AuthenticateAsync(
+        string login, string password, CancellationToken ct = default)
+    {
+        RequireEnabled();
+
+        if (string.IsNullOrWhiteSpace(login) || string.IsNullOrEmpty(password))
+            return null;
+
+        // Сначала служебной учёткой находим DN сотрудника: привязаться можно только
+        // по полному DN, а пользователь вводит короткий логин.
+        DirectoryEntry found;
+        string dn;
+
+        using (var service = await ConnectAsync(_options.BindDn, _options.BindPassword, ct))
+        {
+            var filter = $"(&{_options.UserFilter}({_options.LoginAttribute}={Escape(login)}))";
+            var entries = await SearchRawAsync(service, filter, ct);
+
+            if (entries.Count == 0)
+            {
+                _logger.LogInformation("LDAP: учётная запись {Login} в каталоге не найдена", login);
+                return null;
+            }
+
+            dn = entries[0].Dn;
+            found = Map(entries[0]);
+        }
+
+        try
+        {
+            using var user = await ConnectAsync(dn, password, ct);
+        }
+        catch (LdapException ex)
+        {
+            _logger.LogInformation("LDAP: неверный пароль для {Login} ({Message})", login, ex.Message);
+            return null;
+        }
+
+        return found;
+    }
+
+    // ── внутреннее ───────────────────────────────────────────────────────────
+
+    private void RequireEnabled()
+    {
+        if (!_options.Enabled)
+            throw new InvalidOperationException("Интеграция со службой каталогов выключена");
+    }
+
+    private async Task<LdapConnection> ConnectAsync(string dn, string password, CancellationToken ct)
+    {
+        var connection = new LdapConnection {SecureSocketLayer = _options.UseSsl};
+
+        try
+        {
+            await connection.ConnectAsync(_options.Host, _options.Port, ct);
+            await connection.BindAsync(dn, password, ct);
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    private async Task<List<LdapEntry>> SearchRawAsync(
+        LdapConnection connection, string filter, CancellationToken ct)
+    {
+        var attributes = new[]
+        {
+            _options.LoginAttribute, _options.EmailAttribute, _options.FullNameAttribute,
+            _options.PositionAttribute, _options.OrgUnitAttribute,
+            _options.DisabledAttribute ?? "objectClass",
+        };
+
+        var results = await connection.SearchAsync(
+            _options.BaseDn, LdapConnection.ScopeSub, filter, attributes, typesOnly: false, ct);
+
+        var entries = new List<LdapEntry>();
+
+        while (await results.HasMoreAsync(ct))
+        {
+            try
+            {
+                entries.Add(await results.NextAsync(ct));
+            }
+            catch (LdapReferralException)
+            {
+                // Отсылки к другим контроллерам домена в выборке сотрудников не нужны:
+                // банк синхронизируется с одним каталогом, заданным в настройках.
+            }
+        }
+
+        return entries;
+    }
+
+    private DirectoryEntry Map(LdapEntry entry) => new(
+        Login: Value(entry, _options.LoginAttribute) ?? entry.Dn,
+        Email: Value(entry, _options.EmailAttribute),
+        FullName: Value(entry, _options.FullNameAttribute),
+        Position: Value(entry, _options.PositionAttribute),
+        OrgUnit: Value(entry, _options.OrgUnitAttribute),
+        IsDisabled: IsDisabled(entry));
+
+    private static string? Value(LdapEntry entry, string attribute)
+    {
+        var value = entry.GetStringValueOrDefault(attribute, null!);
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    /// <summary>
+    /// В Active Directory отключённая учётная запись помечается вторым битом
+    /// userAccountControl (0x2). Отдельного булева атрибута там нет.
+    /// </summary>
+    private bool IsDisabled(LdapEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(_options.DisabledAttribute)) return false;
+
+        var raw = Value(entry, _options.DisabledAttribute);
+        return int.TryParse(raw, out var flags) && (flags & 0x2) != 0;
+    }
+
+    /// <summary>Экранирование спецсимволов фильтра (RFC 4515) — логин приходит от пользователя.</summary>
+    private static string Escape(string value) => value
+        .Replace("\\", "\\5c")
+        .Replace("*", "\\2a")
+        .Replace("(", "\\28")
+        .Replace(")", "\\29")
+        .Replace("\0", "\\00");
+}

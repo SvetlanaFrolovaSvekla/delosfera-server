@@ -74,6 +74,7 @@ builder.AddSigningServices();
 builder.AddSzServices();
 builder.AddProcurementServices();
 builder.AddMeetingServices();
+builder.AddIntegrationServices();
 
 
 builder.Services.AddCors(options =>

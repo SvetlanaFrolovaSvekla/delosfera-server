@@ -56,6 +56,34 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// Доменный вход через службу каталогов AD/LDAP (INT-01)
+    /// </summary>
+    /// <response code="200">Вход выполнен успешно</response>
+    /// <response code="401">Каталог не подтвердил пару логин/пароль либо сотрудник не заведён в системе</response>
+    [HttpPost("login-domain")]
+    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<LoginResponse>> LoginDomain([FromBody] DomainLoginRequest request)
+    {
+        var language = _languageResolver.Resolve(Request);
+
+        try
+        {
+            var result = await _authService.LoginWithDirectoryAsync(request, language);
+            SetRefreshCookie(result.RefreshToken);
+            return Ok(result.Response);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Обновление access-токена по refresh-токену из httpOnly-cookie
     /// </summary>
     /// <response code="200">Токены обновлены успешно (новый refresh — в cookie)</response>

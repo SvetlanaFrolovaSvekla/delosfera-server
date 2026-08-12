@@ -7,6 +7,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
+using delosfera_server.Modules.Integrations.Directory;
 using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Users.Services;
@@ -16,17 +17,20 @@ public class AuthService : IAuthService
     private readonly DelosferaDbContext _db;
     private readonly IUserPasswordHasher _passwordHasher;
     private readonly IJwtTokenService _jwtTokenService;
+    private readonly ILdapDirectory _directory;
     private readonly int _refreshTokenExpiryDays;
 
     public AuthService(
         DelosferaDbContext db,
         IUserPasswordHasher passwordHasher,
         IJwtTokenService jwtTokenService,
+        ILdapDirectory directory,
         IConfiguration configuration)
     {
         _db = db;
         _passwordHasher = passwordHasher;
         _jwtTokenService = jwtTokenService;
+        _directory = directory;
         _refreshTokenExpiryDays = int.Parse(configuration["Jwt:RefreshTokenExpiryDays"] ?? "30");
     }
 
@@ -45,8 +49,52 @@ public class AuthService : IAuthService
         if (user.BlockedAt.HasValue)
             throw new UnauthorizedAccessException("Учётная запись заблокирована");
 
+        // У доменной учётной записи локального пароля нет: он живёт в каталоге и
+        // подчиняется доменным политикам. Иначе рядом с доменным появился бы второй
+        // пароль, который не истекает и не блокируется вместе с учёткой.
+        if (user.Source == UserSource.Ldap)
+            throw new UnauthorizedAccessException(
+                "Учётная запись доменная — используйте вход через службу каталогов");
+
         if (!_passwordHasher.Verify(user.PasswordHash, request.Password))
             throw new UnauthorizedAccessException("Неверный email или пароль");
+
+        user.LastLoginAt = DateTime.UtcNow;
+
+        var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
+        await _db.SaveChangesAsync();
+
+        return new AuthResult(
+            new LoginResponse { Token = accessToken, User = ToUserResponse(user, languageCode) },
+            refreshToken);
+    }
+
+    public async Task<AuthResult> LoginWithDirectoryAsync(DomainLoginRequest request, string languageCode)
+    {
+        if (!_directory.Enabled)
+            throw new UnauthorizedAccessException("Доменный вход не настроен");
+
+        var entry = await _directory.AuthenticateAsync(request.Login, request.Password)
+            ?? throw new UnauthorizedAccessException("Неверный доменный логин или пароль");
+
+        if (entry.IsDisabled)
+            throw new UnauthorizedAccessException("Доменная учётная запись отключена");
+
+        if (string.IsNullOrWhiteSpace(entry.Email))
+            throw new UnauthorizedAccessException(
+                "В каталоге не заполнен адрес почты — обратитесь к администратору");
+
+        // Каталог подтвердил личность, но прав в системе у сотрудника может не быть:
+        // доступ выдаётся синхронизацией и ролями, а не самим фактом входа в домен.
+        var user = await LoadUserAsync(x => x.Email == entry.Email)
+            ?? throw new UnauthorizedAccessException(
+                "Сотрудник не заведён в системе — требуется синхронизация каталога");
+
+        if (!user.IsActive)
+            throw new UnauthorizedAccessException("Учётная запись деактивирована");
+
+        if (user.BlockedAt.HasValue)
+            throw new UnauthorizedAccessException("Учётная запись заблокирована");
 
         user.LastLoginAt = DateTime.UtcNow;
 
