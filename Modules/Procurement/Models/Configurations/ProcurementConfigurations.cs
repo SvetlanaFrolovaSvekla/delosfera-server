@@ -92,6 +92,12 @@ public class ProcurementParameterConfiguration : IEntityTypeConfiguration<Procur
                 Id = 5, Code = "CommissionBoardChairThreshold", TitleRu = "Порог назначения председателем комиссии члена Правления", Value = 3_000_000m,
                 Unit = "сом", SourceNote = "PRC-14: председатель — член Правления, не курирующий инициирующее СП",
                 CreatedAt = seedDate, UpdatedAt = seedDate,
+            },
+            new
+            {
+                Id = 6, Code = "CuratorActApprovalThreshold", TitleRu = "Порог утверждения акта курирующим членом Правления", Value = 1_000_000m,
+                Unit = "сом", SourceNote = "PRC-19: акты свыше 1 млн утверждает дополнительно куратор Правления",
+                CreatedAt = seedDate, UpdatedAt = seedDate,
             }
         );
     }

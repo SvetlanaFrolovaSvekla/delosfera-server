@@ -14,6 +14,7 @@ public static class ProcurementServiceExtensions
         builder.Services.AddScoped<IProcurementRouteService, ProcurementRouteService>();
         builder.Services.AddScoped<ITenderService, TenderService>();
         builder.Services.AddScoped<ISupplierService, SupplierService>();
+        builder.Services.AddScoped<IContractService, ContractService>();
         return builder;
     }
 }
