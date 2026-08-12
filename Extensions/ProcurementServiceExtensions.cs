@@ -15,6 +15,10 @@ public static class ProcurementServiceExtensions
         builder.Services.AddScoped<ITenderService, TenderService>();
         builder.Services.AddScoped<ISupplierService, SupplierService>();
         builder.Services.AddScoped<IContractService, ContractService>();
+        builder.Services.AddScoped<IPlanService, PlanService>();
+        builder.Services.AddScoped<IGuaranteeService, GuaranteeService>();
+        builder.Services.AddScoped<IClaimService, ClaimService>();
+        builder.Services.AddScoped<IPublicationService, PublicationService>();
         return builder;
     }
 }

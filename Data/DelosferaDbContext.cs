@@ -87,6 +87,10 @@ public class DelosferaDbContext : DbContext
     public DbSet<TenderBid> TenderBids => Set<TenderBid>();
     public DbSet<ProcurementContract> ProcurementContracts => Set<ProcurementContract>();
     public DbSet<DeliveryAct> DeliveryActs => Set<DeliveryAct>();
+    public DbSet<ProcurementPlan> ProcurementPlans => Set<ProcurementPlan>();
+    public DbSet<ProcurementPlanItem> ProcurementPlanItems => Set<ProcurementPlanItem>();
+    public DbSet<Guarantee> Guarantees => Set<Guarantee>();
+    public DbSet<ProcurementClaim> ProcurementClaims => Set<ProcurementClaim>();
 
     // --- Служебные записки (контур 4 ТЗ) ---
     public DbSet<SzDocument> SzDocuments => Set<SzDocument>();
