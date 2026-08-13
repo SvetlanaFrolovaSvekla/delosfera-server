@@ -125,13 +125,24 @@ public class AuthorityMatrixService : IAuthorityMatrixService
     private static AuthorityMatrixRule PickDefault(List<AuthorityMatrixRule> matching) =>
         matching.FirstOrDefault(r => r.Method!.Code != ProcurementMethodCode.Direct) ?? matching[0];
 
+    /// <summary>
+    /// Диапазон полуоткрытый: нижняя граница включается, верхняя — нет.
+    ///
+    /// В Положении соседние пороги записаны как «до 500 000» и «от 500 000», и при
+    /// включении обеих границ ровно на 500 000 подходили сразу два правила. Побеждало
+    /// то, что стоит раньше по порядку, то есть более слабая процедура: пороговая
+    /// сумма уходила на упрощённую закупку вместо конкурса с комиссией.
+    ///
+    /// Диапазоны правил стыкуются встык (1–500 000, 500 000–20% активов, 20–50%,
+    /// от 50%), поэтому исключение верхней границы не оставляет сумм без правила.
+    /// </summary>
     private static bool InRange(AuthorityMatrixRule rule, decimal amount, MatrixParameters p)
     {
         var min = ToAmount(rule.MinValue, rule.MinBase, p);
         var max = ToAmount(rule.MaxValue, rule.MaxBase, p);
 
         if (min is { } lo && amount < lo) return false;
-        if (max is { } hi && amount > hi) return false;
+        if (max is { } hi && amount >= hi) return false;
         return true;
     }
 
