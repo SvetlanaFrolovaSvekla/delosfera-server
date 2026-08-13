@@ -1,4 +1,4 @@
-﻿namespace delosfera_server.Modules.Documents.VND.Notifications;
+﻿namespace delosfera_server.Modules.Documents.VND.Messages;
 
 using delosfera_server.Modules.Notifications.Models;
 

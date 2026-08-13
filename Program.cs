@@ -7,6 +7,7 @@ using System.Text;
 using delosfera_server.Common.Options;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Common.Services.Authorization.Ldap;
+using delosfera_server.Modules.ActivityLog.Services;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Documents.VND.Services;
@@ -64,6 +65,7 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ITasksService, TasksService>();
 builder.Services.AddScoped<ICoordinationDefaultApproverService, CoordinationDefaultApproverService>();
 builder.Services.AddScoped<IVndActualizationService, VndActualizationService>();
+builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 
 builder.AddDatabase();
 builder.AddDictionaryServices();
