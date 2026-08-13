@@ -89,10 +89,14 @@ public class UserService : IUserService
         if (source.HasValue)
             query = query.Where(x => x.Source == source.Value);
 
+        // Работающей считается учётная запись, которую и не заблокировал администратор,
+        // и которая активна сама по себе: отключённые в службе каталогов приходят
+        // неактивными, и относить их к работающим значит показывать уволенных
+        // наравне с действующими сотрудниками.
         if (isBlocked.HasValue)
             query = isBlocked.Value
-                ? query.Where(x => x.BlockedAt != null)
-                : query.Where(x => x.BlockedAt == null);
+                ? query.Where(x => x.BlockedAt != null || !x.IsActive)
+                : query.Where(x => x.BlockedAt == null && x.IsActive);
 
         query = sortBy switch
         {

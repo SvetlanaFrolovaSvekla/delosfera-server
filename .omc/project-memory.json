@@ -358,6 +358,12 @@
       "accessCount": 1,
       "lastAccessed": 1786623227054,
       "type": "file"
+    },
+    {
+      "path": "Modules/Users/Services/UserService.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786641933430,
+      "type": "file"
     }
   ],
   "userDirectives": []
