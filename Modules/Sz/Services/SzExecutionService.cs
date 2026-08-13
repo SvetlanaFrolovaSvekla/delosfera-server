@@ -3,6 +3,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Workflow.Models;
 
 namespace delosfera_server.Modules.Sz.Services;
 
@@ -38,6 +39,9 @@ public interface ISzExecutionService
 
 public class SzExecutionService : ISzExecutionService
 {
+    /// <summary>Тип задачи-поручения в общем списке задач.</summary>
+    public const string AssignmentTask = "Assignment";
+
     private readonly DelosferaDbContext _db;
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
@@ -76,12 +80,14 @@ public class SzExecutionService : ISzExecutionService
         if (users.Count != assigneeIds.Count)
             throw new InvalidOperationException("Исполнитель не найден");
 
+        var created = new List<SzAssignment>();
+
         foreach (var a in req.Assignments)
         {
             if (string.IsNullOrWhiteSpace(a.Text))
                 throw new InvalidOperationException("У каждого поручения должен быть текст");
 
-            _db.SzAssignments.Add(new SzAssignment
+            var assignment = new SzAssignment
             {
                 SzDocumentId = sz.Id,
                 AssigneeUserId = a.AssigneeUserId,
@@ -92,12 +98,33 @@ public class SzExecutionService : ISzExecutionService
                 // догадываться, к какой дате свести результат.
                 DueDate = a.DueDate ?? sz.DueDate,
                 CreatedByUserId = actorUserId
-            });
+            };
+
+            _db.SzAssignments.Add(assignment);
+            created.Add(assignment);
         }
 
         sz.ExecutionResolution = req.Text.Trim();
         sz.ExecutionResolutionByUserId = actorUserId;
         sz.ExecutionResolutionAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        // Поручение — такая же работа человека, как согласование, и попадать должно
+        // в тот же список задач. Иначе исполнитель узнаёт о нём только из письма.
+        foreach (var assignment in created)
+        {
+            _db.WorkflowTasks.Add(new WorkflowTask
+            {
+                DocumentId = sz.DocumentId,
+                SourceEntityId = assignment.Id,
+                AssigneeUserId = assignment.AssigneeUserId,
+                Type = AssignmentTask,
+                DueAt = assignment.DueDate?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+                State = WorkflowTaskState.Open,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
 
         await _db.SaveChangesAsync();
         await _audit.LogAsync("Sz", sz.Id, "Resolution", actorUserId,
@@ -146,6 +173,10 @@ public class SzExecutionService : ISzExecutionService
         // Повторная сдача после возврата: старая причина возврата не должна висеть.
         a.ReturnReason = null;
 
+        // Своё исполнитель сделал — задача уходит из его списка. Вернут с приёмки —
+        // появится снова.
+        await CloseTaskAsync(a);
+
         await _db.SaveChangesAsync();
         await _audit.LogAsync("SzAssignment", a.Id, "Reported", actorUserId);
 
@@ -186,6 +217,9 @@ public class SzExecutionService : ISzExecutionService
         a.State = SzAssignmentState.Open;
         a.ReturnReason = reason.Trim();
 
+        // Поручение снова у исполнителя — и снова в его списке задач.
+        await ReopenTaskAsync(a);
+
         await _db.SaveChangesAsync();
         await _audit.LogAsync("SzAssignment", a.Id, "Returned", actorUserId, new { reason = a.ReturnReason });
 
@@ -203,6 +237,9 @@ public class SzExecutionService : ISzExecutionService
         a.State = SzAssignmentState.Cancelled;
         a.ClosedByUserId = actorUserId;
         a.ClosedAt = DateTime.UtcNow;
+
+        // Снятое поручение не должно висеть у исполнителя как работа.
+        await CloseTaskAsync(a);
 
         await _db.SaveChangesAsync();
         await _audit.LogAsync("SzAssignment", a.Id, "Cancelled", actorUserId);
@@ -314,6 +351,26 @@ public class SzExecutionService : ISzExecutionService
     private async Task<SzDocument> LoadAsync(int szId) =>
         await _db.SzDocuments.Include(x => x.Document).FirstOrDefaultAsync(x => x.Id == szId)
         ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+    /// <summary>Убрать поручение из списка задач исполнителя.</summary>
+    private async Task CloseTaskAsync(SzAssignment assignment)
+    {
+        var task = await FindTaskAsync(assignment, WorkflowTaskState.Open);
+        if (task is not null) task.State = WorkflowTaskState.Done;
+    }
+
+    /// <summary>Вернуть поручение в список задач исполнителя.</summary>
+    private async Task ReopenTaskAsync(SzAssignment assignment)
+    {
+        var task = await FindTaskAsync(assignment, WorkflowTaskState.Done);
+        if (task is not null) task.State = WorkflowTaskState.Open;
+    }
+
+    private Task<WorkflowTask?> FindTaskAsync(SzAssignment assignment, WorkflowTaskState state) =>
+        _db.WorkflowTasks.FirstOrDefaultAsync(t =>
+            t.Type == AssignmentTask
+            && t.SourceEntityId == assignment.Id
+            && t.State == state);
 
     private async Task<SzAssignment> LoadAssignmentAsync(int id) =>
         await _db.SzAssignments

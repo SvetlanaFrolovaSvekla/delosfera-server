@@ -114,6 +114,7 @@ public class DelosferaDbContext : DbContext
     public DbSet<SzKind> SzKinds => Set<SzKind>();
     public DbSet<SzHrKind> SzHrKinds => Set<SzHrKind>();
     public DbSet<SzAssignment> SzAssignments => Set<SzAssignment>();
+    public DbSet<SzApprover> SzApprovers => Set<SzApprover>(); // согласующие, выбранные автором записки
 
     // --- Заседания Правления, КПА и комитетов (ТЗ «Исполнение решений КПА, Правления и Комитетов») ---
     public DbSet<Meeting> Meetings => Set<Meeting>();

@@ -18,6 +18,12 @@ public static class SzStatus
     /// <summary>Возвращена автору на доработку.</summary>
     public const string OnRevision = "OnRevision";
 
+    /// <summary>
+    /// Согласование пройдено, записка у адресата: решение по существу выносит он,
+    /// и до этого решения записка не считается отработанной.
+    /// </summary>
+    public const string OnAddresseeDecision = "OnAddresseeDecision";
+
     /// <summary>Согласована и передана на исполнение.</summary>
     public const string OnExecution = "OnExecution";
 
@@ -36,13 +42,18 @@ public static class SzStatus
     /// <summary>Все коды — для валидации фильтров реестра.</summary>
     public static readonly string[] All =
     [
-        Draft, PendingRegistration, Registered, OnRevision,
+        Draft, PendingRegistration, Registered, OnRevision, OnAddresseeDecision,
         OnExecution, Executed, Rejected, Withdrawn, Archived
     ];
 
-    /// <summary>Неархивные статусы — реестр по умолчанию показывает именно их.</summary>
+    /// <summary>
+    /// Неархивные статусы — реестр по умолчанию показывает именно их.
+    ///
+    /// Записка у адресата — в работе: она ждёт решения по существу, и пропасть из
+    /// реестра до этого решения не может, иначе адресат её там не найдёт.
+    /// </summary>
     public static readonly string[] Active =
     [
-        Draft, PendingRegistration, Registered, OnRevision, OnExecution
+        Draft, PendingRegistration, Registered, OnRevision, OnAddresseeDecision, OnExecution
     ];
 }

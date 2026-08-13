@@ -61,6 +61,11 @@ public class SzPrintFormResponse
     /// <summary>Резолюция руководителя и поручения — печатаются, если уже вынесены.</summary>
     public string? ExecutionResolution { get; set; }
     public List<SzPrintAssignmentResponse> Assignments { get; set; } = [];
+
+    /// <summary>Решение адресата по существу вопроса — печатается, если вынесено.</summary>
+    public string? AddresseeName { get; set; }
+    public string? AddresseeDecision { get; set; }
+    public DateTime? AddresseeDecisionAt { get; set; }
 }
 
 public class SzPrintFieldResponse

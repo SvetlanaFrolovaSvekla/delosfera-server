@@ -112,6 +112,7 @@ public class SzPaperService : ISzPaperService
             .Include(x => x.HrKind)
             .Include(x => x.AuthorUnit)
             .Include(x => x.CorrespondentUnit)
+            .Include(x => x.AddresseeUser)
             .Include(x => x.EmployeeUnit)
             .Include(x => x.TransferUnit)
             .FirstOrDefaultAsync(x => x.Id == szId)
@@ -127,10 +128,22 @@ public class SzPaperService : ISzPaperService
             HrKind = sz.HrKind?.TitleRu,
             AuthorName = sz.Document.Author?.FullName,
             AuthorUnit = sz.AuthorUnit?.TitleRu ?? sz.Document.Author?.OrgUnit?.TitleRu,
-            CorrespondentUnit = sz.CorrespondentUnit?.TitleRu,
+            // Адресат на бумаге — тот, кому записка направлена: сначала конкретный
+            // человек из «Кому», и лишь при его отсутствии — подразделение.
+            CorrespondentUnit = sz.AddresseeUser is null
+                ? sz.CorrespondentUnit?.TitleRu
+                : sz.CorrespondentUnit is null
+                    ? sz.AddresseeUser.FullName
+                    : $"{sz.AddresseeUser.FullName}, {sz.CorrespondentUnit.TitleRu}",
             DueDate = sz.DueDate,
             IsPaperCarrier = sz.Document.IsPaperCarrier,
-            ExecutionResolution = sz.ExecutionResolution
+            ExecutionResolution = sz.ExecutionResolution,
+
+            // Решение адресата — то, по чему записка исполняется. Без него бумажная
+            // копия не показывает, чем дело кончилось.
+            AddresseeDecision = sz.AddresseeDecision,
+            AddresseeDecisionAt = sz.AddresseeDecisionAt,
+            AddresseeName = sz.AddresseeUser?.FullName,
         };
 
         // В печать идут только заполненные реквизиты: пустые строки в бумажной форме мешают.

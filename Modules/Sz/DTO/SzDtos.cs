@@ -11,6 +11,16 @@ public class SzSaveRequest
     public string? Body { get; set; }
 
     public int? CorrespondentUnitId { get; set; }
+
+    /// <summary>«Кому» — пользователь, который выносит решение по записке.</summary>
+    public int? AddresseeUserId { get; set; }
+
+    /// <summary>Согласующие в порядке прохождения.</summary>
+    public List<int> ApproverUserIds { get; set; } = [];
+
+    /// <summary>Согласование параллельное; иначе — по очереди.</summary>
+    public bool ApprovalIsParallel { get; set; }
+
     public int? SignerUserId { get; set; }
     public bool? IsPaperCarrier { get; set; }
     public List<int> RubricIds { get; set; } = [];
@@ -30,6 +40,27 @@ public class SzSaveRequest
 
     /// <summary>Поля видов, добавленных администратором после релиза.</summary>
     public JsonElement? ExtraFields { get; set; }
+}
+
+/// <summary>Согласующий в карточке записки.</summary>
+public class SzApproverDto
+{
+    public int UserId { get; set; }
+    public string FullName { get; set; } = string.Empty;
+    public string? Position { get; set; }
+    public int Order { get; set; }
+}
+
+/// <summary>Решение адресата по существу вопроса.</summary>
+public class SzAddresseeDecisionRequest
+{
+    public required string Decision { get; set; }
+
+    /// <summary>
+    /// Поручения, выдаваемые тем же решением. Решение без поручений допустимо —
+    /// адресат может ответить по существу, никому ничего не поручая.
+    /// </summary>
+    public List<SzAssignmentRequest> Assignments { get; set; } = [];
 }
 
 /// <summary>Фильтры реестра СЗ.</summary>
@@ -87,6 +118,18 @@ public class SzDetails : SzListItem
     public int? AuthorUnitId { get; set; }
     public string? AuthorUnit { get; set; }
     public int? CorrespondentUnitId { get; set; }
+
+    public int? AddresseeUserId { get; set; }
+    public string? AddresseeUser { get; set; }
+
+    /// <summary>Согласующие в порядке прохождения маршрута.</summary>
+    public List<SzApproverDto> Approvers { get; set; } = [];
+    public bool ApprovalIsParallel { get; set; }
+
+    /// <summary>Решение адресата. Заполняет только он сам.</summary>
+    public string? AddresseeDecision { get; set; }
+    public DateTime? AddresseeDecisionAt { get; set; }
+
     public int? SignerUserId { get; set; }
     public string? SignerUser { get; set; }
     public int? RegisteredByUserId { get; set; }

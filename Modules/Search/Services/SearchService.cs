@@ -374,6 +374,7 @@ public class SearchService : ISearchService
         "Registered" => "Зарегистрирована",
         "OnApproval" => "На согласовании",
         "OnRevision" => "На доработке",
+        "OnAddresseeDecision" => "На решении адресата",
         "OnExecution" => "На исполнении",
         "Approved" => "Согласовано",
         "InProcurement" => "В процедуре закупки",

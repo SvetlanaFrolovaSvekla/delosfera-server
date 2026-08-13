@@ -21,14 +21,20 @@ namespace delosfera_server.Modules.Sz.Controllers;
 public class SzController : ControllerBase
 {
     private readonly ISzService _sz;
+    private readonly ISzExecutionService _execution;
     private readonly DelosferaDbContext _db;
     private readonly IDocumentService _documents;
     private readonly ICurrentUserService _currentUser;
 
     public SzController(
-        ISzService sz, DelosferaDbContext db, IDocumentService documents, ICurrentUserService currentUser)
+        ISzService sz,
+        ISzExecutionService execution,
+        DelosferaDbContext db,
+        IDocumentService documents,
+        ICurrentUserService currentUser)
     {
         _sz = sz;
+        _execution = execution;
         _db = db;
         _documents = documents;
         _currentUser = currentUser;
@@ -101,6 +107,57 @@ public class SzController : ControllerBase
         try
         {
             return Ok(await _sz.SubmitAsync(id, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    /// <summary>
+    /// Решение адресата по существу вопроса (поле «Кому»).
+    /// Пишет только тот пользователь, который в этом поле указан.
+    /// </summary>
+    [HttpPost("{id:int}/addressee-decision")]
+    public async Task<IActionResult> AddresseeDecision(int id, [FromBody] SzAddresseeDecisionRequest req)
+    {
+        try
+        {
+            var decided = await _sz.DecideAsAddresseeAsync(id, req.Decision, _currentUser.UserId);
+
+            // Поручения выдаются тем же действием: решение адресата и есть резолюция,
+            // по которой работа расходится исполнителям. Отдельным шагом её пришлось бы
+            // вводить дважды.
+            if (req.Assignments.Count > 0)
+            {
+                await _execution.ResolveAsync(
+                    id,
+                    new SzResolutionRequest {Text = req.Decision, Assignments = req.Assignments},
+                    _currentUser.UserId);
+
+                decided = (await _sz.GetAsync(id))!;
+            }
+
+            return Ok(decided);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    public class ApproversRequest
+    {
+        public List<int> UserIds { get; set; } = [];
+
+        /// <summary>Параллельное согласование; иначе — по очереди.</summary>
+        public bool Parallel { get; set; }
+    }
+
+    /// <summary>Состав и порядок согласующих (до отправки записки).</summary>
+    [HttpPut("{id:int}/approvers")]
+    public async Task<IActionResult> SetApprovers(int id, [FromBody] ApproversRequest req)
+    {
+        try
+        {
+            return Ok(await _sz.SetApproversAsync(id, req.UserIds, req.Parallel, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }

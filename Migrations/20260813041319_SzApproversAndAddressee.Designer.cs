@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260813041319_SzApproversAndAddressee")]
+    partial class SzApproversAndAddressee
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -7324,10 +7327,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<int?>("DocumentId")
-                        .HasColumnType("integer")
-                        .HasColumnName("document_id");
-
                     b.Property<DateTime?>("DueAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_at");
@@ -7339,10 +7338,6 @@ namespace delosfera_server.Migrations
                     b.Property<int?>("RouteParticipantId")
                         .HasColumnType("integer")
                         .HasColumnName("route_participant_id");
-
-                    b.Property<int?>("SourceEntityId")
-                        .HasColumnType("integer")
-                        .HasColumnName("source_entity_id");
 
                     b.Property<string>("State")
                         .IsRequired()

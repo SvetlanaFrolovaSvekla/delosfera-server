@@ -38,6 +38,36 @@ public class SzDocument : IAuditableEntity
     public int? CorrespondentUnitId { get; set; }
     public OrganizationUnit? CorrespondentUnit { get; set; }
 
+    /// <summary>
+    /// Адресат записки — конкретный сотрудник, которому она направлена.
+    ///
+    /// Отличается от подразделения-адресата: решение по записке выносит человек,
+    /// и право на это поле проверяется по нему, а не по подразделению.
+    /// </summary>
+    public int? AddresseeUserId { get; set; }
+    public User? AddresseeUser { get; set; }
+
+    /// <summary>
+    /// Согласующие идут одновременно, а не по очереди.
+    ///
+    /// Хранится на записке, а не на шаблоне вида: порядок выбирает автор под конкретный
+    /// вопрос — срочное согласуют параллельно, спорное по очереди.
+    /// </summary>
+    public bool ApprovalIsParallel { get; set; }
+
+    /// <summary>Согласующие, выбранные автором записки.</summary>
+    public ICollection<SzApprover> Approvers { get; set; } = new List<SzApprover>();
+
+    /// <summary>
+    /// Решение адресата: заполняет только тот, кто указан в поле «Кому».
+    ///
+    /// Это не резолюция согласующего — согласование к этому моменту уже пройдено;
+    /// адресат отвечает по существу вопроса.
+    /// </summary>
+    public string? AddresseeDecision { get; set; }
+    public DateTime? AddresseeDecisionAt { get; set; }
+    public int? AddresseeDecisionByUserId { get; set; }
+
     /// <summary>Подписант (Председатель / Заместитель Председателя Правления).</summary>
     public int? SignerUserId { get; set; }
     public User? SignerUser { get; set; }

@@ -16,6 +16,15 @@ public interface IRouteEngine
     /// <summary>Резолюция участника (согласовано / с замечаниями / отклонить / вето).</summary>
     Task ResolveAsync(int participantId, ResolutionType type, string? comment, int actorUserId, int? signatureId = null);
 
+    /// <summary>
+    /// Маршрут из явного списка согласующих, без шаблона.
+    ///
+    /// Шаблон описывает типовой путь документа, но у служебных записок состав
+    /// согласующих чаще определяет автор под конкретный вопрос.
+    /// </summary>
+    Task<RouteInstance> InstantiateForApproversAsync(
+        int documentId, IReadOnlyList<int> approverUserIds, bool parallel, int? timeNormHours = null);
+
     /// <summary>Подтверждение автором «Замечания устранены» (строгий режим, TID-09).</summary>
     Task ConfirmRemarkResolvedAsync(int remarkId, int actorUserId);
 

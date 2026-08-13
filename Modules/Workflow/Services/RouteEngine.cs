@@ -78,6 +78,53 @@ public class RouteEngine : IRouteEngine
         return instance;
     }
 
+    public async Task<RouteInstance> InstantiateForApproversAsync(
+        int documentId, IReadOnlyList<int> approverUserIds, bool parallel, int? timeNormHours = null)
+    {
+        if (approverUserIds.Count == 0)
+            throw new InvalidOperationException("Не выбран ни один согласующий");
+
+        // Параллельное согласование — один этап со всеми участниками; последовательное —
+        // по этапу на каждого: движок переходит к следующему только после решения предыдущего.
+        var steps = parallel
+            ? new List<RouteStep>
+            {
+                new()
+                {
+                    Order = 1,
+                    Mode = StepMode.Parallel,
+                    Kind = StepKind.Approval,
+                    TimeNormHours = timeNormHours,
+                    Participants = approverUserIds
+                        .Select(id => new RouteParticipant {UserId = id, Required = true, State = ParticipantState.Pending})
+                        .ToList(),
+                },
+            }
+            : approverUserIds.Select((id, index) => new RouteStep
+            {
+                Order = index + 1,
+                Mode = StepMode.Sequential,
+                Kind = StepKind.Approval,
+                TimeNormHours = timeNormHours,
+                Participants = [new RouteParticipant {UserId = id, Required = true, State = ParticipantState.Pending}],
+            }).ToList();
+
+        var instance = new RouteInstance
+        {
+            DocumentId = documentId,
+            Status = RouteInstanceStatus.Draft,
+            Steps = steps,
+        };
+
+        _db.RouteInstances.Add(instance);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(Entity, instance.Id, "InstantiatedForApprovers", null,
+            new {documentId, approvers = approverUserIds.Count, parallel});
+
+        return instance;
+    }
+
     public async Task StartAsync(int routeInstanceId, int actorUserId)
     {
         var inst = await InstanceQuery().FirstOrDefaultAsync(i => i.Id == routeInstanceId)

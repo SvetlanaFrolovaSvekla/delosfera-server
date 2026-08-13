@@ -23,6 +23,12 @@ public interface ISzService
     /// <summary>Отправить записку: черновик уходит на регистрацию делопроизводством.</summary>
     Task<SzDetails> SubmitAsync(int id, int actorUserId);
 
+    /// <summary>Состав согласующих и порядок их прохождения (последовательно или параллельно).</summary>
+    Task<SzDetails> SetApproversAsync(int id, IReadOnlyList<int> userIds, bool parallel, int actorUserId);
+
+    /// <summary>Решение адресата по существу вопроса — доступно только ему.</summary>
+    Task<SzDetails> DecideAsAddresseeAsync(int id, string decision, int actorUserId);
+
     /// <summary>
     /// Зарегистрировать: присвоить номер, дату и срок исполнения, запустить маршрут
     /// согласования (SZ-01). Шаблон берётся из вида записки или указывается явно.
@@ -160,6 +166,8 @@ public class SzService : ISzService
         await ApplyRubricsAsync(sz, request.RubricIds);
         await _db.SaveChangesAsync();
 
+        await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
+
         await _audit.LogAsync("Sz", sz.Id, "Created", authorId, new { kind = kind.TitleRu });
 
         return (await GetAsync(sz.Id))!;
@@ -193,6 +201,7 @@ public class SzService : ISzService
         sz.KindId = request.KindId;
         ApplyFields(sz, request);
         await ApplyRubricsAsync(sz, request.RubricIds);
+        await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
 
         await _db.SaveChangesAsync();
         await _audit.LogAsync("Sz", sz.Id, "Updated", actorUserId);
@@ -229,11 +238,142 @@ public class SzService : ISzService
         if (string.IsNullOrWhiteSpace(sz.Body))
             throw new InvalidOperationException("Заполните текст служебной записки");
 
-        if (sz.CorrespondentUnitId is null)
-            throw new InvalidOperationException("Укажите адресата — структурное подразделение");
+        if (sz.AddresseeUserId is null && sz.CorrespondentUnitId is null)
+            throw new InvalidOperationException("Укажите адресата записки");
 
-        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.PendingRegistration, actorUserId);
-        await _audit.LogAsync("Sz", sz.Id, "Submitted", actorUserId);
+        var approvers = await _db.SzApprovers
+            .Where(a => a.SzDocumentId == sz.Id)
+            .OrderBy(a => a.Order)
+            .Select(a => a.UserId)
+            .ToListAsync();
+
+        if (approvers.Count == 0)
+        {
+            // Согласующих автор не выбрал — записка идёт прежним путём: делопроизводитель
+            // регистрирует её и запускает маршрут по шаблону вида (SZ-01).
+            await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.PendingRegistration, actorUserId);
+            await _audit.LogAsync("Sz", sz.Id, "Submitted", actorUserId);
+
+            return (await GetAsync(sz.Id))!;
+        }
+
+        // Автор назвал согласующих сам — отдельная регистрация делопроизводителем
+        // здесь ничего не решает, но номер и срок записка получить обязана: без них
+        // на неё нельзя сослаться и по ней нельзя посчитать просрочку.
+        await RegisterAndStartAsync(sz, approvers, actorUserId);
+
+        return (await GetAsync(sz.Id))!;
+    }
+
+    /// <summary>
+    /// Присвоить записке номер и срок и запустить согласование по выбранным автором
+    /// согласующим.
+    /// </summary>
+    private async Task RegisterAndStartAsync(SzDocument sz, List<int> approvers, int actorUserId)
+    {
+        var kind = sz.Kind ?? await _db.SzKinds.FirstOrDefaultAsync(k => k.Id == sz.KindId);
+
+        var number = await _documents.RegisterAsync(
+            sz.DocumentId, "Sz", "global", NumberPattern, actorUserId);
+
+        sz.RegisteredOn = Today;
+        sz.RegisteredByUserId = actorUserId;
+        sz.DueDate = sz.RegisteredOn.Value.AddDays(kind?.ExecutionDays ?? 14);
+        sz.ApprovalRounds++;
+
+        var instance = await _routeEngine.InstantiateForApproversAsync(
+            sz.DocumentId, approvers, sz.ApprovalIsParallel);
+
+        await _routeEngine.StartAsync(instance.Id, actorUserId);
+        sz.Document!.CurrentRouteInstanceId = instance.Id;
+
+        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.Registered, actorUserId);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", sz.Id, "Submitted", actorUserId, new
+        {
+            number,
+            registeredOn = sz.RegisteredOn,
+            dueDate = sz.DueDate,
+            approvers = approvers.Count,
+            parallel = sz.ApprovalIsParallel,
+            routeInstanceId = instance.Id,
+        });
+    }
+
+    public async Task<SzDetails> SetApproversAsync(int id, IReadOnlyList<int> userIds, bool parallel, int actorUserId)
+    {
+        var sz = await _db.SzDocuments.Include(x => x.Document)
+            .FirstOrDefaultAsync(x => x.Id == id)
+            ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision))
+            throw new InvalidOperationException(
+                "Состав согласующих меняется до отправки: маршрут уже запущен");
+
+        var distinct = userIds.Distinct().ToList();
+
+        var existing = await _db.SzApprovers.Where(a => a.SzDocumentId == id).ToListAsync();
+        _db.SzApprovers.RemoveRange(existing);
+
+        for (var i = 0; i < distinct.Count; i++)
+        {
+            _db.SzApprovers.Add(new SzApprover
+            {
+                SzDocumentId = id,
+                UserId = distinct[i],
+                Order = i + 1,
+            });
+        }
+
+        sz.ApprovalIsParallel = parallel;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", sz.Id, "ApproversChanged", actorUserId,
+            new {count = distinct.Count, parallel});
+
+        return (await GetAsync(sz.Id))!;
+    }
+
+    /// <summary>
+    /// Решение адресата (поле «Кому»). Пишет только он сам: это ответ по существу
+    /// вопроса, а не резолюция согласующего, и подменять его нельзя.
+    /// </summary>
+    public async Task<SzDetails> DecideAsAddresseeAsync(int id, string decision, int actorUserId)
+    {
+        var sz = await _db.SzDocuments.Include(x => x.Document)
+            .FirstOrDefaultAsync(x => x.Id == id)
+            ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        if (sz.AddresseeUserId is null)
+            throw new InvalidOperationException("У записки не указан адресат");
+
+        if (sz.AddresseeUserId != actorUserId)
+            throw new UnauthorizedAccessException("Решение по записке выносит только её адресат");
+
+        if (sz.Document!.StatusCode != SzStatus.OnAddresseeDecision)
+            throw new InvalidOperationException(
+                "Решение выносится после согласования: записка ещё не дошла до адресата");
+
+        if (string.IsNullOrWhiteSpace(decision))
+            throw new InvalidOperationException("Напишите решение по записке");
+
+        sz.AddresseeDecision = decision.Trim();
+        sz.AddresseeDecisionAt = DateTime.UtcNow;
+        sz.AddresseeDecisionByUserId = actorUserId;
+
+        // Задача адресата закрыта: ответ дан, и висеть в списке задач ей больше незачем.
+        var task = await _db.WorkflowTasks.FirstOrDefaultAsync(t =>
+            t.DocumentId == sz.DocumentId
+            && t.Type == SzRouteCompletionHandler.AddresseeDecisionTask
+            && t.State == WorkflowTaskState.Open);
+
+        if (task is not null) task.State = WorkflowTaskState.Done;
+
+        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, actorUserId);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", sz.Id, "AddresseeDecided", actorUserId);
 
         return (await GetAsync(sz.Id))!;
     }
@@ -246,6 +386,20 @@ public class SzService : ISzService
 
         if (sz.Document!.StatusCode != SzStatus.PendingRegistration)
             throw new InvalidOperationException("Регистрируются только записки, ожидающие регистрации");
+
+        // Согласующие, названные автором, важнее шаблона вида: шаблон — это умолчание
+        // на случай, когда состав не выбран.
+        var approvers = await _db.SzApprovers
+            .Where(a => a.SzDocumentId == sz.Id)
+            .OrderBy(a => a.Order)
+            .Select(a => a.UserId)
+            .ToListAsync();
+
+        if (approvers.Count > 0 && templateId is null)
+        {
+            await RegisterAndStartAsync(sz, approvers, actorUserId);
+            return (await GetAsync(sz.Id))!;
+        }
 
         var routeTemplateId = templateId ?? sz.Kind?.RouteTemplateId
             ?? throw new InvalidOperationException(
@@ -363,12 +517,16 @@ public class SzService : ISzService
             .Include(x => x.EmployeeUnit)
             .Include(x => x.TransferUnit)
             .Include(x => x.SignerUser)
+            .Include(x => x.AddresseeUser)
+            .Include(x => x.Approvers).ThenInclude(a => a.User)
             .Include(x => x.Rubrics);
 
     private static void ApplyFields(SzDocument sz, SzSaveRequest r)
     {
         sz.Body = r.Body;
         sz.CorrespondentUnitId = r.CorrespondentUnitId;
+        sz.AddresseeUserId = r.AddresseeUserId;
+        sz.ApprovalIsParallel = r.ApprovalIsParallel;
         sz.SignerUserId = r.SignerUserId;
 
         sz.HrKindId = r.HrKindId;
@@ -383,6 +541,29 @@ public class SzService : ISzService
         sz.ExtraFields = r.ExtraFields is JsonElement extra
             ? JsonDocument.Parse(extra.GetRawText())
             : null;
+    }
+
+    /// <summary>
+    /// Полная замена состава согласующих: порядок в списке и есть очерёдность
+    /// прохождения маршрута.
+    /// </summary>
+    private async Task ReplaceApproversAsync(int szId, List<int> userIds)
+    {
+        var existing = await _db.SzApprovers.Where(a => a.SzDocumentId == szId).ToListAsync();
+        _db.SzApprovers.RemoveRange(existing);
+
+        var distinct = userIds.Distinct().ToList();
+        for (var i = 0; i < distinct.Count; i++)
+        {
+            _db.SzApprovers.Add(new SzApprover
+            {
+                SzDocumentId = szId,
+                UserId = distinct[i],
+                Order = i + 1,
+            });
+        }
+
+        await _db.SaveChangesAsync();
     }
 
     private async Task ApplyRubricsAsync(SzDocument sz, List<int> rubricIds)
@@ -406,6 +587,21 @@ public class SzService : ISzService
         d.AuthorUnitId = x.AuthorUnitId;
         d.AuthorUnit = x.AuthorUnit?.TitleRu;
         d.CorrespondentUnitId = x.CorrespondentUnitId;
+        d.AddresseeUserId = x.AddresseeUserId;
+        d.AddresseeUser = x.AddresseeUser?.FullName;
+        d.ApprovalIsParallel = x.ApprovalIsParallel;
+        d.AddresseeDecision = x.AddresseeDecision;
+        d.AddresseeDecisionAt = x.AddresseeDecisionAt;
+        d.Approvers = x.Approvers
+            .OrderBy(a => a.Order)
+            .Select(a => new SzApproverDto
+            {
+                UserId = a.UserId,
+                FullName = a.User?.FullName ?? string.Empty,
+                Position = a.User?.Position?.TitleRu,
+                Order = a.Order,
+            })
+            .ToList();
         d.SignerUserId = x.SignerUserId;
         d.SignerUser = x.SignerUser?.FullName;
         d.RegisteredByUserId = x.RegisteredByUserId;
