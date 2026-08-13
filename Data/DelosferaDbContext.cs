@@ -162,6 +162,14 @@ public class DelosferaDbContext : DbContext
 
     private void ApplyAuditInfo()
     {
+        // Токен версии карточки обновляем при каждом сохранении: по нему EF отличит
+        // «сохраняю то, что видел» от «сохраняю поверх чужой правки» (GEN-05).
+        foreach (var document in ChangeTracker.Entries<Document>())
+        {
+            if (document.State is EntityState.Added or EntityState.Modified)
+                document.Entity.ConcurrencyToken = Guid.NewGuid();
+        }
+
         var entries = ChangeTracker.Entries<IAuditableEntity>();
 
         foreach (var entry in entries)

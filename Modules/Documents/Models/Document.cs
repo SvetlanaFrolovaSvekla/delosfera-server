@@ -76,5 +76,15 @@ public class Document : IAuditableEntity
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
+    /// <summary>
+    /// Токен версии для оптимистичной блокировки (GEN-05). Обновляется при каждом
+    /// сохранении карточки.
+    ///
+    /// Системная колонка xmin для этого не годится: провайдер пытается завести её
+    /// заново миграцией, хотя она есть у каждой строки Postgres. Обычное поле
+    /// переносимо и не зависит от особенностей базы.
+    /// </summary>
+    public Guid ConcurrencyToken { get; set; } = Guid.NewGuid();
+
     public ICollection<DocumentAttachment> Attachments { get; set; } = new List<DocumentAttachment>();
 }
