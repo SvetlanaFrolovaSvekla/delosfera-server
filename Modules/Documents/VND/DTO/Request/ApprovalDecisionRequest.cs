@@ -1,10 +1,13 @@
-﻿namespace delosfera_server.Modules.Documents.VND.DTO.Request;
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace delosfera_server.Modules.Documents.VND.DTO.Request;
 
 public class ApprovalDecisionRequest
 {
     public required ApprovalDecisionType Decision { get; set; }
 
     /// <summary>Обязателен для ApproveWithComment и Reject</summary>
+    [StringLength(2000)]
     public string? Comment { get; set; }
 }
 
