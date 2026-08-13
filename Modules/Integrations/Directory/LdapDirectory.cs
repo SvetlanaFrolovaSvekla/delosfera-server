@@ -108,6 +108,11 @@ public class LdapDirectory : ILdapDirectory
         if (string.IsNullOrWhiteSpace(login) || string.IsNullOrEmpty(password))
             return null;
 
+        // Человек вводит логин так, как привык входить в рабочую станцию: и коротким
+        // именем, и в виде имя@домен, и как ДОМЕН\имя. В каталоге же ищем по короткому
+        // имени, поэтому домен отбрасываем — иначе привычная запись означала бы отказ.
+        login = ShortLogin(login);
+
         // Сначала служебной учёткой находим DN сотрудника: привязаться можно только
         // по полному DN, а пользователь вводит короткий логин.
         DirectoryEntry found;
@@ -224,6 +229,23 @@ public class LdapDirectory : ILdapDirectory
     }
 
     /// <summary>Экранирование спецсимволов фильтра (RFC 4515) — логин приходит от пользователя.</summary>
+    /// <summary>
+    /// Короткое имя учётной записи из того, что ввёл пользователь:
+    /// «имя@домен» и «ДОМЕН\\имя» приводятся к «имя».
+    /// </summary>
+    private static string ShortLogin(string login)
+    {
+        login = login.Trim();
+
+        var slash = login.LastIndexOf('\\');
+        if (slash >= 0) login = login[(slash + 1)..];
+
+        var at = login.IndexOf('@');
+        if (at > 0) login = login[..at];
+
+        return login;
+    }
+
     private static string Escape(string value) => value
         .Replace("\\", "\\5c")
         .Replace("*", "\\2a")
