@@ -131,6 +131,21 @@ public class DelosferaDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(DelosferaDbContext).Assembly);
+
+        // Поисковые векторы (GEN-04) — тип Postgres, и другой провайдер их не понимает.
+        // Тесты работают на in-memory базе, поэтому вне Postgres колонки исключаются
+        // из модели: иначе весь тестовый набор падает на типе, который к проверяемой
+        // логике отношения не имеет.
+        if (!Database.IsNpgsql())
+        {
+            modelBuilder.Entity<Document>().Ignore(x => x.SearchVector);
+            modelBuilder.Entity<SzDocument>().Ignore(x => x.SearchVector);
+            modelBuilder.Entity<ProcurementRequest>().Ignore(x => x.SearchVector);
+            modelBuilder.Entity<AgendaItem>().Ignore(x => x.SearchVector);
+
+            // Дополнительные поля записки хранятся как jsonb — тот же случай.
+            modelBuilder.Entity<SzDocument>().Ignore(x => x.ExtraFields);
+        }
     }
 
     public override int SaveChanges()
