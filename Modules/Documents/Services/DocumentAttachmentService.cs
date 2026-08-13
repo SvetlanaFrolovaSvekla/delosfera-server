@@ -215,7 +215,11 @@ public class DocumentAttachmentService : IDocumentAttachmentService
         // Сверяем хеш при выдаче: подпись удостоверяет его, и расхождение означает,
         // что содержимое в хранилище изменилось в обход системы. Отдать такой файл
         // как подписанный нельзя.
-        using var buffer = new MemoryStream();
+        //
+        // Буфер не освобождается здесь: он и есть возвращаемый поток, и закрыть его
+        // до того, как ASP.NET перепишет содержимое в ответ, значит отдать клиенту
+        // ошибку вместо файла.
+        var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer);
         await stream.DisposeAsync();
 
@@ -224,6 +228,8 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         if (!string.Equals(actual, attachment.Hash, StringComparison.OrdinalIgnoreCase))
         {
+            await buffer.DisposeAsync();
+
             _logger.LogError(
                 "Вложение {AttachmentId}: хеш файла в хранилище {Actual} не совпадает с записанным {Expected}",
                 attachmentId, actual, attachment.Hash);

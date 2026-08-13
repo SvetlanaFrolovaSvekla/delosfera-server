@@ -111,18 +111,71 @@ public class DocumentAttachmentTests
         Assert.True(signature.Revoked);
     }
 
+    [Fact]
+    public async Task Download_ReturnsReadableStream_WithOriginalContent()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (service, _) = NewService(db);
+
+        const string content = "Служебная записка № 12 от 13.08.2026";
+        var documentId = await SeedDocumentAsync(db);
+        var added = await service.AddAsync(documentId, FakeFile(content, "записка.txt"), userId: 1);
+
+        var (stream, _, fileName) = await service.DownloadAsync(added.Id);
+
+        // Поток читается уже после возврата из сервиса — так его читает ASP.NET,
+        // переписывая в тело ответа. Закрытый здесь буфер означал бы, что вместо
+        // файла пользователь получает ошибку.
+        using var reader = new StreamReader(stream);
+        var downloaded = await reader.ReadToEndAsync();
+
+        Assert.Equal(content, downloaded);
+        Assert.Equal("записка.txt", fileName);
+    }
+
+    [Fact]
+    public async Task Download_RefusesFile_TamperedInStorage()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (service, _, _) = NewServiceWithStorage(db);
+
+        var documentId = await SeedDocumentAsync(db);
+        var added = await service.AddAsync(documentId, FakeFile("исходный текст", "акт.txt"), userId: 1);
+
+        // Кто-то подменил содержимое в хранилище мимо системы: хеш, который
+        // удостоверяет подпись, больше не относится к этому файлу.
+        var fileId = int.Parse(
+            (await db.DocumentAttachments.AsNoTracking().SingleAsync(a => a.Id == added.Id)).FileRef);
+
+        InMemoryFileStorage.Content[fileId] = Encoding.UTF8.GetBytes("подменённый текст");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.DownloadAsync(added.Id));
+
+        Assert.Contains("не совпадает с записанным хешем", error.Message);
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private (IDocumentAttachmentService Service, ISignatureService Signatures) NewService(DelosferaDbContext db)
     {
+        var (service, signatures, _) = NewServiceWithStorage(db);
+        return (service, signatures);
+    }
+
+    /// <summary>То же, но с доступом к хранилищу — для проверок подмены файла.</summary>
+    private (IDocumentAttachmentService Service, ISignatureService Signatures, InMemoryFileStorage Storage)
+        NewServiceWithStorage(DelosferaDbContext db)
+    {
         var audit = new AuditService(db);
         var signatures = new SignatureService(db, audit);
+        var storage = new InMemoryFileStorage(db);
 
         var service = new DocumentAttachmentService(
-            db, new InMemoryFileStorage(db), signatures, audit,
+            db, storage, signatures, audit,
             NullLogger<DocumentAttachmentService>.Instance);
 
-        return (service, signatures);
+        return (service, signatures, storage);
     }
 
     private static async Task<int> SeedDocumentAsync(DelosferaDbContext db)
@@ -167,7 +220,8 @@ public class DocumentAttachmentTests
     /// </summary>
     private sealed class InMemoryFileStorage : IFileStorageService
     {
-        private static readonly Dictionary<int, byte[]> Content = new();
+        /// <summary>Содержимое доступно тестам: подмену файла в хранилище нужно уметь имитировать.</summary>
+        internal static readonly Dictionary<int, byte[]> Content = new();
 
         private readonly DelosferaDbContext _db;
 
