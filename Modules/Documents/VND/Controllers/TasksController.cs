@@ -1,6 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
-using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Services;
 namespace delosfera_server.Modules.Documents.VND.Controllers;

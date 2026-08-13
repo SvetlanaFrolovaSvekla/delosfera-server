@@ -480,10 +480,8 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
-N o t e s D e v / 
- 
- 
 
-NotesDev/
-# oh-my-claudecode session state (не коммитить)
-.omc/
+appsettings.Development.json
+appsettings.Local.json
+appsettings.*.local.json
+secrets.json

@@ -19,4 +19,5 @@ public interface IVndService
     Task DeleteLinkAsync(int vndId, int linkId);
     Task<VndRedactionResponse> EditLastRevisionDirectlyAsync(
         int vndId, EditLastRevisionDirectlyRequest request, int currentUserId);
+    Task<List<VndQuickSearchResponse>> QuickSearchAsync(string query, string languageCode, int limit);
 }

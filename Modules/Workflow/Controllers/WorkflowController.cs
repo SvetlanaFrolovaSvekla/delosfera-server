@@ -6,6 +6,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Workflow.DTO;
 using delosfera_server.Modules.Workflow.Models;
 using delosfera_server.Modules.Workflow.Services;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Workflow.Controllers;
 

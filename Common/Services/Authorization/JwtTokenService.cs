@@ -4,7 +4,7 @@ using System.Text;
 using Microsoft.IdentityModel.Tokens;
 using delosfera_server.Modules.Users.Models;
 
-namespace delosfera_server.Common.Services;
+namespace delosfera_server.Common.Services.Authorization;
 
 public interface IJwtTokenService
 {

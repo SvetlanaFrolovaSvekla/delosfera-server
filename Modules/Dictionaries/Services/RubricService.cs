@@ -10,7 +10,6 @@ namespace delosfera_server.Modules.Dictionaries.Services;
 
 public class RubricService : IRubricService
 {
-    private const int MaxDepth = 5;
 
     private readonly DelosferaDbContext _db;
 
@@ -51,7 +50,7 @@ public class RubricService : IRubricService
         {
             await HierarchyValidation.EnsureParentExistsAsync(_db.Rubrics, request.ParentId.Value,
                 pid => $"Родительская рубрика с id={pid} не найдена");
-            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Rubrics, request.ParentId.Value, MaxDepth,
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Rubrics, request.ParentId.Value,
                 depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
@@ -81,7 +80,7 @@ public class RubricService : IRubricService
                 pid => $"Родительская рубрика с id={pid} не найдена");
             await HierarchyValidation.EnsureNoCircularReferenceAsync(_db.Rubrics, id, request.ParentId.Value,
                 "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
-            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Rubrics, request.ParentId.Value, MaxDepth,
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Rubrics, request.ParentId.Value,
                 depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 

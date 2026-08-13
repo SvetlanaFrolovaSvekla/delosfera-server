@@ -4,6 +4,7 @@ using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Integrations.Directory;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Integrations.Controllers;
 

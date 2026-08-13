@@ -4,6 +4,7 @@ using delosfera_server.Common.Services;
 using delosfera_server.Modules.Meetings.DTO;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Modules.Meetings.Services;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Meetings.Controllers;
 

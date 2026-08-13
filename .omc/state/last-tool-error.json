@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd /Users/chyngyz/Downloads/delosferav2/release-2026-08-13/api && ls delosfera-server.dll appsettings.json 2>&1; echo \\\"--- ЗАПУСК ПРОБНЫЙ (порт 5399, та же БД)\\\"; ConnectionStrings__Defau...",
+  "error": "Exit code 7\nappsettings.json\ndelosfera-server.dll\n--- ЗАПУСК ПРОБНЫЙ (порт 5399, та же БД)",
+  "timestamp": "2026-08-13T09:06:14.011Z",
+  "retry_count": 1
+}

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Procurement.DTO;
 using delosfera_server.Modules.Procurement.Services;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Procurement.Controllers;
 

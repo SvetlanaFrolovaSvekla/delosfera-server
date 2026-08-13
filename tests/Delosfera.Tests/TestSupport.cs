@@ -1,5 +1,7 @@
 using delosfera_server.Common.Security;
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Common.Services.Authorization.Ldap;
 using delosfera_server.Modules.Integrations.Directory;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.Models;
@@ -30,7 +32,16 @@ internal static class TestSupport
 
     public static AuthService NewAuthService(DelosferaDbContext db) =>
         new(db, new UserPasswordHasher(), new JwtTokenService(Config()),
-            new DisabledDirectory(), NewPasswordPolicy(), Config());
+            new RejectingLdapAuthenticator(), new DisabledDirectory(), NewPasswordPolicy(), Config());
+
+    /// <summary>
+    /// Каталог в проверках входа недоступен: тесты проверяют локальные учётные записи,
+    /// а доменные пароли живут в домене и в стенде их нет.
+    /// </summary>
+    private sealed class RejectingLdapAuthenticator : ILdapAuthenticator
+    {
+        public Task<bool> VerifyPasswordAsync(string login, string password) => Task.FromResult(false);
+    }
 
     /// <summary>
     /// Парольная политика с настройками по умолчанию. Тесты входа проверяют вход,

@@ -7,6 +7,7 @@ using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Models;
 using delosfera_server.Modules.Sz.Services;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Sz.Controllers;
 

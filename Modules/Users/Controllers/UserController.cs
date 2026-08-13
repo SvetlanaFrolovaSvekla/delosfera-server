@@ -1,6 +1,8 @@
 ﻿using delosfera_server.Common.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Common.Services.Authorization.Ldap;
 using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
 using delosfera_server.Modules.Users.Models;
@@ -241,5 +243,16 @@ public class UserController : ControllerBase
         {
             return Conflict(new { message = ex.Message });
         }
+    }
+    
+    /// <summary>Запустить синхронизацию пользователей с LDAP</summary>
+    [HttpPost("ldap-sync")]
+    [RequirePermission(PermissionCode.ManageUsers)]
+    [ProducesResponseType(typeof(LdapSyncResult), StatusCodes.Status200OK)]
+    public async Task<ActionResult<LdapSyncResult>> SyncLdap(
+        [FromServices] LdapUserSyncService syncService, CancellationToken ct)
+    {
+        var result = await syncService.SyncAsync(ct);
+        return Ok(result);
     }
 }

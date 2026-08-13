@@ -28,6 +28,13 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.BlockedByUserId).HasColumnName("blocked_by_user_id");
         builder.Property(x => x.BlockReason).HasColumnName("block_reason").HasMaxLength(500);
 
+        builder.Property(x => x.LdapObjectId).HasColumnName("ldap_object_id");
+        builder.HasIndex(x => x.LdapObjectId)
+            .IsUnique()
+            .HasFilter("ldap_object_id IS NOT NULL");
+        
+        builder.Property(x => x.LdapLogin).HasColumnName("ldap_login").HasMaxLength(256);
+        
         builder.HasOne(x => x.Position)
             .WithMany()
             .HasForeignKey(x => x.PositionId)

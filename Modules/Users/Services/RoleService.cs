@@ -7,6 +7,7 @@ using delosfera_server.Modules.Users.Models;
 
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Documents.Services;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Users.Services;
 

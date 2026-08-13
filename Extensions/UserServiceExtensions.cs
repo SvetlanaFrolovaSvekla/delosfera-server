@@ -1,4 +1,5 @@
 ﻿using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Users.Services;
 
 namespace delosfera_server.Extensions;

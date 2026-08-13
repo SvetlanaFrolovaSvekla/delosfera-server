@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.DTO.Response;

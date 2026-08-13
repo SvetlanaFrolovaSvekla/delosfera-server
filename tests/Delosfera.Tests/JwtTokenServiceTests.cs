@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Common.Services.Authorization;
 
 namespace Delosfera.Tests;
 

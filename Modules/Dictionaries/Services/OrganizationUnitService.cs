@@ -5,12 +5,12 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Dictionaries.Models;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Dictionaries.Services;
 
 public class OrganizationUnitService : IOrganizationUnitService
 {
-    private const int MaxDepth = 5;
 
     private readonly DelosferaDbContext _db;
     private readonly ICurrentUserService _currentUser;
@@ -60,7 +60,6 @@ public class OrganizationUnitService : IOrganizationUnitService
             await HierarchyValidation.EnsureParentExistsAsync(_db.OrganizationUnits, request.ParentId.Value,
                 pid => $"Родительское подразделение с id={pid} не найдено");
             await HierarchyValidation.EnsureDepthNotExceededAsync(_db.OrganizationUnits, request.ParentId.Value,
-                MaxDepth,
                 depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
@@ -109,7 +108,6 @@ public class OrganizationUnitService : IOrganizationUnitService
             await HierarchyValidation.EnsureNoCircularReferenceAsync(_db.OrganizationUnits, id, request.ParentId.Value,
                 "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
             await HierarchyValidation.EnsureDepthNotExceededAsync(_db.OrganizationUnits, request.ParentId.Value,
-                MaxDepth,
                 depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 

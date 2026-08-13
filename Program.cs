@@ -5,6 +5,9 @@ using delosfera_server.Common.Services;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using System.Text;
+using delosfera_server.Common.Options;
+using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Common.Services.Authorization.Ldap;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Documents.VND.Services;
@@ -49,6 +52,26 @@ builder.Services.AddOpenApi(options =>
 
 builder.Services.AddScoped<ILanguageResolver, LanguageResolver>();
 builder.Services.AddHttpContextAccessor();
+
+/*Берем Ldap из конфига и распаковываем его в объект LdapOptions -
+по совпадению имён свойств. "Server" в JSON в Server в классе, "Port" в Port,
+и так далее. Дальше любой сервис, которому нужны эти настройки, просто просит их через DI*/
+builder.Services.Configure<LdapOptions>(builder.Configuration.GetSection("Ldap"));
+
+
+builder.Services.AddScoped<ILdapDirectoryService, LdapDirectoryService>();
+builder.Services.AddScoped<LdapUserSyncService>();
+
+
+// Чтобы не засорять логи и не гонять фоновые попытки конекта с LDAP
+if (builder.Configuration.GetValue<bool>("Ldap:Enabled"))
+{
+    builder.Services.AddHostedService<LdapSyncBackgroundService>();
+}
+
+
+builder.Services.AddScoped<ILdapAuthenticator, LdapAuthenticator>();
+
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 
 // Календарные даты (сроки, периоды замещения, даты документов) считаются по времени

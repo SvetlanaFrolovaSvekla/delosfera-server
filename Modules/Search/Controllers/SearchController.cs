@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Search.DTO;
 using delosfera_server.Modules.Search.Services;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Search.Controllers;
 

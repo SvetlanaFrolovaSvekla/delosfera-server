@@ -3,6 +3,7 @@ using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Meetings.Services;
 

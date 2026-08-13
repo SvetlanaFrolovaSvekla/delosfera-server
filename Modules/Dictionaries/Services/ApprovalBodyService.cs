@@ -10,9 +10,6 @@ namespace delosfera_server.Modules.Dictionaries.Services;
 
 public class ApprovalBodyService : IApprovalBodyService
 {
-    // Максимальная глубина вложенности - защита от случайных бесконечных цепочек,
-    // с запасом покрывает любую реальную оргструктуру банка
-    private const int MaxDepth = 5;
 
     private readonly DelosferaDbContext _db;
 
@@ -54,7 +51,7 @@ public class ApprovalBodyService : IApprovalBodyService
         {
             await HierarchyValidation.EnsureParentExistsAsync(_db.ApprovalBodies, request.ParentId.Value,
                 pid => $"Родительский орган утверждения с id={pid} не найден");
-            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.ApprovalBodies, request.ParentId.Value, MaxDepth,
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.ApprovalBodies, request.ParentId.Value,
                 depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
@@ -84,7 +81,7 @@ public class ApprovalBodyService : IApprovalBodyService
                 pid => $"Родительский орган утверждения с id={pid} не найден");
             await HierarchyValidation.EnsureNoCircularReferenceAsync(_db.ApprovalBodies, id, request.ParentId.Value,
                 "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
-            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.ApprovalBodies, request.ParentId.Value, MaxDepth,
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.ApprovalBodies, request.ParentId.Value,
                 depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 

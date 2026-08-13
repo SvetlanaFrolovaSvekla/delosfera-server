@@ -1,5 +1,5 @@
 ﻿using delosfera_server.Common.Extensions;
-using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Response;

@@ -6653,6 +6653,15 @@ namespace delosfera_server.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_login_at");
 
+                    b.Property<string>("LdapLogin")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("ldap_login");
+
+                    b.Property<Guid?>("LdapObjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("ldap_object_id");
+
                     b.Property<DateTime?>("LockedUntil")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("locked_until");
@@ -6691,6 +6700,11 @@ namespace delosfera_server.Migrations
                     b.HasIndex("Email")
                         .IsUnique()
                         .HasDatabaseName("ix_user_email");
+
+                    b.HasIndex("LdapObjectId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_user_ldap_object_id")
+                        .HasFilter("ldap_object_id IS NOT NULL");
 
                     b.HasIndex("OrgUnitId")
                         .HasDatabaseName("ix_user_org_unit_id");

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using delosfera_server.Modules.Users.DTO.Request;
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services.Authorization;
 
 namespace Delosfera.Tests;
 

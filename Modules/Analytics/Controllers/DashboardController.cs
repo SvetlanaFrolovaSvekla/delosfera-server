@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Analytics.Services;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Analytics.Controllers;
 

@@ -7,6 +7,7 @@ using delosfera_server.Modules.Notifications.DTO.Response;
 using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Common.Services.Authorization;
 
 namespace Delosfera.Tests;
 

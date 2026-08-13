@@ -5,6 +5,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Documents.DTO;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Documents.Services;
 

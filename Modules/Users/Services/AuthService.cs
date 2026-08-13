@@ -2,7 +2,8 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Extensions;
-using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Common.Services.Authorization.Ldap;
 using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Users.DTO.Request;
@@ -18,6 +19,9 @@ public class AuthService : IAuthService
     private readonly DelosferaDbContext _db;
     private readonly IUserPasswordHasher _passwordHasher;
     private readonly IJwtTokenService _jwtTokenService;
+    // Два пути к службе каталогов, и оба нужны: проверка пароля доменной учётной
+    // записи при обычном входе по адресу почты и отдельный доменный вход по логину.
+    private readonly ILdapAuthenticator _ldapAuthenticator;
     private readonly ILdapDirectory _directory;
     private readonly IPasswordPolicy _passwordPolicy;
     private readonly int _refreshTokenExpiryDays;
@@ -26,6 +30,7 @@ public class AuthService : IAuthService
         DelosferaDbContext db,
         IUserPasswordHasher passwordHasher,
         IJwtTokenService jwtTokenService,
+        ILdapAuthenticator ldapAuthenticator,
         ILdapDirectory directory,
         IPasswordPolicy passwordPolicy,
         IConfiguration configuration)
@@ -33,6 +38,7 @@ public class AuthService : IAuthService
         _db = db;
         _passwordHasher = passwordHasher;
         _jwtTokenService = jwtTokenService;
+        _ldapAuthenticator = ldapAuthenticator;
         _directory = directory;
         _passwordPolicy = passwordPolicy;
         _refreshTokenExpiryDays = int.Parse(configuration["Jwt:RefreshTokenExpiryDays"] ?? "30");
@@ -45,23 +51,15 @@ public class AuthService : IAuthService
     public async Task<AuthResult> LoginAsync(LoginRequest request, string languageCode)
     {
         var user = await LoadUserAsync(x => x.Email == request.Email)
-            ?? throw new UnauthorizedAccessException("Неверный email или пароль");
+                   ?? throw new UnauthorizedAccessException("Неверный email или пароль");
 
-        if (!user.IsActive)
-            throw new UnauthorizedAccessException("Учётная запись деактивирована");
+        if (!user.IsActive) throw new UnauthorizedAccessException("Учётная запись деактивирована");
+        if (user.BlockedAt.HasValue) throw new UnauthorizedAccessException("Учётная запись заблокирована");
 
-        if (user.BlockedAt.HasValue)
-            throw new UnauthorizedAccessException("Учётная запись заблокирована");
-
-        // У доменной учётной записи локального пароля нет: он живёт в каталоге и
-        // подчиняется доменным политикам. Иначе рядом с доменным появился бы второй
-        // пароль, который не истекает и не блокируется вместе с учёткой.
-        if (user.Source == UserSource.Ldap)
-            throw new UnauthorizedAccessException(
-                "Учётная запись доменная — используйте вход через службу каталогов");
-
-        // Блокировка после серии неудачных попыток (NFR-03). Ограничение по адресу
-        // уже стоит, но оно не спасает от подбора с разных адресов по одной учётке.
+        // Блокировка после серии неудачных попыток (NFR-03). Ограничение частоты по
+        // адресу уже стоит, но оно не спасает от подбора с разных адресов по одной
+        // учётной записи. Проверка идёт до обращения к каталогу: заблокированную
+        // учётку незачем проверять ни локально, ни в домене.
         if (user.LockedUntil is { } lockedUntil && lockedUntil > DateTime.UtcNow)
         {
             var minutes = Math.Max(1, (int)Math.Ceiling((lockedUntil - DateTime.UtcNow).TotalMinutes));
@@ -69,7 +67,15 @@ public class AuthService : IAuthService
                 $"Вход временно заблокирован после неудачных попыток. Повторите через {minutes} мин.");
         }
 
-        if (!_passwordHasher.Verify(user.PasswordHash, request.Password))
+        // У доменной учётной записи локального пароля нет: он живёт в каталоге и
+        // подчиняется доменным политикам, поэтому и проверяется там.
+        var passwordOk = user.Source == UserSource.Ldap
+            ? await _ldapAuthenticator.VerifyPasswordAsync(
+                user.LdapLogin ?? throw new UnauthorizedAccessException("У учётной записи не задан LDAP-логин"),
+                request.Password)
+            : _passwordHasher.Verify(user.PasswordHash, request.Password);
+
+        if (!passwordOk)
         {
             user.FailedLoginAttempts++;
 
@@ -87,7 +93,6 @@ public class AuthService : IAuthService
         user.FailedLoginAttempts = 0;
         user.LockedUntil = null;
         user.LastLoginAt = DateTime.UtcNow;
-
         var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
         await _db.SaveChangesAsync();
 

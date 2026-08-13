@@ -10,8 +10,16 @@ namespace delosfera_server.Modules.Users.Models;
 public class User : IAuditableEntity
 {
     public int Id { get; set; }
+    
+    /// <summary>Стабильный идентификатор объекта в AD (objectGUID). Null для локальных учёток</summary>
+    public Guid? LdapObjectId { get; set; }
+    
     public required string FullName { get; set; }
     public required string Email { get; set; }
+    
+    /// <summary>Логин в AD (sAMAccountName). Null для локальных учёток</summary>
+    public string? LdapLogin { get; set; }
+    
     public required string PasswordHash { get; set; }
 
     public int? PositionId { get; set; }

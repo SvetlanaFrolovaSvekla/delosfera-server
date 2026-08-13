@@ -10,8 +10,6 @@ namespace delosfera_server.Modules.Dictionaries.Services;
 
 public class KeywordService : IKeywordService
 {
-    private const int MaxDepth = 5;
-
     private readonly DelosferaDbContext _db;
 
     public KeywordService(DelosferaDbContext db)
@@ -51,7 +49,7 @@ public class KeywordService : IKeywordService
         {
             await HierarchyValidation.EnsureParentExistsAsync(_db.Keywords, request.ParentId.Value,
                 pid => $"Родительское ключевое слово с id={pid} не найдено");
-            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Keywords, request.ParentId.Value, MaxDepth,
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Keywords, request.ParentId.Value,
                 depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
@@ -81,7 +79,7 @@ public class KeywordService : IKeywordService
                 pid => $"Родительское ключевое слово с id={pid} не найдено");
             await HierarchyValidation.EnsureNoCircularReferenceAsync(_db.Keywords, id, request.ParentId.Value,
                 "Нельзя выбрать родителем один из дочерних элементов — это создаст циклическую ссылку");
-            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Keywords, request.ParentId.Value, MaxDepth,
+            await HierarchyValidation.EnsureDepthNotExceededAsync(_db.Keywords, request.ParentId.Value,
                 depth => $"Превышена максимальная глубина вложенности ({depth} уровней)");
         }
 
@@ -116,7 +114,7 @@ public class KeywordService : IKeywordService
                 "Нельзя удалить ключевое слово — на него есть ссылки в других документах");
         }
     }
-    
+
     private static KeywordResponse ToResponse(Keyword entity, string languageCode) => new()
     {
         Id = entity.Id,
