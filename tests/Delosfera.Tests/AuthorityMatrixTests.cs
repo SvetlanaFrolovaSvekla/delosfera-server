@@ -115,7 +115,7 @@ public class AuthorityMatrixTests
 
     private async Task<MatrixResolveResponse> ResolveAsync(decimal amount, bool isAffiliated = false)
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var service = new AuthorityMatrixService(db);
 
         return await service.ResolveAsync(new MatrixResolveRequest

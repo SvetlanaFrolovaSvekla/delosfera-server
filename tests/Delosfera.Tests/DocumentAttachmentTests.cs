@@ -30,7 +30,7 @@ public class DocumentAttachmentTests
     [Fact]
     public async Task ReplaceFile_RevokesSignaturesOfPreviousVersion()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var (service, signatures) = NewService(db);
 
         var documentId = await SeedDocumentAsync(db);
@@ -59,7 +59,7 @@ public class DocumentAttachmentTests
     [Fact]
     public async Task ReplaceWithIdenticalFile_KeepsSignatures()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var (service, signatures) = NewService(db);
 
         var documentId = await SeedDocumentAsync(db);
@@ -79,7 +79,7 @@ public class DocumentAttachmentTests
     [Fact]
     public async Task Hash_IsSha256OfContent_AndIsWhatGetsSigned()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var (service, _) = NewService(db);
 
         const string content = "Протокол заседания КПА № 01";
@@ -93,7 +93,7 @@ public class DocumentAttachmentTests
     [Fact]
     public async Task Delete_RevokesSignaturesButKeepsThemInHistory()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var (service, signatures) = NewService(db);
 
         var documentId = await SeedDocumentAsync(db);

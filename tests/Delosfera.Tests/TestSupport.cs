@@ -2,6 +2,8 @@ using delosfera_server.Common.Security;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Integrations.Directory;
 using delosfera_server.Data;
+using delosfera_server.Modules.Documents.VND.Models;
+using delosfera_server.Modules.Files.Models;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Users.Services;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +11,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace Delosfera.Tests;
 
-/// <summary>Общие фабрики для тестов: изолированный in-memory DbContext и реальные сервисы аутентификации.</summary>
+/// <summary>Общие фабрики для тестов: сервисы аутентификации и сидовые данные.</summary>
 internal static class TestSupport
 {
     public static IConfiguration Config() =>
@@ -22,11 +24,9 @@ internal static class TestSupport
             ["Jwt:RefreshTokenExpiryDays"] = "30",
         }).Build();
 
-    // Уникальная БД на каждый тест — тесты не влияют друг на друга.
-    public static DelosferaDbContext NewDb() =>
-        new(new DbContextOptionsBuilder<DelosferaDbContext>()
-            .UseInMemoryDatabase($"delosfera-tests-{Guid.NewGuid()}")
-            .Options);
+    // Базу выдаёт PostgresFixture: копию шаблона под каждый тест. In-memory провайдер
+    // модель не держит (jsonb, tsvector, вычисляемые колонки), и подменять им настоящую
+    // базу — значит проверять не то поведение, которое будет в банке.
 
     public static AuthService NewAuthService(DelosferaDbContext db) =>
         new(db, new UserPasswordHasher(), new JwtTokenService(Config()),
@@ -52,6 +52,96 @@ internal static class TestSupport
 
         public Task<DirectoryEntry?> AuthenticateAsync(string login, string password, CancellationToken ct = default) =>
             throw new InvalidOperationException("Интеграция со службой каталогов выключена");
+    }
+
+    /// <summary>
+    /// Заводит ВНД со ссылками на реальные справочники базы.
+    ///
+    /// На настоящей базе внешние ключи проверяются: нули в TypeId, DeveloperId,
+    /// OrganId и SecrecyLevelId её не проходят. In-memory провайдер это пропускал,
+    /// и тесты годами ссылались на несуществующие записи.
+    /// </summary>
+    public static VndDocument SeedVnd(DelosferaDbContext db, VndStatus status, int createdByUserId)
+    {
+        EnsureUser(db, createdByUserId);
+
+        var vnd = new VndDocument
+        {
+            // Код уникален в базе: сидовые ВНД уже занимают свои, поэтому берём случайный.
+            Code = $"TEST-{Guid.NewGuid():N}"[..12],
+            TitleRu = "Тестовый ВНД",
+            Status = status,
+            CreatedByUserId = createdByUserId,
+            TypeId = db.TypesVnd.OrderBy(x => x.Id).First().Id,
+            DeveloperId = db.OrganizationUnits.OrderBy(x => x.Id).First().Id,
+            OrganId = db.ApprovalBodies.OrderBy(x => x.Id).First().Id,
+            SecrecyLevelId = db.SecurityLevels.OrderBy(x => x.Id).First().Id,
+        };
+
+        db.VndDocuments.Add(vnd);
+        db.SaveChanges();
+
+        return vnd;
+    }
+
+    /// <summary>
+    /// Гарантирует существование пользователя с заданным идентификатором.
+    ///
+    /// Тесты действуют от лица условных сотрудников (100, 200…), а на настоящей базе
+    /// внешние ключи проверяются: ссылка на несуществующего автора её не проходит.
+    /// </summary>
+    public static void EnsureUser(DelosferaDbContext db, int userId)
+    {
+        if (db.Users.Any(u => u.Id == userId)) return;
+
+        db.Users.Add(new User
+        {
+            Id = userId,
+            FullName = $"Тестовый сотрудник {userId}",
+            Email = $"user-{userId}-{Guid.NewGuid():N}@keremetbank.kg",
+            PasswordHash = "x",
+        });
+
+        db.SaveChanges();
+    }
+
+    /// <summary>
+    /// Запись файла в хранилище. У редакции ВНД ссылка на файл обязательная,
+    /// и на настоящей базе она проверяется внешним ключом.
+    /// </summary>
+    public static FileAttachment SeedFile(DelosferaDbContext db, int uploadedByUserId)
+    {
+        EnsureUser(db, uploadedByUserId);
+
+        var file = new FileAttachment
+        {
+            OriginalFileName = "редакция.docx",
+            ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            SizeBytes = 1024,
+            StorageKey = Guid.NewGuid().ToString("N"),
+            UploadedByUserId = uploadedByUserId,
+        };
+
+        db.FileAttachments.Add(file);
+        db.SaveChanges();
+
+        return file;
+    }
+
+    /// <summary>Сотрудник, от имени которого действует тест.</summary>
+    public static User SeedActor(DelosferaDbContext db)
+    {
+        var user = new User
+        {
+            FullName = "Тестовый сотрудник",
+            Email = $"actor-{Guid.NewGuid():N}@keremetbank.kg",
+            PasswordHash = "x",
+        };
+
+        db.Users.Add(user);
+        db.SaveChanges();
+
+        return user;
     }
 
     /// <summary>Создаёт активного пользователя с ролью и заданным паролем.</summary>

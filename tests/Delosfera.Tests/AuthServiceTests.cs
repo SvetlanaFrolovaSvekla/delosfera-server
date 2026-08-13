@@ -5,8 +5,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Delosfera.Tests;
 
+[Collection(PostgresCollection.Name)]
 public class AuthServiceTests
 {
+    private readonly PostgresFixture _postgres;
+
+    public AuthServiceTests(PostgresFixture postgres) => _postgres = postgres;
+
     private static string Sha256Hex(string s) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(s)));
 
@@ -15,7 +20,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Login_CorrectCredentials_ReturnsTokensAndUser()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         TestSupport.SeedUser(db, "user@bank.kg", "P@ssw0rd");
         var auth = TestSupport.NewAuthService(db);
 
@@ -29,7 +34,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Login_WrongPassword_Throws()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         TestSupport.SeedUser(db, "user@bank.kg", "P@ssw0rd");
         var auth = TestSupport.NewAuthService(db);
 
@@ -40,7 +45,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Login_UnknownEmail_Throws()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var auth = TestSupport.NewAuthService(db);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(
             () => auth.LoginAsync(Login("ghost@bank.kg", "x"), "ru"));
@@ -49,7 +54,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Login_InactiveUser_Throws()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         TestSupport.SeedUser(db, "user@bank.kg", "P@ssw0rd", isActive: false);
         var auth = TestSupport.NewAuthService(db);
 
@@ -60,7 +65,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Login_BlockedUser_Throws()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         TestSupport.SeedUser(db, "user@bank.kg", "P@ssw0rd", blockedAt: DateTime.UtcNow);
         var auth = TestSupport.NewAuthService(db);
 
@@ -71,7 +76,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Login_StoresRefreshTokenHashed_NotPlaintext()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         TestSupport.SeedUser(db, "user@bank.kg", "P@ssw0rd");
         var auth = TestSupport.NewAuthService(db);
 
@@ -86,7 +91,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Refresh_ValidToken_RotatesAndRevokesOld()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         TestSupport.SeedUser(db, "user@bank.kg", "P@ssw0rd");
         var auth = TestSupport.NewAuthService(db);
 
@@ -104,7 +109,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Refresh_UnknownToken_Throws()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var auth = TestSupport.NewAuthService(db);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(
             () => auth.RefreshAsync("never-issued", "ru"));
@@ -113,7 +118,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Refresh_ExpiredToken_Throws()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         TestSupport.SeedUser(db, "user@bank.kg", "P@ssw0rd");
         var auth = TestSupport.NewAuthService(db);
 
@@ -129,7 +134,7 @@ public class AuthServiceTests
     [Fact]
     public async Task Logout_ThenRefresh_Throws()
     {
-        using var db = TestSupport.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         TestSupport.SeedUser(db, "user@bank.kg", "P@ssw0rd");
         var auth = TestSupport.NewAuthService(db);
 

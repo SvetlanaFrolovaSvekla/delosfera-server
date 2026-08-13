@@ -1,5 +1,6 @@
 using delosfera_server.Data;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Testcontainers.PostgreSql;
 
 namespace Delosfera.Tests;
@@ -16,13 +17,16 @@ namespace Delosfera.Tests;
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
+    private const string TemplateDatabase = "delosfera_template";
+
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
         .WithImage("postgres:16-alpine")
-        .WithDatabase("delosfera_tests")
+        .WithDatabase(TemplateDatabase)
         .WithUsername("postgres")
         .WithPassword("postgres")
         .Build();
 
+    /// <summary>Строка подключения к базе-шаблону: миграции накатаны, данные — только сидовые.</summary>
     public string ConnectionString { get; private set; } = string.Empty;
 
     public async Task InitializeAsync()
@@ -32,32 +36,57 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         // Схему накатываем миграциями, а не EnsureCreated: тесты должны идти по той же
         // схеме, что и промышленная база, включая вычисляемые колонки и индексы.
-        await using var db = NewDb();
-        await db.Database.MigrateAsync();
+        await using (var db = NewDb())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        // Копия базы делается только при отсутствии подключений к шаблону,
+        // а пул Npgsql держит их открытыми и после Dispose контекста.
+        NpgsqlConnection.ClearAllPools();
     }
 
     public async Task DisposeAsync() => await _container.DisposeAsync();
 
-    public DelosferaDbContext NewDb() =>
-        new(new DbContextOptionsBuilder<DelosferaDbContext>()
-            .UseNpgsql(ConnectionString)
-            .UseSnakeCaseNamingConvention()
-            .Options);
+    /// <summary>Контекст к базе-шаблону. Для тестов, которым хватает общих данных.</summary>
+    public DelosferaDbContext NewDb() => NewDb(ConnectionString);
 
     /// <summary>
-    /// Очищает таблицы перед тестом, оставляя справочники из миграций. Пересоздавать
-    /// базу на каждый тест дороже, а общий контейнер без очистки даёт зависимость
-    /// тестов друг от друга — самый неприятный вид ложных падений.
+    /// Отдельная база под один тест — копия шаблона.
+    ///
+    /// Postgres копирует базу пофайлово, поэтому это быстрее повторного прогона
+    /// миграций, а тест получает чистое состояние и не зависит от соседей: самый
+    /// неприятный вид ложных падений — когда тест краснеет из-за данных чужого теста.
     /// </summary>
-    public async Task ResetAsync(params string[] tables)
+    public async Task<DelosferaDbContext> NewIsolatedDbAsync()
     {
-        if (tables.Length == 0) return;
+        var name = $"t_{Guid.NewGuid():N}";
 
-        await using var db = NewDb();
-        var list = string.Join(", ", tables.Select(t => $"\"{t}\""));
+        await using (var admin = new NpgsqlConnection(ConnectionString))
+        {
+            await admin.OpenAsync();
 
-        await db.Database.ExecuteSqlRawAsync($"TRUNCATE {list} RESTART IDENTITY CASCADE");
+            await using var command = admin.CreateCommand();
+            command.CommandText = $"CREATE DATABASE \"{name}\" TEMPLATE \"{TemplateDatabase}\"";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder(ConnectionString) {Database = name};
+        return NewDb(builder.ConnectionString);
     }
+
+    /// <summary>
+    /// Ещё один контекст к той же базе. Нужен там, где проверяется работа двух
+    /// параллельных сессий с одной записью.
+    /// </summary>
+    public DelosferaDbContext NewDbFor(DelosferaDbContext existing) =>
+        NewDb(existing.Database.GetConnectionString()!);
+
+    private static DelosferaDbContext NewDb(string connectionString) =>
+        new(new DbContextOptionsBuilder<DelosferaDbContext>()
+            .UseNpgsql(connectionString)
+            .UseSnakeCaseNamingConvention()
+            .Options);
 }
 
 /// <summary>Общий контейнер на все тесты, которым нужна база.</summary>

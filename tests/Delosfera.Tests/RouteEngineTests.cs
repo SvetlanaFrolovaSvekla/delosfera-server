@@ -29,7 +29,7 @@ public class RouteEngineTests
     [Fact]
     public async Task OverdueParticipant_GetsAutoAccept()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var engine = NewEngine(db);
 
         var (instanceId, participantId) = await SeedActiveRouteAsync(db, overdue: true);
@@ -47,7 +47,7 @@ public class RouteEngineTests
     [Fact]
     public async Task OverdueParticipant_OnRouteReturnedForRevision_IsNotAutoAccepted()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var engine = NewEngine(db);
 
         var (instanceId, participantId) = await SeedActiveRouteAsync(db, overdue: true);
@@ -71,7 +71,7 @@ public class RouteEngineTests
     [Fact]
     public async Task OverdueParticipant_WithOpenRemarkOnStep_IsNotAutoAccepted()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var engine = NewEngine(db);
 
         var (_, participantId) = await SeedActiveRouteAsync(db, overdue: true, withOpenRemark: true);
@@ -87,7 +87,7 @@ public class RouteEngineTests
     [Fact]
     public async Task OverdueOnFinalMethodologyStep_IsEscalatedNotAutoAccepted()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var engine = NewEngine(db);
 
         var (_, participantId) = await SeedActiveRouteAsync(db, overdue: true, isFinalMethodology: true);
@@ -111,7 +111,7 @@ public class RouteEngineTests
     [Fact]
     public async Task NotYetDueParticipant_IsUntouched()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var engine = NewEngine(db);
 
         var (_, participantId) = await SeedActiveRouteAsync(db, overdue: false);
@@ -127,7 +127,7 @@ public class RouteEngineTests
     [Fact]
     public async Task StepRequiringQualifiedSignature_RejectsResolutionWithoutIt()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var engine = NewEngine(db);
 
         var (_, participantId) = await SeedActiveRouteAsync(
@@ -163,7 +163,7 @@ public class RouteEngineTests
     [Fact]
     public async Task StepRequiringSignature_StillAllowsRejectionWithoutIt()
     {
-        await using var db = _postgres.NewDb();
+        await using var db = await _postgres.NewIsolatedDbAsync();
         var engine = NewEngine(db);
 
         var (_, participantId) = await SeedActiveRouteAsync(
