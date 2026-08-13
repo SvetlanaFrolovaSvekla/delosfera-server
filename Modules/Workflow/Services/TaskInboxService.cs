@@ -44,28 +44,71 @@ public class TaskInboxService : ITaskInboxService
             .Where(u => actingFor.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => u.FullName);
 
-        var rows = await (
+        // Задачи согласования: документ достаётся через цепочку участник → этап → маршрут.
+        var routeRows = await (
             from t in _db.WorkflowTasks
             join p in _db.RouteParticipants on t.RouteParticipantId equals p.Id
             join st in _db.RouteSteps on p.RouteStepId equals st.Id
             join ri in _db.RouteInstances on st.RouteInstanceId equals ri.Id
             join d in _db.Documents on ri.DocumentId equals d.Id
             where assignees.Contains(t.AssigneeUserId) && t.State == WorkflowTaskState.Open
-            select new
+            select new Row
             {
-                t.Id,
+                Id = t.Id,
                 ParticipantId = p.Id,
-                t.AssigneeUserId,
+                AssigneeUserId = t.AssigneeUserId,
                 TaskType = t.Type,
-                t.DueAt,
-                t.CreatedAt,
-                st.Order,
-                st.Kind,
+                DueAt = t.DueAt,
+                CreatedAt = t.CreatedAt,
+                Order = st.Order,
+                Kind = (StepKind?)st.Kind,
                 DocumentId = d.Id,
-                d.RegNumber,
-                d.Title,
+                RegNumber = d.RegNumber,
+                Title = d.Title,
                 DocType = d.Type,
             }).ToListAsync();
+
+        // Задачи контура — решение адресата, поручение: маршрута за ними нет, документ
+        // указан напрямую. Без них список задач показывал бы только согласования, а
+        // работа, выданная резолюцией, была бы видна лишь внутри своего раздела.
+        var directRows = await (
+            from t in _db.WorkflowTasks
+            join d in _db.Documents on t.DocumentId equals d.Id
+            where assignees.Contains(t.AssigneeUserId)
+               && t.State == WorkflowTaskState.Open
+               && t.RouteParticipantId == null
+            select new Row
+            {
+                Id = t.Id,
+                ParticipantId = null,
+                AssigneeUserId = t.AssigneeUserId,
+                TaskType = t.Type,
+                DueAt = t.DueAt,
+                CreatedAt = t.CreatedAt,
+                Order = null,
+                Kind = null,
+                DocumentId = d.Id,
+                RegNumber = d.RegNumber,
+                Title = d.Title,
+                DocType = d.Type,
+            }).ToListAsync();
+
+        var rows = routeRows.Concat(directRows).ToList();
+
+        // Карточки контуров открываются по своему идентификатору, а не по документу:
+        // /sz/{szId}, /prc/{requestId}. Без этой подстановки задача уводила на чужую
+        // карточку с тем же числом.
+        var documentIds = rows.Select(r => r.DocumentId).Distinct().ToList();
+
+        var entityIds = (await _db.SzDocuments
+                .Where(x => documentIds.Contains(x.DocumentId))
+                .Select(x => new {x.DocumentId, EntityId = x.Id})
+                .ToListAsync())
+            .Concat(await _db.ProcurementRequests
+                .Where(x => documentIds.Contains(x.DocumentId))
+                .Select(x => new {x.DocumentId, EntityId = x.Id})
+                .ToListAsync())
+            .ToDictionary(x => x.DocumentId, x => x.EntityId);
 
         var now = DateTime.UtcNow;
 
@@ -75,13 +118,14 @@ public class TaskInboxService : ITaskInboxService
                 TaskId = r.Id,
                 ParticipantId = r.ParticipantId,
                 DocumentId = r.DocumentId,
+                EntityId = entityIds.TryGetValue(r.DocumentId, out var entityId) ? entityId : null,
                 RegNumber = r.RegNumber,
                 DocumentTitle = r.Title,
                 DocumentType = r.DocType.ToString(),
                 DocumentTypeTitle = DocumentTypeTitle(r.DocType),
                 TaskType = TaskTypeTitle(r.TaskType),
                 StepOrder = r.Order,
-                StepKind = r.Kind.ToString(),
+                StepKind = r.Kind?.ToString(),
                 DueAt = r.DueAt,
                 IsOverdue = r.DueAt is { } due && due < now,
                 OnBehalfOf = r.AssigneeUserId != userId && names.TryGetValue(r.AssigneeUserId, out var name)
@@ -119,6 +163,28 @@ public class TaskInboxService : ITaskInboxService
     {
         "Approval" => "Согласование",
         "RemarksResolution" => "Устранение замечаний",
+        "AddresseeDecision" => "Решение по записке",
+        "Assignment" => "Поручение",
         _ => type,
     };
+
+    /// <summary>
+    /// Строка задачи до сборки ответа. Общий тип нужен, чтобы задачи маршрута и
+    /// задачи контура собирались в один список.
+    /// </summary>
+    private sealed class Row
+    {
+        public int Id { get; init; }
+        public int? ParticipantId { get; init; }
+        public int AssigneeUserId { get; init; }
+        public required string TaskType { get; init; }
+        public DateTime? DueAt { get; init; }
+        public DateTime CreatedAt { get; init; }
+        public int? Order { get; init; }
+        public StepKind? Kind { get; init; }
+        public int DocumentId { get; init; }
+        public string? RegNumber { get; init; }
+        public required string Title { get; init; }
+        public DocumentType DocType { get; init; }
+    }
 }

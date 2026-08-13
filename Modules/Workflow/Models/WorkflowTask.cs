@@ -10,9 +10,22 @@ public class WorkflowTask
 
     public int? RouteParticipantId { get; set; }
 
+    /// <summary>
+    /// Документ задачи, когда она не из маршрута: решение адресата и поручение
+    /// живут вне согласования, но в общем списке задач должны быть наравне с ним —
+    /// иначе работа человека разложена по двум разным экранам.
+    /// </summary>
+    public int? DocumentId { get; set; }
+
+    /// <summary>
+    /// Запись контура, породившая задачу (например поручение по записке): по ней
+    /// задача закрывается, когда работа сдана в своём контуре.
+    /// </summary>
+    public int? SourceEntityId { get; set; }
+
     public int AssigneeUserId { get; set; }
 
-    /// <summary>Тип задачи, напр. "Approval", "RemarksResolution".</summary>
+    /// <summary>Тип задачи, напр. "Approval", "RemarksResolution", "AddresseeDecision", "Assignment".</summary>
     public required string Type { get; set; }
 
     public DateTime? DueAt { get; set; }

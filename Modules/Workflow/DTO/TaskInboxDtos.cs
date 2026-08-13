@@ -4,9 +4,21 @@ namespace delosfera_server.Modules.Workflow.DTO;
 public class InboxTaskDto
 {
     public int TaskId { get; set; }
-    public int ParticipantId { get; set; }
+
+    /// <summary>
+    /// Участник маршрута, если задача пришла из согласования. У задач контура
+    /// (решение адресата, поручение) участника нет — они привязаны к документу.
+    /// </summary>
+    public int? ParticipantId { get; set; }
 
     public int DocumentId { get; set; }
+
+    /// <summary>
+    /// Идентификатор записи контура — записки, заявки. Карточки открываются именно
+    /// по нему, а не по документу: ссылка по DocumentId ведёт на чужую карточку.
+    /// </summary>
+    public int? EntityId { get; set; }
+
     public string? RegNumber { get; set; }
     public required string DocumentTitle { get; set; }
 
@@ -17,9 +29,12 @@ public class InboxTaskDto
     /// <summary>Тип задачи маршрута: согласование, устранение замечаний.</summary>
     public required string TaskType { get; set; }
 
-    /// <summary>Номер этапа и его назначение — понятно, на какой стадии документ.</summary>
-    public int StepOrder { get; set; }
-    public required string StepKind { get; set; }
+    /// <summary>
+    /// Номер этапа и его назначение — понятно, на какой стадии документ.
+    /// У задач вне маршрута этапа нет.
+    /// </summary>
+    public int? StepOrder { get; set; }
+    public string? StepKind { get; set; }
 
     public DateTime? DueAt { get; set; }
     public bool IsOverdue { get; set; }
