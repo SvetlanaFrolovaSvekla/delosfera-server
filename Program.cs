@@ -84,11 +84,20 @@ builder.AddIntegrationServices();
 builder.AddSearchServices();
 
 
+// Адреса фронтенда задаются конфигурацией: на стенде это localhost, в банке —
+// адрес развёрнутого клиента. Захардкоженный localhost означал бы, что на любом
+// другом сервере вход не работает, а причина видна только в консоли браузера.
+//
+// Когда клиент и API стоят за одним reverse-proxy (один origin), CORS не участвует
+// вовсе — список нужен лишь для раздельных адресов.
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174"];
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials(); // нужно для httpOnly refresh-cookie (origin'ы заданы явно, не *)
