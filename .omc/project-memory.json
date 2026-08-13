@@ -276,6 +276,12 @@
       "type": "file"
     },
     {
+      "path": "Common/Services/Authorization/Ldap/LdapAuthenticator.cs",
+      "accessCount": 2,
+      "lastAccessed": 1786643308484,
+      "type": "file"
+    },
+    {
       "path": "Modules/Sz/DTO/SzPaperDtos.cs",
       "accessCount": 1,
       "lastAccessed": 1786602339557,

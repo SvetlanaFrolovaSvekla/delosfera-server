@@ -35,19 +35,62 @@ public interface ILdapDirectory
 /// </summary>
 public class LdapDirectory : ILdapDirectory
 {
-    private readonly LdapOptions _options;
+    private readonly LdapOptions _configured;
+    private readonly IDirectorySettingsService _settings;
+
+    /// <summary>Настройки текущей операции: общие из базы, пока не прочитаны — из конфигурации.</summary>
+    private LdapOptions? _effective;
+    private LdapOptions _options => _effective ?? _configured;
     private readonly ILogger<LdapDirectory> _logger;
 
-    public LdapDirectory(IOptions<LdapOptions> options, ILogger<LdapDirectory> logger)
+    public LdapDirectory(
+        IOptions<LdapOptions> options,
+        IDirectorySettingsService settings,
+        ILogger<LdapDirectory> logger)
     {
-        _options = options.Value;
+        // Настройки задаются администратором в разделе системных настроек; значения
+        // из конфигурации остаются запасными, чтобы стенд без базы настроек работал.
+        _configured = options.Value;
+        _settings = settings;
         _logger = logger;
     }
 
-    public bool Enabled => _options.Enabled;
+    public bool Enabled => _configured.Enabled || _settings.GetAsync().GetAwaiter().GetResult().Enabled;
+
+    /// <summary>
+    /// Действующие параметры связи. Общие настройки системы важнее конфигурации:
+    /// иначе доменный вход ходил бы на один каталог, а синхронизация — на другой.
+    /// </summary>
+    private async Task<LdapOptions> EffectiveAsync(CancellationToken ct)
+    {
+        var shared = await _settings.GetEffectiveAsync(ct);
+        if (shared is null) return _options;
+
+        return new LdapOptions
+        {
+            Enabled = true,
+            Host = shared.Server,
+            Port = shared.Port,
+            UseSsl = shared.UseSsl,
+            BaseDn = shared.UsersBaseDn,
+            BindDn = shared.ServiceAccountLogin,
+            BindPassword = shared.ServiceAccountPassword,
+            UserFilter = shared.UsersFilter,
+            LoginAttribute = shared.LoginAttribute,
+            EmailAttribute = shared.EmailAttribute,
+            FullNameAttribute = shared.FullNameAttribute,
+            PositionAttribute = _configured.PositionAttribute,
+            OrgUnitAttribute = _configured.OrgUnitAttribute,
+            DisabledAttribute = _configured.DisabledAttribute,
+            CreateMissingUsers = _configured.CreateMissingUsers,
+            CreateMissingOrgUnits = _configured.CreateMissingOrgUnits,
+            DefaultRoleTitleRu = _configured.DefaultRoleTitleRu,
+        };
+    }
 
     public async Task<List<DirectoryEntry>> ListUsersAsync(CancellationToken ct = default)
     {
+        _effective = await EffectiveAsync(ct);
         RequireEnabled();
 
         using var connection = await ConnectAsync(_options.BindDn, _options.BindPassword, ct);
@@ -59,6 +102,7 @@ public class LdapDirectory : ILdapDirectory
     public async Task<DirectoryEntry?> AuthenticateAsync(
         string login, string password, CancellationToken ct = default)
     {
+        _effective = await EffectiveAsync(ct);
         RequireEnabled();
 
         if (string.IsNullOrWhiteSpace(login) || string.IsNullOrEmpty(password))
