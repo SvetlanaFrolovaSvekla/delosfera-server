@@ -2,18 +2,19 @@
 using System.Net;
 using Microsoft.Extensions.Options;
 using delosfera_server.Common.Options;
+using delosfera_server.Modules.Integrations.Directory;
 
 namespace delosfera_server.Common.Services.Authorization.Ldap;
 
 public class LdapAuthenticator : ILdapAuthenticator
 {
     private const int InvalidCredentialsErrorCode = 49;
-    private readonly LdapOptions _options;
+    private readonly IDirectorySettingsService _settings;
     private readonly ILogger<LdapAuthenticator> _logger;
 
-    public LdapAuthenticator(IOptions<LdapOptions> options, ILogger<LdapAuthenticator> logger)
+    public LdapAuthenticator(IDirectorySettingsService settings, ILogger<LdapAuthenticator> logger)
     {
-        _options = options.Value;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -24,9 +25,18 @@ public class LdapAuthenticator : ILdapAuthenticator
     вызывающий код (то есть данные, которые пользователь ввёл в форму входа на сайте). 
     Если Bind() отработал без исключения - значит AD подтвердил, что пароль верный,
     и метод возвращает true.*/
-    public Task<bool> VerifyPasswordAsync(string login, string password)
+    public async Task<bool> VerifyPasswordAsync(string login, string password)
     {
-        return Task.Run(() =>
+        // Адрес каталога задаётся администратором в интерфейсе и может измениться
+        // между попытками входа — читаем его при каждой проверке.
+        var _options = await _settings.GetEffectiveAsync();
+        if (_options is null)
+        {
+            _logger.LogWarning("Доменный вход: связь со службой каталогов не настроена");
+            return false;
+        }
+
+        return await Task.Run(() =>
         {
             try
             {

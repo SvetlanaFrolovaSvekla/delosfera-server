@@ -1,41 +1,96 @@
-﻿using Microsoft.Extensions.Options;
-using delosfera_server.Common.Options;
+using delosfera_server.Modules.Integrations.Directory;
 
 namespace delosfera_server.Common.Services.Authorization.Ldap;
 
+/// <summary>
+/// Периодическая выгрузка пользователей из службы каталогов.
+///
+/// Расписание берётся из настроек в базе и перечитывается перед каждым заходом:
+/// администратор меняет интервал через интерфейс, и правка должна вступать в силу
+/// сама. Раньше интервал брался из конфигурации при старте, поэтому изменить его
+/// можно было только перезапуском сервера.
+///
+/// Выключенная интеграция не значит остановленную службу: она продолжает
+/// просыпаться и проверять настройки, иначе включение потребовало бы перезапуска.
+/// </summary>
 public class LdapSyncBackgroundService : BackgroundService
 {
+    /// <summary>Как часто проверять настройки, пока интеграция выключена.</summary>
+    private static readonly TimeSpan IdleDelay = TimeSpan.FromMinutes(5);
+
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly LdapOptions _options;
     private readonly ILogger<LdapSyncBackgroundService> _logger;
 
     public LdapSyncBackgroundService(
-        IServiceScopeFactory scopeFactory, IOptions<LdapOptions> options,
-        ILogger<LdapSyncBackgroundService> logger)
+        IServiceScopeFactory scopeFactory, ILogger<LdapSyncBackgroundService> logger)
     {
         _scopeFactory = scopeFactory;
-        _options = options.Value;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(_options.SyncIntervalMinutes));
-
-        do
+        // Пауза на старте: миграции и разогрев не должны конкурировать с обходом каталога.
+        try
         {
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var delay = IdleDelay;
+
             try
             {
                 using var scope = _scopeFactory.CreateScope();
-                var syncService = scope.ServiceProvider.GetRequiredService<LdapUserSyncService>();
-                await syncService.SyncAsync(stoppingToken);
+                var settingsService = scope.ServiceProvider.GetRequiredService<IDirectorySettingsService>();
+                var settings = await settingsService.GetAsync(stoppingToken);
+
+                if (settings.Enabled)
+                {
+                    delay = TimeSpan.FromMinutes(Math.Clamp(settings.SyncIntervalMinutes, 5, 1440));
+
+                    var syncService = scope.ServiceProvider.GetRequiredService<LdapUserSyncService>();
+                    var result = await syncService.SyncAsync(stoppingToken);
+
+                    await settingsService.RecordSyncAsync(
+                        result.Created, result.Updated, result.Deactivated, null, stoppingToken);
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex)
             {
-                // Воркер не должен падать целиком из-за временной недоступности LDAP-сервера —
-                // просто логируем и ждём следующего тика
-                _logger.LogError(ex, "LDAP sync упал, попробуем на следующем тике");
+                // Недоступный каталог не должен ронять службу: ошибка попадает в настройки,
+                // администратор видит её в интерфейсе, следующая попытка идёт по расписанию.
+                _logger.LogError(ex, "Синхронизация со службой каталогов не удалась");
+
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var settingsService = scope.ServiceProvider.GetRequiredService<IDirectorySettingsService>();
+                    await settingsService.RecordSyncAsync(0, 0, 0, ex.Message, stoppingToken);
+                }
+                catch (Exception recordFailure)
+                {
+                    _logger.LogError(recordFailure, "Не удалось записать итог синхронизации");
+                }
             }
-        } while (await timer.WaitForNextTickAsync(stoppingToken));
+
+            try
+            {
+                await Task.Delay(delay, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
     }
 }

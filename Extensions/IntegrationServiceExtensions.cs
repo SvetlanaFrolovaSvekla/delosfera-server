@@ -13,6 +13,12 @@ public static class IntegrationServiceExtensions
         builder.Services.AddScoped<ILdapDirectory, LdapDirectory>();
         builder.Services.AddScoped<IDirectorySyncService, DirectorySyncService>();
 
+        // Настройки связи со службой каталогов хранятся в базе и правятся администратором
+        // через интерфейс; конфигурация сервера служит лишь первоначальным значением.
+        builder.Services.AddSingleton<delosfera_server.Common.Security.ISecretProtector,
+            delosfera_server.Common.Security.SecretProtector>();
+        builder.Services.AddScoped<IDirectorySettingsService, DirectorySettingsService>();
+
         builder.Services.Configure<MailOptions>(builder.Configuration.GetSection(MailOptions.Section));
         builder.Services.AddScoped<IMailQueue, MailQueue>();
         builder.Services.AddHostedService<MailWorker>();

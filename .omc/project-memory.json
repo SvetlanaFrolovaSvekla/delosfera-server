@@ -316,6 +316,48 @@
       "accessCount": 1,
       "lastAccessed": 1786613899991,
       "type": "file"
+    },
+    {
+      "path": "Common/Security/SecretProtector.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786621474095,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Integrations/Directory/DirectorySettings.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786621496198,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Integrations/Directory/DirectorySettingsService.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786621543052,
+      "type": "file"
+    },
+    {
+      "path": "Common/Services/Authorization/Ldap/LdapDirectoryService.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786621609982,
+      "type": "file"
+    },
+    {
+      "path": "Common/Services/Authorization/Ldap/LdapSyncBackgroundService.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786623171268,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Users/Models/PermissionCode.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786623206957,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Integrations/Controllers/SystemSettingsController.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786623227054,
+      "type": "file"
     }
   ],
   "userDirectives": []

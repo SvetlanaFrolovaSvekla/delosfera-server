@@ -13,6 +13,7 @@ using delosfera_server.Modules.Procurement.Models;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Modules.Integrations.Mail;
 using delosfera_server.Modules.Search.Models;
+using delosfera_server.Modules.Integrations.Directory;
 
 namespace delosfera_server.Data;
 
@@ -125,6 +126,9 @@ public class DelosferaDbContext : DbContext
 
     // --- Интеграции (раздел 8 ТЗ) ---
     public DbSet<OutgoingEmail> OutgoingEmails => Set<OutgoingEmail>(); // очередь исходящих писем (INT-02)
+
+    /// <summary>Связь со службой каталогов: адрес, учётная запись, расписание (INT-01).</summary>
+    public DbSet<DirectorySettings> DirectorySettings => Set<DirectorySettings>();
     public DbSet<SavedSearch> SavedSearches => Set<SavedSearch>(); // сохранённые фильтры поиска (GEN-04)
 
 

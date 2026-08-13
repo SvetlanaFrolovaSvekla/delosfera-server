@@ -2,6 +2,7 @@
 using System.Net;
 using Microsoft.Extensions.Options;
 using delosfera_server.Common.Options;
+using delosfera_server.Modules.Integrations.Directory;
 
 namespace delosfera_server.Common.Services.Authorization.Ldap;
 
@@ -11,20 +12,24 @@ public class LdapDirectoryService : ILdapDirectoryService
         UserAccountControlDisabledBit =
             2; // флаг "учётка отключена", тот же флаг, что в Terrasoft (LdapDisabledAccountValue)
 
-    private readonly LdapOptions _options;
+    private readonly IDirectorySettingsService _settings;
     private readonly ILogger<LdapDirectoryService> _logger;
 
-    public LdapDirectoryService(IOptions<LdapOptions> options, ILogger<LdapDirectoryService> logger)
+    public LdapDirectoryService(IDirectorySettingsService settings, ILogger<LdapDirectoryService> logger)
     {
-        _options = options.Value;
+        _settings = settings;
         _logger = logger;
     }
 
     // В System.DirectoryServices.Protocols нет современных нативных async/await методов вроде SendRequestAsync
     // Используется Task.Run
-    public Task<List<LdapDirectoryUser>> GetAllUsersAsync(CancellationToken ct = default)
+    public async Task<List<LdapDirectoryUser>> GetAllUsersAsync(CancellationToken ct = default)
     {
-        return Task.Run(() =>
+        var _options = await _settings.GetEffectiveAsync(ct)
+            ?? throw new InvalidOperationException(
+                "Связь со службой каталогов не настроена или выключена");
+
+        return await Task.Run(() =>
         {
             using var connection = new LdapConnection(new LdapDirectoryIdentifier(_options.Server, _options.Port))
             {
@@ -85,7 +90,7 @@ public class LdapDirectoryService : ILdapDirectoryService
 
                 foreach (SearchResultEntry entry in response.Entries)
                 {
-                    var user = MapEntry(entry);
+                    var user = MapEntry(entry, _options);
                     if (user is not null) result.Add(user);
                 }
 
@@ -103,7 +108,7 @@ public class LdapDirectoryService : ILdapDirectoryService
 
 
     // Метод для превращения AD-записи пользователя в объект User
-    private LdapDirectoryUser? MapEntry(SearchResultEntry entry)
+    private LdapDirectoryUser? MapEntry(SearchResultEntry entry, Common.Options.LdapOptions _options)
     {
         var login = entry.Attributes[_options.LoginAttribute]?[0]?.ToString();
         var email = entry.Attributes[_options.EmailAttribute]?[0]?.ToString();
