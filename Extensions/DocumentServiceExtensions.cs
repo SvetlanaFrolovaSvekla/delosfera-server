@@ -15,6 +15,9 @@ public static class DocumentServiceExtensions
         builder.Services.AddScoped<ICustomDocumentService, CustomDocumentService>();
         builder.Services.AddScoped<IListViewService, ListViewService>();
         builder.Services.AddScoped<IDocumentService, DocumentService>();
+
+        // Вложения карточки и их связь с подписями (GEN-05, SIG-01)
+        builder.Services.AddScoped<IDocumentAttachmentService, DocumentAttachmentService>();
         return builder;
     }
 }
