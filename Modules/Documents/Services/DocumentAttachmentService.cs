@@ -85,7 +85,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
         var ids = attachments.Select(a => a.Id).ToList();
 
         var signatures = await _db.Signatures
-            .Where(s => ids.Contains(s.DocumentAttachmentId))
+            .Where(s => s.DocumentAttachmentId != null && ids.Contains(s.DocumentAttachmentId.Value))
             .Select(s => new {s.DocumentAttachmentId, s.Revoked})
             .ToListAsync();
 

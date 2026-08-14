@@ -18,8 +18,22 @@ public class Signature
 {
     public int Id { get; set; }
 
-    /// <summary>Подписанное вложение (Documents.DocumentAttachment) — фиксирует хеш версии.</summary>
-    public int DocumentAttachmentId { get; set; }
+    /// <summary>
+    /// Подписанное вложение (Documents.DocumentAttachment) — фиксирует хеш версии.
+    /// Пусто, когда подписана карточка документа: у служебной записки текст живёт
+    /// в самой карточке, файла может не быть вовсе, а виза нужна всё равно.
+    /// </summary>
+    public int? DocumentAttachmentId { get; set; }
+
+    /// <summary>Подписанный документ — заполняется, когда подпись легла на карточку.</summary>
+    public int? DocumentId { get; set; }
+
+    /// <summary>
+    /// Отпечаток подписанного: для вложения это хеш версии файла, для карточки —
+    /// свёртка её существенных полей вместе с хешами вложений. По нему видно,
+    /// изменилось ли то, под чем стоит подпись.
+    /// </summary>
+    public string? ContentHash { get; set; }
 
     public int UserId { get; set; }
 

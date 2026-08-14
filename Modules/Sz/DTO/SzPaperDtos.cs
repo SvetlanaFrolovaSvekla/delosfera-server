@@ -85,6 +85,24 @@ public class SzPrintApprovalResponse
     public string? Resolution { get; set; }
     public string? Comment { get; set; }
     public DateTime? ResolvedAt { get; set; }
+
+    /// <summary>
+    /// Штамп электронной подписи под визой. Пусто — визы нет, и в печатной форме
+    /// на этом месте остаётся линейка под подпись от руки.
+    /// </summary>
+    public SzPrintSignatureResponse? Signature { get; set; }
+}
+
+/// <summary>Реквизиты штампа для печати (SIG-03).</summary>
+public class SzPrintSignatureResponse
+{
+    public required string LevelTitle { get; set; }
+    public string? FullName { get; set; }
+    public string? Position { get; set; }
+    public DateTime At { get; set; }
+    public string? Fingerprint { get; set; }
+    public bool Revoked { get; set; }
+    public string? RevokedReason { get; set; }
 }
 
 public class SzPrintAssignmentResponse

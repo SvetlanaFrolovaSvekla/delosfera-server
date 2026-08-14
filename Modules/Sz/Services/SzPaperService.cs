@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Modules.Signing.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Models;
@@ -202,6 +204,17 @@ public class SzPaperService : ISzPaperService
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => u);
 
+        // Подписи под визами — одним запросом на весь лист согласования.
+        var signatureIds = steps.SelectMany(s => s.Participants)
+            .Select(p => p.Resolution?.SignatureId)
+            .Where(id => id != null).Select(id => id!.Value).Distinct().ToList();
+
+        var signatures = signatureIds.Count == 0
+            ? []
+            : await _db.Signatures.AsNoTracking()
+                .Where(s => signatureIds.Contains(s.Id))
+                .ToDictionaryAsync(s => s.Id);
+
         var sheet = new List<SzPrintApprovalResponse>();
         foreach (var step in steps)
         {
@@ -218,12 +231,59 @@ public class SzPaperService : ISzPaperService
                     Unit = user?.OrgUnit?.TitleRu,
                     Resolution = p.Resolution?.Type.ToString(),
                     Comment = p.Resolution?.Comment,
-                    ResolvedAt = p.Resolution?.At
+                    ResolvedAt = p.Resolution?.At,
+                    Signature = PrintStamp(p.Resolution?.SignatureId, signatures)
                 });
             }
         }
 
         return sheet;
+    }
+
+    /// <summary>
+    /// Штамп подписи для печатной формы. Реквизиты берём из самой подписи: в бумаге
+    /// должно стоять то, кем человек был в день подписания, а не сегодня.
+    /// </summary>
+    private static SzPrintSignatureResponse? PrintStamp(
+        int? signatureId, IReadOnlyDictionary<int, Signature> signatures)
+    {
+        if (signatureId is not { } id || !signatures.TryGetValue(id, out var signature))
+            return null;
+
+        string? fullName = null, position = null, levelTitle = null;
+        if (!string.IsNullOrWhiteSpace(signature.StampMeta))
+        {
+            try
+            {
+                var meta = JsonDocument.Parse(signature.StampMeta).RootElement;
+                fullName = Text(meta, "fullName");
+                position = Text(meta, "position");
+                levelTitle = Text(meta, "levelTitle");
+            }
+            catch (JsonException)
+            {
+                // Реквизиты старой подписи могли быть записаны иначе — печатаем
+                // подпись без них, но саму подпись не теряем.
+            }
+        }
+
+        return new SzPrintSignatureResponse
+        {
+            LevelTitle = levelTitle ?? (signature.Level == SignatureLevel.Qualified
+                ? "Квалифицированная электронная подпись"
+                : "Простая электронная подпись"),
+            FullName = fullName,
+            Position = position,
+            At = signature.At,
+            Fingerprint = signature.ContentHash?[..Math.Min(12, signature.ContentHash.Length)],
+            Revoked = signature.Revoked,
+            RevokedReason = signature.RevokedReason,
+        };
+
+        static string? Text(JsonElement element, string name) =>
+            element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
     }
 
     private async Task<SzDocument> LoadAsync(int szId) =>

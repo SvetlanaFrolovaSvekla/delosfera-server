@@ -86,6 +86,29 @@ public class ResolutionResponse
     public required string Type { get; set; }
     public string? Comment { get; set; }
     public List<RemarkResponse> Remarks { get; set; } = [];
+
+    /// <summary>Подпись под резолюцией — то, что печатается штампом.</summary>
+    public SignatureStampResponse? Signature { get; set; }
+}
+
+/// <summary>
+/// Визуальный штамп подписи (SIG-03). Реквизиты берутся из самой подписи, а не из
+/// справочника: должность подписанта может измениться, а штамп обязан остаться
+/// таким, каким был в момент подписания.
+/// </summary>
+public class SignatureStampResponse
+{
+    public int Id { get; set; }
+    public required string LevelTitle { get; set; }
+    public string? FullName { get; set; }
+    public string? Position { get; set; }
+    public DateTime At { get; set; }
+
+    /// <summary>Отпечаток подписанного — короткая часть для показа на штампе.</summary>
+    public string? Fingerprint { get; set; }
+
+    public bool Revoked { get; set; }
+    public string? RevokedReason { get; set; }
 }
 
 public class RemarkResponse

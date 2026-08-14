@@ -1,8 +1,10 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
+using delosfera_server.Modules.Signing.Models;
 using delosfera_server.Modules.Workflow.DTO;
 using delosfera_server.Modules.Workflow.Models;
 using delosfera_server.Modules.Workflow.Services;
@@ -131,6 +133,55 @@ public class WorkflowController : ControllerBase
         return resp is null ? NotFound() : Ok(resp);
     }
 
+    /// <summary>
+    /// Штамп по сохранённой подписи. Реквизиты лежат в самой подписи строкой JSON —
+    /// разбираем её здесь, чтобы карточка и печатная форма показывали одно и то же.
+    /// </summary>
+    private static SignatureStampResponse? Stamp(
+        int? signatureId, IReadOnlyDictionary<int, Signature> signatures)
+    {
+        if (signatureId is not { } id || !signatures.TryGetValue(id, out var signature))
+            return null;
+
+        string? fullName = null, position = null, levelTitle = null;
+        if (!string.IsNullOrWhiteSpace(signature.StampMeta))
+        {
+            try
+            {
+                var meta = JsonDocument.Parse(signature.StampMeta).RootElement;
+                fullName = Text(meta, "fullName");
+                position = Text(meta, "position");
+                levelTitle = Text(meta, "levelTitle");
+            }
+            catch (JsonException)
+            {
+                // Штамп старой подписи мог быть записан в другом виде. Терять из-за
+                // этого саму подпись нельзя — покажем её без реквизитов.
+            }
+        }
+
+        return new SignatureStampResponse
+        {
+            Id = signature.Id,
+            LevelTitle = levelTitle ?? (signature.Level == SignatureLevel.Qualified
+                ? "Квалифицированная электронная подпись"
+                : "Простая электронная подпись"),
+            FullName = fullName,
+            Position = position,
+            At = signature.At,
+            // Полный отпечаток на штампе не нужен: он длинный и нечитаемый, а для
+            // сверки достаточно начала — целиком он остаётся в подписи.
+            Fingerprint = signature.ContentHash?[..Math.Min(12, signature.ContentHash.Length)],
+            Revoked = signature.Revoked,
+            RevokedReason = signature.RevokedReason,
+        };
+
+        static string? Text(JsonElement element, string name) =>
+            element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+    }
+
     private async Task<RouteInstanceResponse?> LoadResponse(int id)
     {
         var inst = await _db.RouteInstances.AsNoTracking()
@@ -146,6 +197,18 @@ public class WorkflowController : ControllerBase
         var names = await _db.Users.AsNoTracking()
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        // Подписи под резолюциями — одним запросом: лист согласования показывает
+        // штамп у каждой визы, и по подписи на строку это были бы десятки запросов.
+        var signatureIds = inst.Steps.SelectMany(s => s.Participants)
+            .Select(p => p.Resolution?.SignatureId)
+            .Where(id => id != null).Select(id => id!.Value).Distinct().ToList();
+
+        var signatures = signatureIds.Count == 0
+            ? []
+            : await _db.Signatures.AsNoTracking()
+                .Where(s => signatureIds.Contains(s.Id))
+                .ToDictionaryAsync(s => s.Id);
 
         return new RouteInstanceResponse
         {
@@ -168,7 +231,8 @@ public class WorkflowController : ControllerBase
                         Remarks = p.Resolution.Remarks.Select(rm => new RemarkResponse
                         {
                             Id = rm.Id, Text = rm.Text, State = rm.State.ToString()
-                        }).ToList()
+                        }).ToList(),
+                        Signature = Stamp(p.Resolution.SignatureId, signatures)
                     }
                 }).ToList()
             }).ToList()

@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
+using delosfera_server.Modules.Signing.Models;
+using delosfera_server.Modules.Signing.Services;
 using delosfera_server.Modules.Users.Services;
 using delosfera_server.Modules.Workflow.Models;
 
@@ -20,18 +22,21 @@ public class RouteEngine : IRouteEngine
     private readonly IEnumerable<IRouteCompletionHandler> _completionHandlers;
     private readonly ISubstitutionService _substitutions;
     private readonly IWorkflowNotifier _notifier;
+    private readonly ISignatureService _signatures;
 
     public RouteEngine(
         DelosferaDbContext db, IAuditService audit,
         IEnumerable<IRouteCompletionHandler> completionHandlers,
         ISubstitutionService substitutions,
-        IWorkflowNotifier notifier)
+        IWorkflowNotifier notifier,
+        ISignatureService signatures)
     {
         _db = db;
         _audit = audit;
         _completionHandlers = completionHandlers;
         _substitutions = substitutions;
         _notifier = notifier;
+        _signatures = signatures;
     }
 
     private IQueryable<RouteInstance> InstanceQuery() =>
@@ -235,6 +240,16 @@ public class RouteEngine : IRouteEngine
 
         await RequireSignatureAsync(step, type, actorUserId, signatureId);
         var inst = await InstanceQuery().FirstAsync(i => i.Id == step.RouteInstanceId);
+
+        // Нажатие кнопки — это простая электронная подпись, и она должна оставлять
+        // след: кто, когда и под чем расписался. Без записи подписи виза сводится к
+        // смене статуса, а доказать авторство решения потом нечем. Личность
+        // подтверждена входом, момент и отпечаток карточки фиксируются здесь.
+        //
+        // Автоакцепт по нормативу идёт от системы и подписи не имеет по определению.
+        signatureId ??= actorUserId == 0
+            ? null
+            : (await _signatures.SignDocumentAsync(inst.DocumentId, SignatureLevel.Simple, actorUserId)).Id;
 
         var resolution = new Resolution
         {

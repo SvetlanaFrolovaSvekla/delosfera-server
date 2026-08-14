@@ -10,5 +10,6 @@ public class SignatureConfiguration : IEntityTypeConfiguration<Signature>
         b.ToTable("signature");
         b.Property(x => x.Level).HasConversion<string>();
         b.HasIndex(x => x.DocumentAttachmentId);
+        b.HasIndex(x => x.DocumentId);
     }
 }
