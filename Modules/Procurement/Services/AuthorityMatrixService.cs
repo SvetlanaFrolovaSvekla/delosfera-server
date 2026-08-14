@@ -165,6 +165,8 @@ public class AuthorityMatrixService : IAuthorityMatrixService
         // Каждое правило опирается на пункт Положения о закупках. Пункт и ссылка на
         // документ идут рядом с текстом: инициатор должен прочитать основание сам,
         // а не верить системе на слово.
+        response.RegulationDocumentId = p.RegulationDocumentId;
+
         void Note(string text, string? clause = null) =>
             response.Notes.Add(new MatrixNoteResponse
             {

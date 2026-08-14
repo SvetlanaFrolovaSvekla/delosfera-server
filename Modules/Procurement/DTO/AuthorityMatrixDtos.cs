@@ -54,6 +54,12 @@ public class MatrixResolveResponse
     /// <summary>Дополнительные требования: УБУиО в комиссии, председатель — член Правления.</summary>
     public List<MatrixNoteResponse> Notes { get; set; } = [];
 
+    /// <summary>
+    /// Положение о закупках в базе ВНД. Нужен экранам, которые сами показывают
+    /// правила Положения — например, подсказку про закупку вне бюджета.
+    /// </summary>
+    public int? RegulationDocumentId { get; set; }
+
     /// <summary>Id сработавшего правила — на него ссылается заявка, чтобы решение было воспроизводимо.</summary>
     public int? RuleId { get; set; }
 }
