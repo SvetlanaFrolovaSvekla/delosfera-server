@@ -25,6 +25,8 @@ public class DirectorySettingsDto
     public string LoginAttribute { get; set; } = string.Empty;
     public string EmailAttribute { get; set; } = string.Empty;
     public string FullNameAttribute { get; set; } = string.Empty;
+    public string PositionAttribute { get; set; } = string.Empty;
+    public string OrgUnitAttribute { get; set; } = string.Empty;
     public int SyncIntervalMinutes { get; set; }
     public int? DefaultRoleId { get; set; }
 
@@ -53,6 +55,8 @@ public class DirectorySettingsRequest
     public string? LoginAttribute { get; set; }
     public string? EmailAttribute { get; set; }
     public string? FullNameAttribute { get; set; }
+    public string? PositionAttribute { get; set; }
+    public string? OrgUnitAttribute { get; set; }
     public int SyncIntervalMinutes { get; set; } = 60;
     public int? DefaultRoleId { get; set; }
 }
@@ -114,6 +118,10 @@ public class DirectorySettingsService : IDirectorySettingsService
             LoginAttribute = settings.LoginAttribute,
             EmailAttribute = settings.EmailAttribute,
             FullNameAttribute = settings.FullNameAttribute,
+            // Пустое значение в настройке означало бы, что должность и отдел
+            // перестали подтягиваться — держим умолчания Active Directory.
+            PositionAttribute = Fallback(settings.PositionAttribute, "title"),
+            OrgUnitAttribute = Fallback(settings.OrgUnitAttribute, "department"),
             SyncIntervalMinutes = settings.SyncIntervalMinutes,
             DefaultRoleId = settings.DefaultRoleId,
             LastSyncAt = settings.LastSyncAt,
@@ -150,6 +158,8 @@ public class DirectorySettingsService : IDirectorySettingsService
         if (!string.IsNullOrWhiteSpace(request.LoginAttribute)) settings.LoginAttribute = request.LoginAttribute.Trim();
         if (!string.IsNullOrWhiteSpace(request.EmailAttribute)) settings.EmailAttribute = request.EmailAttribute.Trim();
         if (!string.IsNullOrWhiteSpace(request.FullNameAttribute)) settings.FullNameAttribute = request.FullNameAttribute.Trim();
+        if (!string.IsNullOrWhiteSpace(request.PositionAttribute)) settings.PositionAttribute = request.PositionAttribute.Trim();
+        if (!string.IsNullOrWhiteSpace(request.OrgUnitAttribute)) settings.OrgUnitAttribute = request.OrgUnitAttribute.Trim();
 
         // Пустое поле пароля означает «не меняю»: иначе любое сохранение формы,
         // где пароль не показывается, стирало бы его.
@@ -208,11 +218,16 @@ public class DirectorySettingsService : IDirectorySettingsService
             LoginAttribute = settings.LoginAttribute,
             EmailAttribute = settings.EmailAttribute,
             FullNameAttribute = settings.FullNameAttribute,
+            PositionAttribute = settings.PositionAttribute,
+            OrgUnitAttribute = settings.OrgUnitAttribute,
             SyncIntervalMinutes = settings.SyncIntervalMinutes,
             DefaultRoleId = settings.DefaultRoleId,
             Enabled = settings.Enabled,
         };
     }
+
+    private static string Fallback(string? value, string byDefault) =>
+        string.IsNullOrWhiteSpace(value) ? byDefault : value.Trim();
 
     public async Task RecordSyncAsync(
         int created, int updated, int deactivated, string? error, CancellationToken ct = default)
@@ -252,6 +267,8 @@ public class DirectorySettingsService : IDirectorySettingsService
             settings.LoginAttribute = _configured.LoginAttribute;
             settings.EmailAttribute = _configured.EmailAttribute;
             settings.FullNameAttribute = _configured.FullNameAttribute;
+            settings.PositionAttribute = _configured.PositionAttribute;
+            settings.OrgUnitAttribute = _configured.OrgUnitAttribute;
             settings.SyncIntervalMinutes = _configured.SyncIntervalMinutes;
             settings.DefaultRoleId = _configured.DefaultRoleId;
 

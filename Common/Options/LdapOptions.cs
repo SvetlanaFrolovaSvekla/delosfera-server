@@ -39,6 +39,13 @@ public class LdapOptions
     public string EmailAttribute { get; set; } = "mail"; // keremetbank.kg
     public string FullNameAttribute { get; set; } = "displayName"; // полное отображаемое имя (ФИО)
 
+    // Должность сотрудника — в Active Directory это title.
+    public string PositionAttribute { get; set; } = "title";
+
+    // Отдел — в Active Directory это department. Атрибут ou описывает лишь ветку
+    // дерева каталога и оргструктуре банка не соответствует.
+    public string OrgUnitAttribute { get; set; } = "department";
+
     // Фоновый синк
     public int SyncIntervalMinutes { get; set; } = 60; // как часто гонять фоновую синхронизацию, 60 мин
     public int? DefaultRoleId { get; set; } // Id роли "Рядовой пользователь" для новых LDAP-юзеров (в конфиге это значение - 2)

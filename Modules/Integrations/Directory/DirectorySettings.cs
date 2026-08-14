@@ -44,6 +44,15 @@ public class DirectorySettings : IAuditableEntity
     public string EmailAttribute { get; set; } = "mail";
     public string FullNameAttribute { get; set; } = "displayName";
 
+    /// <summary>Атрибут должности. В Active Directory это title.</summary>
+    public string PositionAttribute { get; set; } = "title";
+
+    /// <summary>
+    /// Атрибут подразделения. В Active Directory отдел лежит в department;
+    /// ou содержит лишь ветку дерева каталога и для оргструктуры не годится.
+    /// </summary>
+    public string OrgUnitAttribute { get; set; } = "department";
+
     /// <summary>Как часто забирать пользователей из каталога.</summary>
     public int SyncIntervalMinutes { get; set; } = 60;
 
@@ -78,6 +87,8 @@ public class DirectorySettingsConfiguration : IEntityTypeConfiguration<Directory
         b.Property(x => x.LoginAttribute).HasMaxLength(64);
         b.Property(x => x.EmailAttribute).HasMaxLength(64);
         b.Property(x => x.FullNameAttribute).HasMaxLength(64);
+        b.Property(x => x.PositionAttribute).HasMaxLength(64);
+        b.Property(x => x.OrgUnitAttribute).HasMaxLength(64);
         b.Property(x => x.LastSyncError).HasMaxLength(2000);
     }
 }

@@ -36,7 +36,9 @@ public class LdapOptions
     public string EmailAttribute { get; set; } = "mail";
     public string FullNameAttribute { get; set; } = "cn";
     public string PositionAttribute { get; set; } = "title";
-    public string OrgUnitAttribute { get; set; } = "ou";
+    // В Active Directory отдел хранится в department; ou описывает лишь ветку
+    // дерева каталога и оргструктуре банка не соответствует.
+    public string OrgUnitAttribute { get; set; } = "department";
 
     /// <summary>
     /// Атрибут признака блокировки в AD (userAccountControl). Пусто — признак не читается,
