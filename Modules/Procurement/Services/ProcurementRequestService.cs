@@ -148,6 +148,14 @@ public class ProcurementRequestService : IProcurementRequestService
         if (request.Amount <= 0)
             throw new ArgumentException("Укажите ориентировочную сумму закупки");
 
+        // Окно объявления задаётся целиком или не задаётся вовсе: одна дата без второй
+        // не говорит ни о сроке приёма предложений, ни о дате публикации.
+        if (request.AnnouncementFrom is null != request.AnnouncementTo is null)
+            throw new ArgumentException("Укажите обе даты объявления закупки — «с» и «по»");
+
+        if (request.AnnouncementFrom is { } from && request.AnnouncementTo is { } to && to < from)
+            throw new ArgumentException("Дата окончания объявления раньше даты начала");
+
         // Способ и состав согласования определяет матрица; инициатор может настоять
         // на прямом заключении, но тогда обязательно обоснование (п. 6.6 Положения).
         var resolved = await _matrix.ResolveAsync(new MatrixResolveRequest
@@ -185,6 +193,8 @@ public class ProcurementRequestService : IProcurementRequestService
             HasBudget = request.HasBudget,
             PlanItem = request.PlanItem?.Trim(),
             HasSpecification = request.HasSpecification,
+            AnnouncementFrom = request.AnnouncementFrom,
+            AnnouncementTo = request.AnnouncementTo,
             InitiatorUnitId = request.InitiatorUnitId,
             CuratorUserId = request.CuratorUserId,
             MethodId = method.Id,
@@ -274,6 +284,8 @@ public class ProcurementRequestService : IProcurementRequestService
             HasBudget = r.HasBudget,
             PlanItem = r.PlanItem,
             HasSpecification = r.HasSpecification,
+            AnnouncementFrom = r.AnnouncementFrom,
+            AnnouncementTo = r.AnnouncementTo,
             InitiatorName = r.Document.Author?.FullName,
             InitiatorUnit = r.InitiatorUnit?.TitleRu,
             CuratorName = r.CuratorUser?.FullName,

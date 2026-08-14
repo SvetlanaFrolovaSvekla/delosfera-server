@@ -2,7 +2,7 @@ namespace delosfera_server.Modules.Procurement.DTO;
 
 /// <summary>
 /// Пакет публикации объявления о конкурсе (INT-05): готовый текст и реквизиты
-/// для сайта Банка и procurement.kg.
+/// для сайта Банка и tenders.kg.
 /// </summary>
 public class PublicationPackageDto
 {

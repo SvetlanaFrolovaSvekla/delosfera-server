@@ -54,6 +54,11 @@ public class TenderController : ControllerBase
     public async Task<IActionResult> Attendance(int memberId, [FromBody] AttendanceRequest request) =>
         await Run(() => _tenders.SetAttendanceAsync(memberId, request, _currentUser.UserId));
 
+    /// <summary>Заключение эксперта комиссии: текст и приложенный файл.</summary>
+    [HttpPost("commission/{memberId:int}/conclusion")]
+    public async Task<IActionResult> Conclusion(int memberId, [FromBody] ExpertConclusionRequest request) =>
+        await Run(() => _tenders.SetConclusionAsync(memberId, request, _currentUser.UserId));
+
     /// <summary>Объявить конкурс: публикация и срок приёма заявок.</summary>
     [HttpPost("tenders/{tenderId:int}/publish")]
     public async Task<IActionResult> Publish(int tenderId, [FromBody] TenderPublishRequest request) =>

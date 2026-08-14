@@ -14,6 +14,15 @@ public class CommissionMemberDto
     public bool IsAccountant { get; set; }
     public bool AttendedOpening { get; set; }
     public string? DissentingOpinion { get; set; }
+
+    /// <summary>Голосует ли: у секретаря и эксперта голоса нет.</summary>
+    public bool IsVoting { get; set; }
+
+    /// <summary>Заключение эксперта и приложенный к нему файл.</summary>
+    public string? Conclusion { get; set; }
+    public int? ConclusionAttachmentId { get; set; }
+    public string? ConclusionFileName { get; set; }
+    public DateTime? ConclusionAt { get; set; }
 }
 
 /// <summary>Конкурсная заявка в карточке.</summary>
@@ -127,4 +136,13 @@ public class TenderFailRequest
 {
     public required string Reason { get; set; }
     public bool Cancel { get; set; }
+}
+
+/// <summary>Заключение эксперта комиссии: текст, файл или и то, и другое.</summary>
+public class ExpertConclusionRequest
+{
+    public string? Conclusion { get; set; }
+
+    /// <summary>Вложение документа закупки с файлом заключения.</summary>
+    public int? AttachmentId { get; set; }
 }

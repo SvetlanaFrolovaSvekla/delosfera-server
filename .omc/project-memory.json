@@ -174,6 +174,12 @@
   },
   "hotPaths": [
     {
+      "path": "Modules/Procurement/Services/TenderService.cs",
+      "accessCount": 8,
+      "lastAccessed": 1786694147879,
+      "type": "file"
+    },
+    {
       "path": "Modules/Sz/Services/SzExecutionService.cs",
       "accessCount": 7,
       "lastAccessed": 1786604552393,
@@ -225,6 +231,12 @@
       "path": "Modules/Users/Services/AuthService.cs",
       "accessCount": 3,
       "lastAccessed": 1786613886170,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Procurement/Services/ProposalService.cs",
+      "accessCount": 3,
+      "lastAccessed": 1786694248974,
       "type": "file"
     },
     {
@@ -285,6 +297,30 @@
       "path": "Modules/Documents/Controllers/ActivityLogController.cs",
       "accessCount": 2,
       "lastAccessed": 1786648327697,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Procurement/Models/ProcurementRequest.cs",
+      "accessCount": 2,
+      "lastAccessed": 1786693904895,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Procurement/Services/ProcurementRequestService.cs",
+      "accessCount": 2,
+      "lastAccessed": 1786693924018,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Procurement/Models/Tender.cs",
+      "accessCount": 2,
+      "lastAccessed": 1786693945396,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Procurement/Controllers/TenderController.cs",
+      "accessCount": 2,
+      "lastAccessed": 1786694166017,
       "type": "file"
     },
     {
@@ -381,6 +417,36 @@
       "path": "Modules/Integrations/Directory/LdapDirectory.cs",
       "accessCount": 1,
       "lastAccessed": 1786645359009,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Signing/Services/SignatureService.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786686635849,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Procurement/Models/Configurations/ProposalConfigurations.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786694179659,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Procurement/Models/CommercialProposal.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786694197211,
+      "type": "file"
+    },
+    {
+      "path": "Modules/Procurement/Controllers/ProposalController.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786694408840,
+      "type": "file"
+    },
+    {
+      "path": "Migrations/20260814080713_ProcurementAnnouncementExpertsProposalFiles.cs",
+      "accessCount": 1,
+      "lastAccessed": 1786694837159,
       "type": "file"
     }
   ],

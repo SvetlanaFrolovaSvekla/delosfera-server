@@ -33,6 +33,12 @@ public enum CommissionRole
 
     /// <summary>Секретарь — ведёт протоколы, в кворум не входит.</summary>
     Secretary = 3,
+
+    /// <summary>
+    /// Эксперт — привлекается по отдельным закупкам за специальными знаниями:
+    /// даёт письменное заключение по предмету, но не голосует и в кворум не входит.
+    /// </summary>
+    Expert = 4,
 }
 
 /// <summary>
@@ -56,7 +62,7 @@ public class Tender : IAuditableEntity
     /// <summary>Конкурс с ограниченным участием — объявление не публикуется (PRC-13).</summary>
     public bool IsLimited { get; set; }
 
-    /// <summary>Дата публикации объявления на сайте Банка и procurement.kg.</summary>
+    /// <summary>Дата публикации объявления на сайте Банка и tenders.kg.</summary>
     public DateOnly? PublishedOn { get; set; }
 
     /// <summary>
@@ -109,6 +115,17 @@ public class CommissionMember
 
     /// <summary>Особое мнение члена комиссии фиксируется в протоколе.</summary>
     public string? DissentingOpinion { get; set; }
+
+    /// <summary>
+    /// Заключение эксперта по предмету закупки. Голоса у эксперта нет, поэтому его
+    /// вклад — именно текст заключения и приложенный к нему файл.
+    /// </summary>
+    public string? Conclusion { get; set; }
+
+    /// <summary>Файл заключения во вложениях документа закупки.</summary>
+    public int? ConclusionAttachmentId { get; set; }
+
+    public DateTime? ConclusionAt { get; set; }
 }
 
 /// <summary>Конкурсная заявка поставщика (PRC-15).</summary>

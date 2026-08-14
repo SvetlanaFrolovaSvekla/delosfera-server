@@ -35,6 +35,15 @@ public class CommercialProposal : IAuditableEntity
     /// <summary>Файл КП во вложениях документа закупки.</summary>
     public int? AttachmentId { get; set; }
 
+    /// <summary>
+    /// Ссылка на облако банка (nextcloud.keremetbank.kg) для объёмных приложений:
+    /// поставщики шлют сметы и каталоги, которые в почтовое вложение не помещаются.
+    /// </summary>
+    public string? ExternalLink { get; set; }
+
+    /// <summary>Файлы предложения — одно КП приходит пачкой: письмо, смета, спецификация.</summary>
+    public ICollection<ProposalFile> Files { get; set; } = new List<ProposalFile>();
+
     /// <summary>Дата поступления предложения.</summary>
     public DateOnly ReceivedOn { get; set; }
 
@@ -52,4 +61,22 @@ public class CommercialProposal : IAuditableEntity
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Файл коммерческого предложения. Сам файл лежит во вложениях документа закупки —
+/// здесь только связь: так к КП можно приложить несколько документов, а хранилище,
+/// хеши и подписи остаются общими для всей карточки.
+/// </summary>
+public class ProposalFile
+{
+    public int Id { get; set; }
+
+    public int ProposalId { get; set; }
+    public CommercialProposal? Proposal { get; set; }
+
+    /// <summary>Вложение документа закупки (Documents.DocumentAttachment).</summary>
+    public int DocumentAttachmentId { get; set; }
+
+    public DateTime AddedAt { get; set; }
 }

@@ -50,6 +50,14 @@ public class ProcurementRequest : IAuditableEntity
     /// <summary>Техническое задание приложено файлом или структурированным текстом.</summary>
     public bool HasSpecification { get; set; }
 
+    /// <summary>
+    /// Желаемые сроки объявления закупки: с какой даты объявление публикуется и по какую
+    /// принимаются предложения. Инициатор знает, когда закупка ему нужна; конкурс потом
+    /// берёт эти даты за основу, но переносить их вправо может только организатор.
+    /// </summary>
+    public DateOnly? AnnouncementFrom { get; set; }
+    public DateOnly? AnnouncementTo { get; set; }
+
     /// <summary>Инициирующее структурное подразделение.</summary>
     public int? InitiatorUnitId { get; set; }
     public OrganizationUnit? InitiatorUnit { get; set; }

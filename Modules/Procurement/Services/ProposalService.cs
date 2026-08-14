@@ -12,6 +12,7 @@ public interface IProposalService
     Task<ProposalComparisonDto> GetComparisonAsync(int requestId);
     Task<ProposalComparisonDto> AddAsync(int requestId, ProposalCreateRequest request, int actorUserId);
     Task<ProposalComparisonDto> SetVerdictAsync(int proposalId, ProposalVerdictRequest request, int actorUserId);
+    Task<ProposalComparisonDto> SetSourcesAsync(int proposalId, ProposalSourcesRequest request, int actorUserId);
     Task<ProposalComparisonDto> DeleteAsync(int proposalId, int actorUserId);
     Task<ProposalComparisonDto> DeclareWinnerAsync(int requestId, int proposalId, int actorUserId);
 }
@@ -81,6 +82,69 @@ public class ProposalService : IProposalService
 
         return await BuildAsync(procurement);
     }
+
+    public async Task<ProposalComparisonDto> SetSourcesAsync(
+        int proposalId, ProposalSourcesRequest request, int actorUserId)
+    {
+        var proposal = await _db.CommercialProposals
+            .Include(p => p.Files)
+            .Include(p => p.Supplier)
+            .FirstOrDefaultAsync(p => p.Id == proposalId)
+            ?? throw new KeyNotFoundException("Коммерческое предложение не найдено");
+
+        var procurement = await LoadRequestAsync(proposal.RequestId);
+
+        var link = string.IsNullOrWhiteSpace(request.ExternalLink) ? null : request.ExternalLink.Trim();
+        if (link is not null && !IsUsableLink(link))
+            throw new ArgumentException(
+                "Ссылка должна начинаться с http:// или https:// — например, https://nextcloud.keremetbank.kg/s/…");
+
+        var wanted = request.AttachmentIds.Distinct().ToList();
+        if (wanted.Count > 0)
+        {
+            // Прикладываем только файлы этой же закупки: вложение из чужой карточки
+            // попало бы в сравнительную таблицу как документ поставщика.
+            var own = await _db.DocumentAttachments
+                .Where(a => wanted.Contains(a.Id) && a.DocumentId == procurement.DocumentId)
+                .Select(a => a.Id)
+                .ToListAsync();
+
+            if (own.Count != wanted.Count)
+                throw new InvalidOperationException("Файл не найден среди вложений этой закупки");
+        }
+
+        foreach (var gone in proposal.Files.Where(f => !wanted.Contains(f.DocumentAttachmentId)).ToList())
+            _db.ProposalFiles.Remove(gone);
+
+        var already = proposal.Files.Select(f => f.DocumentAttachmentId).ToHashSet();
+        foreach (var added in wanted.Where(id => !already.Contains(id)))
+            _db.ProposalFiles.Add(new ProposalFile
+            {
+                ProposalId = proposal.Id,
+                DocumentAttachmentId = added,
+                AddedAt = DateTime.UtcNow,
+            });
+
+        proposal.ExternalLink = link;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("ProcurementRequest", proposal.RequestId, "ProposalSourcesChanged", actorUserId, new
+        {
+            supplier = proposal.Supplier?.Title,
+            files = wanted.Count,
+            hasLink = link is not null,
+        });
+
+        return await BuildAsync(procurement);
+    }
+
+    /// <summary>
+    /// Ссылка должна открываться из браузера. Хост не ограничиваем: облако банка —
+    /// основной случай, но предложение может лежать и на стороне поставщика.
+    /// </summary>
+    private static bool IsUsableLink(string link) =>
+        Uri.TryCreate(link, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     public async Task<ProposalComparisonDto> SetVerdictAsync(
         int proposalId, ProposalVerdictRequest request, int actorUserId)
@@ -215,6 +279,7 @@ public class ProposalService : IProposalService
     {
         var proposals = await _db.CommercialProposals
             .Include(p => p.Supplier)
+            .Include(p => p.Files)
             .Where(p => p.RequestId == request.Id)
             .OrderBy(p => p.Price)
             .ToListAsync();
@@ -259,8 +324,35 @@ public class ProposalService : IProposalService
                 SupplierBlacklisted = p.Supplier.IsBlacklisted,
                 SupplierAffiliated = p.Supplier.IsAffiliated,
                 SupplierReliable = p.Supplier.IsReliable,
+                ExternalLink = p.ExternalLink,
             }).ToList(),
         };
+
+        // Имена файлов подтягиваем одним запросом: связь хранит только идентификаторы,
+        // а в таблице предложений нужно показать, что именно приложено.
+        var fileIds = proposals.SelectMany(p => p.Files).Select(f => f.DocumentAttachmentId).Distinct().ToList();
+        if (fileIds.Count > 0)
+        {
+            var files = await _db.DocumentAttachments
+                .Where(a => fileIds.Contains(a.Id))
+                .Select(a => new {a.Id, a.FileName, a.Size})
+                .ToDictionaryAsync(a => a.Id);
+
+            foreach (var p in dto.Proposals)
+            {
+                var links = proposals.First(x => x.Id == p.Id).Files;
+                p.Files = links
+                    .Where(l => files.ContainsKey(l.DocumentAttachmentId))
+                    .Select(l => new ProposalFileDto
+                    {
+                        Id = l.Id,
+                        AttachmentId = l.DocumentAttachmentId,
+                        FileName = files[l.DocumentAttachmentId].FileName,
+                        Size = files[l.DocumentAttachmentId].Size,
+                    })
+                    .ToList();
+            }
+        }
 
         dto.RecommendedProposalId = eligible
             .Where(p => p.MeetsRequirements == true)

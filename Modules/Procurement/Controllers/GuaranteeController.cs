@@ -73,7 +73,7 @@ public class GuaranteeController : ControllerBase
     public async Task<IActionResult> CloseClaim(int id, [FromBody] ClaimCloseRequest request) =>
         await Run(() => _claims.CloseAsync(id, request, _currentUser.UserId));
 
-    /// <summary>Пакет публикации объявления о конкурсе для сайта и procurement.kg.</summary>
+    /// <summary>Пакет публикации объявления о конкурсе для сайта и tenders.kg.</summary>
     [HttpGet("tenders/{tenderId:int}/publication")]
     public async Task<IActionResult> Publication(int tenderId) =>
         await Run(() => _publication.BuildAsync(tenderId));

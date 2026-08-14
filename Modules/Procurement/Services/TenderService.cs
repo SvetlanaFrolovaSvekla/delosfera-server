@@ -17,6 +17,7 @@ public interface ITenderService
     Task<TenderDto> AddBidAsync(int tenderId, TenderBidRequest request, int actorUserId);
     Task<TenderDto> OpenBidsAsync(int tenderId, int actorUserId);
     Task<TenderDto> SetAttendanceAsync(int memberId, AttendanceRequest request, int actorUserId);
+    Task<TenderDto> SetConclusionAsync(int memberId, ExpertConclusionRequest request, int actorUserId);
     Task<TenderDto> ScoreBidAsync(int bidId, BidScoreRequest request, int actorUserId);
     Task<TenderDto> DeclareWinnerAsync(int tenderId, int bidId, int actorUserId);
     Task<TenderDto> FailAsync(int tenderId, TenderFailRequest request, int actorUserId);
@@ -134,6 +135,11 @@ public class TenderService : ITenderService
         if (request.Role == CommissionRole.Chairman && tender.Commission.Any(m => m.Role == CommissionRole.Chairman))
             throw new InvalidOperationException("Председатель комиссии уже назначен");
 
+        // Секретарь у комиссии один: он ведёт протокол, и второй такой же означал бы
+        // два протокола одного заседания.
+        if (request.Role == CommissionRole.Secretary && tender.Commission.Any(m => m.Role == CommissionRole.Secretary))
+            throw new InvalidOperationException("Секретарь комиссии уже назначен");
+
         _db.CommissionMembers.Add(new CommissionMember
         {
             TenderId = tenderId,
@@ -196,7 +202,7 @@ public class TenderService : ITenderService
         {
             tender.PublishedOn,
             tender.SubmissionDeadline,
-            channel = tender.IsLimited ? "приглашения участникам" : "сайт Банка и procurement.kg",
+            channel = tender.IsLimited ? "приглашения участникам" : "сайт Банка и tenders.kg",
         });
 
         return await BuildAsync((await LoadAsync(tenderId))!);
@@ -293,6 +299,13 @@ public class TenderService : ITenderService
         var member = await _db.CommissionMembers.FirstOrDefaultAsync(m => m.Id == memberId)
                      ?? throw new KeyNotFoundException("Член комиссии не найден");
 
+        // Особое мнение — форма несогласия с решением, а решение принимают голосующие.
+        // У эксперта и секретаря голоса нет, их позиция излагается иначе: заключением
+        // и протоколом соответственно.
+        if (!string.IsNullOrWhiteSpace(request.DissentingOpinion) && !IsVoting(member.Role))
+            throw new InvalidOperationException(
+                $"{RoleTitle(member.Role)} не голосует, поэтому особого мнения по решению не заявляет");
+
         member.AttendedOpening = request.Attended;
         member.DissentingOpinion = request.DissentingOpinion?.Trim();
 
@@ -305,6 +318,52 @@ public class TenderService : ITenderService
 
         return await BuildAsync((await LoadAsync(member.TenderId))!);
     }
+
+    public async Task<TenderDto> SetConclusionAsync(int memberId, ExpertConclusionRequest request, int actorUserId)
+    {
+        var member = await _db.CommissionMembers.FirstOrDefaultAsync(m => m.Id == memberId)
+                     ?? throw new KeyNotFoundException("Член комиссии не найден");
+
+        if (member.Role != CommissionRole.Expert)
+            throw new InvalidOperationException("Заключение по предмету закупки даёт эксперт комиссии");
+
+        if (string.IsNullOrWhiteSpace(request.Conclusion) && request.AttachmentId is null)
+            throw new ArgumentException("Приложите заключение текстом или файлом");
+
+        if (request.AttachmentId is { } attachmentId)
+        {
+            // Файл заключения должен лежать в этой же закупке: чужое вложение в
+            // протоколе выглядело бы как подмена документа.
+            var tender = await LoadAsync(member.TenderId) ?? throw new KeyNotFoundException("Конкурс не найден");
+            var documentId = await _db.ProcurementRequests
+                .Where(r => r.Id == tender.RequestId)
+                .Select(r => r.DocumentId)
+                .FirstAsync();
+
+            var belongs = await _db.DocumentAttachments
+                .AnyAsync(a => a.Id == attachmentId && a.DocumentId == documentId);
+
+            if (!belongs)
+                throw new InvalidOperationException("Файл заключения не найден среди вложений этой закупки");
+        }
+
+        member.Conclusion = request.Conclusion?.Trim();
+        member.ConclusionAttachmentId = request.AttachmentId;
+        member.ConclusionAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("Tender", member.TenderId, "ExpertConclusion", actorUserId, new
+        {
+            member.UserId,
+            hasFile = request.AttachmentId is not null,
+        });
+
+        return await BuildAsync((await LoadAsync(member.TenderId))!);
+    }
+
+    /// <summary>Голосуют председатель и члены комиссии; секретарь и эксперт — нет.</summary>
+    private static bool IsVoting(CommissionRole role) =>
+        role is CommissionRole.Chairman or CommissionRole.Member;
 
     public async Task<TenderDto> ScoreBidAsync(int bidId, BidScoreRequest request, int actorUserId)
     {
@@ -499,6 +558,10 @@ public class TenderService : ITenderService
                 IsAccountant = m.IsAccountant,
                 AttendedOpening = m.AttendedOpening,
                 DissentingOpinion = m.DissentingOpinion,
+                IsVoting = IsVoting(m.Role),
+                Conclusion = m.Conclusion,
+                ConclusionAttachmentId = m.ConclusionAttachmentId,
+                ConclusionAt = m.ConclusionAt,
             }).ToList(),
             Bids = t.Bids.OrderBy(b => b.Price).Select(b => new TenderBidDto
             {
@@ -518,10 +581,28 @@ public class TenderService : ITenderService
             }).ToList(),
         };
 
-        // Кворум — не менее двух третей состава, секретарь в него не входит.
-        var voting = t.Commission.Count(m => m.Role != CommissionRole.Secretary);
+        // Имя файла заключения — чтобы в карточке была видна не цифра вложения,
+        // а название документа, который эксперт приложил.
+        var conclusionFiles = dto.Commission
+            .Where(m => m.ConclusionAttachmentId is not null)
+            .Select(m => m.ConclusionAttachmentId!.Value)
+            .ToList();
+
+        if (conclusionFiles.Count > 0)
+        {
+            var names = await _db.DocumentAttachments
+                .Where(a => conclusionFiles.Contains(a.Id))
+                .ToDictionaryAsync(a => a.Id, a => a.FileName);
+
+            foreach (var m in dto.Commission.Where(m => m.ConclusionAttachmentId is not null))
+                m.ConclusionFileName = names.GetValueOrDefault(m.ConclusionAttachmentId!.Value);
+        }
+
+        // Секретарь ведёт протокол, эксперт даёт заключение — ни тот, ни другой не
+        // голосуют, поэтому в кворум и в требования к составу они не входят.
+        var voting = t.Commission.Count(m => IsVoting(m.Role));
         dto.QuorumRequired = (int)Math.Ceiling(voting * 2m / 3m);
-        dto.Attended = t.Commission.Count(m => m.Role != CommissionRole.Secretary && m.AttendedOpening);
+        dto.Attended = t.Commission.Count(m => IsVoting(m.Role) && m.AttendedOpening);
         dto.HasQuorum = voting > 0 && dto.Attended >= dto.QuorumRequired;
 
         FillBlockers(dto, t, voting);
@@ -541,7 +622,7 @@ public class TenderService : ITenderService
         if (!t.Commission.Any(m => m.Role == CommissionRole.Chairman))
             dto.Blockers.Add("Не назначен председатель комиссии");
 
-        var boardMembers = t.Commission.Count(m => m.IsBoardMember);
+        var boardMembers = t.Commission.Count(m => m.IsBoardMember && IsVoting(m.Role));
         if (dto.RequiredBoardMembers > 0 && boardMembers < dto.RequiredBoardMembers)
             dto.Blockers.Add(
                 $"В комиссии должно быть не менее {dto.RequiredBoardMembers} членов Правления, сейчас {boardMembers}");
@@ -573,6 +654,7 @@ public class TenderService : ITenderService
     {
         CommissionRole.Chairman => "Председатель",
         CommissionRole.Secretary => "Секретарь",
+        CommissionRole.Expert => "Эксперт без права голоса",
         _ => "Член комиссии",
     };
 }

@@ -37,5 +37,23 @@ public class CommercialProposalConfiguration : IEntityTypeConfiguration<Commerci
             .WithMany()
             .HasForeignKey(x => x.SupplierId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        b.Property(x => x.ExternalLink).HasMaxLength(1000);
+
+        b.HasMany(x => x.Files)
+            .WithOne(f => f.Proposal!)
+            .HasForeignKey(f => f.ProposalId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class ProposalFileConfiguration : IEntityTypeConfiguration<ProposalFile>
+{
+    public void Configure(EntityTypeBuilder<ProposalFile> b)
+    {
+        b.ToTable("procurement_proposal_file");
+
+        // Один и тот же файл не прикладывается к предложению дважды.
+        b.HasIndex(x => new { x.ProposalId, x.DocumentAttachmentId }).IsUnique();
     }
 }

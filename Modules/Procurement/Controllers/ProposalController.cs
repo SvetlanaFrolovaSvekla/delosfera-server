@@ -42,6 +42,11 @@ public class ProposalController : ControllerBase
         await Run(() => _proposals.SetVerdictAsync(proposalId, request, _currentUser.UserId));
 
     /// <summary>Удалить ошибочно заведённое предложение.</summary>
+    /// <summary>Файлы предложения и ссылка на облако банка.</summary>
+    [HttpPut("proposals/{proposalId:int}/sources")]
+    public async Task<IActionResult> Sources(int proposalId, [FromBody] ProposalSourcesRequest request) =>
+        await Run(() => _proposals.SetSourcesAsync(proposalId, request, _currentUser.UserId));
+
     [HttpDelete("proposals/{proposalId:int}")]
     public async Task<IActionResult> Delete(int proposalId) =>
         await Run(() => _proposals.DeleteAsync(proposalId, _currentUser.UserId));

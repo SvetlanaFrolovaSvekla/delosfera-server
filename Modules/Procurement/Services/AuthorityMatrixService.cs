@@ -169,7 +169,7 @@ public class AuthorityMatrixService : IAuthorityMatrixService
             response.Notes.Add("Обязательно обоснование применения способа по п. 6.6 Положения");
 
         if (method.RequiresPublication)
-            response.Notes.Add("Объявление публикуется на сайте Банка и procurement.kg, конкурсный период — не менее 5 рабочих дней");
+            response.Notes.Add("Объявление публикуется на сайте Банка и tenders.kg, конкурсный период — не менее 5 рабочих дней");
 
         if (response.ProtocolRequired)
             response.Notes.Add($"Сумма превышает {Money(p.ProtocolThreshold)} — оформляется протокол закупки (PRC-10)");

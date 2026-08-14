@@ -57,6 +57,11 @@ public class ProcurementCreateRequest
     public bool HasBudget { get; set; }
     public string? PlanItem { get; set; }
     public bool HasSpecification { get; set; }
+
+    /// <summary>Желаемое окно объявления закупки: «с» и «по».</summary>
+    public DateOnly? AnnouncementFrom { get; set; }
+    public DateOnly? AnnouncementTo { get; set; }
+
     public int? InitiatorUnitId { get; set; }
     public int? CuratorUserId { get; set; }
 
@@ -91,6 +96,10 @@ public class ProcurementCardDto
     public bool HasBudget { get; set; }
     public string? PlanItem { get; set; }
     public bool HasSpecification { get; set; }
+
+    /// <summary>Желаемое окно объявления закупки: «с» и «по».</summary>
+    public DateOnly? AnnouncementFrom { get; set; }
+    public DateOnly? AnnouncementTo { get; set; }
 
     public string? InitiatorName { get; set; }
     public string? InitiatorUnit { get; set; }

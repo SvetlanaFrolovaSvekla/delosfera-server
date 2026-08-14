@@ -19,6 +19,12 @@ public class ProposalDto
     public string? RejectionReason { get; set; }
     public bool IsWinner { get; set; }
 
+    /// <summary>Ссылка на облако банка с приложениями к предложению.</summary>
+    public string? ExternalLink { get; set; }
+
+    /// <summary>Файлы предложения: письмо поставщика, смета, спецификация.</summary>
+    public List<ProposalFileDto> Files { get; set; } = [];
+
     /// <summary>Насколько предложение дороже минимального, в процентах.</summary>
     public decimal? PriceDeltaPercent { get; set; }
 
@@ -73,6 +79,24 @@ public class ProposalCreateRequest
 }
 
 /// <summary>Заключение о соответствии предложения техническим требованиям (PRC-11).</summary>
+public class ProposalFileDto
+{
+    public int Id { get; set; }
+    public int AttachmentId { get; set; }
+    public required string FileName { get; set; }
+    public long Size { get; set; }
+}
+
+/// <summary>Источники предложения: файлы из карточки закупки и ссылка на облако.</summary>
+public class ProposalSourcesRequest
+{
+    /// <summary>Вложения документа закупки, относящиеся к этому предложению.</summary>
+    public List<int> AttachmentIds { get; set; } = [];
+
+    /// <summary>Ссылка на nextcloud.keremetbank.kg. Пусто — ссылку убрать.</summary>
+    public string? ExternalLink { get; set; }
+}
+
 public class ProposalVerdictRequest
 {
     public bool MeetsRequirements { get; set; }
