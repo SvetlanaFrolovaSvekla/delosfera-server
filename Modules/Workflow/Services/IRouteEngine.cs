@@ -22,8 +22,12 @@ public interface IRouteEngine
     /// Шаблон описывает типовой путь документа, но у служебных записок состав
     /// согласующих чаще определяет автор под конкретный вопрос.
     /// </summary>
+    /// <summary>Дописать этап подписания в конец маршрута, собранного по шаблону.</summary>
+    Task AppendSigningStepAsync(int routeInstanceId, int signerUserId);
+
     Task<RouteInstance> InstantiateForApproversAsync(
-        int documentId, IReadOnlyList<int> approverUserIds, bool parallel, int? timeNormHours = null);
+        int documentId, IReadOnlyList<int> approverUserIds, bool parallel,
+        int? timeNormHours = null, int? signerUserId = null);
 
     /// <summary>Подтверждение автором «Замечания устранены» (строгий режим, TID-09).</summary>
     Task ConfirmRemarkResolvedAsync(int remarkId, int actorUserId);

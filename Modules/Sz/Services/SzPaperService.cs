@@ -226,6 +226,7 @@ public class SzPaperService : ISzPaperService
                 sheet.Add(new SzPrintApprovalResponse
                 {
                     StepOrder = step.Order,
+                    StepKind = step.Kind.ToString(),
                     UserName = user?.FullName,
                     Position = user?.Position?.TitleRu,
                     Unit = user?.OrgUnit?.TitleRu,

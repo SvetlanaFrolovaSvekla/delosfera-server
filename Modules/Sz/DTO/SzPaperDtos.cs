@@ -77,6 +77,9 @@ public class SzPrintFieldResponse
 public class SzPrintApprovalResponse
 {
     public int StepOrder { get; set; }
+
+    /// <summary>Вид этапа: согласование или подписание — в листе они различаются.</summary>
+    public string? StepKind { get; set; }
     public string? UserName { get; set; }
     public string? Position { get; set; }
     public string? Unit { get; set; }

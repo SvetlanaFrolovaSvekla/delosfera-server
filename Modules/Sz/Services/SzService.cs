@@ -281,8 +281,11 @@ public class SzService : ISzService
         sz.DueDate = sz.RegisteredOn.Value.AddDays(kind?.ExecutionDays ?? 14);
         sz.ApprovalRounds++;
 
+        // Подписант, если он назван в карточке, замыкает маршрут отдельным этапом:
+        // раньше поле заполнялось, а действия под него не было — человека назначали,
+        // и на этом всё заканчивалось.
         var instance = await _routeEngine.InstantiateForApproversAsync(
-            sz.DocumentId, approvers, sz.ApprovalIsParallel);
+            sz.DocumentId, approvers, sz.ApprovalIsParallel, signerUserId: sz.SignerUserId);
 
         await _routeEngine.StartAsync(instance.Id, actorUserId);
         sz.Document!.CurrentRouteInstanceId = instance.Id;
@@ -416,6 +419,12 @@ public class SzService : ISzService
 
         // Регистрация запускает согласование (SZ-01): маршрут строится из шаблона вида.
         var instance = await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, routeTemplateId);
+
+        // Подписант из карточки замыкает маршрут: шаблон описывает согласование,
+        // а кто подписывает — решает автор записки.
+        if (sz.SignerUserId is { } signer)
+            await _routeEngine.AppendSigningStepAsync(instance.Id, signer);
+
         await _routeEngine.StartAsync(instance.Id, actorUserId);
         sz.Document.CurrentRouteInstanceId = instance.Id;
 

@@ -83,8 +83,34 @@ public class RouteEngine : IRouteEngine
         return instance;
     }
 
+    /// <summary>
+    /// Дописать этап подписания в конец маршрута, собранного по шаблону. Шаблон
+    /// задаёт согласование, а подписант приходит из карточки документа — если в
+    /// шаблоне подписание уже предусмотрено, второй раз его не добавляем.
+    /// </summary>
+    public async Task AppendSigningStepAsync(int routeInstanceId, int signerUserId)
+    {
+        var instance = await InstanceQuery().FirstOrDefaultAsync(i => i.Id == routeInstanceId)
+                       ?? throw new KeyNotFoundException($"Маршрут {routeInstanceId} не найден");
+
+        if (instance.Steps.Any(s => s.Kind == StepKind.Signing)) return;
+
+        _db.RouteSteps.Add(new RouteStep
+        {
+            RouteInstanceId = instance.Id,
+            Order = instance.Steps.Count == 0 ? 1 : instance.Steps.Max(s => s.Order) + 1,
+            Mode = StepMode.Sequential,
+            Kind = StepKind.Signing,
+            Participants = [new RouteParticipant {UserId = signerUserId, Required = true, State = ParticipantState.Pending}],
+        });
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(Entity, instance.Id, "SigningStepAppended", null, new {signerUserId});
+    }
+
     public async Task<RouteInstance> InstantiateForApproversAsync(
-        int documentId, IReadOnlyList<int> approverUserIds, bool parallel, int? timeNormHours = null)
+        int documentId, IReadOnlyList<int> approverUserIds, bool parallel,
+        int? timeNormHours = null, int? signerUserId = null)
     {
         if (approverUserIds.Count == 0)
             throw new InvalidOperationException("Не выбран ни один согласующий");
@@ -114,6 +140,21 @@ public class RouteEngine : IRouteEngine
                 Participants = [new RouteParticipant {UserId = id, Required = true, State = ParticipantState.Pending}],
             }).ToList();
 
+        // Подписант ставит подпись последним: сначала документ согласуют по существу,
+        // и только потом руководитель подписывает то, с чем все согласились. Обратный
+        // порядок означал бы подпись под текстом, который ещё могут изменить.
+        if (signerUserId is { } signer)
+        {
+            steps.Add(new RouteStep
+            {
+                Order = steps.Count + 1,
+                Mode = StepMode.Sequential,
+                Kind = StepKind.Signing,
+                TimeNormHours = timeNormHours,
+                Participants = [new RouteParticipant {UserId = signer, Required = true, State = ParticipantState.Pending}],
+            });
+        }
+
         var instance = new RouteInstance
         {
             DocumentId = documentId,
@@ -125,7 +166,7 @@ public class RouteEngine : IRouteEngine
         await _db.SaveChangesAsync();
 
         await _audit.LogAsync(Entity, instance.Id, "InstantiatedForApprovers", null,
-            new {documentId, approvers = approverUserIds.Count, parallel});
+            new {documentId, approvers = approverUserIds.Count, parallel, signer = signerUserId});
 
         return instance;
     }
