@@ -37,15 +37,17 @@ public class LdapDirectoryService : ILdapDirectoryService
             };
             connection.SessionOptions.ProtocolVersion = 3;
 
-            /* Если в конфиге UseSsl: true (по умолчанию) - включаем шифрование и подставляем
-            свою функцию проверки сертификата сервера, потому что банковский внутренний CA
-            стандартной проверкой .NET не распознаётся как доверенный
-            Поэтому используется VerifyServerCertificate (собственная проверка вместо стандартной) (как и в терасофт).
-             */
+            // Шифрование поднимается до отправки учётных данных: пароль служебной
+            // записи не должен ходить по сети открытым текстом.
             if (_options.UseSsl)
             {
-                connection.SessionOptions.SecureSocketLayer = true;
-                connection.SessionOptions.VerifyServerCertificate = (conn, cert) => LdapCertificateValidator.VerifyCorporateCertificate(cert);
+                var способ = LdapSecurity.Secure(connection, _options.Port);
+                _logger.LogInformation("LDAP: связь шифруется ({Способ})", способ);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "LDAP: шифрование выключено — пароль служебной учётной записи идёт открытым текстом");
             }
 
             // Синк ходит под техническим аккаунтом, не под учёткой конкретного юзера

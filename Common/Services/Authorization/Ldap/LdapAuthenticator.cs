@@ -47,11 +47,10 @@ public class LdapAuthenticator : ILdapAuthenticator
                 };
                 connection.SessionOptions.ProtocolVersion = 3;
 
+                // Пароль сотрудника уходит в этом же соединении, поэтому шифрование
+                // поднимается прежде, чем он будет отправлен.
                 if (_options.UseSsl)
-                {
-                    connection.SessionOptions.SecureSocketLayer = true;
-                    connection.SessionOptions.VerifyServerCertificate = (conn, cert) => LdapCertificateValidator.VerifyCorporateCertificate(cert);
-                }
+                    LdapSecurity.Secure(connection, _options.Port);
 
                 // Домен принимает простой bind только по имени в форме имя@домен:
                 // на голый sAMAccountName он отвечает отказом с кодом 52e, и вход
