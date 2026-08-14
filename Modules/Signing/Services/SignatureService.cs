@@ -11,17 +11,40 @@ public class SignatureService : ISignatureService
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
     private readonly IDocumentFingerprintService _fingerprints;
+    private readonly ISimpleSignatureRegulationService _regulation;
 
     public SignatureService(
-        DelosferaDbContext db, IAuditService audit, IDocumentFingerprintService fingerprints)
+        DelosferaDbContext db, IAuditService audit, IDocumentFingerprintService fingerprints,
+        ISimpleSignatureRegulationService regulation)
     {
         _db = db;
         _audit = audit;
         _fingerprints = fingerprints;
+        _regulation = regulation;
+    }
+
+    /// <summary>
+    /// Простая подпись имеет силу, только когда стороны договорились о правилах её
+    /// применения. Пока сотрудник не согласился с регламентом, подписывать нечем:
+    /// запись в базе без согласия предъявить как подпись нельзя.
+    ///
+    /// Квалифицированная подпись опирается на сертификат и в этой договорённости
+    /// не нуждается.
+    /// </summary>
+    private async Task RequireConsentAsync(SignatureLevel level, int userId)
+    {
+        if (level != SignatureLevel.Simple) return;
+
+        var state = await _regulation.GetStateAsync(userId);
+        if (state.Required && !state.Accepted)
+            throw new InvalidOperationException(
+                "Подписание недоступно: сначала примите регламент применения простой электронной подписи");
     }
 
     public async Task<Signature> SignAsync(int documentAttachmentId, SignatureLevel level, int userId, string? stampMeta = null)
     {
+        await RequireConsentAsync(level, userId);
+
         var hash = await _db.DocumentAttachments
             .Where(a => a.Id == documentAttachmentId)
             .Select(a => a.Hash)
@@ -55,6 +78,8 @@ public class SignatureService : ISignatureService
     public async Task<Signature> SignDocumentAsync(
         int documentId, SignatureLevel level, int userId, string? stampMeta = null)
     {
+        await RequireConsentAsync(level, userId);
+
         var sig = new Signature
         {
             DocumentId = documentId,

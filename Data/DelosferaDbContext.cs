@@ -89,6 +89,8 @@ public class DelosferaDbContext : DbContext
 
     // --- ЭП (SIG-01..05) ---
     public DbSet<Signature> Signatures => Set<Signature>();
+    public DbSet<SimpleSignatureRegulation> SimpleSignatureRegulations => Set<SimpleSignatureRegulation>();
+    public DbSet<SimpleSignatureConsent> SimpleSignatureConsents => Set<SimpleSignatureConsent>();
 
     // --- Закупки (контур 6 ТЗ): матрица полномочий и её параметры ---
     public DbSet<ProcurementMethod> ProcurementMethods => Set<ProcurementMethod>();

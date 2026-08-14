@@ -10,6 +10,7 @@ public static class SupportServiceExtensions
     {
         builder.Services.AddScoped<ISignatureService, SignatureService>();
         builder.Services.AddScoped<IDocumentFingerprintService, DocumentFingerprintService>();
+        builder.Services.AddScoped<ISimpleSignatureRegulationService, SimpleSignatureRegulationService>();
 
         // КЭП: проверка подписи хеша версии и реквизитов сертификата (SIG-02, INT-03)
         builder.Services.AddScoped<IQualifiedSignatureService, QualifiedSignatureService>();
