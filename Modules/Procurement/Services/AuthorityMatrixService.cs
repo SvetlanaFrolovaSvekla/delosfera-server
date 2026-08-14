@@ -162,26 +162,40 @@ public class AuthorityMatrixService : IAuthorityMatrixService
         MatrixResolveResponse response, AuthorityMatrixRule rule, ProcurementMethod method,
         decimal amount, MatrixParameters p)
     {
+        // Каждое правило опирается на пункт Положения о закупках. Пункт и ссылка на
+        // документ идут рядом с текстом: инициатор должен прочитать основание сам,
+        // а не верить системе на слово.
+        void Note(string text, string? clause = null) =>
+            response.Notes.Add(new MatrixNoteResponse
+            {
+                Text = text,
+                Clause = clause,
+                DocumentId = clause is null ? null : p.RegulationDocumentId,
+            });
+
         if (method.MinProposals > 0)
-            response.Notes.Add($"Требуется не менее {method.MinProposals} коммерческих предложений (PRC-09)");
+            Note($"Требуется не менее {method.MinProposals} коммерческих предложений (PRC-09)",
+                "п. 8.1 Положения — запрос ценовых предложений");
 
         if (method.RequiresJustification)
-            response.Notes.Add("Обязательно обоснование применения способа по п. 6.6 Положения");
+            Note("Обязательно обоснование применения способа по п. 6.6 Положения", "п. 6.6 Положения");
 
         if (method.RequiresPublication)
-            response.Notes.Add("Объявление публикуется на сайте Банка и tenders.kg, конкурсный период — не менее 5 рабочих дней");
+            Note("Объявление публикуется на сайте Банка и tenders.kg, конкурсный период — не менее 5 рабочих дней",
+                "разделы 11.2–11.3 Положения — конкурс");
 
         if (response.ProtocolRequired)
-            response.Notes.Add($"Сумма превышает {Money(p.ProtocolThreshold)} — оформляется протокол закупки (PRC-10)");
+            Note($"Сумма превышает {Money(p.ProtocolThreshold)} — оформляется протокол закупки (PRC-10)",
+                "п. 11.1 Положения и Приложение № 2");
 
         if (rule.CommissionRequired && amount > p.CommissionBoardChairThreshold)
-            response.Notes.Add($"Свыше {Money(p.CommissionBoardChairThreshold)} председателем комиссии назначается член Правления, не курирующий инициирующее СП");
+            Note($"Свыше {Money(p.CommissionBoardChairThreshold)} председателем комиссии назначается член Правления, не курирующий инициирующее СП");
 
         if (rule.CommissionRequired && amount > p.CommissionAccountantThreshold)
-            response.Notes.Add($"Свыше {Money(p.CommissionAccountantThreshold)} в состав комиссии включается сотрудник УБУиО");
+            Note($"Свыше {Money(p.CommissionAccountantThreshold)} в состав комиссии включается сотрудник УБУиО");
 
         if (rule.ApprovalAuthority is ApprovalAuthority.Board or ApprovalAuthority.SupervisoryBoard or ApprovalAuthority.Shareholders)
-            response.Notes.Add($"Этап «Вынесение на {AuthorityTitle(rule.ApprovalAuthority)}»: продолжение — после загрузки выписки из протокола (PRC-06)");
+            Note($"Этап «Вынесение на {AuthorityTitle(rule.ApprovalAuthority)}»: продолжение — после загрузки выписки из протокола (PRC-06)");
     }
 
     private static string RangeTitle(AuthorityMatrixRule rule, MatrixParameters p)
@@ -230,7 +244,10 @@ public class AuthorityMatrixService : IAuthorityMatrixService
             Nsk: Get("Nsk", 0m),
             ProtocolThreshold: Get("ProtocolThreshold", 50_000m),
             CommissionAccountantThreshold: Get("CommissionAccountantThreshold", 5_000_000m),
-            CommissionBoardChairThreshold: Get("CommissionBoardChairThreshold", 3_000_000m));
+            CommissionBoardChairThreshold: Get("CommissionBoardChairThreshold", 3_000_000m),
+            // Ноль означает «Положение в базу ВНД ещё не загружено»: тогда примечание
+            // остаётся текстом с номером пункта, но без ссылки.
+            RegulationDocumentId: Get("RegulationDocumentId", 0m) is var id && id > 0 ? (int)id : null);
     }
 
     private record MatrixParameters(
@@ -238,5 +255,6 @@ public class AuthorityMatrixService : IAuthorityMatrixService
         decimal Nsk,
         decimal ProtocolThreshold,
         decimal CommissionAccountantThreshold,
-        decimal CommissionBoardChairThreshold);
+        decimal CommissionBoardChairThreshold,
+        int? RegulationDocumentId);
 }

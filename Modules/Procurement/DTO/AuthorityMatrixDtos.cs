@@ -52,7 +52,7 @@ public class MatrixResolveResponse
     public List<MatrixFactDto> Facts { get; set; } = [];
 
     /// <summary>Дополнительные требования: УБУиО в комиссии, председатель — член Правления.</summary>
-    public List<string> Notes { get; set; } = [];
+    public List<MatrixNoteResponse> Notes { get; set; } = [];
 
     /// <summary>Id сработавшего правила — на него ссылается заявка, чтобы решение было воспроизводимо.</summary>
     public int? RuleId { get; set; }
@@ -88,4 +88,20 @@ public class MatrixTableDto
     public decimal BalanceAssets { get; set; }
     public decimal Nsk { get; set; }
     public decimal ProtocolThreshold { get; set; }
+}
+
+/// <summary>
+/// Примечание к решению матрицы. Правило взято не из воздуха, а из Положения о
+/// закупках, поэтому рядом с текстом идёт пункт и ссылка на сам документ: человек
+/// должен иметь возможность прочитать основание, а не верить системе на слово.
+/// </summary>
+public class MatrixNoteResponse
+{
+    public required string Text { get; set; }
+
+    /// <summary>Пункт Положения, на котором держится правило.</summary>
+    public string? Clause { get; set; }
+
+    /// <summary>Документ Положения в базе ВНД, если он туда загружен.</summary>
+    public int? DocumentId { get; set; }
 }
