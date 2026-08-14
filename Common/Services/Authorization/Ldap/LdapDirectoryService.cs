@@ -58,6 +58,7 @@ public class LdapDirectoryService : ILdapDirectoryService
             var attributes = new[]
             {
                 _options.LoginAttribute, _options.EmailAttribute, _options.FullNameAttribute,
+                _options.PositionAttribute, _options.OrgUnitAttribute,
                 "objectGUID", "userAccountControl"
             };
 
@@ -127,6 +128,16 @@ public class LdapDirectoryService : ILdapDirectoryService
         var uac = entry.Attributes["userAccountControl"]?[0]?.ToString();
         var isActive = uac is null || (int.Parse(uac) & UserAccountControlDisabledBit) == 0;
 
-        return new LdapDirectoryUser(new Guid(guidBytes), login, email, fullName ?? login, isActive);
+        return new LdapDirectoryUser(
+            new Guid(guidBytes), login, email, fullName ?? login, isActive,
+            Position: Text(entry, _options.PositionAttribute),
+            Department: Text(entry, _options.OrgUnitAttribute));
+    }
+
+    /// <summary>Значение атрибута или null, если он не заполнен в каталоге.</summary>
+    private static string? Text(SearchResultEntry entry, string attribute)
+    {
+        var value = entry.Attributes[attribute]?[0]?.ToString();
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 }
