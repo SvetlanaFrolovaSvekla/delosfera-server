@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник ключевых слов (иерархический)
 /// </summary>
 [ApiController]
-[Route("dictionaries/keyword")]
+[Route("api/dictionaries/keyword")]
 [Tags("Справочники — Ключевые слова")]
 [Authorize]
 public class KeywordController : ControllerBase

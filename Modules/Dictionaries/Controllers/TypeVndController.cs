@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник видов внутренних нормативных документов (ВНД)
 /// </summary>
 [ApiController]
-[Route("dictionaries/type-vnd")]
+[Route("api/dictionaries/type-vnd")]
 [Tags("Справочники — Виды ВНД")]
 [Authorize]
 public class TypeVndController : ControllerBase

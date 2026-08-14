@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник групп пользователей
 /// </summary>
 [ApiController]
-[Route("dictionaries/user-group")]
+[Route("api/dictionaries/user-group")]
 [Tags("Справочники — Группы пользователей")]
 [Authorize]
 public class UserGroupController : ControllerBase

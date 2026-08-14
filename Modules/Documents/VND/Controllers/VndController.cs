@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Authorization;
 namespace delosfera_server.Modules.Documents.VND.Controllers;
 
 [ApiController]
-[Route("/vnd")]
+[Route("api/vnd")]
 [Tags("ВНД")]
 [Authorize]
 public class VndController : ControllerBase

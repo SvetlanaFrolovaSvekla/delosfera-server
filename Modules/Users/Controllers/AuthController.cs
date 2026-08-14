@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Users.Controllers;
 /// access-токен возвращается в теле и хранится клиентом в памяти.
 /// </summary>
 [ApiController]
-[Route("/auth")]
+[Route("api/auth")]
 [Tags("Аутентификация")]
 [EnableRateLimiting("auth")]
 public class AuthController : ControllerBase

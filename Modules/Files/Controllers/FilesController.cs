@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace delosfera_server.Modules.Files.Controllers;
 
 [ApiController]
-[Route("/files")]
+[Route("api/files")]
 [Tags("Файлы")]
 [Authorize]
 public class FilesController : ControllerBase

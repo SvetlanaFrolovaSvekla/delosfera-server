@@ -12,7 +12,7 @@ using delosfera_server.Modules.Notifications.Services;
 namespace delosfera_server.Modules.Notifications.Controllers;
 
 [ApiController]
-[Route("/notifications")]
+[Route("api/notifications")]
 [Tags("Уведомления")]
 [Authorize]
 public class NotificationController : ControllerBase

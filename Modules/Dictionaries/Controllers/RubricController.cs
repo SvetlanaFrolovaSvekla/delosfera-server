@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник рубрик (иерархический)
 /// </summary>
 [ApiController]
-[Route("dictionaries/rubric")]
+[Route("api/dictionaries/rubric")]
 [Tags("Справочники — Рубрикатор")]
 [Authorize]
 public class RubricController : ControllerBase

@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник структурных подразделений банка (иерархический)
 /// </summary>
 [ApiController]
-[Route("dictionaries/organization-unit")]
+[Route("api/dictionaries/organization-unit")]
 [Tags("Справочники — Структурные подразделения")]
 [Authorize]
 public class OrganizationUnitController : ControllerBase

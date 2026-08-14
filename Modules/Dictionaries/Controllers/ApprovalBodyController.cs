@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник органов утверждения ВНД (иерархический)
 /// </summary>
 [ApiController]
-[Route("dictionaries/approval-body")]
+[Route("api/dictionaries/approval-body")]
 [Tags("Справочники — Органы утверждения")]
 [Authorize]
 public class ApprovalBodyController : ControllerBase

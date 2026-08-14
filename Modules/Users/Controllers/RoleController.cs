@@ -12,7 +12,7 @@ namespace delosfera_server.Modules.Users.Controllers;
 /// Управление ролями и правами доступа
 /// </summary>
 [ApiController]
-[Route("/users/roles")]
+[Route("api/users/roles")]
 [Tags("Пользователи - Роли")]
 public class RoleController : ControllerBase
 {

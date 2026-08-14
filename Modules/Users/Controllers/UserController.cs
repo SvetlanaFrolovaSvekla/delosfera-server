@@ -15,7 +15,7 @@ namespace delosfera_server.Modules.Users.Controllers;
 /// Управление пользователями системы
 /// </summary>
 [ApiController]
-[Route("users")]
+[Route("api/users")]
 [Tags("Пользователи")]
 [Authorize]
 public class UserController : ControllerBase

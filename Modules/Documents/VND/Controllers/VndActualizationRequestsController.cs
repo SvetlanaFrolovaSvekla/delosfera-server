@@ -9,7 +9,7 @@ namespace delosfera_server.Modules.Documents.VND.Controllers;
 
 /// <summary>Заявки на доступ к актуализации — рассмотрение главным редактором ВНД</summary>
 [ApiController]
-[Route("/vnd/actualization/requests")]
+[Route("api/vnd/actualization/requests")]
 [Tags("ВНД — Актуализация")]
 [Authorize]
 public class VndActualizationRequestsController : ControllerBase

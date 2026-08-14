@@ -14,7 +14,7 @@ namespace delosfera_server.Modules.Analytics.Controllers;
 /// Аналитика по модулю ВНД для страницы отчётности
 /// </summary>
 [ApiController]
-[Route("/analytics/vnd")]
+[Route("api/analytics/vnd")]
 [Tags("Аналитика - ВНД")]
 [Authorize]
 [RequirePermission(PermissionCode.ViewFullStatistics)]

@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник уровней секретности документов
 /// </summary>
 [ApiController]
-[Route("dictionaries/security-level")]
+[Route("api/dictionaries/security-level")]
 [Tags("Справочники — Уровни секретности")]
 [Authorize]
 public class SecurityLevelController : ControllerBase
