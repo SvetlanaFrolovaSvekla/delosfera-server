@@ -20,6 +20,12 @@ public class TemplateStepDto
     public StepKind Kind { get; set; }
     public bool IsFinalMethodology { get; set; }
     public int? TimeNormHours { get; set; }
+
+    /// <summary>
+    /// Чем закрывается этап: простой подписью, квалифицированной или ничем.
+    /// Пусто — этап закрывается решением без подписи.
+    /// </summary>
+    public Signing.Models.SignatureLevel? RequiredSignatureLevel { get; set; }
     public List<TemplateParticipantDto> Participants { get; set; } = [];
 }
 
@@ -116,4 +122,34 @@ public class RemarkResponse
     public int Id { get; set; }
     public required string Text { get; set; }
     public required string State { get; set; }
+}
+
+/// <summary>Шаблон маршрута с этапами — для экрана настройки уровня подписи.</summary>
+public class RouteTemplateResponse
+{
+    public int Id { get; set; }
+    public required string Name { get; set; }
+    public required string DocumentType { get; set; }
+    public bool IsGlobalRule { get; set; }
+    public List<RouteTemplateStepResponse> Steps { get; set; } = [];
+}
+
+public class RouteTemplateStepResponse
+{
+    public int Id { get; set; }
+    public int Order { get; set; }
+    public required string Mode { get; set; }
+    public required string Kind { get; set; }
+    public bool IsFinalMethodology { get; set; }
+    public int? TimeNormHours { get; set; }
+    public int ParticipantCount { get; set; }
+
+    /// <summary>Null — подпись не требуется; Simple — ПЭП; Qualified — ЭЦП.</summary>
+    public Signing.Models.SignatureLevel? RequiredSignatureLevel { get; set; }
+}
+
+public class StepSignatureLevelRequest
+{
+    /// <summary>Пусто — снять требование подписи с этапа.</summary>
+    public Signing.Models.SignatureLevel? Level { get; set; }
 }

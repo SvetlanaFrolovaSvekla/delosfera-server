@@ -1,4 +1,7 @@
 using System.Text.Json;
+using delosfera_server.Common.Authorization;
+using delosfera_server.Modules.Users.Models;
+using delosfera_server.Modules.Documents.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -24,14 +27,17 @@ public class WorkflowController : ControllerBase
     private readonly DelosferaDbContext _db;
     private readonly IRouteEngine _engine;
     private readonly ICurrentUserService _currentUser;
+    private readonly IAuditService _audit;
     private readonly ITaskInboxService _inbox;
 
     public WorkflowController(
-        DelosferaDbContext db, IRouteEngine engine, ICurrentUserService currentUser, ITaskInboxService inbox)
+        DelosferaDbContext db, IRouteEngine engine, ICurrentUserService currentUser, ITaskInboxService inbox,
+        IAuditService audit)
     {
         _db = db;
         _engine = engine;
         _currentUser = currentUser;
+        _audit = audit;
         _inbox = inbox;
     }
 
@@ -74,6 +80,7 @@ public class WorkflowController : ControllerBase
                 Kind = s.Kind,
                 IsFinalMethodology = s.IsFinalMethodology,
                 TimeNormHours = s.TimeNormHours,
+                RequiredSignatureLevel = s.RequiredSignatureLevel,
                 Participants = s.Participants.Select(p => new RouteTemplateParticipant
                 {
                     UserId = p.UserId, UnitId = p.UnitId, RoleRef = p.RoleRef, Required = p.Required
@@ -83,6 +90,67 @@ public class WorkflowController : ControllerBase
         _db.RouteTemplates.Add(tpl);
         await _db.SaveChangesAsync();
         return Ok(tpl.Id);
+    }
+
+    /// <summary>Шаблон с этапами — экран настройки уровня подписи (Б-07).</summary>
+    [HttpGet("templates/{id:int}")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> GetTemplate(int id, CancellationToken ct)
+    {
+        var tpl = await _db.RouteTemplates
+            .AsNoTracking()
+            .Include(t => t.Steps.OrderBy(s => s.Order))
+                .ThenInclude(s => s.Participants)
+            .FirstOrDefaultAsync(t => t.Id == id, ct);
+
+        if (tpl is null) return NotFound(new {message = "Шаблон маршрута не найден"});
+
+        return Ok(new RouteTemplateResponse
+        {
+            Id = tpl.Id,
+            Name = tpl.Name,
+            DocumentType = tpl.DocumentType.ToString(),
+            IsGlobalRule = tpl.IsGlobalRule,
+            Steps = tpl.Steps.OrderBy(s => s.Order).Select(s => new RouteTemplateStepResponse
+            {
+                Id = s.Id,
+                Order = s.Order,
+                Mode = s.Mode.ToString(),
+                Kind = s.Kind.ToString(),
+                IsFinalMethodology = s.IsFinalMethodology,
+                TimeNormHours = s.TimeNormHours,
+                ParticipantCount = s.Participants.Count,
+                RequiredSignatureLevel = s.RequiredSignatureLevel,
+            }).ToList(),
+        });
+    }
+
+    /// <summary>
+    /// Чем закрывается этап: ничем, простой подписью или квалифицированной.
+    ///
+    /// Это и есть переключение контура с ПЭП на ЭЦП: движок проверку уже умеет,
+    /// не хватало только места, где уровень задают. Изменение действует на новые
+    /// маршруты — уже запущенные идут по правилам, при которых стартовали.
+    /// </summary>
+    [HttpPut("templates/steps/{stepId:int}/signature-level")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> SetStepSignatureLevel(
+        int stepId, [FromBody] StepSignatureLevelRequest request, CancellationToken ct)
+    {
+        var step = await _db.RouteTemplateSteps.FirstOrDefaultAsync(s => s.Id == stepId, ct);
+        if (step is null) return NotFound(new {message = "Этап шаблона не найден"});
+
+        var было = step.RequiredSignatureLevel;
+        step.RequiredSignatureLevel = request.Level;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("RouteTemplateStep", step.Id, "SignatureLevelChanged", _currentUser.UserId, new
+        {
+            было = было?.ToString() ?? "без подписи",
+            стало = request.Level?.ToString() ?? "без подписи",
+        });
+
+        return Ok(new {step.Id, level = step.RequiredSignatureLevel});
     }
 
     /// <summary>Создать экземпляр маршрута документа из шаблона.</summary>
