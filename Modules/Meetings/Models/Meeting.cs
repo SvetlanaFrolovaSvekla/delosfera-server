@@ -149,6 +149,15 @@ public class AgendaAssignment : IAuditableEntity
     public int? OrgUnitId { get; set; }
     public OrganizationUnit? OrgUnit { get; set; }
 
+    /// <summary>
+    /// Что именно поручено. По одному вопросу поручений бывает несколько — разным
+    /// людям, с разными сроками и разными формулировками; без текста исполнитель
+    /// видит только срок и гадает, что от него хотят.
+    ///
+    /// Пусто — поручение относится к решению по вопросу целиком.
+    /// </summary>
+    public string? Text { get; set; }
+
     /// <summary>Срок исполнения. От него считаются напоминания за 5 дней, в день срока и после просрочки.</summary>
     public DateOnly? DueDate { get; set; }
 

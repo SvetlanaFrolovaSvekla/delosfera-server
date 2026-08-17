@@ -140,6 +140,10 @@ public class AgendaAssignmentRequest
 {
     public int UserId { get; set; }
     public int? OrgUnitId { get; set; }
+
+    /// <summary>Что поручено. Пусто — поручение по решению целиком.</summary>
+    public string? Text { get; set; }
+
     public DateOnly? DueDate { get; set; }
 }
 
@@ -159,6 +163,9 @@ public class AgendaAssignmentDto
     public string UserName { get; set; } = string.Empty;
     public int? OrgUnitId { get; set; }
     public string? OrgUnitTitle { get; set; }
+
+    /// <summary>Что поручено; пусто — поручение по решению целиком.</summary>
+    public string? Text { get; set; }
 
     public DateOnly? DueDate { get; set; }
     public ExecutionStatus Status { get; set; }

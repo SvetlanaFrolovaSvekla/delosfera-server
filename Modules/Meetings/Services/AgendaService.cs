@@ -168,6 +168,7 @@ public class AgendaService : IAgendaService
             AgendaItemId = itemId,
             UserId = request.UserId,
             OrgUnitId = request.OrgUnitId ?? await UnitOfAsync(request.UserId),
+            Text = string.IsNullOrWhiteSpace(request.Text) ? null : request.Text.Trim(),
             DueDate = request.DueDate,
             Status = ExecutionStatus.New,
         });

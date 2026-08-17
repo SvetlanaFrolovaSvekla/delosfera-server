@@ -1,7 +1,7 @@
 {
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"export DEPLOY_HOST=10.222.10.42 DEPLOY_USER=keremet DEPLOY_PASS='N$=4djD=?WXI'\\nR=/private/tmp/claude-503/-Users-chyngyz/23fd1f55-1f85-4243-b458-f372e33077fa/scratchpad/remote.exp\\nT='eyJh...",
-  "error": "Exit code 1\n\r\nкод 404, байт 0\r\nTraceback (most recent call last):\r\n  File \"<string>\", line 3, in <module>\r\n  File \"/usr/lib/python3.12/json/__init__.py\", line 293, in load\r\n    return loads(fp.read(),\r\n           ^^^^^^^^^^^^^^^^\r\n  File \"/usr/lib/python3.12/json/__init__.py\", line 346, in loads\r\n    return _default_decoder.decode(s)\r\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"/usr/lib/python3.12/json/decoder.py\", line 337, in decode\r\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\r\n  ...",
-  "timestamp": "2026-08-14T11:31:55.070Z",
+  "tool_name": "mcp__plugin_playwright_playwright__browser_click",
+  "tool_input_preview": "{\"target\":\"tr:has-text('Проверка КП') button[title='Победитель']\",\"element\":\"кнопка «Победитель»\"}",
+  "error": "### Error\nError: \"tr:has-text('Проверка КП') button[title='Победитель']\" does not match any elements.",
+  "timestamp": "2026-08-17T11:35:09.847Z",
   "retry_count": 1
 }

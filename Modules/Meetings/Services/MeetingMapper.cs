@@ -65,6 +65,7 @@ public static class MeetingMapper
         UserName = a.User?.FullName ?? string.Empty,
         OrgUnitId = a.OrgUnitId,
         OrgUnitTitle = a.OrgUnit?.TitleRu,
+        Text = a.Text,
         DueDate = a.DueDate,
         Status = a.Status,
         StatusTitle = MeetingTitles.Status(a.Status),

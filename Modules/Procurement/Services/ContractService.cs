@@ -87,10 +87,19 @@ public class ContractService : IContractService
             .OrderByDescending(t => t.Id)
             .FirstOrDefaultAsync();
 
+        // Победитель запроса ценовых предложений — коммерческое предложение, а не
+        // конкурсная заявка. Этим способом идёт большинство закупок банка, и без
+        // него договор по ним заключить было нельзя.
+        var winningProposal = await _db.CommercialProposals
+            .Where(p => p.RequestId == requestId && p.IsWinner)
+            .OrderByDescending(p => p.Id)
+            .FirstOrDefaultAsync();
+
         // Поставщик берётся из состоявшейся процедуры: договор заключается
         // с победителем, а не с произвольным контрагентом.
         var supplierId = request.SupplierId
                          ?? tender?.Bids.FirstOrDefault(b => b.IsWinner)?.SupplierId
+                         ?? winningProposal?.SupplierId
                          ?? protocol?.MainSupplierId
                          ?? throw new InvalidOperationException(
                              "Победитель закупки не определён — договор заключать не с кем");
@@ -102,8 +111,11 @@ public class ContractService : IContractService
             throw new InvalidOperationException(
                 $"Поставщик «{supplier.Title}» в чёрном списке — договор с ним не заключается");
 
+        // Сумма договора — цена победившего предложения, а не ориентировочная сумма
+        // заявки: заявку писали до того, как узнали цены.
         var amount = request.Amount
                      ?? tender?.Bids.FirstOrDefault(b => b.IsWinner)?.Price
+                     ?? winningProposal?.Price
                      ?? protocol?.MainAmount
                      ?? procurement.Amount;
 
