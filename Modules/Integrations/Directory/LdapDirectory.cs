@@ -35,6 +35,9 @@ public interface ILdapDirectory
 /// </summary>
 public class LdapDirectory : ILdapDirectory
 {
+    /// <summary>Порт, на котором шифрование включается с первого байта.</summary>
+    private const int LdapsPort = 636;
+
     private readonly LdapOptions _configured;
     private readonly IDirectorySettingsService _settings;
 
@@ -156,11 +159,20 @@ public class LdapDirectory : ILdapDirectory
 
     private async Task<LdapConnection> ConnectAsync(string dn, string password, CancellationToken ct)
     {
-        var connection = new LdapConnection {SecureSocketLayer = _options.UseSsl};
+        // Шифрование поднимается до отправки учётных данных. На порту 636 оно
+        // включается с первого байта, на обычном 389 — командой StartTLS сразу после
+        // подключения. Пароль служебной записи и пароли сотрудников уходят уже по
+        // защищённому каналу.
+        var ldaps = _options.UseSsl && _options.Port == LdapsPort;
+        var connection = new LdapConnection {SecureSocketLayer = ldaps};
 
         try
         {
             await connection.ConnectAsync(_options.Host, _options.Port, ct);
+
+            if (_options.UseSsl && !ldaps)
+                await connection.StartTlsAsync(ct);
+
             await connection.BindAsync(dn, password, ct);
             return connection;
         }

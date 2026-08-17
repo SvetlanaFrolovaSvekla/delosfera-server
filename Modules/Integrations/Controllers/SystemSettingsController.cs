@@ -22,14 +22,14 @@ namespace delosfera_server.Modules.Integrations.Controllers;
 public class SystemSettingsController : ControllerBase
 {
     private readonly IDirectorySettingsService _settings;
-    private readonly ILdapDirectoryService _directory;
-    private readonly LdapUserSyncService _sync;
+    private readonly ILdapDirectory _directory;
+    private readonly IDirectorySyncService _sync;
     private readonly ICurrentUserService _currentUser;
 
     public SystemSettingsController(
         IDirectorySettingsService settings,
-        ILdapDirectoryService directory,
-        LdapUserSyncService sync,
+        ILdapDirectory directory,
+        IDirectorySyncService sync,
         ICurrentUserService currentUser)
     {
         _settings = settings;
@@ -70,13 +70,13 @@ public class SystemSettingsController : ControllerBase
     {
         try
         {
-            var users = await _directory.GetAllUsersAsync(ct);
+            var users = await _directory.ListUsersAsync(ct);
 
             return Ok(new
             {
                 success = true,
                 total = users.Count,
-                active = users.Count(u => u.IsActive),
+                active = users.Count(u => !u.IsDisabled),
                 message = $"Связь установлена. В каталоге найдено {users.Count} пользователей.",
             });
         }
@@ -95,17 +95,26 @@ public class SystemSettingsController : ControllerBase
     {
         try
         {
-            var result = await _sync.SyncAsync(ct);
-            await _settings.RecordSyncAsync(result.Created, result.Updated, result.Deactivated, null, ct);
+            var result = await _sync.SyncAsync(_currentUser.UserId, ct);
+            await _settings.RecordSyncAsync(
+                result.Created.Count, result.Updated.Count, result.Deactivated.Count, null, ct);
+
+            // Пропущенные записи называем числом и первыми примерами: молчаливый
+            // пропуск сотрудника выглядел бы как успешная синхронизация.
+            var пропущено = result.Skipped.Count == 0
+                ? string.Empty
+                : $" Пропущено: {result.Skipped.Count} — {string.Join("; ", result.Skipped.Take(3))}"
+                  + (result.Skipped.Count > 3 ? " и другие." : ".");
 
             return Ok(new
             {
                 success = true,
-                result.Created,
-                result.Updated,
-                result.Deactivated,
-                message = $"Готово: создано {result.Created}, обновлено {result.Updated}, "
-                          + $"деактивировано {result.Deactivated}.",
+                created = result.Created.Count,
+                updated = result.Updated.Count,
+                deactivated = result.Deactivated.Count,
+                skipped = result.Skipped.Count,
+                message = $"Готово: создано {result.Created.Count}, обновлено {result.Updated.Count}, "
+                          + $"деактивировано {result.Deactivated.Count}.{пропущено}",
             });
         }
         catch (Exception ex)

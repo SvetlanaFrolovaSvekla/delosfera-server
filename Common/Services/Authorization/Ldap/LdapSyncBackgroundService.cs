@@ -54,11 +54,15 @@ public class LdapSyncBackgroundService : BackgroundService
                 {
                     delay = TimeSpan.FromMinutes(Math.Clamp(settings.SyncIntervalMinutes, 5, 1440));
 
-                    var syncService = scope.ServiceProvider.GetRequiredService<LdapUserSyncService>();
-                    var result = await syncService.SyncAsync(stoppingToken);
+                    // Тот же механизм, что и у кнопки «Синхронизировать сейчас»:
+                    // он умеет шифрование связи и подтягивает должность с отделом.
+                    var syncService = scope.ServiceProvider
+                        .GetRequiredService<Modules.Integrations.Directory.IDirectorySyncService>();
+                    var result = await syncService.SyncAsync(null, stoppingToken);
 
                     await settingsService.RecordSyncAsync(
-                        result.Created, result.Updated, result.Deactivated, null, stoppingToken);
+                        result.Created.Count, result.Updated.Count, result.Deactivated.Count,
+                        null, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
