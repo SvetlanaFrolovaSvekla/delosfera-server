@@ -288,6 +288,7 @@ public class WorkflowController : ControllerBase
             {
                 Id = s.Id, Order = s.Order, Mode = s.Mode.ToString(), Kind = s.Kind.ToString(),
                 IsFinalMethodology = s.IsFinalMethodology,
+                RequiredSignatureLevel = s.RequiredSignatureLevel?.ToString(),
                 Participants = s.Participants.OrderBy(p => p.Id).Select(p => new ParticipantResponse
                 {
                     Id = p.Id, UserId = p.UserId, Required = p.Required, State = p.State.ToString(),

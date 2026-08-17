@@ -92,6 +92,12 @@ public class DelosferaDbContext : DbContext
     public DbSet<SimpleSignatureRegulation> SimpleSignatureRegulations => Set<SimpleSignatureRegulation>();
     public DbSet<SimpleSignatureConsent> SimpleSignatureConsents => Set<SimpleSignatureConsent>();
 
+    /// <summary>Кому из удостоверяющих центров доверяет банк — список ведёт администратор.</summary>
+    public DbSet<TrustedCertificateAuthority> TrustedCertificateAuthorities => Set<TrustedCertificateAuthority>();
+
+    /// <summary>Каким сертификатом подписывает каждый сотрудник.</summary>
+    public DbSet<UserCertificate> UserCertificates => Set<UserCertificate>();
+
     // --- Закупки (контур 6 ТЗ): матрица полномочий и её параметры ---
     public DbSet<ProcurementMethod> ProcurementMethods => Set<ProcurementMethod>();
     public DbSet<AuthorityMatrixRule> AuthorityMatrixRules => Set<AuthorityMatrixRule>();

@@ -68,6 +68,14 @@ public class StepResponse
     public required string Mode { get; set; }
     public required string Kind { get; set; }
     public bool IsFinalMethodology { get; set; }
+
+    /// <summary>
+    /// Чем закрывается этап: Simple, Qualified или пусто — без подписи. Клиенту это
+    /// нужно до нажатия кнопки: под квалифицированную подпись открывается рабочее
+    /// место с криптопровайдером, а простая ставится самим нажатием.
+    /// </summary>
+    public string? RequiredSignatureLevel { get; set; }
+
     public List<ParticipantResponse> Participants { get; set; } = [];
 }
 

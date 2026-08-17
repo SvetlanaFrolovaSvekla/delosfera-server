@@ -3,6 +3,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Signing.Models;
 
 namespace delosfera_server.Modules.Signing.Services;
@@ -10,10 +11,16 @@ namespace delosfera_server.Modules.Signing.Services;
 /// <summary>Данные, которые криптопровайдер на рабочем месте должен подписать.</summary>
 public class SignChallengeDto
 {
-    public int AttachmentId { get; set; }
+    /// <summary>Подписываемое вложение. Пусто, когда подписывается карточка документа.</summary>
+    public int? AttachmentId { get; set; }
+
+    /// <summary>Подписываемый документ. Пусто, когда подписывается отдельное вложение.</summary>
+    public int? DocumentId { get; set; }
+
+    /// <summary>Что человек увидит перед тем, как приложить ключ.</summary>
     public string FileName { get; set; } = string.Empty;
 
-    /// <summary>Хеш версии файла (hex) — именно он подписывается, а не сам файл.</summary>
+    /// <summary>Хеш версии (hex) — именно он подписывается, а не сам файл.</summary>
     public string Hash { get; set; } = string.Empty;
 
     public string HashAlgorithm { get; set; } = "SHA-256";
@@ -40,6 +47,12 @@ public class SignatureInfoDto
     public string? CertificateSubject { get; set; }
     public string? CertificateSerial { get; set; }
     public DateTime? CertificateValidTo { get; set; }
+
+    /// <summary>Каким удостоверяющим центром подтверждён сертификат.</summary>
+    public string? TrustAuthority { get; set; }
+
+    /// <summary>Цепочка не проверялась — доверенные центры не заведены.</summary>
+    public bool TrustNotChecked { get; set; }
 }
 
 public class QualifiedSignRequest
@@ -55,6 +68,12 @@ public interface IQualifiedSignatureService
 {
     Task<SignChallengeDto> GetChallengeAsync(int attachmentId);
     Task<SignatureInfoDto> SignAsync(int attachmentId, QualifiedSignRequest request, int userId);
+
+    /// <summary>Данные для подписи карточки документа целиком.</summary>
+    Task<SignChallengeDto> GetDocumentChallengeAsync(int documentId);
+
+    /// <summary>Принять квалифицированную подпись карточки документа.</summary>
+    Task<SignatureInfoDto> SignDocumentAsync(int documentId, QualifiedSignRequest request, int userId);
 }
 
 /// <summary>
@@ -65,8 +84,14 @@ public interface IQualifiedSignatureService
 /// сюда возвращается только подпись и сертификат. Ключ через сервер не проходит —
 /// иначе банк отвечал бы за его хранение, а подпись перестала бы быть личной.
 ///
-/// Подписывается хеш конкретной версии файла (SIG-01): изменение файла аннулирует
-/// подпись, потому что новый хеш проверку уже не пройдёт.
+/// Подписывается хеш конкретной версии (SIG-01): у вложения это хеш файла, у карточки —
+/// отпечаток её существенных полей вместе с хешами вложений. Изменение подписанного
+/// аннулирует подпись, потому что новый хеш проверку уже не пройдёт.
+///
+/// Подпись принимается, только если сертификат прошёл три проверки: срок действия,
+/// цепочку до корня, которому доверяет банк, и принадлежность подписанту. Последняя
+/// нужна потому, что математически подпись сходится с любым действующим ключом —
+/// и без неё чужой визой можно было бы закрыть чей угодно этап.
 ///
 /// Проверка алгоритмов ограничена RSA и ECDSA — тем, что умеет .NET. Сертификаты
 /// ГОСТ Р 34.10, которые выдаёт УЦ «Инфоком», проверяются самим ТУМАР-CSP на стороне
@@ -78,17 +103,25 @@ public class QualifiedSignatureService : IQualifiedSignatureService
 {
     private readonly DelosferaDbContext _db;
     private readonly ISignatureService _signatures;
+    private readonly ICertificateTrustService _trust;
+    private readonly IDocumentFingerprintService _fingerprints;
     private readonly ILogger<QualifiedSignatureService> _logger;
 
     public QualifiedSignatureService(
         DelosferaDbContext db,
         ISignatureService signatures,
+        ICertificateTrustService trust,
+        IDocumentFingerprintService fingerprints,
         ILogger<QualifiedSignatureService> logger)
     {
         _db = db;
         _signatures = signatures;
+        _trust = trust;
+        _fingerprints = fingerprints;
         _logger = logger;
     }
+
+    // ── вложение ─────────────────────────────────────────────────────────────
 
     public async Task<SignChallengeDto> GetChallengeAsync(int attachmentId)
     {
@@ -102,7 +135,7 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             FileName = attachment.FileName,
             Hash = attachment.Hash,
             DataToSign = Convert.ToBase64String(HexToBytes(attachment.Hash)),
-            Signatures = await LoadSignaturesAsync(attachmentId),
+            Signatures = await LoadSignaturesAsync(s => s.DocumentAttachmentId == attachmentId),
         };
     }
 
@@ -113,54 +146,170 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
 
-        var certificate = ParseCertificate(request.Certificate);
-        var signature = ParseBase64(request.Signature, "подпись");
-        var hash = HexToBytes(attachment.Hash);
+        var (certificate, trust) = await AcceptAsync(request, HexToBytes(attachment.Hash), userId);
 
-        var now = DateTime.UtcNow;
-
-        if (now < certificate.NotBefore.ToUniversalTime())
-            throw new InvalidOperationException(
-                $"Сертификат вступает в силу {certificate.NotBefore:dd.MM.yyyy} — подписание невозможно");
-
-        if (now > certificate.NotAfter.ToUniversalTime())
-            throw new InvalidOperationException(
-                $"Срок действия сертификата истёк {certificate.NotAfter:dd.MM.yyyy}");
-
-        if (!Verify(certificate, hash, signature))
-            throw new InvalidOperationException(
-                "Подпись не соответствует хешу версии файла или сертификату подписанта");
-
-        var stamp = JsonSerializer.Serialize(new
+        using (certificate)
         {
-            subject = certificate.Subject,
-            issuer = certificate.Issuer,
-            serial = certificate.SerialNumber,
-            validFrom = certificate.NotBefore.ToUniversalTime(),
-            validTo = certificate.NotAfter.ToUniversalTime(),
-            algorithm = certificate.SignatureAlgorithm.FriendlyName,
-            thumbprint = certificate.Thumbprint,
-        });
+            var stored = await _signatures.SignAsync(
+                attachmentId, SignatureLevel.Qualified, userId, BuildStamp(certificate, trust));
 
-        var stored = await _signatures.SignAsync(attachmentId, SignatureLevel.Qualified, userId, stamp);
+            _logger.LogInformation(
+                "КЭП: вложение {AttachmentId} подписано пользователем {UserId}, сертификат {Subject}",
+                attachmentId, userId, certificate.Subject);
 
-        _logger.LogInformation(
-            "КЭП: вложение {AttachmentId} подписано пользователем {UserId}, сертификат {Subject}",
-            attachmentId, userId, certificate.Subject);
-
-        var user = await _db.Users.Where(u => u.Id == userId).Select(u => u.FullName).FirstOrDefaultAsync();
-
-        return ToDto(stored, user, certificate);
+            return ToDto(stored, await UserNameAsync(userId), certificate, trust);
+        }
     }
 
-    // ── внутреннее ───────────────────────────────────────────────────────────
+    // ── карточка документа ───────────────────────────────────────────────────
+
+    public async Task<SignChallengeDto> GetDocumentChallengeAsync(int documentId)
+    {
+        var document = await _db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => new {d.Id, d.Title, d.RegNumber})
+            .FirstOrDefaultAsync()
+            ?? throw new KeyNotFoundException("Документ не найден");
+
+        // Отпечаток карточки — свёртка её полей и хешей вложений: у служебной записки
+        // подписывать файлом нечего, текст живёт в самой карточке.
+        var fingerprint = await _fingerprints.ComputeAsync(documentId);
+        var hash = FingerprintToBytes(fingerprint);
+
+        return new SignChallengeDto
+        {
+            DocumentId = document.Id,
+            FileName = string.IsNullOrWhiteSpace(document.RegNumber)
+                ? document.Title
+                : $"{document.RegNumber} · {document.Title}",
+            Hash = Convert.ToHexString(hash).ToLowerInvariant(),
+            DataToSign = Convert.ToBase64String(hash),
+            Signatures = await LoadSignaturesAsync(s => s.DocumentId == documentId),
+        };
+    }
+
+    public async Task<SignatureInfoDto> SignDocumentAsync(
+        int documentId, QualifiedSignRequest request, int userId)
+    {
+        var exists = await _db.Documents.AnyAsync(d => d.Id == documentId);
+        if (!exists) throw new KeyNotFoundException("Документ не найден");
+
+        var fingerprint = await _fingerprints.ComputeAsync(documentId);
+        var (certificate, trust) = await AcceptAsync(request, FingerprintToBytes(fingerprint), userId);
+
+        using (certificate)
+        {
+            var stored = await _signatures.SignDocumentAsync(
+                documentId, SignatureLevel.Qualified, userId, BuildStamp(certificate, trust));
+
+            _logger.LogInformation(
+                "КЭП: документ {DocumentId} подписан пользователем {UserId}, сертификат {Subject}",
+                documentId, userId, certificate.Subject);
+
+            return ToDto(stored, await UserNameAsync(userId), certificate, trust);
+        }
+    }
+
+    // ── общая часть приёма подписи ───────────────────────────────────────────
+
+    /// <summary>
+    /// Разобрать сертификат и принять подпись, если она выдерживает все проверки.
+    /// Порядок проверок — от дешёвых к дорогим и от понятных к техническим: подписант
+    /// должен увидеть «истёк сертификат», а не «цепочка не построена», когда верно и то,
+    /// и другое.
+    /// </summary>
+    private async Task<(X509Certificate2 Certificate, TrustResult Trust)> AcceptAsync(
+        QualifiedSignRequest request, byte[] hash, int userId)
+    {
+        var certificate = ParseCertificate(request.Certificate);
+
+        try
+        {
+            var signature = ParseBase64(request.Signature, "подпись");
+            var now = DateTime.UtcNow;
+
+            if (now < certificate.NotBefore.ToUniversalTime())
+                throw new InvalidOperationException(
+                    $"Сертификат вступает в силу {certificate.NotBefore:dd.MM.yyyy} — подписание невозможно");
+
+            if (now > certificate.NotAfter.ToUniversalTime())
+                throw new InvalidOperationException(
+                    $"Срок действия сертификата истёк {certificate.NotAfter:dd.MM.yyyy}");
+
+            var trust = await _trust.ValidateAsync(certificate);
+            if (!trust.Trusted)
+                throw new InvalidOperationException(trust.Reason ?? "Сертификат не подтверждён");
+
+            await RequireBelongsToUserAsync(certificate, userId);
+
+            if (!Verify(certificate, hash, signature))
+                throw new InvalidOperationException(
+                    "Подпись не соответствует хешу подписанного или сертификату подписанта");
+
+            return (certificate, trust);
+        }
+        catch
+        {
+            certificate.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Сертификат закрепляется за сотрудником при первой подписи и дальше принимается
+    /// только от него. Иначе подпись отвечала бы на вопрос «ключ действующий?», но не
+    /// на вопрос «чей он?» — и любой владелец действующего ключа мог бы закрыть чужой этап.
+    /// </summary>
+    private async Task RequireBelongsToUserAsync(X509Certificate2 certificate, int userId)
+    {
+        var thumbprint = certificate.Thumbprint;
+
+        var known = await _db.UserCertificates
+            .FirstOrDefaultAsync(c => c.Thumbprint == thumbprint);
+
+        if (known is null)
+        {
+            _db.UserCertificates.Add(new UserCertificate
+            {
+                UserId = userId,
+                Thumbprint = thumbprint,
+                Subject = certificate.Subject,
+                Issuer = certificate.Issuer,
+                SerialNumber = certificate.SerialNumber,
+                NotBefore = certificate.NotBefore.ToUniversalTime(),
+                NotAfter = certificate.NotAfter.ToUniversalTime(),
+                RawData = certificate.RawData,
+                RegisteredAt = DateTime.UtcNow,
+            });
+
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "КЭП: сертификат {Thumbprint} закреплён за пользователем {UserId}", thumbprint, userId);
+            return;
+        }
+
+        if (known.UserId != userId)
+        {
+            var owner = await UserNameAsync(known.UserId);
+            throw new InvalidOperationException(
+                $"Этот сертификат закреплён за другим сотрудником{(owner is null ? string.Empty : $" ({owner})")} — " +
+                "подписывать чужим ключом нельзя");
+        }
+
+        if (known.RevokedAt is not null)
+            throw new InvalidOperationException(
+                $"Сертификат отозван {known.RevokedAt:dd.MM.yyyy}" +
+                (string.IsNullOrWhiteSpace(known.RevokedReason) ? string.Empty : $": {known.RevokedReason}"));
+    }
 
     /// <summary>
     /// Проверка подписи хеша. Плагины отдают либо «сырую» подпись хеша, либо
     /// контейнер CMS/PKCS#7 — принимаем оба вида, потому что состав средств ЭП
     /// у банка фиксируется только на этапе обследования.
     /// </summary>
-    private bool Verify(X509Certificate2 certificate, byte[] hash, byte[] signature)
+    private static bool Verify(X509Certificate2 certificate, byte[] hash, byte[] signature)
     {
         if (TryVerifyCms(hash, signature)) return true;
 
@@ -190,8 +339,9 @@ public class QualifiedSignatureService : IQualifiedSignatureService
 
             cms.Decode(signature);
 
-            // Цепочку до корня здесь не строим: доверенные УЦ ставятся на серверах
-            // банка отдельно, и на этапе обследования список корней ещё не согласован.
+            // Цепочку здесь не строим намеренно: её проверяет ICertificateTrustService
+            // по корням банка. Встроенная проверка CMS смотрела бы в системное
+            // хранилище сервера, то есть доверяла бы не тем, кому доверяет банк.
             cms.CheckSignature(verifySignatureOnly: true);
             return true;
         }
@@ -201,10 +351,32 @@ public class QualifiedSignatureService : IQualifiedSignatureService
         }
     }
 
-    private async Task<List<SignatureInfoDto>> LoadSignaturesAsync(int attachmentId)
+    // ── вспомогательное ──────────────────────────────────────────────────────
+
+    private static string BuildStamp(X509Certificate2 certificate, TrustResult trust) =>
+        JsonSerializer.Serialize(new
+        {
+            subject = certificate.Subject,
+            issuer = certificate.Issuer,
+            serial = certificate.SerialNumber,
+            validFrom = certificate.NotBefore.ToUniversalTime(),
+            validTo = certificate.NotAfter.ToUniversalTime(),
+            algorithm = certificate.SignatureAlgorithm.FriendlyName,
+            thumbprint = certificate.Thumbprint,
+            trustAuthority = trust.AuthorityTitle,
+            trustNotChecked = trust.NotChecked,
+        });
+
+    private async Task<string?> UserNameAsync(int userId) => await _db.Users
+        .Where(u => u.Id == userId)
+        .Select(u => u.FullName)
+        .FirstOrDefaultAsync();
+
+    private async Task<List<SignatureInfoDto>> LoadSignaturesAsync(
+        System.Linq.Expressions.Expression<Func<Signature, bool>> filter)
     {
         var rows = await _db.Signatures
-            .Where(s => s.DocumentAttachmentId == attachmentId)
+            .Where(filter)
             .OrderBy(s => s.At)
             .ToListAsync();
 
@@ -213,10 +385,11 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => u.FullName);
 
-        return rows.Select(s => ToDto(s, names.GetValueOrDefault(s.UserId), null)).ToList();
+        return rows.Select(s => ToDto(s, names.GetValueOrDefault(s.UserId), null, null)).ToList();
     }
 
-    private static SignatureInfoDto ToDto(Signature s, string? userName, X509Certificate2? certificate)
+    private static SignatureInfoDto ToDto(
+        Signature s, string? userName, X509Certificate2? certificate, TrustResult? trust)
     {
         var dto = new SignatureInfoDto
         {
@@ -237,6 +410,8 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             dto.CertificateSubject = certificate.Subject;
             dto.CertificateSerial = certificate.SerialNumber;
             dto.CertificateValidTo = certificate.NotAfter.ToUniversalTime();
+            dto.TrustAuthority = trust?.AuthorityTitle;
+            dto.TrustNotChecked = trust?.NotChecked ?? false;
             return dto;
         }
 
@@ -252,6 +427,11 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             if (root.TryGetProperty("serial", out var serial)) dto.CertificateSerial = serial.GetString();
             if (root.TryGetProperty("validTo", out var validTo) && validTo.TryGetDateTime(out var to))
                 dto.CertificateValidTo = to;
+            if (root.TryGetProperty("trustAuthority", out var authority))
+                dto.TrustAuthority = authority.GetString();
+            if (root.TryGetProperty("trustNotChecked", out var notChecked) &&
+                notChecked.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                dto.TrustNotChecked = notChecked.GetBoolean();
         }
         catch (JsonException)
         {
@@ -304,6 +484,22 @@ public class QualifiedSignatureService : IQualifiedSignatureService
         {
             throw new InvalidOperationException(
                 "Хеш версии файла записан не в шестнадцатеричном виде — подписание невозможно");
+        }
+    }
+
+    /// <summary>
+    /// Отпечаток карточки хранится в base64 — для подписи он нужен байтами.
+    /// </summary>
+    private static byte[] FingerprintToBytes(string fingerprint)
+    {
+        try
+        {
+            return Convert.FromBase64String(fingerprint);
+        }
+        catch (FormatException)
+        {
+            throw new InvalidOperationException(
+                "Отпечаток карточки записан в неожиданном виде — подписание невозможно");
         }
     }
 }

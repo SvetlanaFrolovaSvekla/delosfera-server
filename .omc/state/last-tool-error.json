@@ -1,7 +1,7 @@
 {
-  "tool_name": "mcp__plugin_playwright_playwright__browser_click",
-  "tool_input_preview": "{\"target\":\"tr:has-text('Проверка КП') button[title='Победитель']\",\"element\":\"кнопка «Победитель»\"}",
-  "error": "### Error\nError: \"tr:has-text('Проверка КП') button[title='Победитель']\" does not match any elements.",
-  "timestamp": "2026-08-17T11:35:09.847Z",
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"export DEPLOY_HOST=10.222.10.42 DEPLOY_USER=keremet DEPLOY_PASS='N$=4djD=?WXI'\\nR=/private/tmp/claude-503/-Users-chyngyz/23fd1f55-1f85-4243-b458-f372e33077fa/scratchpad/remote.exp\\n$R 'T=$...",
+  "error": "Exit code 1\n\r\n{\"message\":\"Укажите ответственного\"}\r\n--- в базе:\r\nERROR:  column \"assignee_id\" does not exist\r\nLINE 1: select id, assignee_id, text, due_date from meeting_agenda_a...\r\n                   ^",
+  "timestamp": "2026-08-17T12:10:07.178Z",
   "retry_count": 1
 }

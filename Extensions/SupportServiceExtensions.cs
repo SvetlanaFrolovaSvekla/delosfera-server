@@ -14,6 +14,7 @@ public static class SupportServiceExtensions
 
         // КЭП: проверка подписи хеша версии и реквизитов сертификата (SIG-02, INT-03)
         builder.Services.AddScoped<IQualifiedSignatureService, QualifiedSignatureService>();
+        builder.Services.AddScoped<ICertificateTrustService, CertificateTrustService>();
         return builder;
     }
 

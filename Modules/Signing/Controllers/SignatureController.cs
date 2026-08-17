@@ -35,6 +35,22 @@ public class SignatureController : ControllerBase
     public async Task<IActionResult> Sign(int attachmentId, [FromBody] QualifiedSignRequest request) =>
         await Run(() => _qualified.SignAsync(attachmentId, request, _currentUser.UserId));
 
+    /// <summary>
+    /// Данные для подписи карточки документа целиком — когда подписывать нечего файлом:
+    /// у служебной записки текст, адресат и срок живут в полях карточки.
+    /// </summary>
+    [HttpGet("documents/{documentId:int}/challenge")]
+    public async Task<IActionResult> DocumentChallenge(int documentId) =>
+        await Run(() => _qualified.GetDocumentChallengeAsync(documentId));
+
+    /// <summary>
+    /// Принять квалифицированную подпись карточки. Полученным идентификатором подписи
+    /// закрывается этап маршрута, на котором требуется КЭП.
+    /// </summary>
+    [HttpPost("documents/{documentId:int}/qualified")]
+    public async Task<IActionResult> SignDocument(int documentId, [FromBody] QualifiedSignRequest request) =>
+        await Run(() => _qualified.SignDocumentAsync(documentId, request, _currentUser.UserId));
+
     private async Task<IActionResult> Run<T>(Func<Task<T>> action)
     {
         try
