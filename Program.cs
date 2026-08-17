@@ -86,6 +86,10 @@ builder.Services.AddSingleton<delosfera_server.Common.Security.IPasswordPolicy,
 builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
 builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();
+
+// Отзыв сертификата происходит между подписаниями: узнать о нём система должна
+// раньше, чем человек снова придёт подписывать (Б-18).
+builder.Services.AddHostedService<delosfera_server.Modules.Signing.Services.CertificateRevocationWorker>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ITasksService, TasksService>();
 builder.Services.AddScoped<ICoordinationDefaultApproverService, CoordinationDefaultApproverService>();

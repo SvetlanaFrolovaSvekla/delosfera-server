@@ -212,6 +212,10 @@ public class WorkflowController : ControllerBase
             return null;
 
         string? fullName = null, position = null, levelTitle = null;
+        string? trustAuthority = null, revocationNote = null, timestampNote = null;
+        var trustNotChecked = false;
+        var revocationChecked = false;
+
         if (!string.IsNullOrWhiteSpace(signature.StampMeta))
         {
             try
@@ -220,6 +224,12 @@ public class WorkflowController : ControllerBase
                 fullName = Text(meta, "fullName");
                 position = Text(meta, "position");
                 levelTitle = Text(meta, "levelTitle");
+                trustAuthority = Text(meta, "trustAuthority");
+                revocationNote = Text(meta, "revocationNote");
+                timestampNote = Text(meta, "timestampNote");
+
+                trustNotChecked = Flag(meta, "trustNotChecked");
+                revocationChecked = Flag(meta, "revocationChecked");
             }
             catch (JsonException)
             {
@@ -237,6 +247,10 @@ public class WorkflowController : ControllerBase
             FullName = fullName,
             Position = position,
             At = signature.At,
+            TimestampedAt = signature.TimestampedAt,
+            TimestampAuthority = signature.TimestampAuthority,
+            TrustAuthority = trustAuthority,
+            Caveats = Caveats(signature, trustNotChecked, revocationChecked, revocationNote, timestampNote),
             // Полный отпечаток на штампе не нужен: он длинный и нечитаемый, а для
             // сверки достаточно начала — целиком он остаётся в подписи.
             Fingerprint = signature.ContentHash?[..Math.Min(12, signature.ContentHash.Length)],
@@ -248,6 +262,39 @@ public class WorkflowController : ControllerBase
             element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : null;
+
+        static bool Flag(JsonElement element, string name) =>
+            element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+    }
+
+    /// <summary>
+    /// Чего у подписи не хватает для полной доказательности. Перечисляется прямо на
+    /// штампе: подпись без метки времени и без проверенной цепочки — всё ещё подпись,
+    /// но опираться на неё в споре можно слабее, и знать об этом должен тот, кто на
+    /// неё смотрит, а не только тот, кто настраивал систему.
+    ///
+    /// Для простой подписи ничего не перечисляется: у неё нет ни сертификата, ни
+    /// цепочки, и упоминать их отсутствие значило бы придираться к ней за то, чем она
+    /// не является.
+    /// </summary>
+    private static List<string> Caveats(
+        Signature signature, bool trustNotChecked, bool revocationChecked,
+        string? revocationNote, string? timestampNote)
+    {
+        if (signature.Level != SignatureLevel.Qualified) return [];
+
+        var caveats = new List<string>();
+
+        if (trustNotChecked)
+            caveats.Add("цепочка сертификата не проверялась: доверенные центры не заведены");
+
+        if (!revocationChecked)
+            caveats.Add(revocationNote ?? "отзыв сертификата не проверялся");
+
+        if (signature.TimestampedAt is null)
+            caveats.Add(timestampNote ?? "без метки времени");
+
+        return caveats;
     }
 
     private async Task<RouteInstanceResponse?> LoadResponse(int id)

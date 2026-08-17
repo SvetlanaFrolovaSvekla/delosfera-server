@@ -43,3 +43,12 @@ public class UserCertificateConfiguration : IEntityTypeConfiguration<UserCertifi
         b.Property(x => x.SerialNumber).HasMaxLength(128);
     }
 }
+
+public class SigningSettingsConfiguration : IEntityTypeConfiguration<SigningSettings>
+{
+    public void Configure(EntityTypeBuilder<SigningSettings> b)
+    {
+        b.ToTable("signing_settings");
+        b.Property(x => x.TimestampAuthorityUrl).HasMaxLength(500);
+    }
+}

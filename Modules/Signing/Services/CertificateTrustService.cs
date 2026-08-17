@@ -22,7 +22,24 @@ public class TrustResult
     /// </summary>
     public bool NotChecked { get; init; }
 
-    public static TrustResult Ok(string? authority) => new() {Trusted = true, AuthorityTitle = authority};
+    /// <summary>
+    /// Отзыв проверен по списку удостоверяющего центра — сертификат не отозван.
+    /// Ложно, когда проверка выключена или связи со службой не было.
+    /// </summary>
+    public bool RevocationChecked { get; init; }
+
+    /// <summary>Почему отзыв не проверен — идёт в штамп, чтобы это не выглядело проверкой.</summary>
+    public string? RevocationNote { get; init; }
+
+    public static TrustResult Ok(string? authority, bool revocationChecked = false, string? revocationNote = null) =>
+        new()
+        {
+            Trusted = true,
+            AuthorityTitle = authority,
+            RevocationChecked = revocationChecked,
+            RevocationNote = revocationNote,
+        };
+
     public static TrustResult Fail(string reason) => new() {Trusted = false, Reason = reason};
     public static TrustResult Skipped() => new() {Trusted = true, NotChecked = true};
 }
@@ -71,12 +88,30 @@ public class CertificateTrustService : ICertificateTrustService
             return TrustResult.Skipped();
         }
 
+        var settings = await _db.SigningSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var checkRevocation = settings?.RevocationCheckEnabled ?? false;
+        var strict = settings?.RevocationStrict ?? false;
+
         using var chain = new X509Chain();
         var policy = chain.ChainPolicy;
 
         policy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-        policy.RevocationMode = X509RevocationMode.NoCheck;
         policy.VerificationFlags = X509VerificationFlags.NoFlag;
+
+        // Точки распространения списков отзыва берутся из самого сертификата: их
+        // указывает удостоверяющий центр при выпуске, и подставлять свои значило бы
+        // проверять не тот список, который ведёт центр.
+        policy.RevocationMode = checkRevocation ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
+        policy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
+        policy.UrlRetrievalTimeout = TimeSpan.FromSeconds(15);
+
+        // Недоступность службы отзыва — не то же самое, что отзыв. В нестрогом режиме
+        // подпись принимается с отметкой «отзыв не проверен»; в строгом неизвестное
+        // состояние считается отозванным, и это осознанный выбор банка.
+        if (checkRevocation && !strict)
+            policy.VerificationFlags |= X509VerificationFlags.IgnoreCertificateAuthorityRevocationUnknown
+                                        | X509VerificationFlags.IgnoreEndRevocationUnknown
+                                        | X509VerificationFlags.IgnoreRootRevocationUnknown;
 
         // Промежуточные и корневые различаются тем, совпадают ли Subject и Issuer:
         // корень подписан сам собой. Класть промежуточный в доверенные корни нельзя —
@@ -105,7 +140,25 @@ public class CertificateTrustService : ICertificateTrustService
             {
                 var root = chain.ChainElements[^1].Certificate;
                 var authority = authorities.FirstOrDefault(a => a.Thumbprint == root.Thumbprint);
-                return TrustResult.Ok(authority?.Title ?? root.Subject);
+
+                // Цепочка построена, но в нестрогом режиме это могло случиться потому,
+                // что неизвестное состояние отзыва было прощено. Проверкой это считать
+                // нельзя — разница видна в штампе.
+                var unknown = chain.ChainStatus.Any(s =>
+                    s.Status is X509ChainStatusFlags.RevocationStatusUnknown
+                        or X509ChainStatusFlags.OfflineRevocation);
+
+                var (checked_, note) = !checkRevocation
+                    ? (false, "проверка отзыва выключена в настройках")
+                    : unknown
+                        ? (false, "служба отзыва недоступна — состояние сертификата неизвестно")
+                        : (true, null as string);
+
+                if (unknown)
+                    _logger.LogWarning(
+                        "Отзыв сертификата {Thumbprint} не проверен: служба недоступна", certificate.Thumbprint);
+
+                return TrustResult.Ok(authority?.Title ?? root.Subject, checked_, note);
             }
 
             var problems = chain.ChainStatus

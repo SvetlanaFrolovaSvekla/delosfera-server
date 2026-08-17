@@ -98,6 +98,9 @@ public class DelosferaDbContext : DbContext
     /// <summary>Каким сертификатом подписывает каждый сотрудник.</summary>
     public DbSet<UserCertificate> UserCertificates => Set<UserCertificate>();
 
+    /// <summary>Служба меток времени и проверка отзыва — одна запись на систему.</summary>
+    public DbSet<SigningSettings> SigningSettings => Set<SigningSettings>();
+
     // --- Закупки (контур 6 ТЗ): матрица полномочий и её параметры ---
     public DbSet<ProcurementMethod> ProcurementMethods => Set<ProcurementMethod>();
     public DbSet<AuthorityMatrixRule> AuthorityMatrixRules => Set<AuthorityMatrixRule>();

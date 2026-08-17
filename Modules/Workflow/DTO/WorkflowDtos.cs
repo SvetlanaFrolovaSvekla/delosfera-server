@@ -123,6 +123,24 @@ public class SignatureStampResponse
 
     public bool Revoked { get; set; }
     public string? RevokedReason { get; set; }
+
+    /// <summary>
+    /// Время, удостоверённое службой меток. Отличается от At тем, что его назвал не
+    /// наш сервер: именно оно доказывает, что подпись поставлена, пока сертификат
+    /// действовал. Пусто — метки нет.
+    /// </summary>
+    public DateTime? TimestampedAt { get; set; }
+
+    public string? TimestampAuthority { get; set; }
+
+    /// <summary>Каким удостоверяющим центром подтверждён сертификат подписанта.</summary>
+    public string? TrustAuthority { get; set; }
+
+    /// <summary>
+    /// Что в этой подписи осталось непроверенным: цепочка, отзыв, метка. Штамп обязан
+    /// это показывать — иначе подпись выглядит доказательнее, чем она есть.
+    /// </summary>
+    public List<string> Caveats { get; set; } = [];
 }
 
 public class RemarkResponse

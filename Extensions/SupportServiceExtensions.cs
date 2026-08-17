@@ -15,6 +15,11 @@ public static class SupportServiceExtensions
         // КЭП: проверка подписи хеша версии и реквизитов сертификата (SIG-02, INT-03)
         builder.Services.AddScoped<IQualifiedSignatureService, QualifiedSignatureService>();
         builder.Services.AddScoped<ICertificateTrustService, CertificateTrustService>();
+
+        // Метки времени и проверка отзыва (Б-18). Отдельный клиент, чтобы таймаут
+        // службы меток не влиял на остальные обращения наружу.
+        builder.Services.AddHttpClient("timestamp");
+        builder.Services.AddScoped<ITimestampService, TimestampService>();
         return builder;
     }
 

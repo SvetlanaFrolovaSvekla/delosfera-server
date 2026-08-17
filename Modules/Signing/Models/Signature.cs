@@ -46,4 +46,18 @@ public class Signature
 
     public bool Revoked { get; set; }
     public string? RevokedReason { get; set; }
+
+    /// <summary>
+    /// Токен метки времени (RFC 3161) целиком. Он и есть доказательство того, что
+    /// подпись существовала к удостоверённому моменту: восстановить его потом
+    /// нельзя — повторный запрос к службе даст другую метку, с другим временем.
+    /// Пусто — метка выключена в настройках либо служба была недоступна.
+    /// </summary>
+    public byte[]? TimestampToken { get; set; }
+
+    /// <summary>Время, удостоверённое службой, — не время нашего сервера.</summary>
+    public DateTime? TimestampedAt { get; set; }
+
+    /// <summary>Какая служба удостоверила время.</summary>
+    public string? TimestampAuthority { get; set; }
 }

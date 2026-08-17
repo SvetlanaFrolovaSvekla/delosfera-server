@@ -84,4 +84,11 @@ public class UserCertificate
     /// </summary>
     public DateTime? RevokedAt { get; set; }
     public string? RevokedReason { get; set; }
+
+    /// <summary>
+    /// Когда последний раз проверяли по списку отзыва. Сертификат отзывают между
+    /// подписаниями, и узнать об этом система должна раньше, чем человек снова
+    /// придёт подписывать. Пусто — ни разу не проверялся.
+    /// </summary>
+    public DateTime? RevocationCheckedAt { get; set; }
 }

@@ -53,6 +53,20 @@ public class SignatureInfoDto
 
     /// <summary>Цепочка не проверялась — доверенные центры не заведены.</summary>
     public bool TrustNotChecked { get; set; }
+
+    /// <summary>Отзыв сертификата проверен по списку удостоверяющего центра.</summary>
+    public bool RevocationChecked { get; set; }
+
+    /// <summary>Почему отзыв не проверен.</summary>
+    public string? RevocationNote { get; set; }
+
+    /// <summary>Время, удостоверённое службой меток. Пусто — метки нет.</summary>
+    public DateTime? TimestampedAt { get; set; }
+
+    public string? TimestampAuthority { get; set; }
+
+    /// <summary>Почему метки нет.</summary>
+    public string? TimestampNote { get; set; }
 }
 
 public class QualifiedSignRequest
@@ -105,6 +119,7 @@ public class QualifiedSignatureService : IQualifiedSignatureService
     private readonly ISignatureService _signatures;
     private readonly ICertificateTrustService _trust;
     private readonly IDocumentFingerprintService _fingerprints;
+    private readonly ITimestampService _timestamps;
     private readonly ILogger<QualifiedSignatureService> _logger;
 
     public QualifiedSignatureService(
@@ -112,12 +127,14 @@ public class QualifiedSignatureService : IQualifiedSignatureService
         ISignatureService signatures,
         ICertificateTrustService trust,
         IDocumentFingerprintService fingerprints,
+        ITimestampService timestamps,
         ILogger<QualifiedSignatureService> logger)
     {
         _db = db;
         _signatures = signatures;
         _trust = trust;
         _fingerprints = fingerprints;
+        _timestamps = timestamps;
         _logger = logger;
     }
 
@@ -146,18 +163,21 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
 
-        var (certificate, trust) = await AcceptAsync(request, HexToBytes(attachment.Hash), userId);
+        var accepted = await AcceptAsync(request, HexToBytes(attachment.Hash), userId);
+        var (certificate, trust, timestamp) = accepted;
 
         using (certificate)
         {
             var stored = await _signatures.SignAsync(
-                attachmentId, SignatureLevel.Qualified, userId, BuildStamp(certificate, trust));
+                attachmentId, SignatureLevel.Qualified, userId, BuildStamp(certificate, trust, timestamp));
+
+            await SaveTimestampAsync(stored.Id, timestamp);
 
             _logger.LogInformation(
                 "КЭП: вложение {AttachmentId} подписано пользователем {UserId}, сертификат {Subject}",
                 attachmentId, userId, certificate.Subject);
 
-            return ToDto(stored, await UserNameAsync(userId), certificate, trust);
+            return ToDto(stored, await UserNameAsync(userId), certificate, trust, timestamp);
         }
     }
 
@@ -196,18 +216,21 @@ public class QualifiedSignatureService : IQualifiedSignatureService
         if (!exists) throw new KeyNotFoundException("Документ не найден");
 
         var fingerprint = await _fingerprints.ComputeAsync(documentId);
-        var (certificate, trust) = await AcceptAsync(request, FingerprintToBytes(fingerprint), userId);
+        var accepted = await AcceptAsync(request, FingerprintToBytes(fingerprint), userId);
+        var (certificate, trust, timestamp) = accepted;
 
         using (certificate)
         {
             var stored = await _signatures.SignDocumentAsync(
-                documentId, SignatureLevel.Qualified, userId, BuildStamp(certificate, trust));
+                documentId, SignatureLevel.Qualified, userId, BuildStamp(certificate, trust, timestamp));
+
+            await SaveTimestampAsync(stored.Id, timestamp);
 
             _logger.LogInformation(
                 "КЭП: документ {DocumentId} подписан пользователем {UserId}, сертификат {Subject}",
                 documentId, userId, certificate.Subject);
 
-            return ToDto(stored, await UserNameAsync(userId), certificate, trust);
+            return ToDto(stored, await UserNameAsync(userId), certificate, trust, timestamp);
         }
     }
 
@@ -219,7 +242,7 @@ public class QualifiedSignatureService : IQualifiedSignatureService
     /// должен увидеть «истёк сертификат», а не «цепочка не построена», когда верно и то,
     /// и другое.
     /// </summary>
-    private async Task<(X509Certificate2 Certificate, TrustResult Trust)> AcceptAsync(
+    private async Task<Accepted> AcceptAsync(
         QualifiedSignRequest request, byte[] hash, int userId)
     {
         var certificate = ParseCertificate(request.Certificate);
@@ -247,7 +270,25 @@ public class QualifiedSignatureService : IQualifiedSignatureService
                 throw new InvalidOperationException(
                     "Подпись не соответствует хешу подписанного или сертификату подписанта");
 
-            return (certificate, trust);
+            // Метка времени ставится последней: штамповать нечего, пока подпись не
+            // признана. Служба меток видит только свёртку подписи, не документ.
+            var timestamp = await _timestamps.StampAsync(signature);
+
+            if (!timestamp.Obtained && !timestamp.Disabled)
+            {
+                var settings = await _db.SigningSettings.AsNoTracking().FirstOrDefaultAsync();
+
+                // Отказ службы меток не всегда должен отменять подпись: приказ иногда
+                // нужно подписать именно сейчас. Решает банк, поэтому это настройка.
+                if (settings?.TimestampRequired == true)
+                    throw new InvalidOperationException(
+                        $"Метка времени обязательна, но получить её не удалось: {timestamp.Reason}");
+
+                _logger.LogWarning(
+                    "Подпись принята без метки времени: {Reason}", timestamp.Reason);
+            }
+
+            return new Accepted(certificate, trust, timestamp);
         }
         catch
         {
@@ -255,6 +296,9 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             throw;
         }
     }
+
+    /// <summary>Принятая подпись со всем, что о ней удалось установить.</summary>
+    private record Accepted(X509Certificate2 Certificate, TrustResult Trust, TimestampResult Timestamp);
 
     /// <summary>
     /// Сертификат закрепляется за сотрудником при первой подписи и дальше принимается
@@ -353,7 +397,8 @@ public class QualifiedSignatureService : IQualifiedSignatureService
 
     // ── вспомогательное ──────────────────────────────────────────────────────
 
-    private static string BuildStamp(X509Certificate2 certificate, TrustResult trust) =>
+    private static string BuildStamp(
+        X509Certificate2 certificate, TrustResult trust, TimestampResult timestamp) =>
         JsonSerializer.Serialize(new
         {
             subject = certificate.Subject,
@@ -365,7 +410,30 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             thumbprint = certificate.Thumbprint,
             trustAuthority = trust.AuthorityTitle,
             trustNotChecked = trust.NotChecked,
+            revocationChecked = trust.RevocationChecked,
+            revocationNote = trust.RevocationNote,
+            timestampAt = timestamp.At,
+            timestampAuthority = timestamp.Authority,
+            timestampNote = timestamp.Obtained ? null : timestamp.Reason,
         });
+
+    /// <summary>
+    /// Токен метки хранится целиком: он и есть доказательство. Восстановить его
+    /// потом нельзя — запрос к службе не повторяется с тем же результатом.
+    /// </summary>
+    private async Task SaveTimestampAsync(int signatureId, TimestampResult timestamp)
+    {
+        if (!timestamp.Obtained) return;
+
+        var signature = await _db.Signatures.FirstOrDefaultAsync(s => s.Id == signatureId);
+        if (signature is null) return;
+
+        signature.TimestampToken = timestamp.Token;
+        signature.TimestampedAt = timestamp.At;
+        signature.TimestampAuthority = timestamp.Authority;
+
+        await _db.SaveChangesAsync();
+    }
 
     private async Task<string?> UserNameAsync(int userId) => await _db.Users
         .Where(u => u.Id == userId)
@@ -385,11 +453,12 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => u.FullName);
 
-        return rows.Select(s => ToDto(s, names.GetValueOrDefault(s.UserId), null, null)).ToList();
+        return rows.Select(s => ToDto(s, names.GetValueOrDefault(s.UserId), null, null, null)).ToList();
     }
 
     private static SignatureInfoDto ToDto(
-        Signature s, string? userName, X509Certificate2? certificate, TrustResult? trust)
+        Signature s, string? userName, X509Certificate2? certificate,
+        TrustResult? trust, TimestampResult? timestamp)
     {
         var dto = new SignatureInfoDto
         {
@@ -412,6 +481,11 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             dto.CertificateValidTo = certificate.NotAfter.ToUniversalTime();
             dto.TrustAuthority = trust?.AuthorityTitle;
             dto.TrustNotChecked = trust?.NotChecked ?? false;
+            dto.RevocationChecked = trust?.RevocationChecked ?? false;
+            dto.RevocationNote = trust?.RevocationNote;
+            dto.TimestampedAt = timestamp?.At;
+            dto.TimestampAuthority = timestamp?.Authority;
+            dto.TimestampNote = timestamp is null || timestamp.Obtained ? null : timestamp.Reason;
             return dto;
         }
 
@@ -432,6 +506,19 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             if (root.TryGetProperty("trustNotChecked", out var notChecked) &&
                 notChecked.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 dto.TrustNotChecked = notChecked.GetBoolean();
+            if (root.TryGetProperty("revocationChecked", out var revocation) &&
+                revocation.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                dto.RevocationChecked = revocation.GetBoolean();
+            if (root.TryGetProperty("revocationNote", out var revocationNote))
+                dto.RevocationNote = revocationNote.GetString();
+            if (root.TryGetProperty("timestampAuthority", out var tsa))
+                dto.TimestampAuthority = tsa.GetString();
+            if (root.TryGetProperty("timestampNote", out var tsNote))
+                dto.TimestampNote = tsNote.GetString();
+
+            // Время метки берём из самой подписи, а не из штампа: в базе оно
+            // типизировано, и разбирать его из текста незачем.
+            dto.TimestampedAt = s.TimestampedAt;
         }
         catch (JsonException)
         {
