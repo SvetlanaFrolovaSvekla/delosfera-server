@@ -23,6 +23,11 @@ public static class SupportServiceExtensions
 
         // Ознакомление с документами (Б-19): роспись сотрудника под приказом или ВНД
         builder.Services.AddScoped<IAcknowledgementService, AcknowledgementService>();
+
+        // Очистка разметки текста документов: редактор отдаёт HTML, а он попадёт
+        // в браузер другого сотрудника (SZ-02).
+        builder.Services.AddSingleton<Common.Services.IDocumentHtmlService,
+            Common.Services.DocumentHtmlService>();
         return builder;
     }
 

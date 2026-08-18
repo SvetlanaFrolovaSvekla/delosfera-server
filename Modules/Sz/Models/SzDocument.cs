@@ -27,6 +27,13 @@ public class SzDocument : IAuditableEntity
     /// <summary>Текст служебной записки.</summary>
     public string? Body { get; set; }
 
+    /// <summary>
+    /// Тот же текст без разметки. Нужен поиску: индекс строится по нему, а не по
+    /// Body — иначе запрос «strong» находил бы все записки с жирным начертанием,
+    /// а «конец абзаца» не находился бы вовсе, потому что теги склеивают слова.
+    /// </summary>
+    public string? BodyText { get; set; }
+
     /// <summary>Поисковый вектор по тексту записки и резолюции (GEN-04).</summary>
     public NpgsqlTsVector? SearchVector { get; set; }
 

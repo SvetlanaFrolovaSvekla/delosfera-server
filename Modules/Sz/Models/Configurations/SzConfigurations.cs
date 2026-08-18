@@ -52,9 +52,11 @@ public class SzDocumentConfiguration : IEntityTypeConfiguration<SzDocument>
         b.ToTable("sz_document");
 
         // Поисковый вектор по тексту записки и резолюции — вычисляется базой (GEN-04).
+        // Берём body_text, а не body: в body лежит разметка редактора, и по ней
+        // поиск находил бы теги вместо слов.
         b.Property(x => x.SearchVector)
             .HasComputedColumnSql(
-                "to_tsvector('russian', coalesce(body, '') || ' ' || coalesce(execution_resolution, ''))",
+                "to_tsvector('russian', coalesce(body_text, '') || ' ' || coalesce(execution_resolution, ''))",
                 stored: true);
 
         b.HasIndex(x => x.SearchVector).HasMethod("GIN");

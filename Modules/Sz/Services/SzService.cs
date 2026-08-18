@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Models;
+using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
@@ -54,14 +55,17 @@ public class SzService : ISzService
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
     private readonly IRouteEngine _routeEngine;
+    private readonly IDocumentHtmlService _html;
 
     public SzService(
-        DelosferaDbContext db, IDocumentService documents, IAuditService audit, IRouteEngine routeEngine)
+        DelosferaDbContext db, IDocumentService documents, IAuditService audit,
+        IRouteEngine routeEngine, IDocumentHtmlService html)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
         _routeEngine = routeEngine;
+        _html = html;
     }
 
     private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
@@ -533,9 +537,12 @@ public class SzService : ISzService
             .Include(x => x.Employees).ThenInclude(e => e.OrgUnit)
             .Include(x => x.Rubrics);
 
-    private static void ApplyFields(SzDocument sz, SzSaveRequest r)
+    private void ApplyFields(SzDocument sz, SzSaveRequest r)
     {
-        sz.Body = r.Body;
+        // Разметку чистим на входе: она придёт в браузер другого сотрудника,
+        // и всё, что не вырезано здесь, выполнится там.
+        sz.Body = _html.Sanitize(r.Body);
+        sz.BodyText = _html.ToPlainText(sz.Body);
         sz.CorrespondentUnitId = r.CorrespondentUnitId;
         sz.AddresseeUserId = r.AddresseeUserId;
         sz.ApprovalIsParallel = r.ApprovalIsParallel;
