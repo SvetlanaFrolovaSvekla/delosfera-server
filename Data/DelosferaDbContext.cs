@@ -101,6 +101,10 @@ public class DelosferaDbContext : DbContext
     /// <summary>Служба меток времени и проверка отзыва — одна запись на систему.</summary>
     public DbSet<SigningSettings> SigningSettings => Set<SigningSettings>();
 
+    /// <summary>Инструкции по работе с системой — тексты правит администратор (KB-01..03).</summary>
+    public DbSet<delosfera_server.Modules.Help.Models.HelpArticle> HelpArticles =>
+        Set<delosfera_server.Modules.Help.Models.HelpArticle>();
+
     // --- Ознакомление с документами (Б-19) ---
     public DbSet<AcknowledgementSheet> AcknowledgementSheets => Set<AcknowledgementSheet>();
     public DbSet<AcknowledgementEntry> AcknowledgementEntries => Set<AcknowledgementEntry>();
