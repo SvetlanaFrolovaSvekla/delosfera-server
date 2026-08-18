@@ -217,6 +217,27 @@ public class SzController : ControllerBase
             .ToListAsync());
 
     /// <summary>Справочник видов кадровых СЗ.</summary>
+    /// <summary>
+    /// Какие поля показывать для каждого вида кадровой записки.
+    ///
+    /// Схема отдаётся целиком, а не по одному виду: пользователь переключает вид
+    /// прямо в карточке, и запрашивать форму на каждое переключение значило бы
+    /// подвешивать интерфейс на сеть там, где данные уже в памяти.
+    /// </summary>
+    [HttpGet("hr-forms")]
+    public IActionResult HrForms() =>
+        Ok(Services.HrFormSchema.Forms.ToDictionary(
+            x => x.Key,
+            x => new
+            {
+                x.Value.AllowMultipleEmployees,
+                x.Value.EmployeeMayBeExternal,
+                fields = x.Value.Fields.Select(f => new
+                {
+                    f.Code, f.Label, f.Type, f.Required, f.PerEmployee, f.Options, f.Hint,
+                }),
+            }));
+
     [HttpGet("hr-kinds")]
     public async Task<IActionResult> HrKinds() =>
         Ok(await _db.SzHrKinds.AsNoTracking()

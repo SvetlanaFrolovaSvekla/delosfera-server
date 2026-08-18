@@ -123,3 +123,21 @@ public class SzAssignmentConfiguration : IEntityTypeConfiguration<SzAssignment>
         b.HasIndex(x => x.DueDate);
     }
 }
+
+public class SzEmployeeConfiguration : IEntityTypeConfiguration<SzEmployee>
+{
+    public void Configure(EntityTypeBuilder<SzEmployee> b)
+    {
+        b.ToTable("sz_employee");
+        b.Property(x => x.FullName).HasMaxLength(300);
+        b.Property(x => x.Position).HasMaxLength(300);
+
+        // Список сотрудников всегда читается вместе с запиской и в заданном порядке.
+        b.HasIndex(x => new {x.SzDocumentId, x.SortOrder});
+
+        b.HasOne(x => x.SzDocument)
+            .WithMany(d => d.Employees)
+            .HasForeignKey(x => x.SzDocumentId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}

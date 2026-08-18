@@ -40,6 +40,12 @@ public class SzSaveRequest
 
     /// <summary>Поля видов, добавленных администратором после релиза.</summary>
     public JsonElement? ExtraFields { get; set; }
+
+    /// <summary>
+    /// Сотрудники, которых касается кадровая записка. Пустой список — записка
+    /// не о людях либо заведена до появления этого поля.
+    /// </summary>
+    public List<SzEmployeeDto> Employees { get; set; } = [];
 }
 
 /// <summary>Согласующий в карточке записки.</summary>
@@ -150,6 +156,12 @@ public class SzDetails : SzListItem
     public bool? TravelExpenses { get; set; }
 
     public JsonElement? ExtraFields { get; set; }
+
+    /// <summary>
+    /// Сотрудники, которых касается кадровая записка. Пустой список — записка
+    /// не о людях либо заведена до появления этого поля.
+    /// </summary>
+    public List<SzEmployeeDto> Employees { get; set; } = [];
     public int? CurrentRouteInstanceId { get; set; }
 
     /// <summary>Обоснование последнего отзыва — участники должны видеть, почему процесс прерван.</summary>
@@ -207,4 +219,22 @@ public class SzStatisticsDto
     public Dictionary<string, SzStatisticsCell> ByUnit { get; set; } = [];
     public Dictionary<string, SzStatisticsCell> ByKind { get; set; } = [];
     public Dictionary<string, SzStatisticsCell> ByMonth { get; set; } = [];
+}
+
+
+/// <summary>
+/// Сотрудник в кадровой записке. UserId пуст у кандидата: в записке о приёме
+/// человека в системе ещё нет, а записка уже нужна.
+/// </summary>
+public class SzEmployeeDto
+{
+    public int? Id { get; set; }
+    public int? UserId { get; set; }
+    public required string FullName { get; set; }
+    public int? OrgUnitId { get; set; }
+    public string? OrgUnit { get; set; }
+    public string? Position { get; set; }
+
+    /// <summary>Значения полей, своих для этого человека: оклад, даты.</summary>
+    public JsonElement? Values { get; set; }
 }

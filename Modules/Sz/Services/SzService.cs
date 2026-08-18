@@ -167,6 +167,7 @@ public class SzService : ISzService
         await _db.SaveChangesAsync();
 
         await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
+        await ReplaceEmployeesAsync(sz.Id, request.Employees);
 
         await _audit.LogAsync("Sz", sz.Id, "Created", authorId, new { kind = kind.TitleRu });
 
@@ -202,6 +203,7 @@ public class SzService : ISzService
         ApplyFields(sz, request);
         await ApplyRubricsAsync(sz, request.RubricIds);
         await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
+        await ReplaceEmployeesAsync(sz.Id, request.Employees);
 
         await _db.SaveChangesAsync();
         await _audit.LogAsync("Sz", sz.Id, "Updated", actorUserId);
@@ -528,6 +530,7 @@ public class SzService : ISzService
             .Include(x => x.SignerUser)
             .Include(x => x.AddresseeUser)
             .Include(x => x.Approvers).ThenInclude(a => a.User)
+            .Include(x => x.Employees).ThenInclude(e => e.OrgUnit)
             .Include(x => x.Rubrics);
 
     private static void ApplyFields(SzDocument sz, SzSaveRequest r)
@@ -550,6 +553,59 @@ public class SzService : ISzService
         sz.ExtraFields = r.ExtraFields is JsonElement extra
             ? JsonDocument.Parse(extra.GetRawText())
             : null;
+    }
+
+    /// <summary>
+    /// Полная замена состава сотрудников записки.
+    ///
+    /// Заменяем целиком, а не сверяем построчно: состав правят в форме списком,
+    /// и попытка угадать, что именно изменилось, дала бы ошибки на переставленных
+    /// строках. Порядок в списке сохраняется — он бывает осмысленным.
+    /// </summary>
+    private async Task ReplaceEmployeesAsync(int szId, List<SzEmployeeDto> employees)
+    {
+        var было = await _db.SzEmployees.Where(e => e.SzDocumentId == szId).ToListAsync();
+        _db.SzEmployees.RemoveRange(было);
+
+        var order = 0;
+        foreach (var e in employees)
+        {
+            if (string.IsNullOrWhiteSpace(e.FullName)) continue;
+
+            _db.SzEmployees.Add(new SzEmployee
+            {
+                SzDocumentId = szId,
+                UserId = e.UserId,
+                FullName = e.FullName.Trim(),
+                OrgUnitId = e.OrgUnitId,
+                Position = string.IsNullOrWhiteSpace(e.Position) ? null : e.Position.Trim(),
+                ValuesJson = e.Values is JsonElement v && v.ValueKind != JsonValueKind.Undefined
+                    ? v.GetRawText()
+                    : null,
+                SortOrder = order++,
+            });
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Значения полей сотрудника. Испорченный JSON не должен ронять карточку:
+    /// строку могли записать вручную запросом к базе.
+    /// </summary>
+    private static JsonElement? ParseValues(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -630,6 +686,20 @@ public class SzService : ISzService
         d.TravelExpenses = x.TravelExpenses;
 
         d.ExtraFields = x.ExtraFields?.RootElement.Clone();
+
+        d.Employees = x.Employees
+            .OrderBy(e => e.SortOrder)
+            .Select(e => new SzEmployeeDto
+            {
+                Id = e.Id,
+                UserId = e.UserId,
+                FullName = e.FullName,
+                OrgUnitId = e.OrgUnitId,
+                OrgUnit = e.OrgUnit?.TitleRu,
+                Position = e.Position,
+                Values = ParseValues(e.ValuesJson),
+            })
+            .ToList();
         d.CurrentRouteInstanceId = x.Document?.CurrentRouteInstanceId;
         d.WithdrawReason = x.WithdrawReason;
         d.ApprovalRounds = x.ApprovalRounds;

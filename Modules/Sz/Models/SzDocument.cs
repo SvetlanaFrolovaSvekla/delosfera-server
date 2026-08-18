@@ -136,8 +136,20 @@ public class SzDocument : IAuditableEntity
     public int? HrKindId { get; set; }
     public SzHrKind? HrKind { get; set; }
 
-    /// <summary>ФИО сотрудника, которого касается записка.</summary>
+    /// <summary>
+    /// ФИО сотрудника, которого касается записка.
+    ///
+    /// Оставлено для записок, заведённых до появления списка сотрудников: в них
+    /// человек один и лежит здесь. Новые записки заполняют Employees — там их
+    /// может быть несколько.
+    /// </summary>
     public string? EmployeeName { get; set; }
+
+    /// <summary>
+    /// Сотрудники, которых касается записка. Командировка бывает групповой, оклад
+    /// повышают отделу, в выходной выходит смена — одного поля ФИО для этого мало.
+    /// </summary>
+    public ICollection<SzEmployee> Employees { get; set; } = new List<SzEmployee>();
 
     /// <summary>Филиал/СП сотрудника.</summary>
     public int? EmployeeUnitId { get; set; }

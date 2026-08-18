@@ -134,6 +134,9 @@ public class DelosferaDbContext : DbContext
     public DbSet<SzDocument> SzDocuments => Set<SzDocument>();
     public DbSet<SzKind> SzKinds => Set<SzKind>();
     public DbSet<SzHrKind> SzHrKinds => Set<SzHrKind>();
+
+    /// <summary>Сотрудники, которых касается кадровая записка: их может быть несколько.</summary>
+    public DbSet<SzEmployee> SzEmployees => Set<SzEmployee>();
     public DbSet<SzAssignment> SzAssignments => Set<SzAssignment>();
     public DbSet<SzApprover> SzApprovers => Set<SzApprover>(); // согласующие, выбранные автором записки
 
