@@ -20,6 +20,9 @@ public static class SupportServiceExtensions
         // службы меток не влиял на остальные обращения наружу.
         builder.Services.AddHttpClient("timestamp");
         builder.Services.AddScoped<ITimestampService, TimestampService>();
+
+        // Ознакомление с документами (Б-19): роспись сотрудника под приказом или ВНД
+        builder.Services.AddScoped<IAcknowledgementService, AcknowledgementService>();
         return builder;
     }
 

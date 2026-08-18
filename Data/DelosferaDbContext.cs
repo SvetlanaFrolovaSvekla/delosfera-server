@@ -101,6 +101,10 @@ public class DelosferaDbContext : DbContext
     /// <summary>Служба меток времени и проверка отзыва — одна запись на систему.</summary>
     public DbSet<SigningSettings> SigningSettings => Set<SigningSettings>();
 
+    // --- Ознакомление с документами (Б-19) ---
+    public DbSet<AcknowledgementSheet> AcknowledgementSheets => Set<AcknowledgementSheet>();
+    public DbSet<AcknowledgementEntry> AcknowledgementEntries => Set<AcknowledgementEntry>();
+
     // --- Закупки (контур 6 ТЗ): матрица полномочий и её параметры ---
     public DbSet<ProcurementMethod> ProcurementMethods => Set<ProcurementMethod>();
     public DbSet<AuthorityMatrixRule> AuthorityMatrixRules => Set<AuthorityMatrixRule>();
