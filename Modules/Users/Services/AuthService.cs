@@ -1,4 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Security.Cryptography;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Extensions;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Common.Services.Authorization.Ldap;
@@ -6,6 +8,8 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
+using delosfera_server.Common.Security;
+using delosfera_server.Modules.Integrations.Directory;
 using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Users.Services;
@@ -15,21 +19,36 @@ public class AuthService : IAuthService
     private readonly DelosferaDbContext _db;
     private readonly IUserPasswordHasher _passwordHasher;
     private readonly IJwtTokenService _jwtTokenService;
+    // Два пути к службе каталогов, и оба нужны: проверка пароля доменной учётной
+    // записи при обычном входе по адресу почты и отдельный доменный вход по логину.
     private readonly ILdapAuthenticator _ldapAuthenticator;
+    private readonly ILdapDirectory _directory;
+    private readonly IPasswordPolicy _passwordPolicy;
+    private readonly int _refreshTokenExpiryDays;
 
     public AuthService(
         DelosferaDbContext db,
         IUserPasswordHasher passwordHasher,
         IJwtTokenService jwtTokenService,
-        ILdapAuthenticator ldapAuthenticator) 
+        ILdapAuthenticator ldapAuthenticator,
+        ILdapDirectory directory,
+        IPasswordPolicy passwordPolicy,
+        IConfiguration configuration)
     {
         _db = db;
         _passwordHasher = passwordHasher;
         _jwtTokenService = jwtTokenService;
-        _ldapAuthenticator = ldapAuthenticator; 
+        _ldapAuthenticator = ldapAuthenticator;
+        _directory = directory;
+        _passwordPolicy = passwordPolicy;
+        _refreshTokenExpiryDays = int.Parse(configuration["Jwt:RefreshTokenExpiryDays"] ?? "30");
     }
 
-    public async Task<LoginResponse> LoginAsync(LoginRequest request, string languageCode)
+    /// <summary>SHA-256 (hex) от токена — в БД хранится только хеш.</summary>
+    private static string HashToken(string token) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+
+    public async Task<AuthResult> LoginAsync(LoginRequest request, string languageCode)
     {
         var user = await LoadUserAsync(x => x.Email == request.Email)
                    ?? throw new UnauthorizedAccessException("Неверный email или пароль");
@@ -37,36 +56,104 @@ public class AuthService : IAuthService
         if (!user.IsActive) throw new UnauthorizedAccessException("Учётная запись деактивирована");
         if (user.BlockedAt.HasValue) throw new UnauthorizedAccessException("Учётная запись заблокирована");
 
-        bool passwordOk = user.Source == UserSource.Ldap
+        // Блокировка после серии неудачных попыток (NFR-03). Ограничение частоты по
+        // адресу уже стоит, но оно не спасает от подбора с разных адресов по одной
+        // учётной записи. Проверка идёт до обращения к каталогу: заблокированную
+        // учётку незачем проверять ни локально, ни в домене.
+        if (user.LockedUntil is { } lockedUntil && lockedUntil > DateTime.UtcNow)
+        {
+            var minutes = Math.Max(1, (int)Math.Ceiling((lockedUntil - DateTime.UtcNow).TotalMinutes));
+            throw new UnauthorizedAccessException(
+                $"Вход временно заблокирован после неудачных попыток. Повторите через {minutes} мин.");
+        }
+
+        // У доменной учётной записи локального пароля нет: он живёт в каталоге и
+        // подчиняется доменным политикам, поэтому и проверяется там.
+        var passwordOk = user.Source == UserSource.Ldap
             ? await _ldapAuthenticator.VerifyPasswordAsync(
                 user.LdapLogin ?? throw new UnauthorizedAccessException("У учётной записи не задан LDAP-логин"),
                 request.Password)
             : _passwordHasher.Verify(user.PasswordHash, request.Password);
 
         if (!passwordOk)
-            throw new UnauthorizedAccessException("Неверный email или пароль");
+        {
+            user.FailedLoginAttempts++;
 
+            if (user.FailedLoginAttempts >= _passwordPolicy.MaxFailedAttempts)
+            {
+                user.LockedUntil = DateTime.UtcNow.Add(_passwordPolicy.LockoutDuration);
+                user.FailedLoginAttempts = 0;
+            }
+
+            await _db.SaveChangesAsync();
+            throw new UnauthorizedAccessException("Неверный email или пароль");
+        }
+
+        // Успешный вход снимает счётчик: он про подбор пароля, а не про рассеянность.
+        user.FailedLoginAttempts = 0;
+        user.LockedUntil = null;
         user.LastLoginAt = DateTime.UtcNow;
         var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
         await _db.SaveChangesAsync();
 
-        return new LoginResponse { Token = accessToken, RefreshToken = refreshToken, User = ToUserResponse(user, languageCode) };
+        return new AuthResult(
+            new LoginResponse { Token = accessToken, User = ToUserResponse(user, languageCode) },
+            refreshToken);
     }
 
-    public async Task<LoginResponse> RefreshAsync(RefreshTokenRequest request, string languageCode)
+    public async Task<AuthResult> LoginWithDirectoryAsync(DomainLoginRequest request, string languageCode)
     {
+        if (!_directory.Enabled)
+            throw new UnauthorizedAccessException("Доменный вход не настроен");
+
+        var entry = await _directory.AuthenticateAsync(request.Login, request.Password)
+            ?? throw new UnauthorizedAccessException("Неверный доменный логин или пароль");
+
+        if (entry.IsDisabled)
+            throw new UnauthorizedAccessException("Доменная учётная запись отключена");
+
+        if (string.IsNullOrWhiteSpace(entry.Email))
+            throw new UnauthorizedAccessException(
+                "В каталоге не заполнен адрес почты — обратитесь к администратору");
+
+        // Каталог подтвердил личность, но прав в системе у сотрудника может не быть:
+        // доступ выдаётся синхронизацией и ролями, а не самим фактом входа в домен.
+        var user = await LoadUserAsync(x => x.Email == entry.Email)
+            ?? throw new UnauthorizedAccessException(
+                "Сотрудник не заведён в системе — требуется синхронизация каталога");
+
+        if (!user.IsActive)
+            throw new UnauthorizedAccessException("Учётная запись деактивирована");
+
+        if (user.BlockedAt.HasValue)
+            throw new UnauthorizedAccessException("Учётная запись заблокирована");
+
+        user.LastLoginAt = DateTime.UtcNow;
+
+        var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
+        await _db.SaveChangesAsync();
+
+        return new AuthResult(
+            new LoginResponse { Token = accessToken, User = ToUserResponse(user, languageCode) },
+            refreshToken);
+    }
+
+    public async Task<AuthResult> RefreshAsync(string refreshToken, string languageCode)
+    {
+        var refreshTokenHash = HashToken(refreshToken);
+
         var tokenEntity = await _db.Tokens
             .Include(x => x.User!).ThenInclude(u => u.Position)
             .Include(x => x.User!).ThenInclude(u => u.OrgUnit)
             .Include(x => x.User!).ThenInclude(u => u.Roles)
             .Include(x => x.User!).ThenInclude(u => u.BlockedByUser)
-            .FirstOrDefaultAsync(x => x.RefreshToken == request.RefreshToken)
+            .FirstOrDefaultAsync(x => x.RefreshTokenHash == refreshTokenHash)
             ?? throw new UnauthorizedAccessException("Недействительный refresh-токен");
 
         if (tokenEntity.IsLoggedOut)
             throw new UnauthorizedAccessException("Refresh-токен отозван");
 
-        if (_jwtTokenService.IsExpired(tokenEntity.RefreshToken))
+        if (tokenEntity.ExpiresAt < DateTime.UtcNow)
             throw new UnauthorizedAccessException("Refresh-токен истёк");
 
         var user = tokenEntity.User!;
@@ -79,15 +166,18 @@ public class AuthService : IAuthService
         if (user.BlockedAt.HasValue)
             throw new UnauthorizedAccessException("Учётная запись заблокирована");
 
-        var (accessToken, refreshToken) = await IssueNewTokenPairAsync(user);
+        var (accessToken, newRefreshToken) = await IssueNewTokenPairAsync(user);
         await _db.SaveChangesAsync();
 
-        return new LoginResponse { Token = accessToken, RefreshToken = refreshToken, User = ToUserResponse(user, languageCode) };
+        return new AuthResult(
+            new LoginResponse { Token = accessToken, User = ToUserResponse(user, languageCode) },
+            newRefreshToken);
     }
 
     public async Task LogoutAsync(string refreshToken)
     {
-        var tokenEntity = await _db.Tokens.FirstOrDefaultAsync(x => x.RefreshToken == refreshToken);
+        var refreshTokenHash = HashToken(refreshToken);
+        var tokenEntity = await _db.Tokens.FirstOrDefaultAsync(x => x.RefreshTokenHash == refreshTokenHash);
         if (tokenEntity is null) return;
 
         tokenEntity.IsLoggedOut = true;
@@ -107,8 +197,8 @@ public class AuthService : IAuthService
 
         _db.Tokens.Add(new Token
         {
-            AccessToken = accessToken,
-            RefreshToken = refreshToken,
+            RefreshTokenHash = HashToken(refreshToken),
+            ExpiresAt = DateTime.UtcNow.AddDays(_refreshTokenExpiryDays),
             IsLoggedOut = false,
             UserId = user.Id
         });

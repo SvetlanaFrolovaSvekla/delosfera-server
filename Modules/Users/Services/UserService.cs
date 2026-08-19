@@ -7,18 +7,51 @@ using delosfera_server.Modules.Users.DTO.Request;
 using delosfera_server.Modules.Users.DTO.Response;
 using delosfera_server.Modules.Users.Models;
 
+using delosfera_server.Common.Security;
+using delosfera_server.Common.Services;
+using delosfera_server.Modules.Documents.Services;
+
 namespace delosfera_server.Modules.Users.Services;
 
 public class UserService : IUserService
 {
     private readonly DelosferaDbContext _db;
     private readonly IUserPasswordHasher _passwordHasher;
+    private readonly IPasswordPolicy _passwordPolicy;
+    private readonly IAuditService _audit;
+    private readonly ICurrentUserService _currentUser;
 
-    public UserService(DelosferaDbContext db, IUserPasswordHasher passwordHasher)
+    public UserService(
+        DelosferaDbContext db,
+        IUserPasswordHasher passwordHasher,
+        IPasswordPolicy passwordPolicy,
+        IAuditService audit,
+        ICurrentUserService currentUser)
     {
         _db = db;
         _passwordHasher = passwordHasher;
+        _passwordPolicy = passwordPolicy;
+        _audit = audit;
+        _currentUser = currentUser;
     }
+
+    /// <summary>
+    /// Хеширует пароль, предварительно проверив его по парольной политике (NFR-03).
+    /// Проверка стоит здесь, а не в атрибутах DTO: политика настраивается службой ИБ,
+    /// а атрибут — это константа в сборке.
+    /// </summary>
+    private string HashChecked(string password)
+    {
+        _passwordPolicy.Validate(password);
+        return _passwordHasher.Hash(password);
+    }
+
+    /// <summary>
+    /// Журнал действий администратора (NFR-03): заведение и изменение учётных записей,
+    /// блокировка, смена ролей. Без него непонятно, кто и когда выдал доступ.
+    /// </summary>
+    private Task LogAdminAsync(int userId, string action, object? payload = null) =>
+        _audit.LogAsync("User", userId, action, _currentUser.UserId == 0 ? null : _currentUser.UserId, payload);
 
     public async Task<List<UserResponse>> GetAllAsync(
         UserSortBy sortBy,
@@ -56,10 +89,14 @@ public class UserService : IUserService
         if (source.HasValue)
             query = query.Where(x => x.Source == source.Value);
 
+        // Работающей считается учётная запись, которую и не заблокировал администратор,
+        // и которая активна сама по себе: отключённые в службе каталогов приходят
+        // неактивными, и относить их к работающим значит показывать уволенных
+        // наравне с действующими сотрудниками.
         if (isBlocked.HasValue)
             query = isBlocked.Value
-                ? query.Where(x => x.BlockedAt != null)
-                : query.Where(x => x.BlockedAt == null);
+                ? query.Where(x => x.BlockedAt != null || !x.IsActive)
+                : query.Where(x => x.BlockedAt == null && x.IsActive);
 
         query = sortBy switch
         {
@@ -90,7 +127,7 @@ public class UserService : IUserService
         {
             FullName = request.FullName,
             Email = request.Email,
-            PasswordHash = _passwordHasher.Hash(request.Password),
+            PasswordHash = HashChecked(request.Password),
             PositionId = request.PositionId,
             OrgUnitId = request.OrgUnitId,
             Source = UserSource.Local, // через API всегда создаётся локальная УЗ; LDAP заводится синком
@@ -99,6 +136,12 @@ public class UserService : IUserService
 
         _db.Users.Add(entity);
         await _db.SaveChangesAsync();
+
+        await LogAdminAsync(entity.Id, "UserCreated", new
+        {
+            email = entity.Email,
+            roles = entity.Roles.Select(r => r.TitleRu).ToList(),
+        });
 
         return await GetByIdAsync(entity.Id, languageCode);
     }
@@ -125,11 +168,23 @@ public class UserService : IUserService
         entity.IsActive = request.IsActive;
 
         if (!string.IsNullOrWhiteSpace(request.Password))
-            entity.PasswordHash = _passwordHasher.Hash(request.Password);
+            entity.PasswordHash = HashChecked(request.Password);
 
+        var rolesBefore = entity.Roles.Select(r => r.TitleRu).ToList();
         entity.Roles = await GetRolesByIdsAsync(request.RoleIds);
 
         await _db.SaveChangesAsync();
+
+        // Смена набора ролей — это выдача или снятие доступа, и она должна быть видна
+        // в журнале отдельно от прочих правок карточки.
+        var rolesAfter = entity.Roles.Select(r => r.TitleRu).ToList();
+
+        await LogAdminAsync(id, "UserUpdated", new
+        {
+            passwordChanged = !string.IsNullOrWhiteSpace(request.Password),
+            rolesBefore,
+            rolesAfter,
+        });
 
         return await GetByIdAsync(id, languageCode);
     }
@@ -175,6 +230,7 @@ public class UserService : IUserService
         entity.BlockReason = reason;
 
         await _db.SaveChangesAsync();
+        await LogAdminAsync(id, "UserBlocked", new {reason});
 
         return await GetByIdAsync(id, languageCode);
     }
@@ -188,7 +244,13 @@ public class UserService : IUserService
         entity.BlockedByUserId = null;
         entity.BlockReason = null;
 
+        // Разблокировка снимает и счётчик неудачных попыток: иначе сотрудник вернётся
+        // к запертому входу с первой же опечатки.
+        entity.FailedLoginAttempts = 0;
+        entity.LockedUntil = null;
+
         await _db.SaveChangesAsync();
+        await LogAdminAsync(id, "UserUnblocked");
 
         return await GetByIdAsync(id, languageCode);
     }

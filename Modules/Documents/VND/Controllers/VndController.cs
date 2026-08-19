@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Authorization;
 namespace delosfera_server.Modules.Documents.VND.Controllers;
 
 [ApiController]
-[Route("/vnd")]
+[Route("api/vnd")]
 [Tags("ВНД")]
 [Authorize]
 public class VndController : ControllerBase
@@ -84,6 +84,26 @@ public class VndController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+    }
+
+    /// <summary>Удаление ВНД (только черновик, создателем или главным редактором)</summary>
+    /// <response code="204">ВНД удалён</response>
+    /// <response code="409">Удалять можно только черновик</response>
+    [HttpDelete("{id:int}")]
+    [RequirePermission(PermissionCode.DeleteVnd)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Delete(int id)
+    {
+        try
+        {
+            await _service.DeleteAsync(id, _currentUser.UserId);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
     /// <summary>Добавление новой редакции ВНД</summary>
@@ -219,7 +239,7 @@ public class VndController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
     
-    /// <summary>Быстрый поиск ВНД для строки поиска в шапке — по коду и названию (RU/EN/KG)</summary>
+    /// <summary>Быстрый поиск ВНД для выпадающего списка в шапке — лёгкий ответ, без фильтров и пагинации</summary>
     [HttpGet("quick-search")]
     [RequirePermission(PermissionCode.ViewVnd)]
     [ProducesResponseType(typeof(List<VndQuickSearchResponse>), StatusCodes.Status200OK)]
@@ -227,7 +247,6 @@ public class VndController : ControllerBase
         [FromQuery] string q, [FromQuery] int limit = 8)
     {
         var language = _languageResolver.Resolve(Request);
-        var result = await _service.QuickSearchAsync(q, language, limit);
-        return Ok(result);
+        return Ok(await _service.QuickSearchAsync(q, language, Math.Clamp(limit, 1, 20)));
     }
 }

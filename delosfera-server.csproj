@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -7,9 +7,9 @@
         <RootNamespace>delosfera_server</RootNamespace>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);CS1591</NoWarn>
-      <UserSecretsId>8e1b7a8a-2901-416f-8479-3f9d7cc21ecd</UserSecretsId>
-  </PropertyGroup>
-    
+        <UserSecretsId>8e1b7a8a-2901-416f-8479-3f9d7cc21ecd</UserSecretsId>
+    </PropertyGroup>
+
     <ItemGroup>
         <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
@@ -20,14 +20,33 @@
         </PackageReference>
         <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
         <PackageReference Include="Minio" Version="7.0.0" />
+        <PackageReference Include="Novell.Directory.Ldap.NETStandard" Version="4.0.0" />
         <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
         <PackageReference Include="Scalar.AspNetCore" Version="2.16.16" />
         <PackageReference Include="System.DirectoryServices.Protocols" Version="10.0.10" />
+        <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.11" />
     </ItemGroup>
 
     <ItemGroup>
       <Folder Include="Modules\Documents\SZ\" />
       <Folder Include="Modules\Documents\Procurement\" />
     </ItemGroup>
-    
+
+    <!-- Тест-проект лежит внутри дерева веб-проекта — исключаем его из компиляции веба -->
+    <ItemGroup>
+      <Compile Remove="tests/**/*.cs" />
+      <Content Remove="tests/**/*" />
+      <EmbeddedResource Remove="tests/**/*" />
+      <None Remove="tests/**/*" />
+    </ItemGroup>
+
+    <!--
+      Настройки стенда в поставку не входят: в них адреса и пароли отладочного
+      окружения (каталог, почта, хранилище). На целевом сервере этот файл не
+      читается, но и лежать там ему незачем.
+    -->
+    <ItemGroup>
+      <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+    </ItemGroup>
+
 </Project>

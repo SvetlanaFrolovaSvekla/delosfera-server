@@ -18,6 +18,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasDefaultValue(UserSource.Local)
             .HasSentinel(UserSource.Local);
 
+        // Счётчик неудачных попыток имеет значение по умолчанию: он появился позже
+        // сид-данных, и требовать его в каждой засеянной записи — лишний шум (NFR-03).
+        // Счётчик неудачных попыток задаётся явно и в сид-данных: провайдер тестов не
+        // знает про умолчания базы, и без явного нуля модель на нём не строится.
+        builder.Property(x => x.FailedLoginAttempts).HasDefaultValue(0);
+
         builder.Property(x => x.BlockedAt).HasColumnName("blocked_at");
         builder.Property(x => x.BlockedByUserId).HasColumnName("blocked_by_user_id");
         builder.Property(x => x.BlockReason).HasColumnName("block_reason").HasMaxLength(500);
@@ -56,91 +62,91 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
                 Id = 1, FullName = "Азамат Осмонов", Email = "aosmonov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAELaBsuyKeMFxAB+MULrtZ9MjkT9t5fx0pas/Ozvz63EziFaKREY6cggdvLgNVCY6ag==",
                 PositionId = (int?)1, OrgUnitId = (int?)26, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 2, FullName = "Гульнара Асанова", Email = "gasanova@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEBc570K6jxp9Cgl9z7O6LPAv1vSm0hcGL8/DUTnhv75jDPRzcFa8bfagsMXikWWvug==",
                 PositionId = (int?)2, OrgUnitId = (int?)34, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 3, FullName = "Бермет Токтосунова", Email = "btoktosunova@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAENcTGN+pr9GDKyGE9w4K5jKdimigO7jzpb+UKIoPOd/ZgnO50Hn1ffr8AYbpFRSf5Q==",
                 PositionId = (int?)3, OrgUnitId = (int?)33, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 4, FullName = "Тимур Иманалиев", Email = "timanaliev@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEP0K+N392Olc2GDbaBBKmr+iMP2+9/8p4xm/bMhVOsFGUFBw+56Uwfncnq3D3ioFSg==",
                 PositionId = (int?)4, OrgUnitId = (int?)35, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 5, FullName = "Эрлан Сыдыков", Email = "esydykov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEPYYwYIZGmUKII4wk3DdX7VxFfSsdPG1Yxtoaq+OtZIKMC2wDMTQnfAxOfngvOp7Zg==",
                 PositionId = (int?)5, OrgUnitId = (int?)36, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 6, FullName = "Айгуль Маматова", Email = "amamatova@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEJsegtPXOp1+XnMfDYn+/my6rUZeZP/mc11xAOs3fgVFJxu8xfdFoQKxjULd0pNp3g==",
                 PositionId = (int?)6, OrgUnitId = (int?)37, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 7, FullName = "Бакыт Кадыров", Email = "bkadyrov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEMIfWpsAG+CZv+Ne2uZBrKf1Wce56WoQWK1QkEJ7Mlhy6/CbH7VcSIG22izU03JewQ==",
                 PositionId = (int?)7, OrgUnitId = (int?)38, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 8, FullName = "Нурлан Абдиев", Email = "nabdiev@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEJY34tOj9D2kQzEPbP8IzIAcRXY9LG1WvfFAF/x8gXYIJCpkPbQ/pTWvJYwYXEy3yg==",
                 PositionId = (int?)8, OrgUnitId = (int?)3, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 9, FullName = "Алия Жумаева", Email = "ajumaeva@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEHqpAAB4JDlfYHk91LymTPuh0fK0lTjEyIqsUskrPHlify//ciM1Pgj+tHYkf8i4Mg==",
                 PositionId = (int?)9, OrgUnitId = (int?)32, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 10, FullName = "Руслан Ормонов", Email = "rormonov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEOWaZvoD8t9WLi3j+9ROOKm4VfhoSC41MG0f6nol0WCiRsjmAn6uhIXOuoxdEyiU3w==",
                 PositionId = (int?)10, OrgUnitId = (int?)39, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 11, FullName = "Салтанат Ибраева", Email = "sibraeva@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEFbfx4mqL8rO9aGfQnkhjR81i+g55Np6sSjzVvt8+zh2hhSvvEeR4cx6k7aq32NVWw==",
                 PositionId = (int?)11, OrgUnitId = (int?)38, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 12, FullName = "Данияр Усенов", Email = "dusenov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEKHOs8yYxWNUVqDlX7az+fTMoaJ+etAefAuscQcbQvaG+3myOORWgkwziGQQ0MNVHQ==",
                 PositionId = (int?)12, OrgUnitId = (int?)4, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 13, FullName = "Администратор СЭД", Email = "admin@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEJ22NmtcxUmIhlc2h5MYf+9ras0f2x67OwOIA1JzqpE0EqB10wr/7yYZD1HvYlcEsA==",
                 PositionId = (int?)13, OrgUnitId = (int?)3, IsActive = true, LastLoginAt = (DateTime?)null,
-                Source = UserSource.Local, CreatedAt = seedDate, UpdatedAt = seedDate
+                Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {

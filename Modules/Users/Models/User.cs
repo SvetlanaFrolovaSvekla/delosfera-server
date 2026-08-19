@@ -29,6 +29,15 @@ public class User : IAuditableEntity
     public OrganizationUnit? OrgUnit { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Неудачные попытки входа подряд (NFR-03). Обнуляются успешным входом:
+    /// счётчик про подбор пароля, а не про рассеянность сотрудника.
+    /// </summary>
+    public int FailedLoginAttempts { get; set; }
+
+    /// <summary>До какого момента вход заперт после исчерпания попыток.</summary>
+    public DateTime? LockedUntil { get; set; }
     public DateTime? LastLoginAt { get; set; }
 
     /// <summary>Источник учётной записи: локальная или LDAP</summary>

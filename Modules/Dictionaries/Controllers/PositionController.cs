@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник должностей сотрудников банка
 /// </summary>
 [ApiController]
-[Route("dictionaries/position")]
+[Route("api/dictionaries/position")]
 [Tags("Справочники — Должности")]
 [Authorize]
 public class PositionController : ControllerBase

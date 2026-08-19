@@ -13,7 +13,7 @@ namespace delosfera_server.Modules.Dictionaries.Controllers;
 /// Справочник структурных подразделений банка (иерархический)
 /// </summary>
 [ApiController]
-[Route("dictionaries/organization-unit")]
+[Route("api/dictionaries/organization-unit")]
 [Tags("Справочники — Структурные подразделения")]
 [Authorize]
 public class OrganizationUnitController : ControllerBase
@@ -83,6 +83,18 @@ public class OrganizationUnitController : ControllerBase
     /// <response code="200">Подразделение успешно обновлено</response>
     /// <response code="404">Подразделение или родитель не найдены</response>
     /// <response code="409">Циклическая ссылка или превышена глубина вложенности</response>
+    /// <summary>История изменений подразделения: переименования, переподчинения, смена руководителей (GEN-08).</summary>
+    [HttpGet("{id:int}/history")]
+    public async Task<IActionResult> History(int id) => Ok(await _service.GetHistoryAsync(id));
+
+    /// <summary>
+    /// Состав оргструктуры на дату — кто руководил подразделениями в момент,
+    /// когда строился разбираемый маршрут согласования (GEN-08).
+    /// </summary>
+    [HttpGet("snapshot")]
+    public async Task<IActionResult> Snapshot([FromQuery] DateOnly date) =>
+        Ok(await _service.GetSnapshotAsync(date, _languageResolver.Resolve(Request)));
+
     [HttpPut("{id:int}")]
     [RequirePermission(PermissionCode.ManageGeneralDictionaries)]
     [ProducesResponseType(typeof(OrganizationUnitResponse), StatusCodes.Status200OK)]

@@ -7,7 +7,7 @@ using delosfera_server.Modules.ActivityLog.Services;
 namespace delosfera_server.Modules.ActivityLog.Controllers;
 
 [ApiController]
-[Route("/activity-log")]
+[Route("api/activity-log")]
 [Tags("Журнал активности")]
 [Authorize]
 public class ActivityLogController : ControllerBase

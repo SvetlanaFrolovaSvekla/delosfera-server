@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.DTO.Response;
 using delosfera_server.Modules.Notifications.Models;
@@ -10,7 +12,7 @@ using delosfera_server.Modules.Notifications.Services;
 namespace delosfera_server.Modules.Notifications.Controllers;
 
 [ApiController]
-[Route("/notifications")]
+[Route("api/notifications")]
 [Tags("Уведомления")]
 [Authorize]
 public class NotificationController : ControllerBase
@@ -70,7 +72,10 @@ public class NotificationController : ControllerBase
     }
 
     /// <summary>Создать и разослать уведомление (конкретным пользователям или всем)</summary>
+    /// <remarks>Ручная рассылка — только для администраторов, иначе любой пользователь
+    /// мог бы разослать уведомление всем.</remarks>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageUsers)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     public async Task<IActionResult> Create([FromBody] CreateNotificationRequest request)
     {

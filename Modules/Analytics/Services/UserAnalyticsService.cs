@@ -57,8 +57,8 @@ public class UserAnalyticsService : IUserAnalyticsService
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var from = request.DateFrom ?? AnalyticsPeriodBucketing.DefaultFrom(today, request.Granularity);
         var to = request.DateTo ?? today;
-        var fromDt = from.ToDateTime(TimeOnly.MinValue);
-        var toDt = to.ToDateTime(TimeOnly.MaxValue);
+        var fromDt = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var toDt = to.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
 
         var created = await _db.Users
             .Where(u => u.CreatedAt >= fromDt && u.CreatedAt <= toDt)

@@ -1,12 +1,12 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Linq.Expressions;
+using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
 using delosfera_server.Common.Extensions;
+using delosfera_server.Common.Services;
 using delosfera_server.Common.Services.Authorization;
-using delosfera_server.Modules.ActivityLog.Models;
-using delosfera_server.Modules.ActivityLog.Services;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Users.Models;
 
@@ -17,15 +17,12 @@ public class VndService : IVndService
     private readonly DelosferaDbContext _db;
     private readonly IFileStorageService _fileService;
     private readonly ICurrentUserService _currentUser;
-    private readonly IActivityLogService _activityLog;
 
-    public VndService(DelosferaDbContext db, IFileStorageService fileService,
-        ICurrentUserService currentUser, IActivityLogService activityLog)
+    public VndService(DelosferaDbContext db, IFileStorageService fileService, ICurrentUserService currentUser)
     {
         _db = db;
         _fileService = fileService;
         _currentUser = currentUser;
-        _activityLog = activityLog;
     }
 
     public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
@@ -188,9 +185,11 @@ public class VndService : IVndService
             ));
     }
 
-    /// <summary>"Только связанные со мной" - текущий пользователь является инициатором
+    /// <summary>"Только связанные со мной" — текущий пользователь является инициатором
     /// согласования, согласующим на одном из этапов, либо ответственным за текущий цикл
-    /// актуализации (та же ответственность распространяется и на консолидацию</summary>
+    /// актуализации (та же ответственность распространяется и на консолидацию — см.
+    /// VndActualizationService.PublishAsync, где для консолидации без активного цикла
+    /// актуализации проверяется именно инициатор согласования).</summary>
     private IQueryable<VndDocument> ApplyLinkedToMeFilter(IQueryable<VndDocument> query, bool linkedToMeOnly)
     {
         if (!linkedToMeOnly) return query;
@@ -224,6 +223,14 @@ public class VndService : IVndService
             : query.Where(x => x.Status != VndStatus.Draft || x.CreatedByUserId == userId);
     }
 
+    /// <summary>Главный редактор — пользователь с любым из «сквозных» прав на создание/актуализацию
+    /// ВНД; такой пользователь причастен к любому документу без явной привязки.</summary>
+    private bool IsChiefEditor() =>
+        _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
+
     private static ActualizationBucket MapActualizationBucketKey(string key) => key.ToLowerInvariant() switch
     {
         "normal" => ActualizationBucket.Normal,
@@ -244,20 +251,37 @@ public class VndService : IVndService
 
     private static IQueryable<VndDocument> ApplyDateFilter(
         IQueryable<VndDocument> query, DateRangeFilter? filter,
-        System.Linq.Expressions.Expression<Func<VndDocument, DateOnly?>> selector)
+        Expression<Func<VndDocument, DateOnly?>> selector)
     {
         if (filter is null) return query;
 
-        var compiled = selector.Compile();
+        // Строим предикат из дерева выражений selector, а НЕ из скомпилированного делегата:
+        // вызов Compile()+делегата внутри Where EF Core не может транслировать в SQL и падает.
+        var param = selector.Parameters[0];
+        var value = selector.Body;                                   // DateOnly? (столбец)
+        var nonNull = Expression.Property(value, nameof(Nullable<DateOnly>.Value)); // DateOnly
+        var isNotNull = Expression.NotEqual(value, Expression.Constant(null, typeof(DateOnly?)));
+
+        Expression<Func<VndDocument, bool>> Lambda(Expression body) =>
+            Expression.Lambda<Func<VndDocument, bool>>(body, param);
 
         if (filter.Exact.HasValue)
-            return query.Where(x => compiled(x) == filter.Exact.Value);
+        {
+            var eq = Expression.Equal(nonNull, Expression.Constant(filter.Exact.Value, typeof(DateOnly)));
+            return query.Where(Lambda(Expression.AndAlso(isNotNull, eq)));
+        }
 
         if (filter.From.HasValue)
-            query = query.Where(x => compiled(x) != null && compiled(x) >= filter.From.Value);
+        {
+            var ge = Expression.GreaterThanOrEqual(nonNull, Expression.Constant(filter.From.Value, typeof(DateOnly)));
+            query = query.Where(Lambda(Expression.AndAlso(isNotNull, ge)));
+        }
 
         if (filter.To.HasValue)
-            query = query.Where(x => compiled(x) != null && compiled(x) <= filter.To.Value);
+        {
+            var le = Expression.LessThanOrEqual(nonNull, Expression.Constant(filter.To.Value, typeof(DateOnly)));
+            query = query.Where(Lambda(Expression.AndAlso(isNotNull, le)));
+        }
 
         return query;
     }
@@ -347,13 +371,12 @@ public class VndService : IVndService
         CreatedAt = x.CreatedAt
     };
 
-    // Создание черновика ВНД
     public async Task<VndResponse> CreateAsync(CreateVndRequest request, int currentUserId, string languageCode)
     {
         if (!_currentUser.HasPermission(PermissionCode.CreateVndWithApproval) &&
             !_currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval))
             throw new UnauthorizedAccessException("У вас нет прав создавать новые ВНД!");
-
+        
         var typeExists = await _db.TypesVnd.AnyAsync(x => x.Id == request.TypeId);
         if (!typeExists) throw new KeyNotFoundException($"Вид ВНД с id={request.TypeId} не найден");
 
@@ -426,16 +449,9 @@ public class VndService : IVndService
         _db.VndDocuments.Add(entity);
         await _db.SaveChangesAsync();
 
-        _activityLog.Log(
-            ActivityModules.Vnd, ActivityEventKind.Created, entity.Id, entity.Code,
-            currentUserId,
-            new ActivityText(
-                $"{currentUser.FullName} создал(а) черновик нового ВНД {entity.Code} «{entity.TitleRu}»",
-                $"{currentUser.FullName} created draft VND {entity.Code} \"{entity.TitleRu}\"",
-                $"{currentUser.FullName} {entity.Code} «{entity.TitleRu}» черновик ВНДди түздү"),
-            $"/base-vnd/{entity.Id}");
-        await _db.SaveChangesAsync();
-
+        // currentUser уже отслеживается этим же DbContext (загружен выше),
+        // поэтому EF автоматически восстановит навигацию entity.CreatedByUser (relationship fixup) —
+        // отдельный Include/reload здесь не нужен.
         return ToResponse(entity, languageCode, today);
     }
 
@@ -477,7 +493,7 @@ public class VndService : IVndService
             throw new KeyNotFoundException($"{entityName}: не все id найдены");
         return items;
     }
-
+    
     /// <summary>Причастен ли пользователь к документу: разработчик (через куратора), куратор,
     /// ответственный исполнитель (через куратора подразделения), инициатор/создатель,
     /// ответственный за текущую актуализацию, либо участник процесса согласования
@@ -519,19 +535,11 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var isChiefEditor = _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
-
-        if (!isChiefEditor && !await IsLinkedToVndAsync(vnd, currentUserId))
+        if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
             throw new UnauthorizedAccessException(
                 "Загружать новую редакцию может только разработчик, куратор, ответственный исполнитель, " +
                 "инициатор, ответственный за актуализацию или главный редактор ВНД");
 
-        var actor = await _db.Users.FindAsync(currentUserId);
-        var actorName = actor?.FullName ?? "—";
-        
         // Правило: последняя редакция не должна быть незавершённой (черновик или на согласовании)
         var lastRedaction = await _db.VndRedactions
             .Where(r => r.VndId == vndId)
@@ -590,16 +598,6 @@ public class VndService : IVndService
         _db.VndRedactions.Add(redaction);
         await _db.SaveChangesAsync();
 
-        _activityLog.Log(
-            ActivityModules.Vnd, ActivityEventKind.ItemAdded, vndId, vnd.Code,
-            currentUserId,
-            new ActivityText(
-                $"{actorName} добавил(а) редакцию {redaction.Code} ВНД «{vnd.TitleRu}»",
-                $"{actorName} added revision {redaction.Code} of VND \"{vnd.TitleRu}\"",
-                $"{actorName} «{vnd.TitleRu}» ВНДисине {redaction.Code} редакциясын кошту"),
-            $"/base-vnd/{vndId}");
-        await _db.SaveChangesAsync();
-
         if (!request.RequiresApproval)
         {
             vnd.CurrentRedactionId = redaction.Id;
@@ -619,19 +617,14 @@ public class VndService : IVndService
         return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
     }
 
-    // Отправка на согласование (заглушка)
+    // Отправка редакции на согласование: переводит черновик редакции в Pending и ВНД в Review.
     public async Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(
         int vndId, int redactionId, int currentUserId)
     {
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var isChiefEditor = _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
-
-        if (!isChiefEditor && !await IsLinkedToVndAsync(vnd, currentUserId))
+        if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
             throw new UnauthorizedAccessException(
                 "Отправить редакцию на согласование может только причастный к этому ВНД пользователь");
 
@@ -663,6 +656,62 @@ public class VndService : IVndService
             .ToListAsync();
 
         return redactions.Select(r => ToRedactionResponse(r, vnd.CurrentRedactionId)).ToList();
+    }
+
+    /// <summary>
+    /// Удаление ВНД. Разрешено только для черновика (действующие/архивные/на согласовании
+    /// удалять нельзя) и только создателю или главному редактору. Явно чистит связанные
+    /// редакции, вложения, ссылки, процессы согласования и файлы в хранилище.
+    /// </summary>
+    public async Task DeleteAsync(int id, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments
+                      .Include(x => x.Redactions).ThenInclude(r => r.Attachments)
+                      .FirstOrDefaultAsync(x => x.Id == id)
+                  ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
+
+        if (vnd.Status != VndStatus.Draft)
+            throw new InvalidOperationException("Удалить можно только ВНД в статусе черновика");
+
+        if (vnd.CreatedByUserId != currentUserId && !IsChiefEditor())
+            throw new UnauthorizedAccessException("Удалить ВНД может только его создатель или главный редактор");
+
+        // Собираем id файлов редакций для последующего удаления из хранилища.
+        var fileIds = new List<int>();
+        foreach (var r in vnd.Redactions)
+        {
+            fileIds.Add(r.DocFileRuId);
+            if (r.DocFileKgId.HasValue) fileIds.Add(r.DocFileKgId.Value);
+            if (r.DocFileEnId.HasValue) fileIds.Add(r.DocFileEnId.Value);
+            if (r.TidFileId.HasValue) fileIds.Add(r.TidFileId.Value);
+            fileIds.AddRange(r.Attachments.Select(a => a.FileAttachmentId));
+        }
+
+        var links = await _db.VndLinks
+            .Where(l => l.SourceVndId == id || l.TargetVndId == id)
+            .ToListAsync();
+        _db.VndLinks.RemoveRange(links);
+
+        var processes = await _db.VndApprovalProcesses
+            .Where(p => p.VndId == id)
+            .Include(p => p.Stages)
+            .Include(p => p.DisagreementMatrixRows)
+            .ToListAsync();
+        _db.VndApprovalProcesses.RemoveRange(processes);
+
+        foreach (var r in vnd.Redactions)
+            _db.VndRedactionAttachments.RemoveRange(r.Attachments);
+        _db.VndRedactions.RemoveRange(vnd.Redactions);
+        _db.VndDocuments.Remove(vnd);
+        await _db.SaveChangesAsync();
+
+        // Файлы удаляем после метаданных, best-effort — недоступность хранилища не должна
+        // откатывать уже выполненное удаление документа.
+        foreach (var fileId in fileIds.Distinct())
+        {
+            try { await _fileService.DeleteAsync(fileId); }
+            catch { /* файл уже удалён или хранилище недоступно — не критично */ }
+        }
     }
 
     public async Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request,
@@ -907,7 +956,7 @@ public class VndService : IVndService
 
         return ToRedactionResponse(lastRedaction, vnd.CurrentRedactionId);
     }
-
+    
     public async Task<List<VndQuickSearchResponse>> QuickSearchAsync(string query, string languageCode, int limit)
     {
         if (string.IsNullOrWhiteSpace(query)) return [];

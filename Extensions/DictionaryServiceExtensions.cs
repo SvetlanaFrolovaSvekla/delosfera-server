@@ -7,6 +7,9 @@ public static class DictionaryServiceExtensions
     public static WebApplicationBuilder AddDictionaryServices(this WebApplicationBuilder builder)
     {
         builder.Services.AddScoped<ITypeVndService, TypeVndService>();
+
+        // Справочники, заводимые администратором заказчика (GEN-07)
+        builder.Services.AddScoped<ICustomDictionaryService, CustomDictionaryService>();
         builder.Services.AddScoped<ISecurityLevelService, SecurityLevelService>();
         builder.Services.AddScoped<IApprovalBodyService, ApprovalBodyService>();
         builder.Services.AddScoped<IOrganizationUnitService, OrganizationUnitService>();

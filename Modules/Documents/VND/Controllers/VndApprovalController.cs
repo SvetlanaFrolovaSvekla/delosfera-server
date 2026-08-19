@@ -10,7 +10,7 @@ using delosfera_server.Modules.Users.Models;
 namespace delosfera_server.Modules.Documents.VND.Controllers;
 
 [ApiController]
-[Route("/vnd/{vndId:int}/approval")]
+[Route("api/vnd/{vndId:int}/approval")]
 [Tags("ВНД — Согласование")]
 [Authorize]
 public class VndApprovalController : ControllerBase
@@ -62,6 +62,21 @@ public class VndApprovalController : ControllerBase
         try
         {
             return Ok(await _service.DecideAsync(vndId, stageId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
+    /// <summary>Инициатор отзывает согласование — редакция и документ возвращаются в черновик</summary>
+    [HttpPost("cancel")]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ApprovalProcessResponse>> Cancel(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.CancelAsync(vndId, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }

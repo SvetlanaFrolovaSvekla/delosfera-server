@@ -1,18 +1,10 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿namespace delosfera_server.Modules.Documents.VND.DTO.Request;
 
-namespace delosfera_server.Modules.Documents.VND.DTO.Request;
-
-public class PublishVndActualizationRequest : IValidatableObject
+public class PublishVndActualizationRequest
 {
+    /// <summary>Прошла ли актуализация с изменениями</summary>
     public required bool HadChanges { get; set; }
-    public DateOnly? NewDueActualizationDate { get; set; }
 
-    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
-    {
-        if (NewDueActualizationDate.HasValue &&
-            NewDueActualizationDate.Value <= DateOnly.FromDateTime(DateTime.UtcNow))
-            yield return new ValidationResult(
-                "Новая дата актуализации должна быть в будущем!",
-                [nameof(NewDueActualizationDate)]);
-    }
+    /// <summary>Обязательно, если у ВНД Period == Custom и был выбран сдвиг периода</summary>
+    public DateOnly? NewDueActualizationDate { get; set; }
 }

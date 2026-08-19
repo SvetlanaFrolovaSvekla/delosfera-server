@@ -10,7 +10,7 @@ using delosfera_server.Modules.Users.Models;
 namespace delosfera_server.Modules.Documents.VND.Controllers;
 
 [ApiController]
-[Route("/vnd/{vndId:int}/actualization")]
+[Route("api/vnd/{vndId:int}/actualization")]
 [Tags("ВНД — Актуализация")]
 [Authorize]
 public class VndActualizationController : ControllerBase

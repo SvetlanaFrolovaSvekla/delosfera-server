@@ -16,7 +16,7 @@ namespace delosfera_server.Modules.Analytics.Controllers;
 /// инициирует документы и как быстро согласующие принимают решения).
 /// </summary>
 [ApiController]
-[Route("/analytics/users")]
+[Route("api/analytics/users")]
 [Tags("Аналитика - Пользователи")]
 [Authorize]
 [RequirePermission(PermissionCode.ViewFullStatistics)]

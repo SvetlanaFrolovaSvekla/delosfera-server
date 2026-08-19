@@ -275,8 +275,11 @@ public class VndAnalyticsService : IVndAnalyticsService
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var from = request.DateFrom ?? AnalyticsPeriodBucketing.DefaultFrom(today, request.Granularity);
         var to = request.DateTo ?? today;
-        var fromDt = from.ToDateTime(TimeOnly.MinValue);
-        var toDt = to.ToDateTime(TimeOnly.MaxValue);
+        // Границы периода помечаются UTC явно: колонки времени — timestamptz, и дата
+        // без указания Kind уходит в запрос как Unspecified, из-за чего Npgsql
+        // отклонял выборку, а график динамики на странице отчётности не строился.
+        var fromDt = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var toDt = to.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
 
         var created = await _db.VndDocuments
             .Where(v => v.CreatedAt >= fromDt && v.CreatedAt <= toDt)
@@ -320,8 +323,8 @@ public class VndAnalyticsService : IVndAnalyticsService
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var from = request.DateFrom ?? AnalyticsPeriodBucketing.DefaultFrom(today, request.Granularity);
         var to = request.DateTo ?? today;
-        var fromDt = from.ToDateTime(TimeOnly.MinValue);
-        var toDt = to.ToDateTime(TimeOnly.MaxValue);
+        var fromDt = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var toDt = to.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
 
         var records = await _db.Set<VndActualizationRecord>()
             .Where(r => r.StartedAt >= fromDt && r.StartedAt <= toDt
@@ -363,8 +366,8 @@ public class VndAnalyticsService : IVndAnalyticsService
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var from = request?.DateFrom ?? AnalyticsPeriodBucketing.DefaultFrom(today, granularity);
         var to = request?.DateTo ?? today;
-        var fromDt = from.ToDateTime(TimeOnly.MinValue);
-        var toDt = to.ToDateTime(TimeOnly.MaxValue);
+        var fromDt = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var toDt = to.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
 
         var processes = await _db.VndApprovalProcesses
             .Where(p => p.PrimaryStartedAt >= fromDt && p.PrimaryStartedAt <= toDt)

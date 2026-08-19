@@ -40,6 +40,31 @@ public class LdapUserSyncService
             .Where(x => x.Source == UserSource.Ldap)
             .ToListAsync(ct);
 
+        // Должность и подразделение приходят из домена названиями, а в системе это
+        // записи справочников. Сопоставляем по наименованию: заводить их заново на
+        // каждую синхронизацию нельзя — справочники ведёт делопроизводство.
+        var positions = await _db.Positions.ToListAsync(ct);
+        var units = await _db.OrganizationUnits.ToListAsync(ct);
+
+        var несопоставленныеДолжности = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var несопоставленныеПодразделения = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        int? НайтиДолжность(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return null;
+            var найдено = positions.FirstOrDefault(p => p.TitleRu.Equals(title, StringComparison.OrdinalIgnoreCase));
+            if (найдено is null) несопоставленныеДолжности.Add(title);
+            return найдено?.Id;
+        }
+
+        int? НайтиПодразделение(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return null;
+            var найдено = units.FirstOrDefault(u => u.TitleRu.Equals(title, StringComparison.OrdinalIgnoreCase));
+            if (найдено is null) несопоставленныеПодразделения.Add(title);
+            return найдено?.Id;
+        }
+
         int created = 0, updated = 0, deactivated = 0;
 
         // Создать / обновить
@@ -79,6 +104,8 @@ public class LdapUserSyncService
                     Source = UserSource.Ldap,
                     LdapObjectId = ldapUser.ObjectId,
                     IsActive = ldapUser.IsActive,
+                    PositionId = НайтиДолжность(ldapUser.Position),
+                    OrgUnitId = НайтиПодразделение(ldapUser.Department),
                     Roles = _options.DefaultRoleId.HasValue
                         ? await _db.Roles.Where(r => r.Id == _options.DefaultRoleId.Value).ToListAsync(ct)
                         : []
@@ -88,15 +115,25 @@ public class LdapUserSyncService
             // Если такой пользователь найден - его данные обновляются
             else
             {
+                var positionId = НайтиДолжность(ldapUser.Position);
+                var unitId = НайтиПодразделение(ldapUser.Department);
+
                 var changed = local.FullName != ldapUser.FullName
                     || local.Email != ldapUser.Email
                     || local.LdapLogin != ldapUser.Login
-                    || local.IsActive != ldapUser.IsActive;
+                    || local.IsActive != ldapUser.IsActive
+                    || (positionId is not null && local.PositionId != positionId)
+                    || (unitId is not null && local.OrgUnitId != unitId);
 
                 local.FullName = ldapUser.FullName;
                 local.Email = ldapUser.Email;
                 local.LdapLogin = ldapUser.Login;
                 local.IsActive = ldapUser.IsActive;
+
+                // Пустое значение в домене не стирает того, что уже проставлено
+                // руками: каталог дополняет карточку, а не обнуляет её.
+                if (positionId is not null) local.PositionId = positionId;
+                if (unitId is not null) local.OrgUnitId = unitId;
 
                 if (changed) updated++;
             }
@@ -120,6 +157,16 @@ public class LdapUserSyncService
 
         _logger.LogInformation("LDAP sync завершён: создано {Created}, обновлено {Updated}, деактивировано {Deactivated}",
             created, updated, deactivated);
+
+        // Названия, которых нет в справочниках, называем поимённо: иначе сотрудники
+        // молча останутся без должности, и никто не поймёт почему.
+        if (несопоставленныеДолжности.Count > 0)
+            _logger.LogWarning("LDAP sync: должности не найдены в справочнике ({Count}): {Titles}",
+                несопоставленныеДолжности.Count, string.Join("; ", несопоставленныеДолжности.Take(20)));
+
+        if (несопоставленныеПодразделения.Count > 0)
+            _logger.LogWarning("LDAP sync: подразделения не найдены в справочнике ({Count}): {Titles}",
+                несопоставленныеПодразделения.Count, string.Join("; ", несопоставленныеПодразделения.Take(20)));
 
         return new LdapSyncResult(created, updated, deactivated);
     }

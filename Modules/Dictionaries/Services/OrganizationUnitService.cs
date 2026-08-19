@@ -5,6 +5,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Dictionaries.Models;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Dictionaries.Services;
 
@@ -12,10 +13,15 @@ public class OrganizationUnitService : IOrganizationUnitService
 {
 
     private readonly DelosferaDbContext _db;
+    private readonly ICurrentUserService _currentUser;
+    private readonly IBankClock _clock;
 
-    public OrganizationUnitService(DelosferaDbContext db)
+    public OrganizationUnitService(
+        DelosferaDbContext db, ICurrentUserService currentUser, IBankClock clock)
     {
         _db = db;
+        _currentUser = currentUser;
+        _clock = clock;
     }
 
     public async Task<List<OrganizationUnitResponse>> GetAllAsync(OrganizationUnitSortBy sortBy, string? search,
@@ -71,6 +77,18 @@ public class OrganizationUnitService : IOrganizationUnitService
         _db.OrganizationUnits.Add(entity);
         await _db.SaveChangesAsync();
 
+        _db.OrganizationUnitHistory.Add(new OrganizationUnitHistory
+        {
+            OrgUnitId = entity.Id,
+            Kind = OrgUnitChangeKind.Created,
+            NewValue = entity.TitleRu,
+            EffectiveFrom = _clock.Today,
+            ChangedByUserId = _currentUser.UserId == 0 ? null : _currentUser.UserId,
+            At = DateTime.UtcNow,
+        });
+
+        await _db.SaveChangesAsync();
+
         return await LoadResponseAsync(entity.Id, languageCode);
     }
 
@@ -98,6 +116,10 @@ public class OrganizationUnitService : IOrganizationUnitService
         if (request.CuratorUserId.HasValue)
             await EnsureUserExistsAsync(request.CuratorUserId.Value, "Куратор");
 
+        // Историю пишем до присвоения: после него старые значения уже не достать,
+        // а именно они и нужны в отчёте «что было на дату» (GEN-08).
+        await RecordChangesAsync(entity, request);
+
         entity.TitleRu = request.TitleRu;
         entity.TitleEn = request.TitleEn;
         entity.TitleKg = request.TitleKg;
@@ -108,6 +130,154 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         return await LoadResponseAsync(id, languageCode);
     }
+
+    public async Task<List<OrgUnitHistoryResponse>> GetHistoryAsync(int id)
+    {
+        var rows = await _db.OrganizationUnitHistory
+            .Include(x => x.ChangedByUser)
+            .Where(x => x.OrgUnitId == id)
+            .OrderByDescending(x => x.At)
+            .AsNoTracking()
+            .ToListAsync();
+
+        return rows.Select(x => new OrgUnitHistoryResponse
+        {
+            Id = x.Id,
+            Kind = x.Kind,
+            KindTitle = KindTitle(x.Kind),
+            OldValue = x.OldValue,
+            NewValue = x.NewValue,
+            Reason = x.Reason,
+            EffectiveFrom = x.EffectiveFrom,
+            ChangedByName = x.ChangedByUser?.FullName,
+            At = x.At,
+        }).ToList();
+    }
+
+    public async Task<List<OrgUnitSnapshotResponse>> GetSnapshotAsync(DateOnly date, string languageCode)
+    {
+        var units = await _db.OrganizationUnits
+            .Include(x => x.HeadUser)
+            .Include(x => x.CuratorUser)
+            .Include(x => x.Parent)
+            .AsNoTracking()
+            .ToListAsync();
+
+        // Изменения ПОСЛЕ запрошенной даты отматываем назад: текущее состояние известно,
+        // а история хранит, чем оно было до каждой правки.
+        var later = await _db.OrganizationUnitHistory
+            .Where(x => x.EffectiveFrom > date)
+            .OrderByDescending(x => x.At)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var result = new List<OrgUnitSnapshotResponse>();
+
+        foreach (var unit in units)
+        {
+            var snapshot = new OrgUnitSnapshotResponse
+            {
+                Id = unit.Id,
+                Title = unit.ResolveTitle(languageCode),
+                ParentTitle = unit.Parent?.TitleRu,
+                HeadName = unit.HeadUser?.FullName,
+                CuratorName = unit.CuratorUser?.FullName,
+            };
+
+            foreach (var change in later.Where(x => x.OrgUnitId == unit.Id))
+            {
+                switch (change.Kind)
+                {
+                    case OrgUnitChangeKind.Created:
+                        snapshot.CreatedLater = true;
+                        break;
+                    case OrgUnitChangeKind.Renamed:
+                        snapshot.Title = change.OldValue ?? snapshot.Title;
+                        break;
+                    case OrgUnitChangeKind.Moved:
+                        snapshot.ParentTitle = change.OldValue;
+                        break;
+                    case OrgUnitChangeKind.HeadChanged:
+                        snapshot.HeadName = change.OldValue;
+                        break;
+                    case OrgUnitChangeKind.CuratorChanged:
+                        snapshot.CuratorName = change.OldValue;
+                        break;
+                }
+            }
+
+            result.Add(snapshot);
+        }
+
+        return result.OrderBy(x => x.Title).ToList();
+    }
+
+    private static string KindTitle(OrgUnitChangeKind kind) => kind switch
+    {
+        OrgUnitChangeKind.Created => "Подразделение заведено",
+        OrgUnitChangeKind.Renamed => "Переименование",
+        OrgUnitChangeKind.Moved => "Переподчинение",
+        OrgUnitChangeKind.HeadChanged => "Смена руководителя",
+        OrgUnitChangeKind.CuratorChanged => "Смена куратора",
+        OrgUnitChangeKind.AttributesChanged => "Изменение реквизитов",
+        OrgUnitChangeKind.Removed => "Подразделение упразднено",
+        _ => kind.ToString(),
+    };
+
+    /// <summary>
+    /// Фиксирует изменения реквизитов подразделения (GEN-08). Каждое изменение — своя
+    /// запись: переименование и переподчинение произошли по разным основаниям, и в
+    /// одной строке они неразличимы.
+    /// </summary>
+    private async Task RecordChangesAsync(OrganizationUnit entity, UpdateOrganizationUnitRequest request)
+    {
+        var changes = new List<(OrgUnitChangeKind Kind, string? Old, string? New)>();
+
+        if (!string.Equals(entity.TitleRu, request.TitleRu, StringComparison.Ordinal))
+            changes.Add((OrgUnitChangeKind.Renamed, entity.TitleRu, request.TitleRu));
+
+        if (entity.ParentId != request.ParentId)
+            changes.Add((OrgUnitChangeKind.Moved,
+                await UnitTitleAsync(entity.ParentId), await UnitTitleAsync(request.ParentId)));
+
+        if (entity.HeadUserId != request.HeadUserId)
+            changes.Add((OrgUnitChangeKind.HeadChanged,
+                await UserNameAsync(entity.HeadUserId), await UserNameAsync(request.HeadUserId)));
+
+        if (entity.CuratorUserId != request.CuratorUserId)
+            changes.Add((OrgUnitChangeKind.CuratorChanged,
+                await UserNameAsync(entity.CuratorUserId), await UserNameAsync(request.CuratorUserId)));
+
+        if (changes.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+        var today = _clock.Today;
+        var actor = _currentUser.UserId;
+
+        foreach (var (kind, oldValue, newValue) in changes)
+        {
+            _db.OrganizationUnitHistory.Add(new OrganizationUnitHistory
+            {
+                OrgUnitId = entity.Id,
+                Kind = kind,
+                OldValue = oldValue,
+                NewValue = newValue,
+                EffectiveFrom = today,
+                ChangedByUserId = actor == 0 ? null : actor,
+                At = now,
+            });
+        }
+    }
+
+    private async Task<string?> UnitTitleAsync(int? unitId) =>
+        unitId is null
+            ? null
+            : await _db.OrganizationUnits.Where(x => x.Id == unitId).Select(x => x.TitleRu).FirstOrDefaultAsync();
+
+    private async Task<string?> UserNameAsync(int? userId) =>
+        userId is null
+            ? null
+            : await _db.Users.Where(x => x.Id == userId).Select(x => x.FullName).FirstOrDefaultAsync();
 
     private async Task EnsureUserExistsAsync(int userId, string role)
     {

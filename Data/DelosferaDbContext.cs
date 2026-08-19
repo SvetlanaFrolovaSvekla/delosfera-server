@@ -5,6 +5,15 @@ using delosfera_server.Modules.Files.Models;
 using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Documents.VND.Models;
+using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Workflow.Models;
+using delosfera_server.Modules.Signing.Models;
+using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Procurement.Models;
+using delosfera_server.Modules.Meetings.Models;
+using delosfera_server.Modules.Integrations.Mail;
+using delosfera_server.Modules.Search.Models;
+using delosfera_server.Modules.Integrations.Directory;
 
 namespace delosfera_server.Data;
 
@@ -18,12 +27,14 @@ public class DelosferaDbContext : DbContext
     public DbSet<OrganizationUnit> OrganizationUnits => Set<OrganizationUnit>(); // Справочник: Структурные подразделения
     public DbSet<Keyword> Keywords => Set<Keyword>(); // Справочник: Ключевые слова
     public DbSet<Position> Positions => Set<Position>(); // Справочник: Должности
+    public DbSet<OrganizationUnitHistory> OrganizationUnitHistory => Set<OrganizationUnitHistory>(); // Историчность оргструктуры (GEN-08)
     public DbSet<UserGroup> UserGroups => Set<UserGroup>(); // Справочник: Группы пользователей
     
     public DbSet<Rubric> Rubrics => Set<Rubric>(); // Справочник: Рубрикатор
     public DbSet<Role> Roles => Set<Role>(); // Роли пользователей
     public DbSet<User> Users => Set<User>(); // Пользователи
     public DbSet<Token> Tokens => Set<Token>(); // Токены
+    public DbSet<Substitution> Substitutions => Set<Substitution>(); // Замещение на период отсутствия (GEN-14)
     
     public DbSet<FileAttachment> FileAttachments { get; set; }
     public DbSet<VndRedaction> VndRedactions { get; set; }
@@ -36,15 +47,126 @@ public class DelosferaDbContext : DbContext
     public DbSet<VndLink> VndLinks => Set<VndLink>();
     
     public DbSet<VndApprovalProcess> VndApprovalProcesses => Set<VndApprovalProcess>();
+
+    // --- Годовой план актуализации ВНД (PLN-01..07) ---
+    public DbSet<ActualizationPlan> ActualizationPlans => Set<ActualizationPlan>();
+    public DbSet<ActualizationPlanItem> ActualizationPlanItems => Set<ActualizationPlanItem>();
+    public DbSet<PlanItemEvent> PlanItemEvents => Set<PlanItemEvent>();
+    public DbSet<ActualizationSettings> ActualizationSettings => Set<ActualizationSettings>();
     public DbSet<VndApprovalStage> VndApprovalStages => Set<VndApprovalStage>();
     
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
-    
+
+    // --- Контур СЗ: справочники архивного хранения (SZ-07 / GEN-09) ---
+    public DbSet<StorageTerm> StorageTerms => Set<StorageTerm>(); // Справочник: Сроки хранения
+    public DbSet<NomenclatureCase> NomenclatureCases => Set<NomenclatureCase>(); // Справочник: Номенклатура дел
+
+    // --- Фундамент документов (GEN-05/09/13): карточка, вложения, связи, нумераторы, аудит ---
+    public DbSet<Document> Documents => Set<Document>();
+    public DbSet<DocumentAttachment> DocumentAttachments => Set<DocumentAttachment>();
+    public DbSet<DocumentLink> DocumentLinks => Set<DocumentLink>();
+    public DbSet<Numerator> Numerators => Set<Numerator>();
+
+    // --- Администрируемость: типы документов, справочники, представления (GEN-06/07/10) ---
+    public DbSet<DocumentTypeDefinition> DocumentTypeDefinitions => Set<DocumentTypeDefinition>();
+    public DbSet<DocumentTypeField> DocumentTypeFields => Set<DocumentTypeField>();
+    public DbSet<ListView> ListViews => Set<ListView>();
+    public DbSet<CustomDictionary> CustomDictionaries => Set<CustomDictionary>();
+    public DbSet<CustomDictionaryItem> CustomDictionaryItems => Set<CustomDictionaryItem>();
+    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+
+    // --- Движок согласования (TID-01..14, SZ-01, PRC-08) ---
+    public DbSet<RouteInstance> RouteInstances => Set<RouteInstance>();
+    public DbSet<RouteStep> RouteSteps => Set<RouteStep>();
+    public DbSet<RouteParticipant> RouteParticipants => Set<RouteParticipant>();
+    public DbSet<Resolution> Resolutions => Set<Resolution>();
+    public DbSet<Remark> Remarks => Set<Remark>();
+    public DbSet<WorkflowTask> WorkflowTasks => Set<WorkflowTask>();
+    public DbSet<RouteTemplate> RouteTemplates => Set<RouteTemplate>();
+    public DbSet<RouteTemplateStep> RouteTemplateSteps => Set<RouteTemplateStep>();
+    public DbSet<RouteTemplateParticipant> RouteTemplateParticipants => Set<RouteTemplateParticipant>();
+
+    // --- ЭП (SIG-01..05) ---
+    public DbSet<Signature> Signatures => Set<Signature>();
+    public DbSet<SimpleSignatureRegulation> SimpleSignatureRegulations => Set<SimpleSignatureRegulation>();
+    public DbSet<SimpleSignatureConsent> SimpleSignatureConsents => Set<SimpleSignatureConsent>();
+
+    /// <summary>Кому из удостоверяющих центров доверяет банк — список ведёт администратор.</summary>
+    public DbSet<TrustedCertificateAuthority> TrustedCertificateAuthorities => Set<TrustedCertificateAuthority>();
+
+    /// <summary>Каким сертификатом подписывает каждый сотрудник.</summary>
+    public DbSet<UserCertificate> UserCertificates => Set<UserCertificate>();
+
+    /// <summary>Служба меток времени и проверка отзыва — одна запись на систему.</summary>
+    public DbSet<SigningSettings> SigningSettings => Set<SigningSettings>();
+
+    // --- Ознакомление с документами (Б-19) ---
+    public DbSet<AcknowledgementSheet> AcknowledgementSheets => Set<AcknowledgementSheet>();
+    public DbSet<AcknowledgementEntry> AcknowledgementEntries => Set<AcknowledgementEntry>();
+
+    // --- Закупки (контур 6 ТЗ): матрица полномочий и её параметры ---
+    public DbSet<ProcurementMethod> ProcurementMethods => Set<ProcurementMethod>();
+    public DbSet<AuthorityMatrixRule> AuthorityMatrixRules => Set<AuthorityMatrixRule>();
+    public DbSet<ProcurementParameter> ProcurementParameters => Set<ProcurementParameter>();
+    public DbSet<ProcurementRequest> ProcurementRequests => Set<ProcurementRequest>();
+    public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<CommercialProposal> CommercialProposals => Set<CommercialProposal>();
+    public DbSet<ProposalFile> ProposalFiles => Set<ProposalFile>();
+    public DbSet<ProcurementProtocol> ProcurementProtocols => Set<ProcurementProtocol>();
+    public DbSet<ProtocolRow> ProtocolRows => Set<ProtocolRow>();
+    public DbSet<ProtocolSignature> ProtocolSignatures => Set<ProtocolSignature>();
+    public DbSet<Tender> Tenders => Set<Tender>();
+    public DbSet<CommissionMember> CommissionMembers => Set<CommissionMember>();
+    public DbSet<TenderBid> TenderBids => Set<TenderBid>();
+    public DbSet<ProcurementContract> ProcurementContracts => Set<ProcurementContract>();
+    public DbSet<DeliveryAct> DeliveryActs => Set<DeliveryAct>();
+    public DbSet<ProcurementPlan> ProcurementPlans => Set<ProcurementPlan>();
+    public DbSet<ProcurementPlanItem> ProcurementPlanItems => Set<ProcurementPlanItem>();
+    public DbSet<Guarantee> Guarantees => Set<Guarantee>();
+    public DbSet<ProcurementClaim> ProcurementClaims => Set<ProcurementClaim>();
+
+    // --- Служебные записки (контур 4 ТЗ) ---
+    public DbSet<SzDocument> SzDocuments => Set<SzDocument>();
+    public DbSet<SzKind> SzKinds => Set<SzKind>();
+    public DbSet<SzHrKind> SzHrKinds => Set<SzHrKind>();
+    public DbSet<SzAssignment> SzAssignments => Set<SzAssignment>();
+    public DbSet<SzApprover> SzApprovers => Set<SzApprover>(); // согласующие, выбранные автором записки
+
+    // --- Заседания Правления, КПА и комитетов (ТЗ «Исполнение решений КПА, Правления и Комитетов») ---
+    public DbSet<Meeting> Meetings => Set<Meeting>();
+    public DbSet<AgendaItem> AgendaItems => Set<AgendaItem>();
+    public DbSet<AgendaGuest> AgendaGuests => Set<AgendaGuest>();
+    public DbSet<AgendaAssignment> AgendaAssignments => Set<AgendaAssignment>();
+    public DbSet<AgendaFile> AgendaFiles => Set<AgendaFile>();
+
+    // --- Интеграции (раздел 8 ТЗ) ---
+    public DbSet<OutgoingEmail> OutgoingEmails => Set<OutgoingEmail>(); // очередь исходящих писем (INT-02)
+
+    /// <summary>Связь со службой каталогов: адрес, учётная запись, расписание (INT-01).</summary>
+    public DbSet<DirectorySettings> DirectorySettings => Set<DirectorySettings>();
+    public DbSet<SavedSearch> SavedSearches => Set<SavedSearch>(); // сохранённые фильтры поиска (GEN-04)
+
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(DelosferaDbContext).Assembly);
+
+        // Поисковые векторы (GEN-04) — тип Postgres, и другой провайдер их не понимает.
+        // Тесты работают на in-memory базе, поэтому вне Postgres колонки исключаются
+        // из модели: иначе весь тестовый набор падает на типе, который к проверяемой
+        // логике отношения не имеет.
+        if (!Database.IsNpgsql())
+        {
+            modelBuilder.Entity<Document>().Ignore(x => x.SearchVector);
+            modelBuilder.Entity<SzDocument>().Ignore(x => x.SearchVector);
+            modelBuilder.Entity<ProcurementRequest>().Ignore(x => x.SearchVector);
+            modelBuilder.Entity<AgendaItem>().Ignore(x => x.SearchVector);
+
+            // Дополнительные поля записки хранятся как jsonb — тот же случай.
+            modelBuilder.Entity<SzDocument>().Ignore(x => x.ExtraFields);
+        }
     }
 
     public override int SaveChanges()
@@ -61,6 +183,14 @@ public class DelosferaDbContext : DbContext
 
     private void ApplyAuditInfo()
     {
+        // Токен версии карточки обновляем при каждом сохранении: по нему EF отличит
+        // «сохраняю то, что видел» от «сохраняю поверх чужой правки» (GEN-05).
+        foreach (var document in ChangeTracker.Entries<Document>())
+        {
+            if (document.State is EntityState.Added or EntityState.Modified)
+                document.Entity.ConcurrencyToken = Guid.NewGuid();
+        }
+
         var entries = ChangeTracker.Entries<IAuditableEntity>();
 
         foreach (var entry in entries)

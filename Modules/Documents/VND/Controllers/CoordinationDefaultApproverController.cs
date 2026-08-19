@@ -14,7 +14,7 @@ namespace delosfera_server.Modules.Documents.VND.Controllers;
 /// создавать/удалять записи нельзя, только менять согласующего по умолчанию.
 /// </summary>
 [ApiController]
-[Route("dictionaries/coordination-users")]
+[Route("api/dictionaries/coordination-users")]
 [Tags("Справочники — Обязательные участники согласования")]
 [Authorize]
 public class CoordinationDefaultApproverController : ControllerBase

@@ -14,19 +14,43 @@ namespace delosfera_server.Modules.Analytics.Controllers;
 /// Аналитика по модулю ВНД для страницы отчётности
 /// </summary>
 [ApiController]
-[Route("/analytics/vnd")]
+[Route("api/analytics/vnd")]
 [Tags("Аналитика - ВНД")]
 [Authorize]
 [RequirePermission(PermissionCode.ViewFullStatistics)]
 public class VndAnalyticsController : ControllerBase
 {
     private readonly IVndAnalyticsService _service;
+    private readonly IVndAnalyticsExportService _export;
     private readonly ILanguageResolver _languageResolver;
 
-    public VndAnalyticsController(IVndAnalyticsService service, ILanguageResolver languageResolver)
+    public VndAnalyticsController(
+        IVndAnalyticsService service,
+        IVndAnalyticsExportService export,
+        ILanguageResolver languageResolver)
     {
         _service = service;
+        _export = export;
         _languageResolver = languageResolver;
+    }
+
+    /// <summary>
+    /// Выгрузка аналитических срезов в Excel (RPT-03): сводка, распределения,
+    /// нагрузка согласующих, сроки и динамика.
+    /// </summary>
+    // Рядом уже живёт выгрузка сводки в CSV — она осталась как есть, а книга Excel
+    // с разрезами по листам отдаётся отдельным адресом. Права те же: экспорт полной
+    // статистики из системы.
+    [HttpGet("export/xlsx")]
+    [RequirePermission(PermissionCode.ExportFullStatisticsReport)]
+    public async Task<IActionResult> ExportXlsx([FromQuery] AnalyticsPeriodRequest? period)
+    {
+        var language = _languageResolver.Resolve(Request);
+        var bytes = await _export.ExportAsync(period, language);
+
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"Аналитика ВНД {DateTime.UtcNow:dd.MM.yyyy}.xlsx");
     }
 
     /// <summary>KPI для верхней части страницы отчётности: сколько ВНД в каждом статусе,

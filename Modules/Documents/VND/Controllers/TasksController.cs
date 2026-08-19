@@ -6,7 +6,7 @@ using delosfera_server.Modules.Documents.VND.Services;
 namespace delosfera_server.Modules.Documents.VND.Controllers;
 
 [ApiController]
-[Route("/tasks")]
+[Route("api/tasks")]
 [Tags("Мои задачи")]
 [Authorize]
 public class TasksController : ControllerBase
