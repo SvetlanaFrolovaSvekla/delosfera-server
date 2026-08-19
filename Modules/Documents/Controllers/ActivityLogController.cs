@@ -20,8 +20,8 @@ namespace delosfera_server.Modules.Documents.Controllers;
 /// разбирательства.
 /// </summary>
 [ApiController]
-[Route("api/activity-log")]
-[Tags("Активность")]
+[Route("api/audit")]
+[Tags("Журнал аудита")]
 [Authorize]
 public class ActivityLogController : ControllerBase
 {
@@ -34,14 +34,6 @@ public class ActivityLogController : ControllerBase
         _currentUser = currentUser;
     }
 
-    /// <summary>
-    /// Журнал действий с отбором (Б-10).
-    ///
-    /// Аудит — это доказательство: кто, что и когда сделал. Поэтому здесь нет
-    /// «своих» записей, как в ленте на рабочем столе, — виден весь журнал, и
-    /// доступ закрыт правом управления пользователями: журнал показывает чужие
-    /// действия и годится для разбирательства.
-    /// </summary>
     [HttpGet]
     [RequirePermission(PermissionCode.ManageUsers)]
     public async Task<IActionResult> Search(
@@ -115,8 +107,6 @@ public class ActivityLogController : ControllerBase
     {
         var rows = await Filtered(from, to, userId, entityType, action)
             .OrderByDescending(e => e.At)
-            // Выгрузка не должна валить сервер: за раз отдаём столько, сколько
-            // осмысленно открыть в таблице, остальное отбирается фильтром.
             .Take(50_000)
             .ToListAsync(ct);
 
@@ -139,8 +129,6 @@ public class ActivityLogController : ControllerBase
             }));
         }
 
-        // Excel открывает CSV в системной кодировке, если не увидит метку порядка
-        // байтов, и кириллица превращается в мусор.
         var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
         return File(bytes, "text/csv", $"Журнал действий {DateTime.Now:dd.MM.yyyy}.csv");
     }
@@ -169,13 +157,11 @@ public class ActivityLogController : ControllerBase
                 .ToDictionaryAsync(u => u.Id, u => u.FullName, ct);
     }
 
-    /// <summary>Экранирование поля CSV: точка с запятой и кавычки внутри значения.</summary>
     private static string Csv(string value) =>
         value.Contains(';') || value.Contains('"') || value.Contains('\n')
             ? $"\"{value.Replace("\"", "\"\"")}\""
             : value;
 
-    /// <summary>Значок и человеческое название действия.</summary>
     private static (string Icon, string Text) Action(string action) => action switch
     {
         "Created" => ("doc", "Создано"),

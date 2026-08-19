@@ -1,6 +1,8 @@
 ﻿using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Modules.ActivityLog.Models;
+using delosfera_server.Modules.ActivityLog.Services;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
@@ -8,8 +10,8 @@ using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Users.Models;
-
-using delosfera_server.Modules.Documents.VND.Notifications;
+using delosfera_server.Modules.Documents.VND.Messages;
+using ActivityText = delosfera_server.Modules.ActivityLog.Models.ActivityText;
 
 namespace delosfera_server.Modules.Documents.VND.Services;
 
@@ -19,22 +21,21 @@ public class VndActualizationService : IVndActualizationService
     private readonly ICurrentUserService _currentUser;
     private readonly INotificationService _notifications;
     private readonly ILogger<VndActualizationService> _logger;
-
-    /// <summary>План актуализации сам следит за циклом (PLN-06) — контур только сообщает ему о событиях.</summary>
-    private readonly IPlanItemSync _planSync;
+    private readonly IActivityLogService _activityLog;
 
     public VndActualizationService(
         DelosferaDbContext db,
         ICurrentUserService currentUser,
         INotificationService notifications,
-        IPlanItemSync planSync,
-        ILogger<VndActualizationService> logger)
+        ILogger<VndActualizationService> logger,
+        IActivityLogService activityLog
+    )
     {
         _db = db;
         _currentUser = currentUser;
         _notifications = notifications;
-        _planSync = planSync;
         _logger = logger;
+        _activityLog = activityLog;
     }
 
     public async Task<VndActualizationStateResponse> StartAsync(
@@ -57,6 +58,9 @@ public class VndActualizationService : IVndActualizationService
             throw new UnauthorizedAccessException(
                 "У вас нет права актуализировать без согласования — выберите вариант \"с согласованием\"");
 
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+        
         var responsibleUserId = request.ResponsibleUserId ?? currentUserId;
         var responsibleExists = await _db.Users.AnyAsync(x => x.Id == responsibleUserId);
         if (!responsibleExists)
@@ -77,6 +81,14 @@ public class VndActualizationService : IVndActualizationService
             StartedAt = DateTime.UtcNow,
             DueActualizationDateBefore = vnd.DueActualizationDate
         });
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ProcessStarted, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} взял(а) в актуализацию ВНД «{vnd.TitleRu}»",
+                $"{actorName} took VND \"{vnd.TitleRu}\" for actualization",
+                $"{actorName} «{vnd.TitleRu}» ВНДисин актуалдаштырууга алды"),
+            $"/base-vnd/{vndId}");
 
         // --- Закрываем все pending-заявки на доступ к актуализации этого ВНД: раз актуализация
         // стартовала напрямую (главным редактором/админом), решать по этим заявкам уже нечего —
@@ -107,10 +119,6 @@ public class VndActualizationService : IVndActualizationService
 
             await NotifyAsync(notice, vndId, currentUserId, pending.RequestedByUserId);
         }
-
-        // Позиция годового плана переходит в «На актуализации» сама (PLN-06):
-        // отмечать это руками — значит однажды получить план, расходящийся с делом.
-        await _planSync.OnVndActualizationStartedAsync(vndId, currentUserId);
 
         return await BuildStateResponseAsync(vnd);
     }
@@ -288,6 +296,9 @@ public class VndActualizationService : IVndActualizationService
             throw new UnauthorizedAccessException(
                 "Опубликовать редакцию может только ответственный за актуализацию, инициатор согласования или главный редактор ВНД");
 
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+        
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         if (vnd.ActualizationShiftNextPeriod)
@@ -308,6 +319,14 @@ public class VndActualizationService : IVndActualizationService
         vnd.LastActualizationHadChanges = request.HadChanges;
         vnd.RevisionChangedDate = today;
         vnd.Status = VndStatus.Active;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Published, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} опубликовал(а) ВНД «{vnd.TitleRu}» после актуализации",
+                $"{actorName} published VND \"{vnd.TitleRu}\" after actualization",
+                $"{actorName} актуалдаштыруудан кийин «{vnd.TitleRu}» ВНДисин жарыялады"),
+            $"/base-vnd/{vndId}");
 
         // --- Закрываем открытую запись истории (если публикация происходит в рамках цикла
         // актуализации — при обычном согласовании вне актуализации открытой записи нет,
@@ -339,9 +358,6 @@ public class VndActualizationService : IVndActualizationService
             VndActualizationNotificationMessages.Published(vnd.TitleRu, request.HadChanges),
             vndId, currentUserId,
             developerHeadId.HasValue ? [developerHeadId.Value] : []);
-
-        // Изменения утверждены — закрываем позицию плана и проставляем новый срок (PLN-06).
-        await _planSync.OnVndActualizationPublishedAsync(vndId, currentUserId);
 
         return await BuildStateResponseAsync(vnd);
     }
@@ -463,7 +479,7 @@ public class VndActualizationService : IVndActualizationService
     };
 
     private async Task NotifyAsync(
-        Notifications.NotificationText text, int vndId, int? triggeredByUserId, params int[] recipientUserIds)
+        NotificationText text, int vndId, int? triggeredByUserId, params int[] recipientUserIds)
     {
         if (recipientUserIds.Length == 0) return;
 
@@ -477,7 +493,7 @@ public class VndActualizationService : IVndActualizationService
                 BodyRu = text.BodyRu,
                 BodyEn = text.BodyEn,
                 BodyKg = text.BodyKg,
-                Category = NotificationCategory.Approval, 
+                Category = NotificationCategory.Approval,
                 Severity = text.Severity,
                 EntityType = "Vnd",
                 EntityId = vndId,

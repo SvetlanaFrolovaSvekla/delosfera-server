@@ -5,8 +5,9 @@ using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
 using delosfera_server.Common.Extensions;
-using delosfera_server.Common.Services;
 using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Modules.ActivityLog.Models;
+using delosfera_server.Modules.ActivityLog.Services;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Users.Models;
 
@@ -17,12 +18,16 @@ public class VndService : IVndService
     private readonly DelosferaDbContext _db;
     private readonly IFileStorageService _fileService;
     private readonly ICurrentUserService _currentUser;
+    private readonly IActivityLogService _activityLog;
 
-    public VndService(DelosferaDbContext db, IFileStorageService fileService, ICurrentUserService currentUser)
+    public VndService(
+        DelosferaDbContext db, IFileStorageService fileService,
+        ICurrentUserService currentUser, IActivityLogService activityLog)
     {
         _db = db;
         _fileService = fileService;
         _currentUser = currentUser;
+        _activityLog = activityLog;
     }
 
     public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
@@ -187,9 +192,7 @@ public class VndService : IVndService
 
     /// <summary>"Только связанные со мной" — текущий пользователь является инициатором
     /// согласования, согласующим на одном из этапов, либо ответственным за текущий цикл
-    /// актуализации (та же ответственность распространяется и на консолидацию — см.
-    /// VndActualizationService.PublishAsync, где для консолидации без активного цикла
-    /// актуализации проверяется именно инициатор согласования).</summary>
+    /// актуализации (та же ответственность распространяется и на консолидацию).</summary>
     private IQueryable<VndDocument> ApplyLinkedToMeFilter(IQueryable<VndDocument> query, bool linkedToMeOnly)
     {
         if (!linkedToMeOnly) return query;
@@ -249,17 +252,17 @@ public class VndService : IVndService
         _ => null
     };
 
+    // Строим предикат из дерева выражений selector, а НЕ из скомпилированного делегата:
+    // вызов Compile()+делегата внутри Where EF Core не может транслировать в SQL и падает.
     private static IQueryable<VndDocument> ApplyDateFilter(
         IQueryable<VndDocument> query, DateRangeFilter? filter,
         Expression<Func<VndDocument, DateOnly?>> selector)
     {
         if (filter is null) return query;
 
-        // Строим предикат из дерева выражений selector, а НЕ из скомпилированного делегата:
-        // вызов Compile()+делегата внутри Where EF Core не может транслировать в SQL и падает.
         var param = selector.Parameters[0];
-        var value = selector.Body;                                   // DateOnly? (столбец)
-        var nonNull = Expression.Property(value, nameof(Nullable<DateOnly>.Value)); // DateOnly
+        var value = selector.Body;
+        var nonNull = Expression.Property(value, nameof(Nullable<DateOnly>.Value));
         var isNotNull = Expression.NotEqual(value, Expression.Constant(null, typeof(DateOnly?)));
 
         Expression<Func<VndDocument, bool>> Lambda(Expression body) =>
@@ -371,12 +374,13 @@ public class VndService : IVndService
         CreatedAt = x.CreatedAt
     };
 
+    // Создание черновика ВНД
     public async Task<VndResponse> CreateAsync(CreateVndRequest request, int currentUserId, string languageCode)
     {
         if (!_currentUser.HasPermission(PermissionCode.CreateVndWithApproval) &&
             !_currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval))
             throw new UnauthorizedAccessException("У вас нет прав создавать новые ВНД!");
-        
+
         var typeExists = await _db.TypesVnd.AnyAsync(x => x.Id == request.TypeId);
         if (!typeExists) throw new KeyNotFoundException($"Вид ВНД с id={request.TypeId} не найден");
 
@@ -449,9 +453,16 @@ public class VndService : IVndService
         _db.VndDocuments.Add(entity);
         await _db.SaveChangesAsync();
 
-        // currentUser уже отслеживается этим же DbContext (загружен выше),
-        // поэтому EF автоматически восстановит навигацию entity.CreatedByUser (relationship fixup) —
-        // отдельный Include/reload здесь не нужен.
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Created, entity.Id, entity.Code,
+            currentUserId,
+            new ActivityText(
+                $"{currentUser.FullName} создал(а) черновик нового ВНД {entity.Code} «{entity.TitleRu}»",
+                $"{currentUser.FullName} created draft VND {entity.Code} \"{entity.TitleRu}\"",
+                $"{currentUser.FullName} {entity.Code} «{entity.TitleRu}» черновик ВНДди түздү"),
+            $"/base-vnd/{entity.Id}");
+        await _db.SaveChangesAsync();
+
         return ToResponse(entity, languageCode, today);
     }
 
@@ -493,7 +504,7 @@ public class VndService : IVndService
             throw new KeyNotFoundException($"{entityName}: не все id найдены");
         return items;
     }
-    
+
     /// <summary>Причастен ли пользователь к документу: разработчик (через куратора), куратор,
     /// ответственный исполнитель (через куратора подразделения), инициатор/создатель,
     /// ответственный за текущую актуализацию, либо участник процесса согласования
@@ -539,6 +550,9 @@ public class VndService : IVndService
             throw new UnauthorizedAccessException(
                 "Загружать новую редакцию может только разработчик, куратор, ответственный исполнитель, " +
                 "инициатор, ответственный за актуализацию или главный редактор ВНД");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
 
         // Правило: последняя редакция не должна быть незавершённой (черновик или на согласовании)
         var lastRedaction = await _db.VndRedactions
@@ -596,6 +610,16 @@ public class VndService : IVndService
         };
 
         _db.VndRedactions.Add(redaction);
+        await _db.SaveChangesAsync();
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ItemAdded, vndId, vnd.Code,
+            currentUserId,
+            new ActivityText(
+                $"{actorName} добавил(а) редакцию {redaction.Code} ВНД «{vnd.TitleRu}»",
+                $"{actorName} added revision {redaction.Code} of VND \"{vnd.TitleRu}\"",
+                $"{actorName} «{vnd.TitleRu}» ВНДисине {redaction.Code} редакциясын кошту"),
+            $"/base-vnd/{vndId}");
         await _db.SaveChangesAsync();
 
         if (!request.RequiresApproval)
@@ -676,6 +700,11 @@ public class VndService : IVndService
         if (vnd.CreatedByUserId != currentUserId && !IsChiefEditor())
             throw new UnauthorizedAccessException("Удалить ВНД может только его создатель или главный редактор");
 
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+        var vndCode = vnd.Code;
+        var vndTitle = vnd.TitleRu;
+
         // Собираем id файлов редакций для последующего удаления из хранилища.
         var fileIds = new List<int>();
         foreach (var r in vnd.Redactions)
@@ -687,10 +716,10 @@ public class VndService : IVndService
             fileIds.AddRange(r.Attachments.Select(a => a.FileAttachmentId));
         }
 
-        var links = await _db.VndLinks
+        var links = await _db.Set<VndLink>()
             .Where(l => l.SourceVndId == id || l.TargetVndId == id)
             .ToListAsync();
-        _db.VndLinks.RemoveRange(links);
+        _db.Set<VndLink>().RemoveRange(links);
 
         var processes = await _db.VndApprovalProcesses
             .Where(p => p.VndId == id)
@@ -700,10 +729,19 @@ public class VndService : IVndService
         _db.VndApprovalProcesses.RemoveRange(processes);
 
         foreach (var r in vnd.Redactions)
-            _db.VndRedactionAttachments.RemoveRange(r.Attachments);
+            _db.Set<VndRedactionAttachment>().RemoveRange(r.Attachments);
         _db.VndRedactions.RemoveRange(vnd.Redactions);
         _db.VndDocuments.Remove(vnd);
         await _db.SaveChangesAsync();
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Other, id, vndCode,
+            currentUserId,
+            new ActivityText(
+                $"{actorName} удалил(а) черновик ВНД {vndCode} «{vndTitle}»",
+                $"{actorName} deleted draft VND {vndCode} \"{vndTitle}\"",
+                $"{actorName} {vndCode} «{vndTitle}» ВНДисинин черновигин өчүрдү"),
+            null);
 
         // Файлы удаляем после метаданных, best-effort — недоступность хранилища не должна
         // откатывать уже выполненное удаление документа.
@@ -956,7 +994,7 @@ public class VndService : IVndService
 
         return ToRedactionResponse(lastRedaction, vnd.CurrentRedactionId);
     }
-    
+
     public async Task<List<VndQuickSearchResponse>> QuickSearchAsync(string query, string languageCode, int limit)
     {
         if (string.IsNullOrWhiteSpace(query)) return [];
