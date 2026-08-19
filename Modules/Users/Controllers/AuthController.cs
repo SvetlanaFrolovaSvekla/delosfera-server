@@ -135,7 +135,7 @@ public class AuthController : ControllerBase
         HttpOnly = true,
         Secure = Request.IsHttps,
         SameSite = SameSiteMode.Strict,
-        Path = "/auth",
+        Path = "/api/auth",   
         MaxAge = TimeSpan.FromDays(_refreshTokenExpiryDays)
     };
 
