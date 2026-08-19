@@ -10,7 +10,7 @@ using delosfera_server.Modules.Users.Models;
 namespace delosfera_server.Modules.Documents.VND.Controllers;
 
 [ApiController]
-[Route("api/vnd/{vndId:int}/approval")]
+[Route("/api/vnd/{vndId:int}/approval")]
 [Tags("ВНД — Согласование")]
 [Authorize]
 public class VndApprovalController : ControllerBase

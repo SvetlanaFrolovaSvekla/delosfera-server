@@ -1,6 +1,6 @@
 ﻿using delosfera_server.Modules.Notifications.Models;
 
-namespace delosfera_server.Modules.Documents.VND.Notifications;
+namespace delosfera_server.Modules.Documents.VND.Messages;
 
 /// <summary>Тексты уведомлений по заявкам и событиям актуализации ВНД.
 /// NotificationText — тот же record, что используется в VndApprovalNotificationMessages.</summary>

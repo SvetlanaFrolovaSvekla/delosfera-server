@@ -239,7 +239,7 @@ public class VndController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
     
-    /// <summary>Быстрый поиск ВНД для выпадающего списка в шапке — лёгкий ответ, без фильтров и пагинации</summary>
+    /// <summary>Быстрый поиск ВНД для строки поиска в шапке — по коду и названию (RU/EN/KG)</summary>
     [HttpGet("quick-search")]
     [RequirePermission(PermissionCode.ViewVnd)]
     [ProducesResponseType(typeof(List<VndQuickSearchResponse>), StatusCodes.Status200OK)]
@@ -247,6 +247,7 @@ public class VndController : ControllerBase
         [FromQuery] string q, [FromQuery] int limit = 8)
     {
         var language = _languageResolver.Resolve(Request);
-        return Ok(await _service.QuickSearchAsync(q, language, Math.Clamp(limit, 1, 20)));
+        var result = await _service.QuickSearchAsync(q, language, limit);
+        return Ok(result);
     }
 }

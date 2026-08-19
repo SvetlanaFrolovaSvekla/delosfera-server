@@ -1,15 +1,18 @@
 ﻿using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Modules.ActivityLog.Models;
+using delosfera_server.Modules.ActivityLog.Services;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
-using delosfera_server.Modules.Documents.VND.Notifications;
+using delosfera_server.Modules.Documents.VND.Messages;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Users.Models;
+using ActivityText = delosfera_server.Modules.ActivityLog.Models.ActivityText;
 
 namespace delosfera_server.Modules.Documents.VND.Services;
 
@@ -20,35 +23,42 @@ public class VndApprovalService : IVndApprovalService
     private readonly INotificationService _notifications;
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<VndApprovalService> _logger;
+    private readonly IActivityLogService _activityLog;
 
     public VndApprovalService(
         DelosferaDbContext db,
         IFileStorageService fileService,
         INotificationService notifications,
         ICurrentUserService currentUser,
-        ILogger<VndApprovalService> logger)
+        ILogger<VndApprovalService> logger,
+        IActivityLogService activityLog)
     {
         _db = db;
         _fileService = fileService;
         _notifications = notifications;
         _currentUser = currentUser;
         _logger = logger;
+        _activityLog = activityLog;
     }
+
+    private bool IsChiefEditor() =>
+        _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
 
     public async Task<ApprovalProcessResponse> StartAsync(int vndId, StartApprovalRequest request, int currentUserId)
     {
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var isChiefEditor = _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
-
-        if (!isChiefEditor && !await IsLinkedToVndAsync(vnd, currentUserId))
+        if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
             throw new UnauthorizedAccessException(
                 "Запустить согласование может только разработчик, куратор, ответственный исполнитель, " +
                 "ответственный за актуализацию или главный редактор ВНД");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
 
         var lastRedaction = await _db.VndRedactions
                                 .Where(r => r.VndId == vndId)
@@ -108,6 +118,16 @@ public class VndApprovalService : IVndApprovalService
         lastRedaction.ApprovalStatus = RedactionApprovalStatus.Pending;
         vnd.Status = VndStatus.Review;
 
+        await _db.SaveChangesAsync();
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ProcessStarted, vndId, vnd.Code,
+            currentUserId,
+            new ActivityText(
+                $"{actorName} запустил(а) согласование редакции {lastRedaction.Code} ВНД «{vnd.TitleRu}»",
+                $"{actorName} started approval of revision {lastRedaction.Code} of VND \"{vnd.TitleRu}\"",
+                $"{actorName} «{vnd.TitleRu}» ВНДисинин {lastRedaction.Code} редакциясын макулдашууну баштады"),
+            $"/base-vnd/{vndId}");
         await _db.SaveChangesAsync();
 
         // --- Уведомления: задача на первичное согласование - только тем, кому реально нужно
@@ -255,6 +275,28 @@ public class VndApprovalService : IVndApprovalService
         var redactionCode = process.Redaction!.Code;
         var vndTitle = process.Vnd!.TitleRu;
 
+        var logKind = decision switch
+        {
+            ApprovalStageDecision.Approved => ActivityEventKind.Approved,
+            ApprovalStageDecision.ApprovedWithComment => ActivityEventKind.ApprovedWithComment,
+            ApprovalStageDecision.Rejected => ActivityEventKind.Rejected,
+            _ => ActivityEventKind.Other
+        };
+
+        _activityLog.Log(
+            ActivityModules.Vnd, logKind, vndId, process.Vnd!.Code, currentUserId,
+            decision == ApprovalStageDecision.Rejected
+                ? new ActivityText(
+                    $"{approverName} отклонил(а) редакцию {redactionCode} ВНД «{vndTitle}»",
+                    $"{approverName} rejected revision {redactionCode} of VND \"{vndTitle}\"",
+                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын четке какты")
+                : new ActivityText(
+                    $"{approverName} согласовал(а) редакцию {redactionCode} ВНД «{vndTitle}»",
+                    $"{approverName} approved revision {redactionCode} of VND \"{vndTitle}\"",
+                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын макулдады"),
+            $"/base-vnd/{vndId}");
+        await _db.SaveChangesAsync();
+
         var decisionNotice = decision switch
         {
             ApprovalStageDecision.Approved =>
@@ -275,19 +317,14 @@ public class VndApprovalService : IVndApprovalService
 
     /// <summary>
     /// Отзыв согласования инициатором (или главным редактором). Незавершённый процесс
-    /// переводится в Cancelled, редакция и документ возвращаются в черновик, согласующим
-    /// уходит уведомление, что задача снята. Заполняет пробел статуса Cancelled.
+    /// переводится в Cancelled, редакция и документ возвращаются в черновик/актуализацию,
+    /// согласующим уходит уведомление, что задача снята.
     /// </summary>
     public async Task<ApprovalProcessResponse> CancelAsync(int vndId, int currentUserId)
     {
         var process = await LoadProcessForVndAsync(vndId);
 
-        var isChiefEditor = _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
-
-        if (process.InitiatorUserId != currentUserId && !isChiefEditor)
+        if (process.InitiatorUserId != currentUserId && !IsChiefEditor())
             throw new UnauthorizedAccessException(
                 "Отозвать согласование может только инициатор или главный редактор");
 
@@ -295,6 +332,9 @@ public class VndApprovalService : IVndApprovalService
             or ApprovalProcessStatus.Cancelled
             or ApprovalProcessStatus.Rejected)
             throw new InvalidOperationException("Согласование уже завершено — отозвать нельзя");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
 
         process.Status = ApprovalProcessStatus.Cancelled;
         process.CompletedAt = DateTime.UtcNow;
@@ -308,6 +348,14 @@ public class VndApprovalService : IVndApprovalService
         // Документ: если это была первая редакция — возвращаем в черновик; если это цикл
         // актуализации существующего ВНД — возвращаем на актуализацию, а не в черновик.
         vnd.Status = redaction.Number <= 1 ? VndStatus.Draft : VndStatus.OnActualization;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Other, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} отозвал(а) согласование редакции {redaction.Code} ВНД «{vnd.TitleRu}»",
+                $"{actorName} withdrew approval of revision {redaction.Code} of VND \"{vnd.TitleRu}\"",
+                $"{actorName} «{vnd.TitleRu}» ВНДисинин {redaction.Code} редакциясынын макулдашуусун артка алды"),
+            $"/base-vnd/{vndId}");
 
         await _db.SaveChangesAsync();
 
@@ -493,6 +541,15 @@ public class VndApprovalService : IVndApprovalService
             {
                 stage.PrimaryDecision = ApprovalStageDecision.AutoApprovedByTimeout;
                 stage.PrimaryDecidedAt = now;
+
+                _activityLog.Log(
+                    ActivityModules.Vnd, ActivityEventKind.AutoApprovedTimeout,
+                    process.VndId, process.Vnd!.Code, null,
+                    new ActivityText(
+                        $"Просрочен срок согласования редакции {process.Redaction!.Code} ВНД «{process.Vnd!.TitleRu}» — применён автоакцепт",
+                        $"Approval deadline missed for revision {process.Redaction!.Code} of VND \"{process.Vnd!.TitleRu}\" — auto-approved",
+                        $"«{process.Vnd!.TitleRu}» ВНДисинин {process.Redaction!.Code} редакциясын макулдашуу мөөнөтү өттү — автоматтык түрдө макулдашылды"),
+                    $"/base-vnd/{process.VndId}");
             }
 
             await CompletePrimaryPhaseAsync(process, save: false);
@@ -515,6 +572,15 @@ public class VndApprovalService : IVndApprovalService
             {
                 stage.RepeatDecision = ApprovalStageDecision.AutoApprovedByTimeout;
                 stage.RepeatDecidedAt = now;
+
+                _activityLog.Log(
+                    ActivityModules.Vnd, ActivityEventKind.AutoApprovedTimeout,
+                    process.VndId, process.Vnd!.Code, null,
+                    new ActivityText(
+                        $"Просрочен срок повторного согласования редакции {process.Redaction!.Code} ВНД «{process.Vnd!.TitleRu}» — применён автоакцепт",
+                        $"Repeated approval deadline missed for revision {process.Redaction!.Code} of VND \"{process.Vnd!.TitleRu}\" — auto-approved",
+                        $"«{process.Vnd!.TitleRu}» ВНДисинин {process.Redaction!.Code} редакциясын кайра макулдашуу мөөнөтү өттү — автоматтык түрдө макулдашылды"),
+                    $"/base-vnd/{process.VndId}");
             }
 
             await CompleteRepeatPhaseAsync(process, save: false);
@@ -536,6 +602,15 @@ public class VndApprovalService : IVndApprovalService
             {
                 stage.FinalHoldDecision = ApprovalStageDecision.AutoApprovedByTimeout;
                 stage.FinalHoldDecidedAt = now;
+
+                _activityLog.Log(
+                    ActivityModules.Vnd, ActivityEventKind.AutoApprovedTimeout,
+                    process.VndId, process.Vnd!.Code, null,
+                    new ActivityText(
+                        $"Просрочен срок финальной выдержки редакции {process.Redaction!.Code} ВНД «{process.Vnd!.TitleRu}» — применён автоакцепт",
+                        $"Final hold deadline missed for revision {process.Redaction!.Code} of VND \"{process.Vnd!.TitleRu}\" — auto-approved",
+                        $"«{process.Vnd!.TitleRu}» ВНДисинин {process.Redaction!.Code} редакциясынын акыркы кармоо мөөнөтү өттү — автоматтык түрдө макулдашылды"),
+                    $"/base-vnd/{process.VndId}");
             }
 
             // Никто не оставил замечаний до дедлайна - завершаем (afterRevision: true,
@@ -621,6 +696,14 @@ public class VndApprovalService : IVndApprovalService
         // CurrentRedactionId и RevisionChangedDate выставит VndActualizationService.PublishAsync
         // в момент явной публикации из статуса Consolidation.
         vnd.Status = VndStatus.Consolidation;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Finalized, process.VndId, vnd.Code, null,
+            new ActivityText(
+                $"Редакция {redaction.Code} ВНД «{vnd.TitleRu}» согласована, ВНД переведён в статус «Консолидация»",
+                $"Revision {redaction.Code} of VND \"{vnd.TitleRu}\" has been approved, VND moved to \"Consolidation\" status",
+                $"«{vnd.TitleRu}» ВНДисинин {redaction.Code} редакциясы макулдашылды, ВНД «Консолидация» абалына өттү"),
+            $"/base-vnd/{process.VndId}");
 
         var notice = afterRevision
             ? VndApprovalNotificationMessages.ApprovedAfterRevision(redaction.Code, vnd.TitleRu)
@@ -728,7 +811,7 @@ public class VndApprovalService : IVndApprovalService
                    .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
                ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
     }
-    
+
     /// <summary>Причастен ли пользователь к документу - та же логика,
     /// что и в VndService.IsLinkedToVndAsync, но без проверки существующих
     /// процессов согласования (для Start процесса ещё нет).</summary>
