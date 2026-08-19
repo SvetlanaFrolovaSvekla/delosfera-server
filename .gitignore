@@ -485,3 +485,6 @@ appsettings.Development.json
 appsettings.Local.json
 appsettings.*.local.json
 secrets.json
+# Служебные записи агента: к коду отношения не имеют, а в одной из них
+# оказался пароль от стенда — такие файлы в репозитории не место.
+.omc/
