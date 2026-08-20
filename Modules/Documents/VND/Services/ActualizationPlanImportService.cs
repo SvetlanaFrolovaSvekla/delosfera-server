@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Export;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
+using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Documents.VND.DTO;
 using delosfera_server.Modules.Documents.VND.Models;
 
@@ -95,9 +96,15 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
         // у новых позиций идентификатор появляется только там (PLN-07).
         var imported = new List<(ActualizationPlanItem Item, string Description)>();
 
-        // Первая строка — шапка: отличаем её по тому, что во второй колонке заголовок,
-        // а не наименование документа.
-        var start = LooksLikeHeader(rows[0]) ? 1 : 0;
+        // Шапку ищем, а не считаем первой строкой: в плане банка над ней стоят
+        // название документа и ссылка на протокол Правления, которым он утверждён.
+        var (headerRow, columns) = FindHeader(rows);
+        var start = headerRow + 1;
+
+        // Подразделение в плане задаётся не колонкой, а строкой-разделом: «1.1
+        // Управление риск-менеджмента», и относится ко всем позициям под ней.
+        // Колонка «Ответственный исполнитель» содержит ФИО, а не подразделение.
+        OrganizationUnit? sectionUnit = null;
 
         for (var r = start; r < rows.Count; r++)
         {
@@ -105,7 +112,7 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
             var line = r + 1;
             result.RowsRead++;
 
-            var title = Cell(row, 1);
+            var title = At(row, columns.Title);
 
             if (string.IsNullOrWhiteSpace(title))
             {
@@ -117,22 +124,32 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
                 continue;
             }
 
-            var dueDate = XlsxReader.ParseDate(Cell(row, 3));
-
-            if (dueDate is null)
+            // Раздел: заполнено только наименование, срока нет. Такая строка не
+            // позиция плана, а заголовок группы — запоминаем подразделение и идём дальше.
+            if (string.IsNullOrWhiteSpace(At(row, columns.Due)))
             {
-                result.Skipped.Add($"строка {line}: не разобрана дата актуализации «{Cell(row, 3)}»");
+                var found = MatchUnit(units, title);
+                if (found is not null) sectionUnit = found;
                 continue;
             }
 
-            var unitTitle = Cell(row, 2);
-            var unit = units.FirstOrDefault(u =>
-                u.TitleRu.Equals(unitTitle, StringComparison.OrdinalIgnoreCase));
+            var dueDate = XlsxReader.ParseDate(At(row, columns.Due));
 
-            if (unit is null && !string.IsNullOrWhiteSpace(unitTitle))
-                result.Skipped.Add($"строка {line}: подразделение «{unitTitle}» не найдено в справочнике");
+            if (dueDate is null)
+            {
+                result.Skipped.Add($"строка {line}: не разобран срок «{At(row, columns.Due)}»");
+                continue;
+            }
 
-            var bodyTitle = Cell(row, 4);
+            // Подразделение берём из раздела; если в файле есть отдельная колонка
+            // с подразделением — она главнее, потому что задана явно.
+            var unitTitle = At(row, columns.Unit);
+            var unit = MatchUnit(units, unitTitle) ?? sectionUnit;
+
+            if (unit is null)
+                result.Skipped.Add($"строка {line}: подразделение не определено — ни в разделе, ни в строке");
+
+            var bodyTitle = At(row, columns.Body);
             var body = bodies.FirstOrDefault(x =>
                 x.TitleRu.Equals(bodyTitle, StringComparison.OrdinalIgnoreCase));
 
@@ -157,7 +174,7 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
                     ResponsibleUnitId = unit?.Id,
                     ApprovalBodyId = body?.Id,
                     DueDate = dueDate.Value,
-                    Comment = Cell(row, 5),
+                    Comment = BuildComment(row, columns),
                 };
 
                 plan.Items.Add(created);
@@ -181,7 +198,7 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
             existing.ResponsibleUnitId = unit?.Id ?? existing.ResponsibleUnitId;
             existing.ApprovalBodyId = body?.Id ?? existing.ApprovalBodyId;
             existing.DueDate = dueDate.Value;
-            existing.Comment = Cell(row, 5) ?? existing.Comment;
+            existing.Comment = BuildComment(row, columns) ?? existing.Comment;
 
             imported.Add((existing, previousDue == dueDate.Value
                 ? "Обновлена импортом файла"
@@ -307,10 +324,122 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
     private static string? Cell(string[] row, int index) =>
         index < row.Length ? row[index]?.Trim() : null;
 
-    private static bool LooksLikeHeader(string[] row)
+    /// <summary>Номера колонок, найденные по заголовкам. -1 — колонки нет.</summary>
+    private record Columns(int Title, int Due, int Unit, int Body, int Executor, int Curator,
+                           int Kind, int Purpose, int Comment);
+
+    /// <summary>
+    /// Найти шапку и разобрать, где какая колонка.
+    ///
+    /// Порядок колонок в плане банка не совпадает с шаблоном, а над шапкой стоят
+    /// название документа и ссылка на протокол. Поэтому колонки ищутся по словам
+    /// в заголовке, а не по номерам: план правят каждый год, и переставленный
+    /// столбец не должен ломать загрузку.
+    /// </summary>
+    private static (int Row, Columns Columns) FindHeader(List<string[]> rows)
     {
-        var second = Cell(row, 1) ?? string.Empty;
-        return second.Contains("наименование", StringComparison.OrdinalIgnoreCase)
-               || second.Contains("ВНД", StringComparison.OrdinalIgnoreCase);
+        for (var r = 0; r < Math.Min(rows.Count, 20); r++)
+        {
+            var row = rows[r];
+            var title = Find(row, "наименование");
+
+            // Шапка — та строка, где есть и наименование, и срок: у названия
+            // документа над таблицей второго признака нет.
+            if (title < 0) continue;
+
+            var due = Find(row, "срок", "дата актуализ", "дата");
+            if (due < 0) continue;
+
+            return (r, new Columns(
+                Title: title,
+                Due: due,
+                Unit: Find(row, "ответственное подразделение", "подразделение"),
+                Body: Find(row, "орган утверждения", "орган"),
+                Executor: Find(row, "ответственный исполнитель", "исполнитель"),
+                Curator: Find(row, "контролирующее лицо", "куратор"),
+                Kind: Find(row, "вид разработки", "вид"),
+                Purpose: Find(row, "цель"),
+                Comment: Find(row, "комментарий", "примечание")));
+        }
+
+        throw new InvalidOperationException(
+            "В файле не найдена шапка таблицы: нужны колонки с наименованием ВНД и сроком");
+    }
+
+    /// <summary>Номер колонки по первому подходящему слову заголовка.</summary>
+    private static int Find(string[] row, params string[] words)
+    {
+        foreach (var word in words)
+            for (var i = 0; i < row.Length; i++)
+                if ((row[i] ?? string.Empty).Contains(word, StringComparison.OrdinalIgnoreCase))
+                    return i;
+
+        return -1;
+    }
+
+    private static string? At(string[] row, int index) =>
+        index >= 0 && index < row.Length && !string.IsNullOrWhiteSpace(row[index])
+            ? row[index].Trim()
+            : null;
+
+    /// <summary>
+    /// Подразделение по названию раздела плана.
+    ///
+    /// Сверка идёт по нормализованному названию, а не по вхождению подстроки:
+    /// «Управление внутреннего аудита» содержит в себе «Правление», и поиск по
+    /// вхождению уводил позиции этого управления в подразделение Правления.
+    /// Номер раздела вида «1.1» отбрасывается: в справочнике его нет.
+    ///
+    /// Не нашлось — позиция остаётся без подразделения, и это видно в итогах
+    /// загрузки. Приписать её к похожему по названию хуже, чем оставить пустой:
+    /// ошибку в приписке никто не заметит, а пустое поле бросается в глаза.
+    /// </summary>
+    private static OrganizationUnit? MatchUnit(List<OrganizationUnit> units, string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return null;
+
+        var clean = Normalize(title);
+        if (clean.Length < 4) return null;
+
+        return units.FirstOrDefault(u => Normalize(u.TitleRu) == clean);
+    }
+
+    /// <summary>
+    /// Название к сравнимому виду: без номера раздела, лишних пробелов, кавычек
+    /// и различий в регистре. «1.1  Управление  риск-менеджмента» и «Управление
+    /// риск-менеджмента» — одно и то же подразделение.
+    /// </summary>
+    private static string Normalize(string value)
+    {
+        var text = System.Text.RegularExpressions.Regex.Replace(value.Trim(), @"^[IVXLC\d]+[.\d]*\s+", "");
+        text = text.Replace("«", "\"").Replace("»", "\"").Replace("ё", "е").Replace("Ё", "Е");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+        return text.Trim().ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Комментарий к позиции. В плане есть колонки, которых нет в модели: вид
+    /// разработки, цель актуализации, ответственный исполнитель, контролирующее
+    /// лицо. Терять их нельзя — методологу они нужны, — поэтому сводим в текст.
+    /// </summary>
+    private static string? BuildComment(string[] row, Columns c)
+    {
+        var parts = new List<string>();
+
+        void Add(string label, int index)
+        {
+            var value = At(row, index);
+            if (!string.IsNullOrWhiteSpace(value)) parts.Add($"{label}: {value}");
+        }
+
+        Add("Вид разработки", c.Kind);
+        Add("Цель", c.Purpose);
+        Add("Исполнитель", c.Executor);
+        Add("Контролирует", c.Curator);
+
+        var own = At(row, c.Comment);
+        if (!string.IsNullOrWhiteSpace(own)) parts.Insert(0, own);
+
+        return parts.Count == 0 ? null : string.Join("; ", parts);
     }
 }
