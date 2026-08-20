@@ -8,6 +8,8 @@ using delosfera_server.Modules.Users.DTO.Response;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Users.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
+using delosfera_server.Data;
 
 namespace delosfera_server.Modules.Users.Controllers;
 
@@ -24,17 +26,20 @@ public class UserController : ControllerBase
     private readonly IUserActivityService _activityService;
     private readonly ILanguageResolver _languageResolver;
     private readonly ICurrentUserService _currentUser;
+    private readonly DelosferaDbContext _db;
 
     public UserController(
         IUserService service,
         IUserActivityService activityService,
         ILanguageResolver languageResolver,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        DelosferaDbContext db)
     {
         _service = service;
         _activityService = activityService;
         _languageResolver = languageResolver;
         _currentUser = currentUser;
+        _db = db;
     }
 
     /// <summary>Текущий авторизованный пользователь</summary>
@@ -108,6 +113,31 @@ public class UserController : ControllerBase
         var result = await _service.GetAllAsync(sortBy, search, orgUnitIds, positionIds, roleIds, source, isBlocked, language);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Краткий список сотрудников для выбора: кого назначить согласующим,
+    /// исполнителем, подписантом.
+    ///
+    /// Полный список отдаёт роли, даты блокировки и вложенные объекты должности и
+    /// подразделения — на пятистах сотрудниках это полмегабявта на каждое открытие
+    /// карточки, а для выбора человека нужны четыре поля. Заблокированные не
+    /// возвращаются: назначать им задачу бессмысленно, войти они не могут.
+    /// </summary>
+    /// <response code="200">Список получен</response>
+    [HttpGet("lookup")]
+    public async Task<IActionResult> Lookup(CancellationToken ct) =>
+        Ok(await _db.Users
+            .AsNoTracking()
+            .Where(u => u.IsActive && u.BlockedAt == null)
+            .OrderBy(u => u.FullName)
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName,
+                position = u.Position != null ? u.Position.TitleRu : null,
+                orgUnit = u.OrgUnit != null ? u.OrgUnit.TitleRu : null,
+            })
+            .ToListAsync(ct));
 
     /// <summary>
     /// Создать нового пользователя
