@@ -176,7 +176,7 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
                     ResponsibleUnitId = unit?.Id,
                     ApprovalBodyId = body?.Id,
                     DueDate = dueDate.Value,
-                    Comment = BuildComment(row, columns),
+                    Comment = BuildComment(row, columns, At(row, columns.Due)),
                 };
 
                 plan.Items.Add(created);
@@ -200,7 +200,7 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
             existing.ResponsibleUnitId = unit?.Id ?? existing.ResponsibleUnitId;
             existing.ApprovalBodyId = body?.Id ?? existing.ApprovalBodyId;
             existing.DueDate = dueDate.Value;
-            existing.Comment = BuildComment(row, columns) ?? existing.Comment;
+            existing.Comment = BuildComment(row, columns, At(row, columns.Due)) ?? existing.Comment;
 
             imported.Add((existing, previousDue == dueDate.Value
                 ? "Обновлена импортом файла"
@@ -452,9 +452,20 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
     /// разработки, цель актуализации, ответственный исполнитель, контролирующее
     /// лицо. Терять их нельзя — методологу они нужны, — поэтому сводим в текст.
     /// </summary>
-    private static string? BuildComment(string[] row, Columns c)
+    private static string? BuildComment(string[] row, Columns c, string? rawDue)
     {
         var parts = new List<string>();
+
+        // Срок, записанный словами — «В течении года, но не позднее 24.12.26», —
+        // несёт больше, чем извлечённая из него дата: в поле срока останется
+        // крайняя дата, а условие сохраняем здесь, иначе оно потеряется.
+        if (!string.IsNullOrWhiteSpace(rawDue)
+            && !double.TryParse(rawDue, System.Globalization.NumberStyles.Any,
+                   System.Globalization.CultureInfo.InvariantCulture, out _)
+            && !DateOnly.TryParse(rawDue, out _))
+        {
+            parts.Add($"Срок по плану: {rawDue}");
+        }
 
         void Add(string label, int index)
         {

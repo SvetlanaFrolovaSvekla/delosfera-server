@@ -165,6 +165,43 @@ public static class XlsxReader
                 return date;
         }
 
-        return DateOnly.TryParse(text, out var parsed) ? parsed : null;
+        if (DateOnly.TryParse(text, out var parsed)) return parsed;
+
+        // Срок в плане иногда записан словами: «В течении года, но не позднее
+        // 24.12.26». Дата внутри такой фразы — и есть крайний срок, ради которого
+        // строка вообще нужна. Отбросить её значило бы потерять позицию из контроля.
+        return FindDateInText(text);
+    }
+
+    /// <summary>
+    /// Найти дату внутри произвольного текста. Берётся последняя: во фразах вида
+    /// «с 01.01.26 по 24.12.26» и «не позднее …» крайний срок стоит в конце.
+    /// </summary>
+    private static DateOnly? FindDateInText(string text)
+    {
+        var matches = System.Text.RegularExpressions.Regex.Matches(
+            text, @"\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})\b");
+
+        if (matches.Count == 0) return null;
+
+        var last = matches[^1];
+
+        if (!int.TryParse(last.Groups[1].Value, out var day)) return null;
+        if (!int.TryParse(last.Groups[2].Value, out var month)) return null;
+        if (!int.TryParse(last.Groups[3].Value, out var year)) return null;
+
+        // Двузначный год: план составляется на ближайшие годы, век подставляем текущий.
+        if (year < 100) year += 2000;
+
+        try
+        {
+            return new DateOnly(year, month, day);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // «31.02» и подобное: в плане опечатка, и молча подставлять соседний
+            // день нельзя — пусть строка попадёт в пропущенные и её проверят.
+            return null;
+        }
     }
 }
