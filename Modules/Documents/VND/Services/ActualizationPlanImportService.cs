@@ -67,9 +67,11 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
 
     public async Task<PlanImportResultDto> ImportAsync(int year, Stream file, int userId)
     {
-        var rows = XlsxReader.ReadFirstSheet(file);
+        // Ищем лист с планом, а не берём первый: в файле банка первым идёт лист с
+        // изменениями законодательства, вторым — сам план, и порядок меняется.
+        var sheets = XlsxReader.ReadAllSheets(file);
 
-        if (rows.Count == 0)
+        if (sheets.Count == 0 || sheets.All(x => x.Count == 0))
             throw new InvalidOperationException("Файл пуст: нет ни одной строки");
 
         var plan = await _db.ActualizationPlans
@@ -98,7 +100,7 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
 
         // Шапку ищем, а не считаем первой строкой: в плане банка над ней стоят
         // название документа и ссылка на протокол Правления, которым он утверждён.
-        var (headerRow, columns) = FindHeader(rows);
+        var (rows, headerRow, columns) = FindPlanSheet(sheets);
         var start = headerRow + 1;
 
         // Подразделение в плане задаётся не колонкой, а строкой-разделом: «1.1
@@ -327,6 +329,34 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
     /// <summary>Номера колонок, найденные по заголовкам. -1 — колонки нет.</summary>
     private record Columns(int Title, int Due, int Unit, int Body, int Executor, int Curator,
                            int Kind, int Purpose, int Comment);
+
+    /// <summary>
+    /// Найти среди листов тот, где лежит план: у него есть шапка с наименованием
+    /// ВНД и сроком. Прочие листы книги — изменения законодательства, сводки,
+    /// расчёты — такой шапки не имеют.
+    /// </summary>
+    private static (List<string[]> Rows, int HeaderRow, Columns Columns) FindPlanSheet(
+        List<List<string[]>> sheets)
+    {
+        foreach (var rows in sheets)
+        {
+            if (rows.Count == 0) continue;
+
+            try
+            {
+                var (headerRow, columns) = FindHeader(rows);
+                return (rows, headerRow, columns);
+            }
+            catch (InvalidOperationException)
+            {
+                // На этом листе плана нет — смотрим следующий.
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Ни на одном листе книги не найдена таблица плана: нужны колонки " +
+            "с наименованием ВНД и сроком");
+    }
 
     /// <summary>
     /// Найти шапку и разобрать, где какая колонка.

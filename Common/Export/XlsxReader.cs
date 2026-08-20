@@ -32,6 +32,33 @@ public static class XlsxReader
         var sheetEntry = FindFirstSheet(zip)
             ?? throw new InvalidOperationException("В файле не найден лист с данными");
 
+        return ReadSheet(sheetEntry, shared);
+    }
+
+    /// <summary>
+    /// Строки всех листов книги, по порядку.
+    ///
+    /// Нужно там, где таблица лежит не на первом листе: в плане актуализации банка
+    /// первым идёт лист с изменениями законодательства, а сам план — вторым.
+    /// Требовать от методолога переставить листы значит требовать помнить об этом
+    /// каждый год.
+    /// </summary>
+    public static List<List<string[]>> ReadAllSheets(Stream stream)
+    {
+        using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
+
+        var shared = ReadSharedStrings(zip);
+
+        return zip.Entries
+            .Where(e => e.FullName.StartsWith("xl/worksheets/sheet", StringComparison.OrdinalIgnoreCase)
+                        && e.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(e => e.FullName, StringComparer.OrdinalIgnoreCase)
+            .Select(e => ReadSheet(e, shared))
+            .ToList();
+    }
+
+    private static List<string[]> ReadSheet(ZipArchiveEntry sheetEntry, List<string> shared)
+    {
         using var sheetStream = sheetEntry.Open();
         var doc = XDocument.Load(sheetStream);
 
