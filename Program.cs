@@ -112,6 +112,10 @@ builder.AddMeetingServices();
 builder.AddIntegrationServices();
 builder.AddSearchServices();
 
+// Обкатка подразделениями: пожелания с экранов и учёт посещаемости. Журнал заходов
+// растёт быстрее всех таблиц, поэтому вместе со сбором сразу заводим и чистку.
+builder.Services.AddHostedService<delosfera_server.Modules.Feedback.Services.PageVisitCleanupWorker>();
+
 
 // Адреса фронтенда задаются конфигурацией: на стенде это localhost, в банке —
 // адрес развёрнутого клиента. Захардкоженный localhost означал бы, что на любом
@@ -220,6 +224,18 @@ using (var scope = app.Services.CreateScope())
     // Bootstrap администратора из конфигурации (env/secrets), а НЕ из захардкоженного хеша.
     // Пароли сид-аккаунтов инвалидированы миграцией InvalidateSeededPasswords; этот блок —
     // единственный способ выдать рабочий пароль администратору, без коммита хеша в репозиторий.
+    // Учётные записи для обкатки бизнес-подразделениями. Заводятся только при явно
+    // включённой настройке и только если задан пароль — в коде его нет и не будет.
+    // На продуктивном контуре Demo:Enabled выключен, и этот блок не делает ничего.
+    if (app.Configuration.GetValue<bool>("Demo:Enabled"))
+    {
+        delosfera_server.Modules.Users.Services.DemoAccountsSeeder.Seed(
+            db,
+            scope.ServiceProvider.GetRequiredService<IUserPasswordHasher>(),
+            app.Configuration["Demo:Password"] ?? "",
+            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Demo"));
+    }
+
     var adminEmail = app.Configuration["Bootstrap:AdminEmail"];
     var adminPassword = app.Configuration["Bootstrap:AdminPassword"];
     if (!string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword))

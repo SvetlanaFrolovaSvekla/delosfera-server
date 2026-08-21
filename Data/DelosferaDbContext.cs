@@ -109,6 +109,17 @@ public class DelosferaDbContext : DbContext
     public DbSet<AcknowledgementSheet> AcknowledgementSheets => Set<AcknowledgementSheet>();
     public DbSet<AcknowledgementEntry> AcknowledgementEntries => Set<AcknowledgementEntry>();
 
+    /// <summary>Пожелания и замечания сотрудников с экранов системы — обкатка подразделениями.</summary>
+    public DbSet<delosfera_server.Modules.Feedback.Models.FeedbackItem> FeedbackItems =>
+        Set<delosfera_server.Modules.Feedback.Models.FeedbackItem>();
+
+    /// <summary>
+    /// Заходы на экраны. Растёт быстрее всех прочих таблиц, чистится фоновой службой
+    /// PageVisitCleanupWorker по настройке Usage:RetentionDays.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Feedback.Models.PageVisit> PageVisits =>
+        Set<delosfera_server.Modules.Feedback.Models.PageVisit>();
+
     // --- Закупки (контур 6 ТЗ): матрица полномочий и её параметры ---
     public DbSet<ProcurementMethod> ProcurementMethods => Set<ProcurementMethod>();
     public DbSet<AuthorityMatrixRule> AuthorityMatrixRules => Set<AuthorityMatrixRule>();

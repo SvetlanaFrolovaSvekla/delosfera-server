@@ -22,13 +22,46 @@ public class AuthController : ControllerBase
 
     private readonly IAuthService _authService;
     private readonly ILanguageResolver _languageResolver;
+    private readonly IConfiguration _configuration;
     private readonly int _refreshTokenExpiryDays;
 
     public AuthController(IAuthService authService, ILanguageResolver languageResolver, IConfiguration configuration)
     {
         _authService = authService;
         _languageResolver = languageResolver;
+        _configuration = configuration;
         _refreshTokenExpiryDays = int.Parse(configuration["Jwt:RefreshTokenExpiryDays"] ?? "30");
+    }
+
+    /// <summary>
+    /// Учётные записи для обкатки: логин, пароль и что этой ролью можно делать.
+    ///
+    /// Отдаётся только при включённой настройке <c>Demo:Enabled</c> — на продуктивном
+    /// контуре список пуст, и подставлять на странице входа будет нечего. Пароль
+    /// приходит с сервера, а не лежит в коде страницы: выключенная настройка должна
+    /// означать, что учётных данных нет нигде, включая собранный файл в браузере.
+    /// </summary>
+    /// <response code="200">Список учётных записей; пуст, если режим обкатки выключен</response>
+    [HttpGet("demo-accounts")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult DemoAccounts()
+    {
+        var enabled = _configuration.GetValue<bool>("Demo:Enabled");
+        var password = _configuration["Demo:Password"];
+
+        if (!enabled || string.IsNullOrWhiteSpace(password))
+            return Ok(Array.Empty<object>());
+
+        var accounts = DemoAccountsSeeder.Accounts.Select(a => new
+        {
+            email = a.Email,
+            password,
+            fullName = a.FullName,
+            role = a.RoleTitle,
+            purpose = a.Purpose,
+        });
+
+        return Ok(accounts);
     }
 
     /// <summary>
