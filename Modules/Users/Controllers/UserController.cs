@@ -140,6 +140,34 @@ public class UserController : ControllerBase
             .ToListAsync(ct));
 
     /// <summary>
+    /// Список пользователей, которым разрешено выступать согласующими (право ActAsApprover) —
+    /// для выбора в конструкторе маршрута согласования. Заблокированные и неактивные не
+    /// возвращаются: назначать им этап согласования бессмысленно.
+    /// </summary>
+    /// <response code="200">Список получен</response>
+    [HttpGet("approvers")]
+    public async Task<IActionResult> Approvers(CancellationToken ct)
+    {
+        var approverCode = (int)PermissionCode.ActAsApprover;
+
+        return Ok(await _db.Users
+            .AsNoTracking()
+            .Where(u => u.IsActive && u.BlockedAt == null)
+            .Where(u => u.Roles.Any(r => r.PermissionCodes.Contains(approverCode)))
+            .OrderBy(u => u.FullName)
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName,
+                u.Email,
+                orgUnitId = u.OrgUnitId,
+                orgUnitName = u.OrgUnit != null ? u.OrgUnit.TitleRu : null,
+                positionName = u.Position != null ? u.Position.TitleRu : null,
+            })
+            .ToListAsync(ct));
+    }
+
+    /// <summary>
     /// Создать нового пользователя
     /// </summary>
     /// <response code="201">Пользователь успешно создан</response>
