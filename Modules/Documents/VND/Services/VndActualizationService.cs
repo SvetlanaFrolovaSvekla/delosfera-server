@@ -382,6 +382,7 @@ public class VndActualizationService : IVndActualizationService
             RequiresApproval = x.RequiresApproval,
             ShiftNextPeriod = x.ShiftNextPeriod,
             StartedAt = x.StartedAt,
+            ConsolidationStartedAt = x.ConsolidationStartedAt,
             PublishedAt = x.PublishedAt,
             HadChanges = x.HadChanges,
             DueActualizationDateBefore = x.DueActualizationDateBefore,

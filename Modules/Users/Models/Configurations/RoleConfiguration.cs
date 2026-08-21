@@ -37,7 +37,8 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
             (int)PermissionCode.ExportFullStatisticsReport,
             (int)PermissionCode.ViewFullStatistics,
             (int)PermissionCode.ActAsApprover,
-            (int)PermissionCode.EditVndRequisites
+            (int)PermissionCode.EditVndRequisites,
+            (int)PermissionCode.ViewVndRegistryExtended
         };
 
         builder.HasData(

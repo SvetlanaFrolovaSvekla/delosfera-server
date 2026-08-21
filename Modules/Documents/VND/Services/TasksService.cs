@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
@@ -14,6 +14,11 @@ public class TasksService : ITasksService
         _db = db;
     }
 
+    /// <summary>Задачи вкладки "Ждущие моего согласования" — все три фазы, на которых
+    /// решение сейчас за текущим пользователем: первичное, повторное согласование и
+    /// финальная выдержка. Раньше финальная выдержка сюда не попадала — по переходу в этот
+    /// статус согласующим уходило только уведомление (см. WorkflowNotifier/VndApprovalService),
+    /// а сама задача в "Мои задачи" не появлялась.</summary>
     public async Task<List<VndTaskResponse>> GetCoordinationTasksAsync(int userId)
     {
         var stages = await _db.Set<VndApprovalStage>()
@@ -26,18 +31,18 @@ public class TasksService : ITasksService
                 ||
                 (s.ApprovalProcess!.Status == ApprovalProcessStatus.Repeated
                  && s.ParticipatesInRepeat
-                 && (s.RepeatDecision == null || s.RepeatDecision == ApprovalStageDecision.Pending)))
+                 && (s.RepeatDecision == null || s.RepeatDecision == ApprovalStageDecision.Pending))
+                ||
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.FinalHold
+                 && (s.FinalHoldDecision == null || s.FinalHoldDecision == ApprovalStageDecision.Pending)))
             .ToListAsync();
 
-        var initiatorIds = stages.Select(s => s.ApprovalProcess!.InitiatorUserId).Distinct().ToList();
-        var initiators = await _db.Users
-            .Where(u => initiatorIds.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+        var initiators = await GetInitiatorNamesAsync(stages.Select(s => s.ApprovalProcess!.InitiatorUserId));
 
         return stages.Select(s =>
         {
             var process = s.ApprovalProcess!;
-            var isPrimaryPhase = process.Status == ApprovalProcessStatus.Primary;
+            var phase = MapProcessPhase(process.Status);
 
             return new VndTaskResponse
             {
@@ -45,14 +50,35 @@ public class TasksService : ITasksService
                 VndCode = process.Vnd!.Code,
                 VndTitle = process.Vnd!.TitleRu,
                 Scope = "coordination",
+                VndStatus = MapVndStatus(process.Vnd!.Status),
                 RedactionId = process.RedactionId,
                 RedactionCode = process.Redaction!.Code,
                 StageId = s.Id,
-                StagePhase = isPrimaryPhase ? "primary" : "repeat",
-                DeadlineAt = isPrimaryPhase ? process.PrimaryDeadlineAt : process.RepeatDeadlineAt,
+                StagePhase = phase,
+                StageKind = MapStageKind(s.Kind),
+                DeadlineAt = phase switch
+                {
+                    "primary" => process.PrimaryDeadlineAt,
+                    "repeat" => process.RepeatDeadlineAt,
+                    "final" => process.FinalHoldDeadlineAt,
+                    _ => null
+                },
                 InitiatorName = initiators.GetValueOrDefault(process.InitiatorUserId, "—"),
-                DeadlineMinutes = isPrimaryPhase ? process.PrimaryDeadlineMinutes : process.RepeatDeadlineMinutes,
-                CreatedAt = isPrimaryPhase ? process.PrimaryStartedAt : (process.RepeatStartedAt ?? process.CreatedAt)
+                DeadlineMinutes = phase switch
+                {
+                    "primary" => process.PrimaryDeadlineMinutes,
+                    "repeat" => process.RepeatDeadlineMinutes,
+                    "final" => process.FinalHoldDeadlineMinutes,
+                    _ => null
+                },
+                InitiatorComment = phase == "primary" ? null : process.RepeatInitiatorComment,
+                CreatedAt = phase switch
+                {
+                    "primary" => process.PrimaryStartedAt,
+                    "repeat" => process.RepeatStartedAt ?? process.CreatedAt,
+                    "final" => process.FinalHoldStartedAt ?? process.CreatedAt,
+                    _ => process.CreatedAt
+                }
             };
         })
         .OrderBy(t => t.DeadlineAt)
@@ -76,6 +102,7 @@ public class TasksService : ITasksService
                 VndCode = x.Code,
                 VndTitle = x.TitleRu,
                 Scope = "actualization",
+                VndStatus = MapVndStatus(x.Status),
                 DueActualizationDate = x.DueActualizationDate,
                 CreatedAt = x.UpdatedAt
             })
@@ -98,6 +125,7 @@ public class TasksService : ITasksService
                 VndCode = x.Code,
                 VndTitle = x.TitleRu,
                 Scope = "consolidation",
+                VndStatus = MapVndStatus(x.Status),
                 StatusLabel = "В процессе консолидации",
                 DueActualizationDate = x.DueActualizationDate,
                 CreatedAt = x.UpdatedAt
@@ -136,14 +164,28 @@ public class TasksService : ITasksService
                 VndCode = vnd.Code,
                 VndTitle = vnd.TitleRu,
                 Scope = "myVndApproval",
+                VndStatus = MapVndStatus(vnd.Status),
                 RedactionId = process.RedactionId,
                 RedactionCode = process.Redaction?.Code,
+                // Текущий этап согласования — тот же смысл, что и у "Ждущих моего согласования",
+                // только с точки зрения инициатора: на каком именно круге сейчас его редакция.
+                // Для RevisionNeeded (на доработке у самого инициатора) фазы нет ни в одном из
+                // трёх согласованных значений — фильтр по этапу её не подхватит, "Все этапы" покажет.
+                StagePhase = MapProcessPhase(process.Status),
                 StatusLabel = statusLabel,
                 CreatedAt = vnd.UpdatedAt
             });
         }
 
         return result.OrderBy(t => t.CreatedAt).ToList();
+    }
+
+    private async Task<Dictionary<int, string>> GetInitiatorNamesAsync(IEnumerable<int> initiatorUserIds)
+    {
+        var ids = initiatorUserIds.Distinct().ToList();
+        return await _db.Users
+            .Where(u => ids.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
     }
 
     private async Task<HashSet<int>> GetOpenActualizationVndIdsAsync(List<int>? restrictToVndIds = null)
@@ -182,7 +224,10 @@ public class TasksService : ITasksService
                 ||
                 (s.ApprovalProcess!.Status == ApprovalProcessStatus.Repeated
                  && s.ParticipatesInRepeat
-                 && (s.RepeatDecision == null || s.RepeatDecision == ApprovalStageDecision.Pending)))
+                 && (s.RepeatDecision == null || s.RepeatDecision == ApprovalStageDecision.Pending))
+                ||
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.FinalHold
+                 && (s.FinalHoldDecision == null || s.FinalHoldDecision == ApprovalStageDecision.Pending)))
             .CountAsync();
 
         var actualizationCount = (await GetActualizationTasksAsync(userId)).Count;
@@ -237,6 +282,8 @@ public class TasksService : ITasksService
                  || p.Status == ApprovalProcessStatus.FinalHold));
 
         // Карточка 4: этапы, ожидающие решения именно меня прямо сейчас
+        // (первичное/повторное согласование + финальная выдержка — все три уже внутри
+        // GetCoordinationTasksAsync)
         var pendingMyApproval = await GetCoordinationTasksAsync(userId);
 
         return new VndHomeSummaryResponse
@@ -247,4 +294,38 @@ public class TasksService : ITasksService
             PendingMyApproval = pendingMyApproval.Count
         };
     }
+
+    // ── маппинг enum → строковые ключи для фронта ──────────────────────────
+
+    /// <summary>"primary" | "repeat" | "final" — фаза согласования, под которую заточен и
+    /// фильтр "Этап согласования" на странице "Мои задачи", и бейдж на карточке.
+    /// RevisionNeeded (доработка у инициатора) не сопоставляется ни с одной из трёх фаз.</summary>
+    private static string? MapProcessPhase(ApprovalProcessStatus status) => status switch
+    {
+        ApprovalProcessStatus.Primary => "primary",
+        ApprovalProcessStatus.Repeated => "repeat",
+        ApprovalProcessStatus.FinalHold => "final",
+        _ => null
+    };
+
+    private static string MapStageKind(ApprovalStageKind kind) => kind switch
+    {
+        ApprovalStageKind.Legal => "legal",
+        ApprovalStageKind.RiskManagement => "risk_management",
+        ApprovalStageKind.Compliance => "compliance",
+        ApprovalStageKind.Custom => "custom",
+        ApprovalStageKind.Methodology => "methodology",
+        _ => "custom"
+    };
+
+    private static string MapVndStatus(VndStatus status) => status switch
+    {
+        VndStatus.Active => "active",
+        VndStatus.OnActualization => "onact",
+        VndStatus.Review => "review",
+        VndStatus.Consolidation => "consol",
+        VndStatus.Archived => "arch",
+        VndStatus.Draft => "draft",
+        _ => "active"
+    };
 }

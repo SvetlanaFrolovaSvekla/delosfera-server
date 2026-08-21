@@ -60,4 +60,11 @@ public class VndResponse
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>Виды связи текущего пользователя с этим документом ("initiator",
+    /// "currentApprover", "pastApprover", "currentActualizer", "pastActualizer",
+    /// "currentConsolidator", "pastConsolidator") — заполняется только когда поиск идёт
+    /// с LinkedToMeOnly=true, иначе пустой список (не вычисляется, чтобы не тратить время
+    /// на поиск, где фильтр не запрашивался).</summary>
+    public List<string> LinkedToMeRelations { get; set; } = [];
 }

@@ -20,6 +20,8 @@ public class TasksController : ControllerBase
         _currentUser = currentUser;
     }
 
+    /// <summary>"Ждущие моего согласования" — первичное, повторное согласование и финальная
+    /// выдержка одним списком (см. TasksService.GetCoordinationTasksAsync).</summary>
     [HttpGet("coordination")]
     public async Task<ActionResult<List<VndTaskResponse>>> GetCoordination() =>
         Ok(await _service.GetCoordinationTasksAsync(_currentUser.UserId));

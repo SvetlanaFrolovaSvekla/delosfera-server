@@ -1,7 +1,8 @@
-﻿namespace delosfera_server.Modules.Documents.VND.DTO.Response;
+namespace delosfera_server.Modules.Documents.VND.DTO.Response;
 
 public class VndTaskCountsResponse
 {
+    /// <summary>"Ждущие моего согласования" — первичное + повторное согласование + финальная выдержка.</summary>
     public int Coordination { get; set; }
     public int Actualization { get; set; }
     public int Consolidation { get; set; }

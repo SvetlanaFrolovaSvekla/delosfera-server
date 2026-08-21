@@ -4,6 +4,8 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 
 public interface ITasksService
 {
+    /// <summary>"Ждущие моего согласования" — включает первичное, повторное согласование
+    /// и финальную выдержку одним списком.</summary>
     Task<List<VndTaskResponse>> GetCoordinationTasksAsync(int userId);
     Task<List<VndTaskResponse>> GetActualizationTasksAsync(int userId);
     Task<List<VndTaskResponse>> GetConsolidationTasksAsync(int userId);

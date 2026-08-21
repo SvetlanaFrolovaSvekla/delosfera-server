@@ -697,6 +697,20 @@ public class VndApprovalService : IVndApprovalService
         // в момент явной публикации из статуса Consolidation.
         vnd.Status = VndStatus.Consolidation;
 
+        // Если это часть цикла актуализации - фиксируем момент входа в консолидацию в открытой
+        // записи истории (фильтр "Только связанные со мной" → "я консолидирую"/"я когда-то
+        // консолидировал"). Обычное согласование вне актуализации открытой записи не имеет.
+        if (vnd.ActualizationResponsibleUserId.HasValue)
+        {
+            var openRecord = await _db.Set<VndActualizationRecord>()
+                .Where(r => r.VndId == process.VndId && r.PublishedAt == null)
+                .OrderByDescending(r => r.StartedAt)
+                .FirstOrDefaultAsync();
+
+            if (openRecord is not null && openRecord.ConsolidationStartedAt is null)
+                openRecord.ConsolidationStartedAt = DateTime.UtcNow;
+        }
+
         _activityLog.Log(
             ActivityModules.Vnd, ActivityEventKind.Finalized, process.VndId, vnd.Code, null,
             new ActivityText(

@@ -12,6 +12,9 @@ public class VndActualizationRecordResponse
 
     public DateTime StartedAt { get; set; }
 
+    /// <summary>null, пока документ не дошёл (в рамках этого цикла) до статуса "Консолидация"</summary>
+    public DateTime? ConsolidationStartedAt { get; set; }
+
     /// <summary>null, пока цикл ещё не завершён (см. IsCompleted)</summary>
     public DateTime? PublishedAt { get; set; }
     public bool? HadChanges { get; set; }
