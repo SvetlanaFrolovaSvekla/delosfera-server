@@ -13,12 +13,25 @@ public enum ActualizationBucket
 }
 
 /// <summary>
-/// Пороги в днях для расчёта ActualizationBucket
+/// Пороги в днях для расчёта ActualizationBucket. Значения настраиваются администратором
+/// в справочнике "Пороги индикации сроков актуализации" (раздел ВНД, см.
+/// ActualizationBucketSettings/ActualizationBucketSettingsService) и хранятся в БД —
+/// здесь только текущий кэш в памяти процесса, обновляемый этим сервисом при каждом
+/// чтении/сохранении настроек. "Просрочено" порогом не управляется в принципе: это
+/// всегда дата актуализации в прошлом.
 /// </summary>
 public static class ActualizationThresholds
 {
-    public const int CriticalDays = 5;
-    public const int ApproachingDays = 30;
+    public static int CriticalDays { get; private set; } = 5;
+    public static int ApproachingDays { get; private set; } = 30;
+
+    /// <summary>Обновляет пороги в памяти значениями из БД. Вызывается
+    /// ActualizationBucketSettingsService — не вызывайте напрямую.</summary>
+    public static void Configure(int criticalDays, int approachingDays)
+    {
+        CriticalDays = criticalDays;
+        ApproachingDays = approachingDays;
+    }
 
     public static ActualizationBucket? Resolve(DateOnly? dueDate, DateOnly today)
     {
