@@ -112,6 +112,30 @@ builder.AddMeetingServices();
 builder.AddIntegrationServices();
 builder.AddSearchServices();
 
+// Обкатка подразделениями: пожелания с экранов и учёт посещаемости. Журнал заходов
+// растёт быстрее всех таблиц, поэтому вместе со сбором сразу заводим и чистку.
+builder.Services.AddHostedService<delosfera_server.Modules.Feedback.Services.PageVisitCleanupWorker>();
+
+// Доверенности. Состояние хранится, а не считается по датам, — значит кто-то должен
+// закрывать истёкшие, иначе реестр отвечает неправдой на вопрос «вправе ли он».
+builder.Services.AddScoped<
+    delosfera_server.Modules.PowerOfAttorney.Services.IPoaService,
+    delosfera_server.Modules.PowerOfAttorney.Services.PoaService>();
+builder.Services.AddHostedService<delosfera_server.Modules.PowerOfAttorney.Services.PoaExpiryWorker>();
+
+// Регулярные обязательства: календарь заседаний комитетов, отчётов и пересмотра
+// политик. Периоды заводятся вперёд, заседания закрывают их сами.
+builder.Services.AddScoped<
+    delosfera_server.Modules.Obligations.Services.IObligationService,
+    delosfera_server.Modules.Obligations.Services.ObligationService>();
+builder.Services.AddHostedService<delosfera_server.Modules.Obligations.Services.ObligationWorker>();
+
+// Канцелярия: книга регистрации входящих и исходящих. Запросы регулятора и
+// обращения клиентов — категории писем, а не отдельные реестры.
+builder.Services.AddScoped<
+    delosfera_server.Modules.Correspondence.Services.ILetterService,
+    delosfera_server.Modules.Correspondence.Services.LetterService>();
+
 
 // Адреса фронтенда задаются конфигурацией: на стенде это localhost, в банке —
 // адрес развёрнутого клиента. Захардкоженный localhost означал бы, что на любом
@@ -220,6 +244,24 @@ using (var scope = app.Services.CreateScope())
     // Bootstrap администратора из конфигурации (env/secrets), а НЕ из захардкоженного хеша.
     // Пароли сид-аккаунтов инвалидированы миграцией InvalidateSeededPasswords; этот блок —
     // единственный способ выдать рабочий пароль администратору, без коммита хеша в репозиторий.
+    // Учётные записи для обкатки бизнес-подразделениями. Заводятся только при явно
+    // включённой настройке и только если задан пароль — в коде его нет и не будет.
+    // На продуктивном контуре Demo:Enabled выключен, и этот блок не делает ничего.
+    if (app.Configuration.GetValue<bool>("Demo:Enabled"))
+    {
+        delosfera_server.Modules.Users.Services.DemoAccountsSeeder.Seed(
+            db,
+            scope.ServiceProvider.GetRequiredService<IUserPasswordHasher>(),
+            app.Configuration["Demo:Password"] ?? "",
+            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Demo"));
+    }
+
+    // Права на новые разделы существующим ролям. Без этого раздел после выкладки
+    // не видит никто: право заведено, но ни одной роли не принадлежит.
+    await delosfera_server.Modules.Users.Services.RolePermissionDefaults.ApplyAsync(
+        db,
+        app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("RoleDefaults"));
+
     var adminEmail = app.Configuration["Bootstrap:AdminEmail"];
     var adminPassword = app.Configuration["Bootstrap:AdminPassword"];
     if (!string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword))

@@ -152,9 +152,9 @@ public class SzAddresseeDecisionTests
         // Обработчик контура обязателен: именно он переводит записку к адресату по
         // завершении маршрута. Без него проверялся бы движок, а не поведение системы.
         var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
-        var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier());
+        var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
 
-        return (new SzService(db, documents, audit, engine), engine);
+        return (new SzService(db, documents, audit, engine, new PassthroughHtml()), engine);
     }
 
     /// <summary>Записка, отправленная на согласование: один согласующий, один адресат.</summary>

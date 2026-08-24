@@ -15,7 +15,7 @@ public class VndServiceTests
     private const int Creator = 100;
 
     private static VndService NewService(DelosferaDbContext db, int currentUserId, params delosfera_server.Modules.Users.Models.PermissionCode[] perms) =>
-        new(db, new NoopFileStorage(), new FakeCurrentUser(currentUserId, perms));
+        new(db, new NoopFileStorage(), new FakeCurrentUser(currentUserId, perms), new FakeActivityLog());
 
     private static VndDocument SeedVnd(DelosferaDbContext db, VndStatus status) =>
         TestSupport.SeedVnd(db, status, Creator);

@@ -33,11 +33,16 @@ public class SearchService : ISearchService
 
     private readonly DelosferaDbContext _db;
     private readonly IMeetingAccessService _meetingAccess;
+    private readonly Common.Services.Authorization.ICurrentUserService _currentUser;
 
-    public SearchService(DelosferaDbContext db, IMeetingAccessService meetingAccess)
+    public SearchService(
+        DelosferaDbContext db,
+        IMeetingAccessService meetingAccess,
+        Common.Services.Authorization.ICurrentUserService currentUser)
     {
         _db = db;
         _meetingAccess = meetingAccess;
+        _currentUser = currentUser;
     }
 
     public async Task<SearchResultDto> SearchAsync(SearchRequest request, int currentUserId)
@@ -65,6 +70,9 @@ public class SearchService : ISearchService
                 SearchScope.Procurement => await SearchProcurementAsync(request, tsQuery, take),
                 SearchScope.Contract => await SearchContractsAsync(request, tsQuery, take),
                 SearchScope.Meeting => await SearchMeetingsAsync(request, tsQuery, take),
+                SearchScope.Vnd => await SearchVndAsync(request, tsQuery, take),
+                SearchScope.Correspondence => await SearchCorrespondenceAsync(request, tsQuery, take),
+                SearchScope.PowerOfAttorney => await SearchPoaAsync(request, tsQuery, take),
                 _ => ([], 0),
             };
 
@@ -340,6 +348,205 @@ public class SearchService : ISearchService
 
         return (hits.Take(take).ToList(), hits.Count);
     }
+
+    /// <summary>
+    /// Нормативные документы. До сих пор общий поиск их не охватывал — при том что
+    /// это самое объёмное содержимое системы и то, что ищут чаще всего.
+    /// </summary>
+    private async Task<(List<SearchHitDto>, int)> SearchVndAsync(
+        SearchRequest request, string? tsQuery, int take)
+    {
+        var query = _db.VndDocuments
+            .Include(v => v.Developer)
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (request.OrgUnitId is { } unitId)
+            query = query.Where(v => v.DeveloperId == unitId);
+
+        if (request.From is { } from)
+            query = query.Where(v => v.CreatedAt >= from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+
+        if (request.To is { } to)
+            query = query.Where(v => v.CreatedAt <= to.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc));
+
+        if (tsQuery is not null)
+            query = query.Where(v => v.SearchVector!.Matches(EF.Functions.ToTsQuery("russian", tsQuery)));
+
+        var total = await query.CountAsync();
+
+        var rows = await query
+            .OrderByDescending(v => v.CreatedAt)
+            .Take(take)
+            .Select(v => new
+            {
+                v.Id, v.Code, v.TitleRu, v.Status, v.CreatedAt,
+                Unit = v.Developer!.TitleRu,
+            })
+            .ToListAsync();
+
+        var hits = rows.Select(r => new SearchHitDto
+        {
+            Scope = SearchScope.Vnd,
+            ScopeTitle = SearchScopeMap.Title(SearchScope.Vnd),
+            Id = r.Id,
+            RegNumber = r.Code,
+            Title = r.TitleRu,
+            StatusTitle = VndStatusTitle(r.Status),
+            OrgUnitTitle = r.Unit,
+            CreatedAt = r.CreatedAt,
+            Url = $"/base-vnd/{r.Id}",
+        }).ToList();
+
+        return (hits, total);
+    }
+
+    /// <summary>
+    /// Корреспонденция. Ограничение по банковской тайне применяется здесь же:
+    /// общий поиск не должен показывать существование запроса по счетам тому,
+    /// кому запрос не положен.
+    /// </summary>
+    private async Task<(List<SearchHitDto>, int)> SearchCorrespondenceAsync(
+        SearchRequest request, string? tsQuery, int take)
+    {
+        var query = _db.CorrespondenceLetters
+            .Include(l => l.Correspondent)
+            .Include(l => l.ResponsibleUnit)
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (!_currentUser.HasPermission(Users.Models.PermissionCode.ViewBankSecrecyInquiries))
+        {
+            var userId = _currentUser.UserId;
+
+            query = query.Where(l =>
+                l.Category != Correspondence.Models.LetterCategory.BankSecrecyInquiry
+                || l.ResponsibleUserId == userId
+                || l.ResolutionByUserId == userId
+                || l.CreatedByUserId == userId);
+        }
+
+        if (request.OrgUnitId is { } unitId)
+            query = query.Where(l => l.ResponsibleUnitId == unitId);
+
+        if (request.From is { } from)
+            query = query.Where(l => l.RegisteredOn >= from);
+
+        if (request.To is { } to)
+            query = query.Where(l => l.RegisteredOn <= to);
+
+        if (tsQuery is not null)
+            query = query.Where(l => l.SearchVector!.Matches(EF.Functions.ToTsQuery("russian", tsQuery)));
+
+        var total = await query.CountAsync();
+
+        var rows = await query
+            .OrderByDescending(l => l.RegisteredOn).ThenByDescending(l => l.Id)
+            .Take(take)
+            .Select(l => new
+            {
+                l.Id, l.RegNumber, l.Subject, l.Summary, l.Direction, l.Status, l.CreatedAt,
+                Correspondent = l.Correspondent!.Title,
+                Unit = l.ResponsibleUnit!.TitleRu,
+            })
+            .ToListAsync();
+
+        var hits = rows.Select(r => new SearchHitDto
+        {
+            Scope = SearchScope.Correspondence,
+            ScopeTitle = SearchScopeMap.Title(SearchScope.Correspondence),
+            Id = r.Id,
+            RegNumber = r.RegNumber,
+            Title = r.Subject,
+            Snippet = Snippet(r.Summary, request.Query),
+            StatusTitle = r.Direction == Correspondence.Models.LetterDirection.Incoming
+                ? $"Входящее · {r.Correspondent}"
+                : $"Исходящее · {r.Correspondent}",
+            OrgUnitTitle = r.Unit,
+            CreatedAt = r.CreatedAt,
+            Url = $"/correspondence/{r.Id}",
+        }).ToList();
+
+        return (hits, total);
+    }
+
+    /// <summary>
+    /// Доверенности. Ищут по фамилии представителя и по фразе из полномочий —
+    /// «вправе ли он подписывать договоры аренды».
+    /// </summary>
+    private async Task<(List<SearchHitDto>, int)> SearchPoaAsync(
+        SearchRequest request, string? tsQuery, int take)
+    {
+        if (!_currentUser.HasPermission(Users.Models.PermissionCode.ViewPowersOfAttorney))
+            return ([], 0);
+
+        var query = _db.PowersOfAttorney
+            .Include(p => p.HolderUnit)
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (request.OrgUnitId is { } unitId)
+            query = query.Where(p => p.HolderUnitId == unitId);
+
+        if (request.From is { } from)
+            query = query.Where(p => p.IssuedOn >= from);
+
+        if (request.To is { } to)
+            query = query.Where(p => p.IssuedOn <= to);
+
+        if (tsQuery is not null)
+            query = query.Where(p => p.SearchVector!.Matches(EF.Functions.ToTsQuery("russian", tsQuery)));
+
+        var total = await query.CountAsync();
+
+        var rows = await query
+            .OrderByDescending(p => p.IssuedOn).ThenByDescending(p => p.Id)
+            .Take(take)
+            .Select(p => new
+            {
+                p.Id, p.RegNumber, p.HolderName, p.Powers, p.Status, p.ValidTo, p.CreatedAt,
+                Unit = p.HolderUnit!.TitleRu,
+            })
+            .ToListAsync();
+
+        var hits = rows.Select(r => new SearchHitDto
+        {
+            Scope = SearchScope.PowerOfAttorney,
+            ScopeTitle = SearchScopeMap.Title(SearchScope.PowerOfAttorney),
+            Id = r.Id,
+            RegNumber = r.RegNumber,
+            Title = $"Доверенность на {r.HolderName}",
+            Snippet = Snippet(r.Powers, request.Query),
+            StatusTitle = PoaStatusTitle(r.Status, r.ValidTo),
+            OrgUnitTitle = r.Unit,
+            CreatedAt = r.CreatedAt,
+            Url = $"/poa/{r.Id}",
+        }).ToList();
+
+        return (hits, total);
+    }
+
+    private static string VndStatusTitle(Documents.VND.Models.VndStatus status) => status switch
+    {
+        Documents.VND.Models.VndStatus.Active => "Действует",
+        Documents.VND.Models.VndStatus.OnActualization => "На актуализации",
+        Documents.VND.Models.VndStatus.Review => "На согласовании",
+        Documents.VND.Models.VndStatus.Consolidation => "На утверждении",
+        Documents.VND.Models.VndStatus.Archived => "В архиве",
+        Documents.VND.Models.VndStatus.Draft => "Черновик",
+        _ => status.ToString(),
+    };
+
+    private static string PoaStatusTitle(
+        PowerOfAttorney.Models.PoaStatus status, DateOnly validTo) => status switch
+    {
+        PowerOfAttorney.Models.PoaStatus.Active => $"Действует по {validTo:dd.MM.yyyy}",
+        PowerOfAttorney.Models.PoaStatus.Revoked => "Отозвана",
+        PowerOfAttorney.Models.PoaStatus.Expired => "Срок истёк",
+        PowerOfAttorney.Models.PoaStatus.Draft => "Проект",
+        PowerOfAttorney.Models.PoaStatus.OnApproval => "На подписании",
+        _ => status.ToString(),
+    };
 
     // ── общее ────────────────────────────────────────────────────────────────
 

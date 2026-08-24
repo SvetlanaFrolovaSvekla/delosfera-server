@@ -1,0 +1,76 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace delosfera_server.Modules.Hr.Models.Configurations;
+
+public class HrOrderConfiguration : IEntityTypeConfiguration<HrOrder>
+{
+    public void Configure(EntityTypeBuilder<HrOrder> builder)
+    {
+        builder.ToTable("hr_order");
+
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.RegNumber).HasMaxLength(50);
+        builder.Property(x => x.Title).HasMaxLength(1000).IsRequired();
+        builder.Property(x => x.Body).HasMaxLength(20000);
+        builder.Property(x => x.Basis).HasMaxLength(1000);
+
+        builder.HasOne(x => x.SignerUser)
+            .WithMany()
+            .HasForeignKey(x => x.SignerUserId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.NomenclatureCase)
+            .WithMany()
+            .HasForeignKey(x => x.NomenclatureCaseId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // Отменяющий приказ ссылается на отменяемый. Удаление отменяемого не должно
+        // уносить отменяющий: он подписан и существует независимо.
+        builder.HasOne(x => x.CancelsOrder)
+            .WithMany()
+            .HasForeignKey(x => x.CancelsOrderId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Книга приказов по личному составу: номер уникален в пределах года.
+        builder.HasIndex(x => new { x.Year, x.RegNumber })
+            .IsUnique()
+            .HasFilter("reg_number IS NOT NULL");
+
+        builder.HasIndex(x => new { x.Status, x.OrderDate });
+        builder.HasIndex(x => x.Kind);
+    }
+}
+
+public class HrOrderEmployeeConfiguration : IEntityTypeConfiguration<HrOrderEmployee>
+{
+    public void Configure(EntityTypeBuilder<HrOrderEmployee> builder)
+    {
+        builder.ToTable("hr_order_employee");
+
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.FullNameSnapshot).HasMaxLength(300);
+        builder.Property(x => x.PositionSnapshot).HasMaxLength(300);
+        builder.Property(x => x.UnitSnapshot).HasMaxLength(300);
+        builder.Property(x => x.FieldValues).HasColumnType("jsonb");
+
+        builder.HasOne(x => x.Order)
+            .WithMany(x => x.Employees)
+            .HasForeignKey(x => x.OrderId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // «Что было по этому сотруднику» — главный вопрос к книге приказов.
+        builder.HasIndex(x => x.UserId);
+
+        // Один сотрудник в приказе один раз: дважды указанный получил бы два
+        // приказа об одном и том же.
+        builder.HasIndex(x => new { x.OrderId, x.UserId }).IsUnique();
+    }
+}

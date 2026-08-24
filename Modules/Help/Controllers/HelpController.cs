@@ -50,18 +50,24 @@ public class HelpController : ControllerBase
     private static readonly string[] AllowedKinds =
     [
         HelpBlockKind.Text, HelpBlockKind.Steps, HelpBlockKind.Note,
-        HelpBlockKind.Link, HelpBlockKind.Vnd,
+        HelpBlockKind.Link, HelpBlockKind.Vnd, HelpBlockKind.Image,
     ];
 
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
     private readonly ICurrentUserService _currentUser;
+    private readonly Files.Services.IFileStorageService _files;
 
-    public HelpController(DelosferaDbContext db, IAuditService audit, ICurrentUserService currentUser)
+    public HelpController(
+        DelosferaDbContext db,
+        IAuditService audit,
+        ICurrentUserService currentUser,
+        Files.Services.IFileStorageService files)
     {
         _db = db;
         _audit = audit;
         _currentUser = currentUser;
+        _files = files;
     }
 
     /// <summary>Оглавление: разделы со статьями. Черновики — только редактору.</summary>
@@ -152,6 +158,8 @@ public class HelpController : ControllerBase
         _db.HelpArticles.Add(article);
         await _db.SaveChangesAsync(ct);
 
+        await SyncImagesAsync(article, ct);
+
         await _audit.LogAsync("HelpArticle", article.Id, "Created", _currentUser.UserId,
             new {article.TitleRu, section = article.Section.ToString(), article.IsPublished});
 
@@ -182,6 +190,7 @@ public class HelpController : ControllerBase
         article.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+        await SyncImagesAsync(article, ct);
 
         await _audit.LogAsync("HelpArticle", article.Id, "Updated", _currentUser.UserId, new
         {
@@ -207,6 +216,135 @@ public class HelpController : ControllerBase
         await _audit.LogAsync("HelpArticle", id, "Deleted", _currentUser.UserId, new {article.TitleRu});
 
         return Ok(new {ok = true});
+    }
+
+    // ── снимки экрана ────────────────────────────────────────────────────────
+
+    /// <summary>Столько снимков в одной статье. Больше — значит статью надо делить.</summary>
+    private const int MaxImagesPerArticle = 20;
+
+    /// <summary>
+    /// Загрузить снимок экрана для статьи. Отдаёт идентификатор файла — его
+    /// редактор кладёт в блок изображения.
+    /// </summary>
+    [HttpPost("images")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> UploadImage(IFormFile file, CancellationToken ct)
+    {
+        if (file.Length == 0)
+            return BadRequest(new {message = "Файл пустой."});
+
+        // Только растровые изображения. SVG исключён намеренно: это документ,
+        // который может нести скрипт, и открывается он в браузере сотрудника.
+        var allowed = new[] {"image/png", "image/jpeg", "image/webp", "image/gif"};
+        if (!allowed.Contains(file.ContentType))
+            return BadRequest(new {message = "Допустимы только изображения PNG, JPEG, WEBP или GIF."});
+
+        const long maxBytes = 8 * 1024 * 1024;
+        if (file.Length > maxBytes)
+            return BadRequest(new {message = "Снимок экрана больше 8 МБ — уменьшите его."});
+
+        var attachment = await _files.SaveAsync(file, _currentUser.UserId, ct);
+        return Ok(new {fileId = attachment.Id, fileName = attachment.OriginalFileName, size = attachment.SizeBytes});
+    }
+
+    /// <summary>
+    /// Выдать снимок экрана статьи.
+    ///
+    /// Отдельно от общей выдачи файлов: та разрешает доступ автору вложения и
+    /// участникам документа, а инструкция участников не имеет — её читают все.
+    /// Здесь проверка своя: файл отдаётся, если он привязан к опубликованной
+    /// статье, а неопубликованной — только тому, кто статьи правит.
+    /// </summary>
+    [HttpGet("images/{fileId:int}")]
+    public async Task<IActionResult> GetImage(int fileId, CancellationToken ct)
+    {
+        var mayEdit = _currentUser.HasPermission(PermissionCode.ManageSystemSettings);
+
+        var allowed = await _db.HelpArticleImages
+            .AnyAsync(i => i.FileId == fileId && (mayEdit || i.Article!.IsPublished), ct);
+
+        if (!allowed) return NotFound();
+
+        var (stream, contentType, fileName) = await _files.DownloadAsync(fileId, ct);
+
+        // Снимки интерфейса меняются вместе со сборкой, а не по часам: сутки в
+        // кеше браузера снимают лишние обращения, не делая инструкцию устаревшей.
+        Response.Headers.CacheControl = "private, max-age=86400";
+
+        return File(stream, contentType, fileName);
+    }
+
+    /// <summary>
+    /// Приводит список привязанных файлов в соответствие телу статьи: добавляет
+    /// появившиеся, убирает исчезнувшие.
+    ///
+    /// Без уборки удалённый из текста снимок остался бы доступен по прямой
+    /// ссылке — а его могли удалить именно потому, что он показывал лишнее.
+    /// </summary>
+    private async Task SyncImagesAsync(HelpArticle article, CancellationToken ct)
+    {
+        var referenced = ExtractImageIds(article.BodyJson);
+
+        var existing = await _db.HelpArticleImages
+            .Where(i => i.ArticleId == article.Id)
+            .ToListAsync(ct);
+
+        var stale = existing.Where(i => !referenced.Contains(i.FileId)).ToList();
+        if (stale.Count > 0) _db.HelpArticleImages.RemoveRange(stale);
+
+        var known = existing.Select(i => i.FileId).ToHashSet();
+
+        foreach (var fileId in referenced.Where(id => !known.Contains(id)).Take(MaxImagesPerArticle))
+        {
+            _db.HelpArticleImages.Add(new HelpArticleImage
+            {
+                ArticleId = article.Id,
+                FileId = fileId,
+                UploadedByUserId = _currentUser.UserId,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
+
+        if (stale.Count > 0 || referenced.Count > 0)
+            await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Идентификаторы файлов из блоков изображения в теле статьи.</summary>
+    private static HashSet<int> ExtractImageIds(string bodyJson)
+    {
+        var ids = new HashSet<int>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(bodyJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return ids;
+
+            foreach (var block in doc.RootElement.EnumerateArray())
+            {
+                if (block.ValueKind != JsonValueKind.Object) continue;
+
+                if (!block.TryGetProperty("kind", out var kind)
+                    || kind.GetString() != HelpBlockKind.Image)
+                {
+                    continue;
+                }
+
+                if (block.TryGetProperty("fileId", out var fileId)
+                    && fileId.TryGetInt32(out var value)
+                    && value > 0)
+                {
+                    ids.Add(value);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Тело неразборчиво — связей не трогаем. Чинить его должен тот, кто
+            // испортил, а не эта уборка.
+        }
+
+        return ids;
     }
 
     // ── внутреннее ───────────────────────────────────────────────────────────

@@ -138,6 +138,18 @@ public class SzDetails : SzListItem
 
     public int? SignerUserId { get; set; }
     public string? SignerUser { get; set; }
+
+    /// <summary>
+    /// Отметка «вынести на коллегиальный орган»: заявка секретарю, а не
+    /// распоряжение. Пусто — записка решается в рабочем порядке.
+    /// </summary>
+    public string? SubmitToBody { get; set; }
+    public string? SubmitToBodyQuestion { get; set; }
+    public DateTime? SubmitToBodyRequestedAt { get; set; }
+
+    /// <summary>Включена ли записка в повестку — тогда отметку менять поздно.</summary>
+    public bool InAgenda { get; set; }
+
     public int? RegisteredByUserId { get; set; }
     public string? RegisteredBy { get; set; }
     public List<int> RubricIds { get; set; } = [];

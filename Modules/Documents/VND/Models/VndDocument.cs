@@ -9,6 +9,14 @@ namespace delosfera_server.Modules.Documents.VND.Models;
 public class VndDocument : IAuditableEntity, ITranslatableEntity
 {
     public int Id { get; set; }
+
+    /// <summary>
+    /// Поисковый вектор по коду и названию. Вычисляемая колонка Postgres, а не
+    /// поле, которое надо помнить обновлять: рано или поздно синхронизация
+    /// расходится с данными, а генерируемая колонка устареть не может.
+    /// </summary>
+    public NpgsqlTypes.NpgsqlTsVector? SearchVector { get; set; }
+
     public required string Code { get; set; }
     public required string TitleRu { get; set; }
     public string? TitleEn { get; set; }
