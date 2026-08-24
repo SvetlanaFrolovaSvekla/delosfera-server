@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260824053608_AddActualizationPlannedNoChangesAndRequestConsumption")]
+    partial class AddActualizationPlannedNoChangesAndRequestConsumption
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3006,10 +3009,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("had_changes");
 
-                    b.Property<DateTime?>("PerformedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("performed_at");
-
                     b.Property<bool>("PlannedNoChanges")
                         .HasColumnType("boolean")
                         .HasColumnName("planned_no_changes");
@@ -3079,6 +3078,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("decided_by_user_id");
 
+                    b.Property<bool>("PlannedNoChanges")
+                        .HasColumnType("boolean")
+                        .HasColumnName("planned_no_changes");
+
                     b.Property<int>("RequestedByUserId")
                         .HasColumnType("integer")
                         .HasColumnName("requested_by_user_id");
@@ -3086,10 +3089,6 @@ namespace delosfera_server.Migrations
                     b.Property<bool>("RequiresApproval")
                         .HasColumnType("boolean")
                         .HasColumnName("requires_approval");
-
-                    b.Property<bool>("ShiftNextPeriod")
-                        .HasColumnType("boolean")
-                        .HasColumnName("shift_next_period");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer")
@@ -3346,10 +3345,6 @@ namespace delosfera_server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<bool>("ActualizationPerformed")
-                        .HasColumnType("boolean")
-                        .HasColumnName("actualization_performed");
-
                     b.Property<bool>("ActualizationPlannedNoChanges")
                         .HasColumnType("boolean")
                         .HasColumnName("actualization_planned_no_changes");
@@ -3513,7 +3508,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 1,
-                            ActualizationPerformed = false,
                             ActualizationPlannedNoChanges = false,
                             ActualizationRequiresApproval = false,
                             ActualizationShiftNextPeriod = false,
@@ -3541,7 +3535,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 2,
-                            ActualizationPerformed = false,
                             ActualizationPlannedNoChanges = false,
                             ActualizationRequiresApproval = false,
                             ActualizationShiftNextPeriod = false,
@@ -3569,7 +3562,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 3,
-                            ActualizationPerformed = false,
                             ActualizationPlannedNoChanges = false,
                             ActualizationRequiresApproval = false,
                             ActualizationShiftNextPeriod = false,
@@ -3597,7 +3589,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 4,
-                            ActualizationPerformed = false,
                             ActualizationPlannedNoChanges = false,
                             ActualizationRequiresApproval = false,
                             ActualizationShiftNextPeriod = false,
@@ -3625,7 +3616,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 5,
-                            ActualizationPerformed = false,
                             ActualizationPlannedNoChanges = false,
                             ActualizationRequiresApproval = false,
                             ActualizationShiftNextPeriod = false,
@@ -3655,7 +3645,6 @@ namespace delosfera_server.Migrations
                         new
                         {
                             Id = 6,
-                            ActualizationPerformed = false,
                             ActualizationPlannedNoChanges = false,
                             ActualizationRequiresApproval = false,
                             ActualizationShiftNextPeriod = false,

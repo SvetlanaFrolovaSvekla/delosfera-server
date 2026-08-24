@@ -7,6 +7,9 @@ public class ApprovalProcessResponse
     public int RedactionId { get; set; }
     public int InitiatorUserId { get; set; }
     public required string InitiatorName { get; set; }
+
+    /// <summary>Должность инициатора (если назначена)</summary>
+    public string? InitiatorPosition { get; set; }
     public required string Status { get; set; } // primary/revision_needed/repeated/final_hold/approved/cancelled
 
     public string? RepeatInitiatorComment { get; set; }

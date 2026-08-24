@@ -124,6 +124,8 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationResponsibleUserId = (int?)null,
                 ActualizationRequiresApproval = false,
                 ActualizationShiftNextPeriod = false,
+                ActualizationPlannedNoChanges = false,
+                ActualizationPerformed = false,
                 SecrecyLevelId = 3,
                 CreatedByUserId = (int?)14,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -146,6 +148,8 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationResponsibleUserId = (int?)null,
                 ActualizationRequiresApproval = false,
                 ActualizationShiftNextPeriod = false,
+                ActualizationPlannedNoChanges = false,
+                ActualizationPerformed = false,
                 SecrecyLevelId = 2,
                 CreatedByUserId = (int?)14,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -168,6 +172,8 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationResponsibleUserId = (int?)null,
                 ActualizationRequiresApproval = false,
                 ActualizationShiftNextPeriod = false,
+                ActualizationPlannedNoChanges = false,
+                ActualizationPerformed = false,
                 SecrecyLevelId = 1,
                 CreatedByUserId = (int?)7,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -190,6 +196,8 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationResponsibleUserId = (int?)null,
                 ActualizationRequiresApproval = false,
                 ActualizationShiftNextPeriod = false,
+                ActualizationPlannedNoChanges = false,
+                ActualizationPerformed = false,
                 SecrecyLevelId = 1,
                 CreatedByUserId = (int?)15,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -213,6 +221,8 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationResponsibleUserId = (int?)null,
                 ActualizationRequiresApproval = false,
                 ActualizationShiftNextPeriod = false,
+                ActualizationPlannedNoChanges = false,
+                ActualizationPerformed = false,
                 SecrecyLevelId = 2,
                 CreatedByUserId = (int?)12,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -235,6 +245,8 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationResponsibleUserId = (int?)null,
                 ActualizationRequiresApproval = false,
                 ActualizationShiftNextPeriod = false,
+                ActualizationPlannedNoChanges = false,
+                ActualizationPerformed = false,
                 SecrecyLevelId = 3,
                 CreatedByUserId = (int?)17,
                 CreatedAt = seedDate, UpdatedAt = seedDate

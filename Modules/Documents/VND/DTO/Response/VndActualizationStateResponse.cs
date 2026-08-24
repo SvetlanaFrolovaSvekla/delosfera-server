@@ -11,6 +11,8 @@ public class VndActualizationStateResponse
     public string? ActualizationResponsibleUserName { get; set; }
     public bool ActualizationRequiresApproval { get; set; }
     public bool ActualizationShiftNextPeriod { get; set; }
+    public bool ActualizationPlannedNoChanges { get; set; }
+    public bool ActualizationPerformed { get; set; }
 
     public DateOnly? DueActualizationDate { get; set; }
     public DateOnly? LastActualizationDate { get; set; }

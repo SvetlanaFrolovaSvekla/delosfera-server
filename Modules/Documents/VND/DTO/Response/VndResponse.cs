@@ -34,6 +34,18 @@ public class VndResponse
     public int? ActualizationResponsibleUserId { get; set; }
     public string? ActualizationResponsibleUserName { get; set; }
 
+    /// <summary>Требуется ли согласование в ТЕКУЩЕМ цикле актуализации — заполнено, только
+    /// пока документ в OnActualization/Review/Consolidation в рамках этого цикла.</summary>
+    public bool ActualizationRequiresApproval { get; set; }
+
+    /// <summary>Заявлено ли, что текущий цикл актуализации пройдёт без изменений документа.</summary>
+    public bool ActualizationPlannedNoChanges { get; set; }
+
+    /// <summary>Пройден ли шаг "Выполнить актуализацию" в текущем открытом цикле — пока false,
+    /// значения ActualizationPlannedNoChanges/сдвига срока ещё не окончательные, и загрузка новой
+    /// редакции заблокирована (см. VndDocument.ActualizationPerformed).</summary>
+    public bool ActualizationPerformed { get; set; }
+
     public DateOnly? AdoptionDate { get; set; }
     public string? AdoptionCode { get; set; }
     public DateOnly? EffectiveDate { get; set; }

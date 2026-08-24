@@ -26,11 +26,26 @@ public class VndActualizationRequest : IAuditableEntity
     /// на этапе создания заявки, здесь просто фиксируется результат).</summary>
     public bool RequiresApproval { get; set; }
 
+    /// <summary>Сдвигать ли DueActualizationDate после публикации — исходно выбор заявителя.
+    /// Главный редактор может скорректировать это значение при одобрении заявки
+    /// (VndActualizationService.DecideRequestAsync) — тогда сюда записывается уже финальное,
+    /// решённое значение (не то, что просил заявитель), а заявителю уходит уведомление, если
+    /// значение было изменено. Используется как есть при фактическом старте цикла
+    /// (ConfirmStartAfterRequestAsync) — там уже не запрашивается заново.</summary>
+    public bool ShiftNextPeriod { get; set; }
+
     public ActualizationAccessStatus Status { get; set; } = ActualizationAccessStatus.Pending;
 
     public int? DecidedByUserId { get; set; }
     public User? DecidedByUser { get; set; }
     public DateTime? DecidedAt { get; set; }
+
+    /// <summary>Момент, когда одобренная заявка была фактически использована для старта цикла
+    /// актуализации (ConfirmStartAfterRequestAsync, либо сразу при одобрении в рамках прямого
+    /// старта главным редактором — VndActualizationService.StartAsync). Пока null - заявка
+    /// одобрена, но ещё не "потрачена" и теоретически может быть использована повторно. После
+    /// простановки заявка больше не подхватывается автостартом следующих циклов.</summary>
+    public DateTime? ConsumedAt { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

@@ -9,8 +9,13 @@ public class VndActualizationRecordResponse
 
     public bool RequiresApproval { get; set; }
     public bool ShiftNextPeriod { get; set; }
+    public bool PlannedNoChanges { get; set; }
 
     public DateTime StartedAt { get; set; }
+
+    /// <summary>null, пока шаг "Выполнить актуализацию" ещё не пройден — до этого момента
+    /// ShiftNextPeriod/PlannedNoChanges выше ещё не окончательные (см. VndDocument.ActualizationPerformed)</summary>
+    public DateTime? PerformedAt { get; set; }
 
     /// <summary>null, пока документ не дошёл (в рамках этого цикла) до статуса "Консолидация"</summary>
     public DateTime? ConsolidationStartedAt { get; set; }
