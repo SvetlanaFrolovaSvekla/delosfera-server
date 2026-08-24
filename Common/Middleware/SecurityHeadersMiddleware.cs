@@ -28,9 +28,16 @@ public class SecurityHeadersMiddleware
         // Реферер не утекает на внешние адреса: в пути карточки виден её идентификатор.
         headers["Referrer-Policy"] = "no-referrer";
 
-        // API отдаёт только данные — сторонние скрипты и фреймы ему не нужны.
-        headers["Content-Security-Policy"] =
-            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+        // /scalar и /openapi — это dev-страница документации API, ей нужны свои
+        // скрипты и стили. Остальному приложению (реальным API-ответам) такое
+        // послабление не требуется, поэтому сужаем его только на эти пути.
+        var isDocsPath = context.Request.Path.StartsWithSegments("/scalar")
+            || context.Request.Path.StartsWithSegments("/openapi");
+
+        headers["Content-Security-Policy"] = isDocsPath
+            ? "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
+              "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'"
+            : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
         headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
 

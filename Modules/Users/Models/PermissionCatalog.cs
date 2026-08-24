@@ -213,6 +213,12 @@ public static class PermissionCatalog
             TitleRu = "Член Кредитного комитета — полная повестка заседаний КИТ",
             TitleEn = "Credit Committee member — full agenda of Credit Committee meetings",
             TitleKg = "Кредиттик комитеттин мүчөсү — жыйналыштардын толук күн тартиби"
+        },
+        [PermissionCode.ViewVndRegistryExtended] = new PermissionDescription
+        {
+            TitleRu = "Просмотр реестра ВНД в расширенном режиме: статус последней редакции, актуализация",
+            TitleEn = "View the VND registry in extended mode: latest revision status, actualization",
+            TitleKg = "ВНД реестрин кеңейтилген режимде көрүү: акыркы редакциянын статусу, актуалдаштыруу"
         }
     };
     

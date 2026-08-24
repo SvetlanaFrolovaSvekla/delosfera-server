@@ -29,6 +29,15 @@ public class VndActualizationRecord : IAuditableEntity
 
     public DateTime StartedAt { get; set; }
 
+    /// <summary>Момент перехода документа в статус "Консолидация" в рамках этого цикла
+    /// (после согласования редакции — FinalizeApprovalAsync, либо сразу при загрузке
+    /// редакции без согласования во время актуализации — AddRedactionAsync). Пока null -
+    /// цикл ещё либо не дошёл до консолидации, либо консолидации в нём не было и не будет
+    /// (это не может произойти в текущей бизнес-логике — Publish возможен только из
+    /// Consolidation, — но поле остаётся nullable на случай, если запись открыта, но ещё
+    /// не дошла до этой стадии).</summary>
+    public DateTime? ConsolidationStartedAt { get; set; }
+
     // --- Заполняется в момент публикации (PublishAsync). Пока PublishedAt == null - цикл ещё идёт.
     public DateTime? PublishedAt { get; set; }
     public bool? HadChanges { get; set; }

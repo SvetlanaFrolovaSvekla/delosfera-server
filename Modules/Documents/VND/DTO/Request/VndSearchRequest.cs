@@ -38,6 +38,12 @@ public class VndSearchRequest
     /// ответственный за актуализацию/консолидацию</summary>
     public bool LinkedToMeOnly { get; set; }
 
+    /// <summary>Какие именно виды связи учитывать при LinkedToMeOnly: "currentApprover",
+    /// "pastApprover", "initiator", "currentActualizer", "pastActualizer",
+    /// "currentConsolidator", "pastConsolidator". Пусто при LinkedToMeOnly=true — не
+    /// совпадёт ни с чем (фронт всегда передаёт явный список, по умолчанию — все виды).</summary>
+    public List<string> LinkedToMeRelations { get; set; } = [];
+
     /// <summary>Для вкладки "Черновики": "mine" — только свои черновики, "others" — черновики
     /// других пользователей (требует право ViewOtherUsersDrafts). Пусто = без доп. фильтра
     /// (но пользователь без права ViewOtherUsersDrafts в любом случае не увидит чужие черновики).</summary>

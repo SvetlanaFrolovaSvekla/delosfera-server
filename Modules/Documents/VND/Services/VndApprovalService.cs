@@ -18,6 +18,10 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 
 public class VndApprovalService : IVndApprovalService
 {
+    // Верхняя граница норматива срока согласования — 90 дней. Должна совпадать с
+    // MAX_DEADLINE_MINUTES на клиенте (src/constants/coordinationParams.ts).
+    private const int MaxDeadlineMinutes = 90 * 24 * 60;
+
     private readonly DelosferaDbContext _db;
     private readonly IFileStorageService _fileService;
     private readonly INotificationService _notifications;
@@ -79,6 +83,16 @@ public class VndApprovalService : IVndApprovalService
         if (request.PrimaryDeadlineMinutes <= 0 || request.RepeatDeadlineMinutes <= 0 ||
             request.FinalHoldDeadlineMinutes <= 0)
             throw new InvalidOperationException("Все три норматива должны быть больше нуля минут");
+
+        // Верхняя граница нужна не только для здравого смысла, но и чтобы не уронить
+        // расчёт дедлайна: PrimaryStartedAt.AddMinutes(...) кидает ArgumentOutOfRangeException,
+        // если результат выходит за пределы DateTime, а слишком большое int-значение минут
+        // (например, случайно введённое количество часов вместо минут) на это способно.
+        if (request.PrimaryDeadlineMinutes > MaxDeadlineMinutes ||
+            request.RepeatDeadlineMinutes > MaxDeadlineMinutes ||
+            request.FinalHoldDeadlineMinutes > MaxDeadlineMinutes)
+            throw new InvalidOperationException(
+                $"Норматив срока не может превышать {MaxDeadlineMinutes / 60 / 24} дней");
 
         // Себя можно указать согласующим только на фиксированном этапе (Legal/RiskManagement/
         // Compliance/Methodology) - принадлежность инициатора нужному подразделению всё равно
@@ -697,6 +711,20 @@ public class VndApprovalService : IVndApprovalService
         // в момент явной публикации из статуса Consolidation.
         vnd.Status = VndStatus.Consolidation;
 
+        // Если это часть цикла актуализации - фиксируем момент входа в консолидацию в открытой
+        // записи истории (фильтр "Только связанные со мной" → "я консолидирую"/"я когда-то
+        // консолидировал"). Обычное согласование вне актуализации открытой записи не имеет.
+        if (vnd.ActualizationResponsibleUserId.HasValue)
+        {
+            var openRecord = await _db.Set<VndActualizationRecord>()
+                .Where(r => r.VndId == process.VndId && r.PublishedAt == null)
+                .OrderByDescending(r => r.StartedAt)
+                .FirstOrDefaultAsync();
+
+            if (openRecord is not null && openRecord.ConsolidationStartedAt is null)
+                openRecord.ConsolidationStartedAt = DateTime.UtcNow;
+        }
+
         _activityLog.Log(
             ActivityModules.Vnd, ActivityEventKind.Finalized, process.VndId, vnd.Code, null,
             new ActivityText(
@@ -743,7 +771,7 @@ public class VndApprovalService : IVndApprovalService
 
         var approverIds = requestStages.Select(s => s.ApproverUserId).ToList();
         if (approverIds.Distinct().Count() != approverIds.Count)
-            throw new InvalidOperationException("Один пользователь не может занимать два этапа одновременно");
+            throw new InvalidOperationException("Один пользователь не может быть согласующим два раза одновременно");
 
         var users = await _db.Users
             .Include(u => u.Roles)

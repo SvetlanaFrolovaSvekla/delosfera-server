@@ -19,6 +19,10 @@ public static class VndServiceExtensions
         builder.Services.AddScoped<IPlanReminderService, PlanReminderService>();
         builder.Services.AddHostedService<PlanReminderWorker>();
 
+        // Пороги индикации сроков актуализации (Normal/Approaching/Critical) —
+        // справочник в разделе ВНД, настраивается администратором
+        builder.Services.AddScoped<IActualizationBucketSettingsService, ActualizationBucketSettingsService>();
+
         return builder;
     }
 }

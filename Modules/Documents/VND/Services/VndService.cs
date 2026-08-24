@@ -107,12 +107,65 @@ public class VndService : IVndService
 
         query = ApplyActualizationBucketFilter(query, request.ActualizationBuckets);
 
-        query = ApplyLinkedToMeFilter(query, request.LinkedToMeOnly);
+        query = ApplyLinkedToMeFilter(query, request.LinkedToMeOnly, request.LinkedToMeRelations);
         query = ApplyDraftVisibilityFilter(query, request.DraftOwnerScope);
 
         var entities = await query.ToListAsync();
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        return entities.Select(x => ToResponse(x, languageCode, today)).ToList();
+
+        // Виды связи с текущим пользователем считаем только когда запрошен LinkedToMeOnly —
+        // это отдельные запросы к БД, незачем тратить их, когда колонка "Связь со мной" всё
+        // равно скрыта на фронте
+        var relationsByVndId = request.LinkedToMeOnly
+            ? await BuildLinkedToMeRelationsAsync(entities)
+            : null;
+
+        return entities
+            .Select(x => ToResponse(x, languageCode, today, relationsByVndId?.GetValueOrDefault(x.Id)))
+            .ToList();
+    }
+
+    /// <summary>Для каждого документа из <paramref name="entities"/> — список видов связи
+    /// текущего пользователя с ним (см. VndResponse.LinkedToMeRelations и ApplyLinkedToMeFilter
+    /// для семантики каждого ключа). В отличие от ApplyLinkedToMeFilter, здесь не важно, что
+    /// выбрано в фильтре — показываем ВСЕ фактические связи, а не только отмеченные галочками.</summary>
+    private async Task<Dictionary<int, List<string>>> BuildLinkedToMeRelationsAsync(List<VndDocument> entities)
+    {
+        var result = entities.ToDictionary(e => e.Id, _ => new List<string>());
+        if (entities.Count == 0) return result;
+
+        var userId = _currentUser.UserId;
+        var ids = result.Keys.ToList();
+
+        foreach (var d in entities)
+        {
+            if (d.CreatedByUserId == userId) result[d.Id].Add("initiator");
+            if (d.ActualizationResponsibleUserId == userId && d.Status == VndStatus.OnActualization)
+                result[d.Id].Add("currentActualizer");
+            if (d.ActualizationResponsibleUserId == userId && d.Status == VndStatus.Consolidation)
+                result[d.Id].Add("currentConsolidator");
+        }
+
+        var approverProcesses = await _db.VndApprovalProcesses
+            .Where(p => ids.Contains(p.VndId) && p.Stages.Any(s => s.ApproverUserId == userId))
+            .Select(p => new {p.VndId, p.CompletedAt})
+            .ToListAsync();
+
+        foreach (var p in approverProcesses)
+            result[p.VndId].Add(p.CompletedAt == null ? "currentApprover" : "pastApprover");
+
+        var records = await _db.Set<VndActualizationRecord>()
+            .Where(r => ids.Contains(r.VndId) && r.ResponsibleUserId == userId && r.PublishedAt != null)
+            .Select(r => new {r.VndId, r.ConsolidationStartedAt})
+            .ToListAsync();
+
+        foreach (var r in records)
+        {
+            result[r.VndId].Add("pastActualizer");
+            if (r.ConsolidationStartedAt != null) result[r.VndId].Add("pastConsolidator");
+        }
+
+        return result;
     }
 
     public async Task<VndResponse> GetByIdAsync(int id, string languageCode)
@@ -190,19 +243,68 @@ public class VndService : IVndService
             ));
     }
 
-    /// <summary>"Только связанные со мной" — текущий пользователь является инициатором
-    /// согласования, согласующим на одном из этапов, либо ответственным за текущий цикл
-    /// актуализации (та же ответственность распространяется и на консолидацию).</summary>
-    private IQueryable<VndDocument> ApplyLinkedToMeFilter(IQueryable<VndDocument> query, bool linkedToMeOnly)
+    /// <summary>"Только связанные со мной" — фильтрует по конкретным видам связи из
+    /// <paramref name="relations"/> (пусто = не совпадёт ни с чем; фронт всегда передаёт явный
+    /// список ключей, по умолчанию — все):
+    /// - initiator — пользователь создал документ (VndDocument.CreatedByUserId);
+    /// - currentApprover / pastApprover — согласующий на одном из этапов активного /
+    ///   уже завершённого процесса согласования;
+    /// - currentActualizer / currentConsolidator — ответственный за текущий цикл
+    ///   актуализации (VndDocument.ActualizationResponsibleUserId), различаются по
+    ///   текущему статусу документа (OnActualization / Consolidation);
+    /// - pastActualizer — был ответственным в завершённом цикле актуализации
+    ///   (VndActualizationRecord.PublishedAt != null);
+    /// - pastConsolidator — тот же завершённый цикл, но только если в нём реально была
+    ///   стадия консолидации (VndActualizationRecord.ConsolidationStartedAt != null) — для
+    ///   циклов без согласования, опубликованных напрямую из OnActualization минуя
+    ///   Consolidation, pastConsolidator не сработает, даже если pastActualizer сработает.</summary>
+    private IQueryable<VndDocument> ApplyLinkedToMeFilter(
+        IQueryable<VndDocument> query, bool linkedToMeOnly, List<string> relations)
     {
         if (!linkedToMeOnly) return query;
 
         var userId = _currentUser.UserId;
+        var rel = relations.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var wantInitiator = rel.Contains("initiator");
+        var wantCurrentApprover = rel.Contains("currentApprover");
+        var wantPastApprover = rel.Contains("pastApprover");
+        var wantCurrentActualizer = rel.Contains("currentActualizer");
+        var wantPastActualizer = rel.Contains("pastActualizer");
+        var wantCurrentConsolidator = rel.Contains("currentConsolidator");
+        var wantPastConsolidator = rel.Contains("pastConsolidator");
 
         return query.Where(x =>
-            x.ActualizationResponsibleUserId == userId ||
-            _db.VndApprovalProcesses.Any(p => p.VndId == x.Id && p.InitiatorUserId == userId) ||
-            _db.VndApprovalProcesses.Any(p => p.VndId == x.Id && p.Stages.Any(s => s.ApproverUserId == userId)));
+            (wantInitiator && x.CreatedByUserId == userId) ||
+            (wantCurrentApprover && _db.VndApprovalProcesses.Any(p =>
+                p.VndId == x.Id && p.CompletedAt == null && p.Stages.Any(s => s.ApproverUserId == userId))) ||
+            (wantPastApprover && _db.VndApprovalProcesses.Any(p =>
+                p.VndId == x.Id && p.CompletedAt != null && p.Stages.Any(s => s.ApproverUserId == userId))) ||
+            (wantCurrentActualizer &&
+             x.ActualizationResponsibleUserId == userId && x.Status == VndStatus.OnActualization) ||
+            (wantCurrentConsolidator &&
+             x.ActualizationResponsibleUserId == userId && x.Status == VndStatus.Consolidation) ||
+            (wantPastActualizer && _db.Set<VndActualizationRecord>().Any(r =>
+                r.VndId == x.Id && r.ResponsibleUserId == userId && r.PublishedAt != null)) ||
+            (wantPastConsolidator && _db.Set<VndActualizationRecord>().Any(r =>
+                r.VndId == x.Id && r.ResponsibleUserId == userId &&
+                r.PublishedAt != null && r.ConsolidationStartedAt != null)));
+    }
+
+    /// <summary>Фиксирует момент входа документа в статус "Консолидация" в открытой (ещё не
+    /// опубликованной) записи истории актуализации — используется фильтром "Только связанные
+    /// со мной" (виды связи "я консолидирую" / "я когда-то консолидировал"). Не пишет в БД сама
+    /// (SaveChangesAsync вызывает вызывающий код) и ничего не делает, если открытой записи нет
+    /// (например, редакция без согласования вне цикла актуализации) или отметка уже стоит.</summary>
+    private async Task StampConsolidationStartedAsync(int vndId)
+    {
+        var openRecord = await _db.Set<VndActualizationRecord>()
+            .Where(r => r.VndId == vndId && r.PublishedAt == null)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync();
+
+        if (openRecord is not null && openRecord.ConsolidationStartedAt is null)
+            openRecord.ConsolidationStartedAt = DateTime.UtcNow;
     }
 
     /// <summary>Видимость черновиков: пользователь без права ViewOtherUsersDrafts никогда не
@@ -311,7 +413,8 @@ public class VndService : IVndService
         _ => "onact"
     };
 
-    private static VndResponse ToResponse(VndDocument x, string languageCode, DateOnly today) => new()
+    private static VndResponse ToResponse(
+        VndDocument x, string languageCode, DateOnly today, List<string>? linkedToMeRelations = null) => new()
     {
         Id = x.Id,
         Code = x.Code,
@@ -354,7 +457,8 @@ public class VndService : IVndService
         UserGroupIds = x.UserGroups.Select(g => g.Id).ToList(),
         RedactionIds = x.Redactions.Select(r => r.Id).ToList(),
         CreatedAt = x.CreatedAt,
-        UpdatedAt = x.UpdatedAt
+        UpdatedAt = x.UpdatedAt,
+        LinkedToMeRelations = linkedToMeRelations ?? []
     };
 
     private static VndRedactionResponse ToRedactionResponse(VndRedaction x, int? currentRedactionId) => new()
@@ -631,9 +735,11 @@ public class VndService : IVndService
             // даже если конкретно эта редакция не требовала согласования.
             // Иначе (первая редакция нового ВНД, или обычное обновление активного
             // документа без согласования, без консолидации) - сразу становится действующим, как раньше.
-            vnd.Status = vnd.Status == VndStatus.OnActualization
-                ? VndStatus.Consolidation
-                : VndStatus.Active;
+            var enteringConsolidation = vnd.Status == VndStatus.OnActualization;
+            vnd.Status = enteringConsolidation ? VndStatus.Consolidation : VndStatus.Active;
+
+            if (enteringConsolidation)
+                await StampConsolidationStartedAsync(vndId);
 
             await _db.SaveChangesAsync();
         }
