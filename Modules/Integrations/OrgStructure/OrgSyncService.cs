@@ -105,6 +105,17 @@ public class OrgSyncService(
             run.Error = e.Message;
             log.LogWarning("Синхронизация оргструктуры не прошла: {Error}", e.Message);
         }
+        catch (OperationCanceledException)
+        {
+            // Запрос оборвали — обычно это истёкшее ожидание у обратного прокси.
+            // Проход при этом мог сделать половину работы, и запись о нём должна
+            // сказать об этом прямо: иначе в истории висит «не прошла» без
+            // времени окончания и без причины, и понять, что случилось, нельзя.
+            run.Outcome = OrgSyncOutcome.Failed;
+            run.Error = "Проход прерван: обращение к порталу не уложилось в отведённое время. "
+                      + "Часть данных могла обновиться. Запустите синхронизацию заново.";
+            log.LogWarning("Синхронизация оргструктуры прервана по времени");
+        }
         catch (Exception e)
         {
             run.Outcome = OrgSyncOutcome.Failed;
@@ -116,7 +127,11 @@ public class OrgSyncService(
         if (notes.Count > 0)
             run.NotesJson = JsonSerializer.Serialize(notes.Take(200), JsonOptions);
 
-        await db.SaveChangesAsync(ct);
+        // Запись о проходе дописываем признаком, который не отменяют. Прежде
+        // здесь стоял тот же признак, что и у запроса: прокси обрывал ожидание,
+        // отмена доходила и сюда, сохранение падало — и в истории оставалась
+        // строка без времени окончания и без объяснения.
+        await db.SaveChangesAsync(CancellationToken.None);
         return run;
     }
 

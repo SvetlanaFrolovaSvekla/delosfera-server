@@ -62,7 +62,8 @@ public class OrgStructureController(
     DelosferaDbContext db,
     IOrgSyncService sync,
     ISecretProtector protector,
-    ICurrentUserService currentUser) : ControllerBase
+    ICurrentUserService currentUser,
+    IServiceProvider services) : ControllerBase
 {
     [HttpGet("settings")]
     [RequirePermission(PermissionCode.ManageSystemSettings)]
@@ -140,14 +141,45 @@ public class OrgStructureController(
         }
     }
 
-    /// <summary>Забрать структуру сейчас, не дожидаясь расписания.</summary>
+    /// <summary>
+    /// Забрать структуру сейчас, не дожидаясь расписания.
+    ///
+    /// Запускает проход и сразу возвращает управление. Обход портала занимает
+    /// минуты: справочник берётся страницами, а сотрудников в банке под четыре
+    /// сотни. Обратный прокси столько не ждёт — он обрывал запрос, администратор
+    /// видел ошибку, а проход при этом шёл дальше и заканчивался успешно.
+    ///
+    /// Ход виден в истории: она обновляется по ходу дела.
+    /// </summary>
     [HttpPost("sync")]
     [RequirePermission(PermissionCode.ManageSystemSettings)]
-    public async Task<ActionResult<OrgSyncRunResponse>> SyncNow(CancellationToken ct)
+    public IActionResult SyncNow()
     {
-        var run = await sync.RunAsync(currentUser.UserId, ct);
-        var names = await NamesAsync([run], ct);
-        return Ok(ToResponse(run, names));
+        var userId = currentUser.UserId;
+
+        // Своя область служб: та, что у запроса, закроется вместе с ответом,
+        // и проход остался бы с уничтоженным контекстом базы.
+        _ = Task.Run(async () =>
+        {
+            using var scope = services.CreateScope();
+            var run = scope.ServiceProvider.GetRequiredService<IOrgSyncService>();
+
+            try
+            {
+                // Признак отмены не передаём: проход живёт дольше запроса,
+                // и обрывать его нечему.
+                await run.RunAsync(userId, CancellationToken.None);
+            }
+            catch (Exception e)
+            {
+                scope.ServiceProvider
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("OrgSync")
+                    .LogError(e, "Проход синхронизации, запущенный вручную, прервался");
+            }
+        });
+
+        return Accepted(new { message = "Синхронизация запущена. Ход виден в истории ниже." });
     }
 
     /// <summary>История проходов, свежие сверху.</summary>

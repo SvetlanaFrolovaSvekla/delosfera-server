@@ -98,6 +98,37 @@ public class OrganizationUnitService : IOrganizationUnitService
         var entity = await _db.OrganizationUnits.FindAsync(id)
                      ?? throw new KeyNotFoundException($"Структурное подразделение с id={id} не найдено");
 
+        // Подразделение пришло из портала — значит портал им и распоряжается.
+        // Название, место в структуре, начальника и куратора он перезаписывает
+        // при каждом проходе, и правка здесь дожила бы до ближайшей ночи.
+        //
+        // Молча принять её было бы хуже отказа: человек увидел бы сохранённое
+        // значение, ушёл, а наутро оно вернулось бы к прежнему — и связать одно
+        // с другим уже никто не смог бы.
+        //
+        // Переводы и признак бумажной записки портал не присылает: они наши,
+        // и править их можно.
+        if (entity.ExternalId is not null)
+        {
+            var занято = new List<string>();
+
+            if (!string.Equals(request.TitleRu?.Trim(), entity.TitleRu?.Trim(), StringComparison.Ordinal))
+                занято.Add("название");
+            if (request.ParentId != entity.ParentId)
+                занято.Add("вышестоящее подразделение");
+            if (request.HeadUserId != entity.HeadUserId)
+                занято.Add("начальник");
+            if (request.CuratorUserId != entity.CuratorUserId)
+                занято.Add("куратор");
+
+            if (занято.Count > 0)
+                throw new InvalidOperationException(
+                    $"Это подразделение ведётся в портале банка, здесь его копия. " +
+                    $"Изменить нельзя: {string.Join(", ", занято)}. " +
+                    "Правка не сохранилась бы — ближайшая синхронизация вернула бы значение из портала. " +
+                    "Меняйте в портале; здесь можно править только переводы названия.");
+        }
+
         if (request.ParentId.HasValue)
         {
             if (request.ParentId.Value == id)
@@ -299,6 +330,16 @@ public class OrganizationUnitService : IOrganizationUnitService
     {
         var entity = await _db.OrganizationUnits.FindAsync(id)
                      ?? throw new KeyNotFoundException($"Структурное подразделение с id={id} не найдено");
+
+        // Удалять пришедшее из портала бессмысленно вдвойне: ближайший проход
+        // заведёт его заново, и получится то же подразделение с новым
+        // идентификатором — а привязанные к прежнему документы останутся
+        // висеть на удалённом.
+        if (entity.ExternalId is not null)
+            throw new InvalidOperationException(
+                "Это подразделение ведётся в портале банка. Удалить его здесь нельзя: " +
+                "ближайшая синхронизация заведёт его заново, а документы остались бы " +
+                "привязанными к удалённой записи. Расформировывайте в портале.");
 
         var hasChildren = await _db.OrganizationUnits.AnyAsync(x => x.ParentId == id);
         if (hasChildren)
