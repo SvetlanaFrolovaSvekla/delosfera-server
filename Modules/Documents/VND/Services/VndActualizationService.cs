@@ -42,8 +42,7 @@ public class VndActualizationService : IVndActualizationService
     /// чем просто ActualizeAnyVnd(With/Without)Approval: пользователь с правом создавать ВНД
     /// (CreateVndWithApproval/CreateVndWithoutApproval) тоже действует как главный редактор
     /// (см. VndService.IsChiefEditor/VndApprovalService.IsChiefEditor — тот же набор прав).
-    /// Раньше PublishAsync/ConfirmNoChangesAsync использовали разные наборы прав — это и было
-    /// багом (см. фронтовый OpenVndPage.canConsolidate, который чинится тем же способом).</summary>
+    /// </summary>
     private bool IsChiefEditor() =>
         _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
         || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)

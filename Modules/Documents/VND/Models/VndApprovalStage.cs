@@ -44,4 +44,8 @@ public class VndApprovalStage : IAuditableEntity
     public ApprovalStageDecision? FinalHoldDecision { get; set; }
     public string? FinalHoldComment { get; set; }
     public DateTime? FinalHoldDecidedAt { get; set; }
+
+    /// <summary>Файлы, приложенные согласующим к резолюции (по всем фазам). Очищаются, когда
+    /// редакция становится согласованной — см. <see cref="VndApprovalStageAttachment"/>.</summary>
+    public ICollection<VndApprovalStageAttachment> Attachments { get; set; } = new List<VndApprovalStageAttachment>();
 }

@@ -219,6 +219,12 @@ public static class PermissionCatalog
             TitleRu = "Просмотр реестра ВНД в расширенном режиме: статус последней редакции, актуализация",
             TitleEn = "View the VND registry in extended mode: latest revision status, actualization",
             TitleKg = "ВНД реестрин кеңейтилген режимде көрүү: акыркы редакциянын статусу, актуалдаштыруу"
+        },
+        [PermissionCode.CancelAnyVndApproval] = new PermissionDescription
+        {
+            TitleRu = "Отозвать согласование любой ВНД, не будучи инициатором (главный редактор)",
+            TitleEn = "Withdraw approval of any VND without being its initiator (chief editor)",
+            TitleKg = "Демилгечиси болбосо да, каалаган ВНДдин макулдашуусун артка алуу (башкы редактор)"
         }
     };
     

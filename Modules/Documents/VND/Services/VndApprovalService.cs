@@ -239,6 +239,8 @@ public class VndApprovalService : IVndApprovalService
                 stage.ParticipatesInRepeat = decision is ApprovalStageDecision.ApprovedWithComment
                     or ApprovalStageDecision.Rejected;
 
+                await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Primary, request.Files, currentUserId);
+
                 await _db.SaveChangesAsync();
 
                 if (process.Stages.All(s => s.PrimaryDecision != ApprovalStageDecision.Pending))
@@ -255,6 +257,8 @@ public class VndApprovalService : IVndApprovalService
                 stage.RepeatComment = request.Comment;
                 stage.RepeatDecidedAt = DateTime.UtcNow;
 
+                await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Repeat, request.Files, currentUserId);
+
                 await _db.SaveChangesAsync();
 
                 var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
@@ -270,6 +274,8 @@ public class VndApprovalService : IVndApprovalService
                 stage.FinalHoldDecision = decision;
                 stage.FinalHoldComment = request.Comment;
                 stage.FinalHoldDecidedAt = DateTime.UtcNow;
+
+                await AttachDecisionFilesAsync(stage, ApprovalStagePhase.FinalHold, request.Files, currentUserId);
 
                 await _db.SaveChangesAsync();
 
@@ -350,7 +356,12 @@ public class VndApprovalService : IVndApprovalService
     {
         var process = await LoadProcessForVndAsync(vndId);
 
-        if (process.InitiatorUserId != currentUserId && !IsChiefEditor())
+        // IsChiefEditor() тут не подходит - она проверяет права на СОЗДАНИЕ/актуализацию ВНД
+        // (CreateVndWithApproval и т.п.), которыми на практике обладает почти любой автор ВНД,
+        // а не только главный редактор. Поэтому отзыв "чужого" согласования - отдельное,
+        // намеренно узкое право CancelAnyVndApproval.
+        if (process.InitiatorUserId != currentUserId
+            && !_currentUser.HasPermission(PermissionCode.CancelAnyVndApproval))
             throw new UnauthorizedAccessException(
                 "Отозвать согласование может только инициатор или главный редактор");
 
@@ -462,6 +473,10 @@ public class VndApprovalService : IVndApprovalService
             process.Status = ApprovalProcessStatus.Repeated;
             process.RepeatStartedAt = DateTime.UtcNow;
 
+            // Инициатор мог быть согласующим на одном из этапов - на повторном согласовании
+            // его решение тоже проставляется автоматически, иначе оно "висит" до просрочки.
+            AutoApproveInitiatorStages(process, ApprovalStagePhase.Repeat);
+
             await _db.SaveChangesAsync();
 
             var repeatApproverIds = process.Stages
@@ -472,20 +487,26 @@ public class VndApprovalService : IVndApprovalService
             await NotifyAsync(
                 VndApprovalNotificationMessages.TaskRepeatApproval(redaction.Code, process.Vnd!.TitleRu),
                 NotificationCategory.Approval, vndId, currentUserId, repeatApproverIds);
+
+            var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
+            if (repeatStages.Count > 0 && repeatStages.All(s =>
+                    s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending))
+            {
+                await CompleteRepeatPhaseAsync(process);
+                await _db.SaveChangesAsync();
+            }
         }
         else
         {
             // Составлена матрица разногласий - повторное согласование пропускаем,
-            // сразу идём на финальную выдержку (там решения принимают ВСЕ этапы)
-            foreach (var stage in process.Stages)
-            {
-                stage.FinalHoldDecision = ApprovalStageDecision.Pending;
-                stage.FinalHoldComment = null;
-                stage.FinalHoldDecidedAt = null;
-            }
-
+            // сразу идём на финальную выдержку (решение по-прежнему требуется только от тех,
+            // кто ещё не давал чистого согласования этой редакции - см. ResetFinalHoldDecisions)
             process.Status = ApprovalProcessStatus.FinalHold;
+            ResetFinalHoldDecisions(process);
             process.FinalHoldStartedAt = DateTime.UtcNow;
+
+            // См. комментарий выше - тот же самообход для финальной выдержки.
+            AutoApproveInitiatorStages(process, ApprovalStagePhase.FinalHold);
 
             await _db.SaveChangesAsync();
 
@@ -498,6 +519,13 @@ public class VndApprovalService : IVndApprovalService
             await NotifyAsync(
                 VndApprovalNotificationMessages.SentToFinalHold(redaction.Code),
                 NotificationCategory.Approval, vndId, currentUserId, currentUserId);
+
+            if (process.Stages.All(s =>
+                    s.FinalHoldDecision is not null && s.FinalHoldDecision != ApprovalStageDecision.Pending))
+            {
+                await FinalizeApprovalAsync(process, afterRevision: true);
+                await _db.SaveChangesAsync();
+            }
         }
 
         return await LoadResponseAsync(process.Id);
@@ -674,12 +702,11 @@ public class VndApprovalService : IVndApprovalService
         process.Status = ApprovalProcessStatus.FinalHold;
         process.FinalHoldStartedAt = DateTime.UtcNow;
 
-        foreach (var stage in process.Stages)
-        {
-            stage.FinalHoldDecision = ApprovalStageDecision.Pending;
-            stage.FinalHoldComment = null;
-            stage.FinalHoldDecidedAt = null;
-        }
+        ResetFinalHoldDecisions(process);
+
+        // Инициатор мог быть согласующим на одном из этапов - на финальной выдержке
+        // его решение тоже проставляется автоматически, иначе оно "висит" до просрочки.
+        AutoApproveInitiatorStages(process, ApprovalStagePhase.FinalHold);
 
         var stageApproverIds = process.Stages.Select(s => s.ApproverUserId).ToArray();
 
@@ -692,6 +719,15 @@ public class VndApprovalService : IVndApprovalService
         await NotifyAsync(
             VndApprovalNotificationMessages.SentToFinalHold(process.Redaction!.Code),
             NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+
+        // Если самообход инициатора уже закрыл все решения финальной выдержки (например,
+        // маршрут состоит из одного этапа, и на нём согласующий - сам инициатор) - сразу
+        // завершаем согласование, не дожидаясь дедлайна.
+        if (process.Stages.All(s =>
+                s.FinalHoldDecision is not null && s.FinalHoldDecision != ApprovalStageDecision.Pending))
+        {
+            await FinalizeApprovalAsync(process, afterRevision: true);
+        }
 
         if (save) await _db.SaveChangesAsync();
     }
@@ -717,6 +753,11 @@ public class VndApprovalService : IVndApprovalService
         var vnd = process.Vnd!;
 
         redaction.ApprovalStatus = RedactionApprovalStatus.Approved;
+
+        // Редакция стала согласованной - файлы, приложенные согласующими к своим резолюциям,
+        // больше не нужны и удаляются, чтобы не копить их в БД/хранилище. Текст самих резолюций
+        // (PrimaryComment/RepeatComment/FinalHoldComment) остаётся как есть.
+        await CleanupStageAttachmentsAsync(process);
 
         // Согласование завершено, но документ ещё не публикуется автоматически -
         // CurrentRedactionId и RevisionChangedDate выставит VndActualizationService.PublishAsync
@@ -757,6 +798,146 @@ public class VndApprovalService : IVndApprovalService
 
         await NotifyAsync(
             notice, NotificationCategory.Approval, process.VndId, null, consolidationRecipients.ToArray());
+    }
+
+    /// <summary>Если инициатор согласования сам числится согласующим на одном из этапов, его
+    /// решение на этой фазе проставляется автоматически - как и на первичном этапе при старте
+    /// процесса (см. StartAsync). Без этого решение того же человека "зависает" в Pending на
+    /// повторном согласовании/финальной выдержке до истечения дедлайна: сбросы в Pending при
+    /// старте фазы (ResubmitAfterRevisionAsync, CompleteRepeatPhaseAsync) применяются одинаково
+    /// ко всем этапам, включая тот, где согласующий - сам инициатор.
+    /// Вызывать сразу после сброса решений фазы в Pending, до SaveChangesAsync; после вызова
+    /// стоит проверить, не оказалась ли фаза уже полностью решена (см. вызывающий код).</summary>
+    private static void AutoApproveInitiatorStages(VndApprovalProcess process, ApprovalStagePhase phase)
+    {
+        const string comment = "Согласовано автоматически — инициатор является согласующим на этом этапе";
+        var now = DateTime.UtcNow;
+
+        IEnumerable<VndApprovalStage> stages = phase switch
+        {
+            ApprovalStagePhase.Repeat => process.Stages.Where(s =>
+                s.ApproverUserId == process.InitiatorUserId
+                && s.ParticipatesInRepeat
+                && s.RepeatDecision == ApprovalStageDecision.Pending),
+            ApprovalStagePhase.FinalHold => process.Stages.Where(s =>
+                s.ApproverUserId == process.InitiatorUserId
+                && s.FinalHoldDecision == ApprovalStageDecision.Pending),
+            _ => Enumerable.Empty<VndApprovalStage>()
+        };
+
+        foreach (var stage in stages)
+        {
+            if (phase == ApprovalStagePhase.Repeat)
+            {
+                stage.RepeatDecision = ApprovalStageDecision.Approved;
+                stage.RepeatComment = comment;
+                stage.RepeatDecidedAt = now;
+            }
+            else
+            {
+                stage.FinalHoldDecision = ApprovalStageDecision.Approved;
+                stage.FinalHoldComment = comment;
+                stage.FinalHoldDecidedAt = now;
+            }
+        }
+    }
+
+    /// <summary>Определяет, какое решение по этапу считается "актуальным" на момент входа в
+    /// финальную выдержку — самое позднее из уже принятых (FinalHold нового круга ещё не
+    /// проставлен на момент вызова, поэтому фактически это FinalHold ПРЕДЫДУЩЕГО круга, если
+    /// он был, иначе Repeat, иначе Primary). Использовать ДО сброса FinalHoldDecision.</summary>
+    private static ApprovalStageDecision? LatestDecisionBeforeFinalHold(VndApprovalStage stage) =>
+        stage.FinalHoldDecision ?? stage.RepeatDecision ?? stage.PrimaryDecision;
+
+    /// <summary>Готовит решения этапов к (пере)входу в финальную выдержку. Если согласующий уже
+    /// дал по этой редакции чистое согласование без замечаний (не участвовал в повторном
+    /// согласовании — т.е. его первичное решение было Approved/автоакцепт по таймауту, либо он
+    /// уже чисто согласовал на предыдущем круге финальной выдержки) — его решение проставляется
+    /// автоматически, и жать "Согласовать" ещё раз ему не нужно. Формального решения снова ждём
+    /// только от тех, кто на этой редакции ранее оставлял замечания или отклонял её.
+    /// Вызывать сразу после назначения process.Status = FinalHold, до SaveChangesAsync.</summary>
+    private static void ResetFinalHoldDecisions(VndApprovalProcess process)
+    {
+        const string comment = "Согласовано автоматически — вы уже согласовали эту редакцию без замечаний ранее";
+        var now = DateTime.UtcNow;
+
+        foreach (var stage in process.Stages)
+        {
+            var latest = LatestDecisionBeforeFinalHold(stage);
+            var wasClean = latest is ApprovalStageDecision.Approved or ApprovalStageDecision.AutoApprovedByTimeout;
+
+            if (wasClean)
+            {
+                stage.FinalHoldDecision = ApprovalStageDecision.Approved;
+                stage.FinalHoldComment = comment;
+                stage.FinalHoldDecidedAt = now;
+            }
+            else
+            {
+                stage.FinalHoldDecision = ApprovalStageDecision.Pending;
+                stage.FinalHoldComment = null;
+                stage.FinalHoldDecidedAt = null;
+            }
+        }
+    }
+
+    /// <summary>Сохраняет файлы, приложенные согласующим к резолюции конкретной фазы, и
+    /// связывает их с этапом. Вызывается из DecideAsync до SaveChangesAsync — сами
+    /// вложения переживают до тех пор, пока редакция не станет согласованной
+    /// (см. <see cref="CleanupStageAttachmentsAsync"/>).</summary>
+    private async Task AttachDecisionFilesAsync(
+        VndApprovalStage stage, ApprovalStagePhase phase, List<IFormFile>? files, int userId)
+    {
+        if (files is null || files.Count == 0) return;
+
+        foreach (var file in files)
+        {
+            if (file.Length == 0) continue;
+
+            var stored = await _fileService.SaveAsync(file, userId);
+
+            _db.Set<VndApprovalStageAttachment>().Add(new VndApprovalStageAttachment
+            {
+                VndApprovalStageId = stage.Id,
+                Phase = phase,
+                FileAttachmentId = stored.Id,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+    }
+
+    /// <summary>Удаляет все файлы, приложенные согласующими к резолюциям этого процесса
+    /// (по всем этапам и фазам), когда редакция становится согласованной — чтобы не копить
+    /// файлы в БД и в хранилище. Текст резолюций (Primary/Repeat/FinalHoldComment) не трогается.</summary>
+    private async Task CleanupStageAttachmentsAsync(VndApprovalProcess process)
+    {
+        var stageIds = process.Stages.Select(s => s.Id).ToList();
+        if (stageIds.Count == 0) return;
+
+        var attachments = await _db.Set<VndApprovalStageAttachment>()
+            .Where(a => stageIds.Contains(a.VndApprovalStageId))
+            .ToListAsync();
+
+        if (attachments.Count == 0) return;
+
+        foreach (var attachment in attachments)
+        {
+            try
+            {
+                await _fileService.DeleteAsync(attachment.FileAttachmentId);
+            }
+            catch (Exception ex)
+            {
+                // Сбой удаления файла из хранилища не должен срывать завершение согласования -
+                // запись о вложении всё равно будет убрана ниже, а "осиротевший" файл в бакете
+                // не критичен и может быть подчищен отдельно.
+                _logger.LogWarning(ex,
+                    "Не удалось удалить файл {FileId} вложения резолюции при завершении согласования процесса {ProcessId}",
+                    attachment.FileAttachmentId, process.Id);
+            }
+        }
+
+        _db.Set<VndApprovalStageAttachment>().RemoveRange(attachments);
     }
 
     private async Task<List<VndApprovalStage>> BuildAndValidateStagesAsync(List<ApprovalStageRequest> requestStages)
@@ -849,7 +1030,7 @@ public class VndApprovalService : IVndApprovalService
         // без создания новой строки VndRedaction — без сортировки здесь можно было бы случайно
         // получить старый уже завершённый процесс вместо актуального.
         return await _db.VndApprovalProcesses
-                   .Include(x => x.Stages)
+                   .Include(x => x.Stages).ThenInclude(s => s.Attachments)
                    .Include(x => x.Redaction)
                    .Include(x => x.Vnd)
                    .Include(x => x.DisagreementMatrixRows)
@@ -879,6 +1060,7 @@ public class VndApprovalService : IVndApprovalService
         var process = await _db.VndApprovalProcesses
             .Include(x => x.Stages).ThenInclude(s => s.OrgUnit)
             .Include(x => x.Stages).ThenInclude(s => s.ApproverUser)
+            .Include(x => x.Stages).ThenInclude(s => s.Attachments).ThenInclude(a => a.FileAttachment)
             .Include(x => x.DisagreementMatrixRows)
             .FirstAsync(x => x.Id == processId);
 
@@ -924,13 +1106,16 @@ public class VndApprovalService : IVndApprovalService
                 PrimaryDecision = MapDecision(s.PrimaryDecision),
                 PrimaryComment = s.PrimaryComment,
                 PrimaryDecidedAt = s.PrimaryDecidedAt,
+                PrimaryAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.Primary),
                 ParticipatesInRepeat = s.ParticipatesInRepeat,
                 RepeatDecision = s.RepeatDecision.HasValue ? MapDecision(s.RepeatDecision.Value) : null,
                 RepeatComment = s.RepeatComment,
                 RepeatDecidedAt = s.RepeatDecidedAt,
+                RepeatAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.Repeat),
                 FinalHoldDecision = s.FinalHoldDecision.HasValue ? MapDecision(s.FinalHoldDecision.Value) : null,
                 FinalHoldComment = s.FinalHoldComment,
-                FinalHoldDecidedAt = s.FinalHoldDecidedAt
+                FinalHoldDecidedAt = s.FinalHoldDecidedAt,
+                FinalHoldAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.FinalHold)
             }).ToList()
         };
     }
@@ -943,6 +1128,23 @@ public class VndApprovalService : IVndApprovalService
         DeveloperJustification = row.DeveloperJustification,
         CreatedAt = row.CreatedAt
     };
+
+    /// <summary>Вложения этапа для конкретной фазы решения (первичной/повторной/финальной).
+    /// Пусто, если согласование уже завершилось согласованием редакции — вложения к этому моменту
+    /// уже удалены, остаётся только текст резолюции.</summary>
+    private static List<ApprovalStageAttachmentResponse> ToAttachmentResponses(
+        IEnumerable<VndApprovalStageAttachment> attachments, ApprovalStagePhase phase) =>
+        attachments
+            .Where(a => a.Phase == phase)
+            .OrderBy(a => a.CreatedAt)
+            .Select(a => new ApprovalStageAttachmentResponse
+            {
+                Id = a.Id,
+                FileId = a.FileAttachmentId,
+                FileName = a.FileAttachment?.OriginalFileName ?? "",
+                SizeBytes = a.FileAttachment?.SizeBytes ?? 0
+            })
+            .ToList();
 
     /// <summary>
     /// Общий хелпер отправки уведомлений по событиям согласования.
