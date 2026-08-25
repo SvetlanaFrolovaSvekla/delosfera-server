@@ -45,6 +45,14 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasForeignKey(x => x.OrgUnitId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Руководитель — тоже пользователь. При удалении руководителя связь
+        // обнуляется, а не тянет за собой подчинённых: увольнение начальника
+        // не должно стирать отдел.
+        builder.HasOne(x => x.Manager)
+            .WithMany()
+            .HasForeignKey(x => x.ManagerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.HasOne(x => x.BlockedByUser)
             .WithMany()
             .HasForeignKey(x => x.BlockedByUserId)

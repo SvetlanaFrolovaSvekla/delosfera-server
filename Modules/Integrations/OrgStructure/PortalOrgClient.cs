@@ -124,14 +124,24 @@ public class PortalOrgClient(HttpClient http)
         // Отдельные сообщения на частые случаи: администратору важно различать
         // «токен отозвали» и «портал лежит», а по коду 401 против 502 он этого
         // не поймёт, если увидит только «ошибка обращения».
+        //
+        // К своему тексту добавляем ответ портала. Портал объясняет отказ
+        // по-русски и по делу — «нужен токен» и «токен отозван» это разные
+        // причины, а наше сообщение одно на оба случая и увело бы в неверную
+        // сторону: администратор пошёл бы выпрашивать новый токен, когда
+        // на деле заголовок до портала не дошёл.
         if (response.StatusCode == HttpStatusCode.Unauthorized)
-            throw new PortalException("Портал не принял токен: его нет, он недействителен или отозван.");
+            throw new PortalException(
+                "Портал не принял токен. " + await PortalSaidAsync(response, ct));
 
         if (response.StatusCode == HttpStatusCode.NotFound)
-            throw new PortalException($"Портал не знает такого адреса: {path}. Проверьте адрес портала и версию API.");
+            throw new PortalException(
+                $"Портал не знает такого адреса: {path}. Проверьте адрес портала и версию API. "
+                + await PortalSaidAsync(response, ct));
 
         if (!response.IsSuccessStatusCode)
-            throw new PortalException($"Портал ответил {(int)response.StatusCode}.");
+            throw new PortalException(
+                $"Портал ответил {(int)response.StatusCode}. " + await PortalSaidAsync(response, ct));
 
         try
         {
@@ -144,8 +154,40 @@ public class PortalOrgClient(HttpClient http)
         }
     }
 
+    /// <summary>
+    /// Что ответил портал, своими словами. Портал объясняет отказ по-русски,
+    /// и его объяснение точнее нашей догадки по коду ответа.
+    ///
+    /// Длину ограничиваем: при неверном адресе вместоJSON приходит страница
+    /// целиком, и она вытеснила бы саму причину из сообщения.
+    /// </summary>
+    private static async Task<string> PortalSaidAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var body = (await response.Content.ReadAsStringAsync(ct)).Trim();
+            if (string.IsNullOrEmpty(body)) return "Ответ пустой.";
+
+            // Портал отвечает {"error":"…"} — вынимаем текст, чтобы не показывать
+            // администратору фигурные скобки.
+            try
+            {
+                using var json = JsonDocument.Parse(body);
+                if (json.RootElement.TryGetProperty("error", out var error))
+                    return "Портал ответил: " + error.GetString();
+            }
+            catch (JsonException) { /* не JSON — покажем как есть */ }
+
+            return "Портал ответил: " + (body.Length > 300 ? body[..300] + "…" : body);
+        }
+        catch
+        {
+            return "Ответ прочитать не удалось.";
+        }
+    }
+
     /// <summary>Плоский список подразделений со связями.</summary>
-    public async Task<List<PortalUnit>> GetUnitsAsync(
+    public virtual async Task<List<PortalUnit>> GetUnitsAsync(
         string baseUrl, string token, CancellationToken ct = default)
     {
         var response = await SendAsync<UnitsResponse>(baseUrl, token, "units", ct);
@@ -155,8 +197,14 @@ public class PortalOrgClient(HttpClient http)
     /// <summary>
     /// Все сотрудники, страницами. Портал отдаёт до 500 за раз и просит
     /// не опрашивать его в цикле — один проход забирает всех и на этом кончается.
+    ///
+    /// Запрашиваем вместе с уволенными (<c>inactive=1</c>). Без этого признака
+    /// портал отдаёт только работающих, а уволенный просто исчезает из ответа —
+    /// и отличить «уволился» от «не менялся» становится нечем. Такой человек
+    /// остался бы у нас действующим навсегда: в списках согласующих и в адресатах
+    /// записок. Уволенные приходят с <c>active: false</c>, по нему их и гасим.
     /// </summary>
-    public async Task<List<PortalEmployee>> GetEmployeesAsync(
+    public virtual async Task<List<PortalEmployee>> GetEmployeesAsync(
         string baseUrl, string token, CancellationToken ct = default)
     {
         const int PageSize = 500;
@@ -167,7 +215,7 @@ public class PortalOrgClient(HttpClient http)
         while (true)
         {
             var page = await SendAsync<EmployeesResponse>(
-                baseUrl, token, $"employees?limit={PageSize}&offset={offset}", ct);
+                baseUrl, token, $"employees?limit={PageSize}&offset={offset}&inactive=1", ct);
 
             all.AddRange(page.Employees);
 
@@ -187,7 +235,7 @@ public class PortalOrgClient(HttpClient http)
     /// Проверка связи для кнопки «Проверить». Возвращает, сколько подразделений
     /// видно, — этого достаточно, чтобы понять, что адрес и токен верны.
     /// </summary>
-    public async Task<int> CheckAsync(string baseUrl, string token, CancellationToken ct = default)
+    public virtual async Task<int> CheckAsync(string baseUrl, string token, CancellationToken ct = default)
     {
         var units = await GetUnitsAsync(baseUrl, token, ct);
         return units.Count;

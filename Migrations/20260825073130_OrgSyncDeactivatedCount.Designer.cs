@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260825073130_OrgSyncDeactivatedCount")]
+    partial class OrgSyncDeactivatedCount
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1012,10 +1015,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("head_user_id");
 
-                    b.Property<int>("Kind")
-                        .HasColumnType("integer")
-                        .HasColumnName("kind");
-
                     b.Property<int?>("ParentId")
                         .HasColumnType("integer")
                         .HasColumnName("parent_id");
@@ -1060,7 +1059,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 1,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Administrative Affairs Department",
                             TitleKg = "Иштерди башкаруу",
@@ -1071,7 +1069,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 2,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 0,
                             ParentId = 1,
                             RequiresPaperSz = false,
                             TitleEn = "Head of Administrative Affairs Department",
@@ -1085,7 +1082,6 @@ namespace delosfera_server.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             CuratorUserId = 14,
                             HeadUserId = 8,
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Information Technology Department",
                             TitleKg = "Маалыматтык технологиялар башкармасы",
@@ -1096,7 +1092,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 4,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Treasury Operations Department",
                             TitleKg = "Казыналык операциялар башкармасы",
@@ -1107,7 +1102,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 5,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Compliance Control Department",
                             TitleKg = "Комплаенс контролдоо башкармасы",
@@ -1118,7 +1112,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 6,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 3,
                             ParentId = 5,
                             RequiresPaperSz = false,
                             TitleEn = "Compliance Control Division",
@@ -1130,7 +1123,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 7,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 3,
                             ParentId = 5,
                             RequiresPaperSz = false,
                             TitleEn = "Quality Control Division",
@@ -1142,7 +1134,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 8,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Lending Department",
                             TitleKg = "Кредиттөө башкармасы",
@@ -1153,7 +1144,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 10,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Marketing Department",
                             TitleKg = "Маркетинг башкармасы",
@@ -1164,7 +1154,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 11,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Loan Collateral Department",
                             TitleKg = "Кредиттерди камсыздоо башкармасы",
@@ -1175,7 +1164,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 12,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Loan Collateral Department (LCD)",
                             TitleKg = "Кредиттерди камсыздоо башкармасы (ККБ)",
@@ -1186,7 +1174,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 13,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Payment Services Department",
                             TitleKg = "Төлөм сервистери башкармасы",
@@ -1197,7 +1184,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 14,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 3,
                             ParentId = 13,
                             RequiresPaperSz = false,
                             TitleEn = "Claims Handling Division",
@@ -1209,7 +1195,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 15,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 3,
                             ParentId = 13,
                             RequiresPaperSz = false,
                             TitleEn = "Payment Systems Accounting Division",
@@ -1221,7 +1206,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 16,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 3,
                             ParentId = 13,
                             RequiresPaperSz = false,
                             TitleEn = "Acquiring Division",
@@ -1233,7 +1217,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 17,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 3,
                             ParentId = 13,
                             RequiresPaperSz = false,
                             TitleEn = "Card Issuance Division",
@@ -1245,7 +1228,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 18,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Customer Relations Department",
                             TitleKg = "Кардарлар менен мамилелер башкармасы",
@@ -1256,7 +1238,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 19,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Problem Loans Department",
                             TitleKg = "Көйгөйлүү кредиттер менен иштөө башкармасы",
@@ -1267,7 +1248,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 20,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Other Property Management Department",
                             TitleKg = "Башка мүлк менен иштөө башкармасы",
@@ -1278,7 +1258,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 21,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Business Support Department",
                             TitleKg = "Бизнести колдоо башкармасы",
@@ -1289,7 +1268,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 22,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Sales Department",
                             TitleKg = "Сатуулар башкармасы",
@@ -1300,7 +1278,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 23,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 3,
                             ParentId = 22,
                             RequiresPaperSz = false,
                             TitleEn = "Operational Support Division",
@@ -1312,7 +1289,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 24,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 3,
                             ParentId = 22,
                             RequiresPaperSz = false,
                             TitleEn = "Regional Support Division",
@@ -1324,7 +1300,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 25,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "SME Sales Department",
                             TitleKg = "ЧОБ сатуулар башкармасы",
@@ -1335,7 +1310,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 26,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Risk Management Department",
                             TitleKg = "Тобокелдиктерди башкаруу башкармасы",
@@ -1346,7 +1320,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 27,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 3,
                             ParentId = 26,
                             RequiresPaperSz = false,
                             TitleEn = "Operational Risk Sector",
@@ -1358,7 +1331,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 28,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Risk Management Office",
                             TitleKg = "Тобокелдик-менеджмент башкармасы",
@@ -1369,7 +1341,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 29,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Retail Sales Department",
                             TitleKg = "Чекене сатуулар башкармасы",
@@ -1380,7 +1351,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 30,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Retail Products Department",
                             TitleKg = "Чекене продукттар башкармасы",
@@ -1393,7 +1363,6 @@ namespace delosfera_server.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             CuratorUserId = 5,
                             HeadUserId = 7,
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Strategic Planning and Budgeting Department",
                             TitleKg = "Стратегиялык пландоо жана бюджеттөө башкармасы",
@@ -1404,7 +1373,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 32,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Human Resources Department",
                             TitleKg = "Адам ресурстарын башкаруу",
@@ -1415,7 +1383,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 33,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Methodology and Products Department",
                             TitleKg = "Методология жана продукттар башкармасы",
@@ -1426,7 +1393,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 34,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 0,
                             RequiresPaperSz = false,
                             TitleEn = "Legal Department",
                             TitleKg = "Юридикалык башкарма",
@@ -1439,7 +1405,6 @@ namespace delosfera_server.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             CuratorUserId = 5,
                             HeadUserId = 4,
-                            Kind = 0,
                             RequiresPaperSz = false,
                             TitleEn = "Administrative Division",
                             TitleKg = "Административдик бөлүм",
@@ -1452,7 +1417,6 @@ namespace delosfera_server.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             CuratorUserId = 5,
                             HeadUserId = 5,
-                            Kind = 1,
                             RequiresPaperSz = false,
                             TitleEn = "Management Board",
                             TitleKg = "Башкарма",
@@ -1463,7 +1427,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 37,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 0,
                             RequiresPaperSz = false,
                             TitleEn = "Chancellery",
                             TitleKg = "Канцелярия",
@@ -1476,7 +1439,6 @@ namespace delosfera_server.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             CuratorUserId = 7,
                             HeadUserId = 11,
-                            Kind = 0,
                             RequiresPaperSz = false,
                             TitleEn = "Accounting and Reporting Department",
                             TitleKg = "ЭБжО башкармасы",
@@ -1487,7 +1449,6 @@ namespace delosfera_server.Migrations
                         {
                             Id = 39,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Kind = 2,
                             RequiresPaperSz = false,
                             TitleEn = "Security Department",
                             TitleKg = "Коопсуздук департаменти",
@@ -8865,10 +8826,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("locked_until");
 
-                    b.Property<int?>("ManagerId")
-                        .HasColumnType("integer")
-                        .HasColumnName("manager_id");
-
                     b.Property<int?>("OrgUnitId")
                         .HasColumnType("integer")
                         .HasColumnName("org_unit_id");
@@ -8908,9 +8865,6 @@ namespace delosfera_server.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_user_ldap_object_id")
                         .HasFilter("ldap_object_id IS NOT NULL");
-
-                    b.HasIndex("ManagerId")
-                        .HasDatabaseName("ix_user_manager_id");
 
                     b.HasIndex("OrgUnitId")
                         .HasDatabaseName("ix_user_org_unit_id");
@@ -11658,12 +11612,6 @@ namespace delosfera_server.Migrations
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_user_user_blocked_by_user_id");
 
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "Manager")
-                        .WithMany()
-                        .HasForeignKey("ManagerId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_user_user_manager_id");
-
                     b.HasOne("delosfera_server.Modules.Dictionaries.Models.OrganizationUnit", "OrgUnit")
                         .WithMany()
                         .HasForeignKey("OrgUnitId")
@@ -11677,8 +11625,6 @@ namespace delosfera_server.Migrations
                         .HasConstraintName("fk_user_dictionary_position_position_id");
 
                     b.Navigation("BlockedByUser");
-
-                    b.Navigation("Manager");
 
                     b.Navigation("OrgUnit");
 

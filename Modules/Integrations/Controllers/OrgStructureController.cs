@@ -45,6 +45,7 @@ public record OrgSyncRunResponse(
     int EmployeesMatched,
     int EmployeesUnmatched,
     int EmployeesUpdated,
+    int EmployeesDeactivated,
     string? Error,
     string[] Notes);
 
@@ -192,6 +193,7 @@ public class OrgStructureController(
             r.StartedByUserId is int id && names.TryGetValue(id, out var name) ? name : null,
             r.UnitsReceived, r.UnitsCreated, r.UnitsUpdated, r.UnitsSkipped,
             r.EmployeesReceived, r.EmployeesMatched, r.EmployeesUnmatched, r.EmployeesUpdated,
+            r.EmployeesDeactivated,
             r.Error, notes);
     }
 }

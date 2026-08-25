@@ -2,12 +2,15 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Modules.Dictionaries.Models;
 
 namespace delosfera_server.Modules.Integrations.Controllers;
 
 public record OrgTreeNode(
     int Id,
     string Title,
+    /// <summary>Коллегиальный орган, управление или отдел. Пусто — вид не указан.</summary>
+    string? Kind,
     int? ParentId,
     /// <summary>Начальник подразделения.</summary>
     string? Head,
@@ -48,6 +51,7 @@ public class OrgTreeController(DelosferaDbContext db) : ControllerBase
                 u.Id,
                 u.TitleRu,
                 u.ParentId,
+                u.Kind,
                 u.ExternalId,
                 Head = u.HeadUser == null ? null : u.HeadUser.FullName,
                 Curator = u.CuratorUser == null ? null : u.CuratorUser.FullName,
@@ -57,7 +61,7 @@ public class OrgTreeController(DelosferaDbContext db) : ControllerBase
 
         var nodes = units.ToDictionary(
             u => u.Id,
-            u => new OrgTreeNode(u.Id, u.TitleRu, u.ParentId, u.Head, u.Curator,
+            u => new OrgTreeNode(u.Id, u.TitleRu, ВидНазванием(u.Kind), u.ParentId, u.Head, u.Curator,
                                  u.StaffCount, u.ExternalId is not null, []));
 
         var roots = new List<OrgTreeNode>();
@@ -84,6 +88,18 @@ public class OrgTreeController(DelosferaDbContext db) : ControllerBase
 
         return Ok(new OrgTreeResponse(roots, units.Count, orphans, await LastSyncAsync(ct)));
     }
+
+    /// <summary>
+    /// Вид словом. Переводим на сервере: перечисление живёт здесь, и держать
+    /// его второй копией на клиенте значило бы однажды их разойтись.
+    /// </summary>
+    private static string? ВидНазванием(OrgUnitKind kind) => kind switch
+    {
+        OrgUnitKind.Board => "Коллегиальный орган",
+        OrgUnitKind.Division => "Управление",
+        OrgUnitKind.Department => "Отдел",
+        _ => null,
+    };
 
     /// <summary>По алфавиту на каждом уровне: порядок в справочнике не задан, а список читают глазами.</summary>
     private static void Sort(List<OrgTreeNode> nodes)
