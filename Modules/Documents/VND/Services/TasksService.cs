@@ -72,6 +72,7 @@ public class TasksService : ITasksService
                     _ => null
                 },
                 InitiatorComment = phase == "primary" ? null : process.RepeatInitiatorComment,
+                ActualizationPlannedNoChanges = process.Vnd!.ActualizationPlannedNoChanges,
                 CreatedAt = phase switch
                 {
                     "primary" => process.PrimaryStartedAt,
@@ -85,15 +86,24 @@ public class TasksService : ITasksService
         .ToList();
     }
 
-    /// <summary>Видит только инициатор (создатель) ВНД — кураторы, начальники подразделений
-    /// и ответственные исполнители в этот список больше не попадают, независимо от связи с документом.</summary>
+    /// <summary>Видит ответственный за актуализацию этого конкретного цикла
+    /// (VndDocument.ActualizationResponsibleUserId) — раньше здесь ошибочно фильтровалось по
+    /// CreatedByUserId (создателю ВНД), из-за чего назначенный ответственный (если это не он
+    /// сам создавал документ) вообще не видел задачу о необходимости актуализировать.</summary>
     public async Task<List<VndTaskResponse>> GetActualizationTasksAsync(int userId)
     {
         var openVndIds = await GetOpenActualizationVndIdsAsync();
         if (openVndIds.Count == 0) return new List<VndTaskResponse>();
 
+        // Статус тоже фильтруем, а не только "цикл ещё не опубликован" (PublishedAt == null) —
+        // иначе документ, дошедший до Consolidation в рамках того же открытого цикла, продолжает
+        // висеть здесь ОДНОВРЕМЕННО с задачей в GetConsolidationTasksAsync: пользователь видит
+        // два "дубликата" одной и той же работы, причём актуализационная карточка выглядит
+        // "свежее" из-за собственной сортировки/CreatedAt, хотя по факту документ уже ушёл дальше.
         var docs = await _db.VndDocuments
-            .Where(x => openVndIds.Contains(x.Id) && x.CreatedByUserId == userId)
+            .Where(x => openVndIds.Contains(x.Id)
+                        && x.ActualizationResponsibleUserId == userId
+                        && x.Status == VndStatus.OnActualization)
             .ToListAsync();
 
         return docs.Select(x => new VndTaskResponse
@@ -104,17 +114,24 @@ public class TasksService : ITasksService
                 Scope = "actualization",
                 VndStatus = MapVndStatus(x.Status),
                 DueActualizationDate = x.DueActualizationDate,
+                ActualizationPlannedNoChanges = x.ActualizationPlannedNoChanges,
+                ActualizationPerformed = x.ActualizationPerformed,
                 CreatedAt = x.UpdatedAt
             })
             .OrderBy(t => t.DueActualizationDate)
             .ToList();
     }
 
-    /// <summary>Видит только инициатор (создатель) ВНД — та же логика, что и для актуализации.</summary>
+    /// <summary>Видит ответственный за актуализацию этого цикла
+    /// (VndDocument.ActualizationResponsibleUserId) — та же поправка, что и для актуализации.
+    /// Если консолидация не связана с циклом актуализации (обычное согласование первой редакции,
+    /// ActualizationResponsibleUserId == null), задачу по-прежнему видит инициатор.</summary>
     public async Task<List<VndTaskResponse>> GetConsolidationTasksAsync(int userId)
     {
         var docs = await _db.VndDocuments
-            .Where(x => x.Status == VndStatus.Consolidation && x.CreatedByUserId == userId)
+            .Where(x => x.Status == VndStatus.Consolidation
+                        && (x.ActualizationResponsibleUserId == userId
+                            || (x.ActualizationResponsibleUserId == null && x.CreatedByUserId == userId)))
             .ToListAsync();
 
         if (docs.Count == 0) return new List<VndTaskResponse>();
@@ -128,6 +145,8 @@ public class TasksService : ITasksService
                 VndStatus = MapVndStatus(x.Status),
                 StatusLabel = "В процессе консолидации",
                 DueActualizationDate = x.DueActualizationDate,
+                ActualizationPlannedNoChanges = x.ActualizationPlannedNoChanges,
+                ActualizationPerformed = x.ActualizationPerformed,
                 CreatedAt = x.UpdatedAt
             })
             .OrderBy(t => t.DueActualizationDate)
@@ -173,6 +192,7 @@ public class TasksService : ITasksService
                 // трёх согласованных значений — фильтр по этапу её не подхватит, "Все этапы" покажет.
                 StagePhase = MapProcessPhase(process.Status),
                 StatusLabel = statusLabel,
+                ActualizationPlannedNoChanges = vnd.ActualizationPlannedNoChanges,
                 CreatedAt = vnd.UpdatedAt
             });
         }

@@ -27,7 +27,22 @@ public class VndActualizationRecord : IAuditableEntity
     /// <summary>Планировался ли сдвиг DueActualizationDate по завершении (зафиксировано на старте)</summary>
     public bool ShiftNextPeriod { get; set; }
 
+    /// <summary>Было ли на старте цикла заявлено "без изменений" (зафиксировано на старте,
+    /// см. VndDocument.ActualizationPlannedNoChanges). Если по ходу цикла всё же загрузили
+    /// новую редакцию - здесь остаётся исходное значение true, это часть истории; фактический
+    /// результат смотри по HadChanges после публикации.</summary>
+    public bool PlannedNoChanges { get; set; }
+
     public DateTime StartedAt { get; set; }
+
+    /// <summary>Момент, когда был выполнен шаг "Выполнить актуализацию" (см.
+    /// VndDocument.ActualizationPerformed) — то есть когда RequiresApproval/ShiftNextPeriod/
+    /// PlannedNoChanges выше приняли свои финальные, действующие в цикле значения. Для пути
+    /// "по заявке" (ConfirmStartAfterRequestAsync) совпадает со StartedAt — там это один и тот же
+    /// шаг. Для прямого старта главным редактором (StartAsync + отдельный PerformAsync) — позже
+    /// StartedAt, и пока null, значения этих трёх полей в записи ещё не окончательные (по факту
+    /// ShiftNextPeriod/PlannedNoChanges равны false до выполнения этого шага).</summary>
+    public DateTime? PerformedAt { get; set; }
 
     /// <summary>Момент перехода документа в статус "Консолидация" в рамках этого цикла
     /// (после согласования редакции — FinalizeApprovalAsync, либо сразу при загрузке

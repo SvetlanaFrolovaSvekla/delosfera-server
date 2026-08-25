@@ -1,4 +1,4 @@
-﻿using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.ActivityLog.Models;
@@ -38,6 +38,23 @@ public class VndActualizationService : IVndActualizationService
         _activityLog = activityLog;
     }
 
+    /// <summary>Единое определение "главный редактор" для всей актуализации — умышленно шире,
+    /// чем просто ActualizeAnyVnd(With/Without)Approval: пользователь с правом создавать ВНД
+    /// (CreateVndWithApproval/CreateVndWithoutApproval) тоже действует как главный редактор
+    /// (см. VndService.IsChiefEditor/VndApprovalService.IsChiefEditor — тот же набор прав).
+    /// Раньше PublishAsync/ConfirmNoChangesAsync использовали разные наборы прав — это и было
+    /// багом (см. фронтовый OpenVndPage.canConsolidate, который чинится тем же способом).</summary>
+    private bool IsChiefEditor() =>
+        _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
+
+    /// <summary>Шаг А (для главного редактора, прямой старт без заявки) — только переводит
+    /// документ в "На актуализации" и фиксирует ответственного/порядок согласования. Сдвиг срока
+    /// и "актуализация без изменений" здесь сознательно НЕ запрашиваются — они решаются позже,
+    /// отдельным шагом "Выполнить актуализацию" (см. PerformAsync), который может выполнить как
+    /// сам главный редактор, так и назначенный им ответственный.</summary>
     public async Task<VndActualizationStateResponse> StartAsync(
         int vndId, StartActualizationRequest request, int currentUserId)
     {
@@ -60,7 +77,7 @@ public class VndActualizationService : IVndActualizationService
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
-        
+
         var responsibleUserId = request.ResponsibleUserId ?? currentUserId;
         var responsibleExists = await _db.Users.AnyAsync(x => x.Id == responsibleUserId);
         if (!responsibleExists)
@@ -69,7 +86,10 @@ public class VndActualizationService : IVndActualizationService
         vnd.Status = VndStatus.OnActualization;
         vnd.ActualizationResponsibleUserId = responsibleUserId;
         vnd.ActualizationRequiresApproval = request.RequiresApproval;
-        vnd.ActualizationShiftNextPeriod = request.ShiftNextPeriod;
+        // Сдвиг срока и "без изменений" — ещё не решены, это шаг "Выполнить актуализацию"
+        vnd.ActualizationShiftNextPeriod = false;
+        vnd.ActualizationPlannedNoChanges = false;
+        vnd.ActualizationPerformed = false;
 
         // --- Открываем запись в истории циклов актуализации
         _db.Set<VndActualizationRecord>().Add(new VndActualizationRecord
@@ -77,7 +97,8 @@ public class VndActualizationService : IVndActualizationService
             VndId = vndId,
             ResponsibleUserId = responsibleUserId,
             RequiresApproval = request.RequiresApproval,
-            ShiftNextPeriod = request.ShiftNextPeriod,
+            ShiftNextPeriod = false,
+            PlannedNoChanges = false,
             StartedAt = DateTime.UtcNow,
             DueActualizationDateBefore = vnd.DueActualizationDate
         });
@@ -100,11 +121,17 @@ public class VndActualizationService : IVndActualizationService
 
         foreach (var pending in pendingRequests)
         {
-            pending.Status = pending.RequestedByUserId == responsibleUserId
+            var becomesResponsible = pending.RequestedByUserId == responsibleUserId;
+            pending.Status = becomesResponsible
                 ? ActualizationAccessStatus.Approved
                 : ActualizationAccessStatus.Rejected;
             pending.DecidedByUserId = currentUserId;
             pending.DecidedAt = DateTime.UtcNow;
+
+            // Заявка сразу используется этим же стартом (заявитель становится ответственным
+            // прямо сейчас) — помечаем её потраченной, чтобы она не "ожила" в следующем цикле.
+            if (becomesResponsible)
+                pending.ConsumedAt = DateTime.UtcNow;
         }
 
         await _db.SaveChangesAsync();
@@ -117,8 +144,76 @@ public class VndActualizationService : IVndActualizationService
                 : VndActualizationNotificationMessages.AccessRejectedDirectStart(vnd.TitleRu,
                     responsibleUserId == currentUserId);
 
-            await NotifyAsync(notice, vndId, currentUserId, pending.RequestedByUserId);
+            await NotifyAsync(notice, vndId, currentUserId, [pending.RequestedByUserId]);
         }
+
+        // --- Если ответственным назначен не сам инициировавший старт, а другой пользователь —
+        // тот должен узнать, что ему нужно выполнить шаг "Выполнить актуализацию" (баг №1:
+        // раньше об этом не было ни уведомления, ни задачи).
+        if (responsibleUserId != currentUserId)
+        {
+            await NotifyAsync(
+                VndActualizationNotificationMessages.AssignedResponsible(vnd.TitleRu, actorName),
+                vndId, currentUserId, [responsibleUserId], urlOverride: $"/base-vnd/{vndId}?tab=actual");
+        }
+
+        return await BuildStateResponseAsync(vnd);
+    }
+
+    /// <summary>Шаг Б для цикла, начатого напрямую главным редактором (StartAsync) — фиксирует
+    /// финальные "сдвигать ли срок" и "актуализация без изменений". До этого шага загрузка новой
+    /// редакции заблокирована (см. VndService.AddRedactionAsync, проверка ActualizationPerformed).
+    /// Доступен как самому назначившему себя главному редактору, так и любому другому назначенному
+    /// им ответственному, а также любому главному редактору (может выполнить его за ответственного).
+    /// Для пути "по заявке" этот шаг совмещён со стартом — см. ConfirmStartAfterRequestAsync,
+    /// вызывать PerformAsync после него не нужно (и нельзя — ActualizationPerformed уже true).</summary>
+    public async Task<VndActualizationStateResponse> PerformAsync(
+        int vndId, PerformActualizationRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        if (vnd.Status != VndStatus.OnActualization)
+            throw new InvalidOperationException("Выполнить актуализацию можно только в процессе актуализации");
+
+        if (vnd.ActualizationPerformed)
+            throw new InvalidOperationException("Шаг «Выполнить актуализацию» для этого цикла уже пройден");
+
+        if (vnd.ActualizationResponsibleUserId != currentUserId && !IsChiefEditor())
+            throw new UnauthorizedAccessException(
+                "Выполнить актуализацию может только назначенный ответственный или главный редактор ВНД");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+
+        vnd.ActualizationShiftNextPeriod = request.ShiftNextPeriod;
+        vnd.ActualizationPlannedNoChanges = request.PlannedNoChanges;
+        vnd.ActualizationPerformed = true;
+
+        var openRecord = await _db.Set<VndActualizationRecord>()
+            .Where(r => r.VndId == vndId && r.PublishedAt == null)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync();
+
+        if (openRecord is not null)
+        {
+            openRecord.ShiftNextPeriod = request.ShiftNextPeriod;
+            openRecord.PlannedNoChanges = request.PlannedNoChanges;
+            openRecord.PerformedAt = DateTime.UtcNow;
+        }
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ProcessStarted, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} выполнил(а) шаг «Выполнить актуализацию» ВНД «{vnd.TitleRu}»" +
+                (request.PlannedNoChanges ? " (заявлено без изменений)" : ""),
+                $"{actorName} completed the \"Perform actualization\" step for VND \"{vnd.TitleRu}\"" +
+                (request.PlannedNoChanges ? " (declared as no changes)" : ""),
+                $"{actorName} «{vnd.TitleRu}» ВНДисинин «Актуализацияны аткаруу» кадамын аткарды" +
+                (request.PlannedNoChanges ? " (өзгөртүүсүз деп жарыяланды)" : "")),
+            $"/base-vnd/{vndId}");
+
+        await _db.SaveChangesAsync();
 
         return await BuildStateResponseAsync(vnd);
     }
@@ -152,6 +247,7 @@ public class VndActualizationService : IVndActualizationService
             VndId = vndId,
             RequestedByUserId = currentUserId,
             RequiresApproval = request.RequiresApproval,
+            ShiftNextPeriod = request.ShiftNextPeriod,
             Status = ActualizationAccessStatus.Pending
         };
 
@@ -161,9 +257,11 @@ public class VndActualizationService : IVndActualizationService
         var requester = await _db.Users.FindAsync(currentUserId);
         var chiefEditorIds = await GetChiefEditorIdsAsync();
 
+        // Ведём прямо на вкладку «Актуализация» этого документа — там сразу видно, кто
+        // запросил доступ, и можно одобрить в один клик (не через реквизиты/маршрут вручную).
         await NotifyAsync(
             VndActualizationNotificationMessages.AccessRequested(vnd.TitleRu, requester?.FullName ?? "—"),
-            vndId, currentUserId, chiefEditorIds.ToArray());
+            vndId, currentUserId, chiefEditorIds.ToArray(), urlOverride: $"/base-vnd/{vndId}?tab=actual");
 
         return await LoadRequestResponseAsync(entity.Id);
     }
@@ -186,37 +284,89 @@ public class VndActualizationService : IVndActualizationService
         return requests.Select(ToRequestResponse).ToList();
     }
 
+    /// <summary>Решение по заявке — approve/reject. При одобрении главный редактор может
+    /// скорректировать пожелание заявителя насчёт сдвига срока (тогда заявителю отдельно
+    /// уходит уведомление об этом). Одновременно все ОСТАЛЬНЫЕ pending-заявки по этому же ВНД
+    /// автоматически отклоняются — решать по ним больше нечего, раз ответственный уже назначен
+    /// (без отдельного комментария, по договорённости).</summary>
     public async Task<VndActualizationRequestResponse> DecideRequestAsync(
-        int requestId, bool approve, int currentUserId)
+        int requestId, ActualizationRequestDecisionRequest request, int currentUserId)
     {
         var canWithoutApproval = _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
         var canWithApproval = _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval);
         if (!canWithoutApproval && !canWithApproval)
             throw new UnauthorizedAccessException("Решения по заявкам принимает только главный редактор ВНД");
 
-        var request = await _db.VndActualizationRequests
+        var current = await _db.VndActualizationRequests
                           .Include(x => x.Vnd)
                           .FirstOrDefaultAsync(x => x.Id == requestId)
                       ?? throw new KeyNotFoundException($"Заявка с id={requestId} не найдена");
 
-        if (request.Status != ActualizationAccessStatus.Pending)
+        if (current.Status != ActualizationAccessStatus.Pending)
             throw new InvalidOperationException("Решение по этой заявке уже принято");
 
-        request.Status = approve ? ActualizationAccessStatus.Approved : ActualizationAccessStatus.Rejected;
-        request.DecidedByUserId = currentUserId;
-        request.DecidedAt = DateTime.UtcNow;
+        if (request.Approve && request.ShiftNextPeriod is null)
+            throw new InvalidOperationException(
+                "При одобрении заявки нужно указать, сдвигать ли срок следующей актуализации");
+
+        var requestedShift = current.ShiftNextPeriod; // исходное пожелание заявителя
+        var shiftOverridden = request.Approve
+                               && request.ShiftNextPeriod!.Value != requestedShift;
+
+        current.Status = request.Approve ? ActualizationAccessStatus.Approved : ActualizationAccessStatus.Rejected;
+        current.DecidedByUserId = currentUserId;
+        current.DecidedAt = DateTime.UtcNow;
+
+        if (request.Approve)
+            current.ShiftNextPeriod = request.ShiftNextPeriod!.Value;
+
+        // --- Остальные pending-заявки на актуализацию этого же ВНД: как только по одной из них
+        // принято решение (даже отклонение), по остальным решать уже нечего только в случае
+        // одобрения (появился ответственный) — иначе, если эту заявку просто отклонили, другие
+        // заявки на общих основаниях остаются ожидать решения.
+        var otherPending = request.Approve
+            ? await _db.VndActualizationRequests
+                .Where(x => x.VndId == current.VndId && x.Id != current.Id
+                            && x.Status == ActualizationAccessStatus.Pending)
+                .ToListAsync()
+            : new List<VndActualizationRequest>();
+
+        foreach (var other in otherPending)
+        {
+            other.Status = ActualizationAccessStatus.Rejected;
+            other.DecidedByUserId = currentUserId;
+            other.DecidedAt = DateTime.UtcNow;
+        }
 
         await _db.SaveChangesAsync();
 
-        var notice = approve
-            ? VndActualizationNotificationMessages.AccessApproved(request.Vnd!.TitleRu)
-            : VndActualizationNotificationMessages.AccessRejected(request.Vnd!.TitleRu);
+        var vndTitle = current.Vnd!.TitleRu;
 
-        await NotifyAsync(notice, request.VndId, currentUserId, request.RequestedByUserId);
+        var notice = request.Approve
+            ? (shiftOverridden
+                ? VndActualizationNotificationMessages.AccessApprovedShiftOverridden(vndTitle, request.ShiftNextPeriod!.Value)
+                : VndActualizationNotificationMessages.AccessApproved(vndTitle))
+            : VndActualizationNotificationMessages.AccessRejected(vndTitle);
 
-        return await LoadRequestResponseAsync(request.Id);
+        await NotifyAsync(notice, current.VndId, currentUserId, [current.RequestedByUserId]);
+
+        foreach (var other in otherPending)
+        {
+            await NotifyAsync(
+                VndActualizationNotificationMessages.AccessRejectedAnotherApproved(vndTitle),
+                current.VndId, currentUserId, [other.RequestedByUserId]);
+        }
+
+        return await LoadRequestResponseAsync(current.Id);
     }
 
+    /// <summary>Шаг "Выполнить актуализацию" для пути "по заявке" (обычный редактор) — совмещает
+    /// в себе и старт цикла (переход в "На актуализации"), и фиксацию финальных условий: этот
+    /// путь, в отличие от прямого старта главным редактором, не разбит на два отдельных клика —
+    /// пользователь видит единственную кнопку "Выполнить актуализацию" после того, как его
+    /// заявка одобрена. ShiftNextPeriod берём из одобренной заявки (решённое значение — то, что
+    /// осталось после возможной корректировки главным редактором в DecideRequestAsync), заново
+    /// не запрашиваем.</summary>
     public async Task<VndActualizationStateResponse> ConfirmStartAfterRequestAsync(
         int vndId, ConfirmActualizationStartRequest request, int currentUserId)
     {
@@ -226,32 +376,116 @@ public class VndActualizationService : IVndActualizationService
         if (vnd.Status != VndStatus.Active)
             throw new InvalidOperationException("Начать актуализацию можно только для действующего ВНД");
 
-        // Берём самую свежую одобренную заявку текущего пользователя по этому ВНД.
-        // NB: заявка не "гасится" после использования — если нужно ограничить
-        // повторный запуск без новой заявки на следующий цикл, добавь сюда доп. флаг.
+        // Берём самую свежую одобренную и ещё не использованную заявку текущего пользователя по
+        // этому ВНД. ConsumedAt == null отсекает заявки, уже потраченные на предыдущий цикл —
+        // без этого фильтра одна и та же одобренная заявка могла бы бесконечно автостартовать
+        // актуализацию в каждом следующем цикле, даже если её никто не выдавал заново.
         var approvedRequest = await _db.VndActualizationRequests
                                   .Where(x => x.VndId == vndId && x.RequestedByUserId == currentUserId
-                                                               && x.Status == ActualizationAccessStatus.Approved)
+                                                               && x.Status == ActualizationAccessStatus.Approved
+                                                               && x.ConsumedAt == null)
                                   .OrderByDescending(x => x.DecidedAt)
                                   .FirstOrDefaultAsync()
                               ?? throw new InvalidOperationException(
-                                  "Нет одобренной заявки на актуализацию этого ВНД для текущего пользователя");
+                                  "Нет одобренной и ещё не использованной заявки на актуализацию этого ВНД для текущего пользователя");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
 
         vnd.Status = VndStatus.OnActualization;
         vnd.ActualizationResponsibleUserId = currentUserId;
         vnd.ActualizationRequiresApproval = approvedRequest.RequiresApproval;
-        vnd.ActualizationShiftNextPeriod = request.ShiftNextPeriod;
+        vnd.ActualizationShiftNextPeriod = approvedRequest.ShiftNextPeriod;
+        vnd.ActualizationPlannedNoChanges = request.PlannedNoChanges;
+        vnd.ActualizationPerformed = true;
 
-        // --- Открываем запись в истории циклов актуализации
+        approvedRequest.ConsumedAt = DateTime.UtcNow;
+
+        var now = DateTime.UtcNow;
+
+        // --- Открываем запись в истории циклов актуализации — сразу с выполненным шагом
+        // "Выполнить актуализацию" (для этого пути старт и выполнение совмещены)
         _db.Set<VndActualizationRecord>().Add(new VndActualizationRecord
         {
             VndId = vndId,
             ResponsibleUserId = currentUserId,
             RequiresApproval = approvedRequest.RequiresApproval,
-            ShiftNextPeriod = request.ShiftNextPeriod,
-            StartedAt = DateTime.UtcNow,
+            ShiftNextPeriod = approvedRequest.ShiftNextPeriod,
+            PlannedNoChanges = request.PlannedNoChanges,
+            StartedAt = now,
+            PerformedAt = now,
             DueActualizationDateBefore = vnd.DueActualizationDate
         });
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ProcessStarted, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} начал(а) актуализацию ВНД «{vnd.TitleRu}» по одобренной заявке" +
+                (request.PlannedNoChanges ? " (заявлено без изменений)" : ""),
+                $"{actorName} started actualization of VND \"{vnd.TitleRu}\" under an approved request" +
+                (request.PlannedNoChanges ? " (declared as no changes)" : ""),
+                $"{actorName} бекитилген арыз боюнча «{vnd.TitleRu}» ВНДисин актуалдаштырууну баштады" +
+                (request.PlannedNoChanges ? " (өзгөртүүсүз деп жарыяланды)" : "")),
+            $"/base-vnd/{vndId}");
+
+        await _db.SaveChangesAsync();
+
+        return await BuildStateResponseAsync(vnd);
+    }
+
+    /// <summary>Подтвердить, что заявленная "актуализация без изменений" (см.
+    /// VndDocument.ActualizationPlannedNoChanges) действительно прошла без изменений и
+    /// согласование не требовалось — документ сразу переходит в "Консолидация" без загрузки
+    /// новой редакции. Если для цикла требуется согласование — используй вместо этого
+    /// обычный запуск согласования (VndApprovalService.StartAsync), которое в этом случае
+    /// разрешено запустить над уже действующей редакцией.</summary>
+    public async Task<VndActualizationStateResponse> ConfirmNoChangesAsync(int vndId, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        if (vnd.Status != VndStatus.OnActualization)
+            throw new InvalidOperationException("Подтвердить отсутствие изменений можно только в процессе актуализации");
+
+        if (!vnd.ActualizationPerformed)
+            throw new InvalidOperationException(
+                "Прежде выполните шаг «Выполнить актуализацию» и укажите, что актуализация без изменений");
+
+        if (!vnd.ActualizationPlannedNoChanges)
+            throw new InvalidOperationException("Для этого цикла не была заявлена актуализация без изменений");
+
+        if (vnd.ActualizationRequiresApproval)
+            throw new InvalidOperationException(
+                "Для этого цикла требуется согласование — запустите его во вкладке «Согласование», " +
+                "а не подтверждайте отсутствие изменений напрямую");
+
+        if (vnd.ActualizationResponsibleUserId != currentUserId && !IsChiefEditor())
+            throw new UnauthorizedAccessException(
+                "Подтвердить отсутствие изменений может только ответственный за актуализацию или главный редактор ВНД");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+
+        vnd.Status = VndStatus.Consolidation;
+
+        var openRecord = await _db.Set<VndActualizationRecord>()
+            .Where(r => r.VndId == vndId && r.PublishedAt == null)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync();
+
+        if (openRecord is not null && openRecord.ConsolidationStartedAt is null)
+            openRecord.ConsolidationStartedAt = DateTime.UtcNow;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Finalized, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} подтвердил(а) отсутствие изменений при актуализации ВНД «{vnd.TitleRu}», " +
+                "ВНД переведён в статус «Консолидация»",
+                $"{actorName} confirmed no changes while actualizing VND \"{vnd.TitleRu}\", " +
+                "VND moved to \"Consolidation\" status",
+                $"{actorName} «{vnd.TitleRu}» ВНДисин актуалдаштырууда өзгөртүүлөр жоктугун ырастады, " +
+                "ВНД «Консолидация» абалына өттү"),
+            $"/base-vnd/{vndId}");
 
         await _db.SaveChangesAsync();
 
@@ -269,8 +503,7 @@ public class VndActualizationService : IVndActualizationService
         if (vnd.Status != VndStatus.Consolidation)
             throw new InvalidOperationException("Опубликовать можно только ВНД в статусе консолидации");
 
-        var isChiefEditor = _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
-                            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
+        var isChiefEditor = IsChiefEditor();
 
         bool isAuthorized;
         if (vnd.ActualizationResponsibleUserId.HasValue)
@@ -298,7 +531,7 @@ public class VndActualizationService : IVndActualizationService
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
-        
+
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         if (vnd.ActualizationShiftNextPeriod)
@@ -346,6 +579,8 @@ public class VndActualizationService : IVndActualizationService
         vnd.ActualizationResponsibleUserId = null;
         vnd.ActualizationRequiresApproval = false;
         vnd.ActualizationShiftNextPeriod = false;
+        vnd.ActualizationPlannedNoChanges = false;
+        vnd.ActualizationPerformed = false;
 
         await _db.SaveChangesAsync();
 
@@ -381,7 +616,9 @@ public class VndActualizationService : IVndActualizationService
             ResponsibleUserName = x.ResponsibleUser?.FullName ?? "—",
             RequiresApproval = x.RequiresApproval,
             ShiftNextPeriod = x.ShiftNextPeriod,
+            PlannedNoChanges = x.PlannedNoChanges,
             StartedAt = x.StartedAt,
+            PerformedAt = x.PerformedAt,
             ConsolidationStartedAt = x.ConsolidationStartedAt,
             PublishedAt = x.PublishedAt,
             HadChanges = x.HadChanges,
@@ -389,6 +626,24 @@ public class VndActualizationService : IVndActualizationService
             DueActualizationDateAfter = x.DueActualizationDateAfter,
             IsCompleted = x.PublishedAt.HasValue
         }).ToList();
+    }
+
+    /// <summary>Все заявки на доступ к актуализации этого документа (любого статуса), от новых
+    /// к старым — для истории/аудита и для того, чтобы заявитель мог узнать статус своей заявки.</summary>
+    public async Task<List<VndActualizationRequestResponse>> GetRequestHistoryAsync(int vndId)
+    {
+        var exists = await _db.VndDocuments.AnyAsync(x => x.Id == vndId);
+        if (!exists) throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var requests = await _db.VndActualizationRequests
+            .Include(x => x.Vnd)
+            .Include(x => x.RequestedByUser)
+            .Include(x => x.DecidedByUser)
+            .Where(x => x.VndId == vndId)
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync();
+
+        return requests.Select(ToRequestResponse).ToList();
     }
 
     private static DateOnly ResolveShiftedDueDate(ActualizationPeriod period, DateOnly today) => period switch
@@ -430,6 +685,8 @@ public class VndActualizationService : IVndActualizationService
             ActualizationResponsibleUserName = responsibleName,
             ActualizationRequiresApproval = vnd.ActualizationRequiresApproval,
             ActualizationShiftNextPeriod = vnd.ActualizationShiftNextPeriod,
+            ActualizationPlannedNoChanges = vnd.ActualizationPlannedNoChanges,
+            ActualizationPerformed = vnd.ActualizationPerformed,
             DueActualizationDate = vnd.DueActualizationDate,
             LastActualizationDate = vnd.LastActualizationDate
         };
@@ -455,6 +712,7 @@ public class VndActualizationService : IVndActualizationService
         RequestedByUserId = x.RequestedByUserId,
         RequestedByName = x.RequestedByUser?.FullName ?? "",
         RequiresApproval = x.RequiresApproval,
+        ShiftNextPeriod = x.ShiftNextPeriod,
         Status = x.Status switch
         {
             ActualizationAccessStatus.Pending => "pending",
@@ -465,6 +723,7 @@ public class VndActualizationService : IVndActualizationService
         DecidedByUserId = x.DecidedByUserId,
         DecidedByName = x.DecidedByUser?.FullName,
         DecidedAt = x.DecidedAt,
+        ConsumedAt = x.ConsumedAt,
         CreatedAt = x.CreatedAt
     };
 
@@ -480,7 +739,8 @@ public class VndActualizationService : IVndActualizationService
     };
 
     private async Task NotifyAsync(
-        NotificationText text, int vndId, int? triggeredByUserId, params int[] recipientUserIds)
+        NotificationText text, int vndId, int? triggeredByUserId, int[] recipientUserIds,
+        string? urlOverride = null)
     {
         if (recipientUserIds.Length == 0) return;
 
@@ -498,7 +758,7 @@ public class VndActualizationService : IVndActualizationService
                 Severity = text.Severity,
                 EntityType = "Vnd",
                 EntityId = vndId,
-                Url = $"/base-vnd/{vndId}",
+                Url = urlOverride ?? $"/base-vnd/{vndId}",
                 UserIds = recipientUserIds.Distinct().ToList()
             }, triggeredByUserId);
         }

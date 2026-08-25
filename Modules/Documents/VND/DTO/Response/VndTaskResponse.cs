@@ -44,5 +44,14 @@ public class VndTaskResponse
     // --- Только для actualization/consolidation ---
     public DateOnly? DueActualizationDate { get; set; }
 
+    /// <summary>Заявлено ли для текущего цикла актуализации "без изменений" — показывается
+    /// бейджем на карточке задачи (actualization/consolidation/coordination/myVndApproval).</summary>
+    public bool ActualizationPlannedNoChanges { get; set; }
+
+    /// <summary>Пройден ли шаг "Выполнить актуализацию" (только для actualization/consolidation) —
+    /// пока false, карточка actualization должна вести на экран "Выполнить актуализацию", а не
+    /// сразу на загрузку/согласование редакции (см. VndDocument.ActualizationPerformed).</summary>
+    public bool ActualizationPerformed { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }

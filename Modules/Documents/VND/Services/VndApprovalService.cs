@@ -70,7 +70,15 @@ public class VndApprovalService : IVndApprovalService
                                 .FirstOrDefaultAsync()
                             ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
 
-        if (lastRedaction.ApprovalStatus != RedactionApprovalStatus.Draft)
+        // Особый случай: заявленная "актуализация без изменений" с согласованием (см.
+        // VndDocument.ActualizationPlannedNoChanges) — новая редакция не загружалась вообще,
+        // на согласование уходит СУЩЕСТВУЮЩАЯ действующая редакция как есть (её ApprovalStatus
+        // в этот момент Approved/NotRequired от прошлого цикла, не Draft). Если согласующие
+        // всё же попросят доработку — ResubmitAfterRevisionAsync обновит файлы этой же редакции
+        // на месте, как и в обычном цикле, никакой новой строки VndRedaction не создаётся.
+        var isNoChangesReviewRound = vnd.Status == VndStatus.OnActualization && vnd.ActualizationPlannedNoChanges;
+
+        if (lastRedaction.ApprovalStatus != RedactionApprovalStatus.Draft && !isNoChangesReviewRound)
             throw new InvalidOperationException(
                 "На согласование можно отправить только редакцию в статусе черновика (ещё не отправленную)");
 
@@ -184,8 +192,12 @@ public class VndApprovalService : IVndApprovalService
                                 .FirstOrDefaultAsync()
                             ?? throw new KeyNotFoundException($"У ВНД с id={vndId} нет редакций");
 
+        // См. комментарий в LoadProcessForVndAsync — сортировка нужна на случай, если одна и та же
+        // редакция уже проходила согласование раньше (актуализация без изменений, повторный цикл).
         var process = await _db.VndApprovalProcesses
-                          .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
+                          .Where(x => x.RedactionId == lastRedaction.Id)
+                          .OrderByDescending(x => x.CreatedAt)
+                          .FirstOrDefaultAsync()
                       ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
 
         return await LoadResponseAsync(process.Id);
@@ -831,12 +843,19 @@ public class VndApprovalService : IVndApprovalService
                                 .FirstOrDefaultAsync()
                             ?? throw new KeyNotFoundException($"У ВНД с id={vndId} нет редакций");
 
+        // OrderByDescending(CreatedAt) — обычно у редакции ровно один процесс согласования за всю
+        // жизнь, но при "актуализации без изменений" (см. VndDocument.ActualizationPlannedNoChanges)
+        // одна и та же действующая редакция может проходить согласование повторно в разных циклах
+        // без создания новой строки VndRedaction — без сортировки здесь можно было бы случайно
+        // получить старый уже завершённый процесс вместо актуального.
         return await _db.VndApprovalProcesses
                    .Include(x => x.Stages)
                    .Include(x => x.Redaction)
                    .Include(x => x.Vnd)
                    .Include(x => x.DisagreementMatrixRows)
-                   .FirstOrDefaultAsync(x => x.RedactionId == lastRedaction.Id)
+                   .Where(x => x.RedactionId == lastRedaction.Id)
+                   .OrderByDescending(x => x.CreatedAt)
+                   .FirstOrDefaultAsync()
                ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
     }
 
@@ -863,7 +882,9 @@ public class VndApprovalService : IVndApprovalService
             .Include(x => x.DisagreementMatrixRows)
             .FirstAsync(x => x.Id == processId);
 
-        var initiator = await _db.Users.FindAsync(process.InitiatorUserId);
+        var initiator = await _db.Users
+            .Include(u => u.Position)
+            .FirstOrDefaultAsync(u => u.Id == process.InitiatorUserId);
 
         return new ApprovalProcessResponse
         {
@@ -872,6 +893,7 @@ public class VndApprovalService : IVndApprovalService
             RedactionId = process.RedactionId,
             InitiatorUserId = process.InitiatorUserId,
             InitiatorName = initiator?.FullName ?? "",
+            InitiatorPosition = initiator?.Position?.TitleRu,
             Status = MapStatus(process.Status),
             PrimaryDeadlineMinutes = process.PrimaryDeadlineMinutes,
             RepeatDeadlineMinutes = process.RepeatDeadlineMinutes,

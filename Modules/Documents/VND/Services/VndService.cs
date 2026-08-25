@@ -436,6 +436,9 @@ public class VndService : IVndService
         CreatedByUserName = x.CreatedByUser?.FullName,
         ActualizationResponsibleUserId = x.ActualizationResponsibleUserId,
         ActualizationResponsibleUserName = x.ActualizationResponsibleUser?.FullName,
+        ActualizationRequiresApproval = x.ActualizationRequiresApproval,
+        ActualizationPlannedNoChanges = x.ActualizationPlannedNoChanges,
+        ActualizationPerformed = x.ActualizationPerformed,
         AdoptionDate = x.AdoptionDate,
         AdoptionCode = x.AdoptionCode,
         EffectiveDate = x.EffectiveDate,
@@ -682,6 +685,40 @@ public class VndService : IVndService
             throw new InvalidOperationException(
                 "При актуализации ВНД необходимо приложить файл ТИД (Таблица изменений и дополнений)");
 
+        // Вторую и последующие редакции можно добавлять только в рамках открытого цикла
+        // актуализации (см. VndActualizationService.StartAsync/ConfirmStartAfterRequestAsync) —
+        // без этого документ должен оставаться на действующей редакции до тех пор, пока кто-то
+        // не возьмёт его в актуализацию. Первая редакция нового ВНД (lastRedaction == null)
+        // этим правилом не ограничена.
+        if (lastRedaction is not null && vnd.Status != VndStatus.OnActualization)
+            throw new InvalidOperationException(
+                "Добавить новую редакцию действующего ВНД можно только в рамках актуализации — " +
+                "начните актуализацию во вкладке «Актуализация»");
+
+        // Внутри цикла актуализации новую редакцию можно грузить только после того, как
+        // ответственный зафиксировал финальные сдвиг срока/"без изменений" на шаге
+        // "Выполнить актуализацию" (см. VndDocument.ActualizationPerformed,
+        // VndActualizationService.PerformAsync/ConfirmStartAfterRequestAsync) — до этого момента
+        // решение о самой стратегии цикла ещё не принято.
+        if (lastRedaction is not null && vnd.Status == VndStatus.OnActualization && !vnd.ActualizationPerformed)
+            throw new InvalidOperationException(
+                "Прежде чем загружать новую редакцию, выполните шаг «Выполнить актуализацию»");
+
+        // В рамках открытого цикла актуализации решение "с согласованием / без" уже зафиксировано
+        // при старте цикла (StartAsync/ConfirmStartAfterRequestAsync) — не доверяем тому, что
+        // прислал клиент в request.RequiresApproval, иначе обычный редактор без прав на
+        // актуализацию без согласования мог бы обойти это ограничение, отредактировав запрос
+        // напрямую. Вне цикла актуализации (первая редакция нового ВНД) решение остаётся за
+        // тем, кто загружает, как и раньше.
+        var effectiveRequiresApproval = vnd.Status == VndStatus.OnActualization
+            ? vnd.ActualizationRequiresApproval
+            : request.RequiresApproval;
+
+        // Раз загружается настоящая новая редакция — план "актуализация без изменений" (если он
+        // был) больше не в силе: изменения всё-таки есть.
+        if (vnd.ActualizationPlannedNoChanges)
+            vnd.ActualizationPlannedNoChanges = false;
+
         var docRu = await _fileService.SaveAsync(request.DocRu, currentUserId);
         var docKg = request.DocKg is not null ? await _fileService.SaveAsync(request.DocKg, currentUserId) : null;
         var docEn = request.DocEn is not null ? await _fileService.SaveAsync(request.DocEn, currentUserId) : null;
@@ -706,8 +743,8 @@ public class VndService : IVndService
             DocFileKgId = docKg?.Id,
             DocFileEnId = docEn?.Id,
             TidFileId = tid?.Id,
-            RequiresApproval = request.RequiresApproval,
-            ApprovalStatus = request.RequiresApproval
+            RequiresApproval = effectiveRequiresApproval,
+            ApprovalStatus = effectiveRequiresApproval
                 ? RedactionApprovalStatus.Draft
                 : RedactionApprovalStatus.NotRequired,
             Attachments = attachmentEntities
@@ -726,7 +763,7 @@ public class VndService : IVndService
             $"/base-vnd/{vndId}");
         await _db.SaveChangesAsync();
 
-        if (!request.RequiresApproval)
+        if (!effectiveRequiresApproval)
         {
             vnd.CurrentRedactionId = redaction.Id;
             vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -1059,6 +1096,16 @@ public class VndService : IVndService
                                 .Include(r => r.Attachments)
                                 .FirstOrDefaultAsync()
                             ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
+
+        // Редакция, отправленная на согласование, редактируется только через отзыв согласования
+        // (VndApprovalService.CancelAsync возвращает её в черновик) — иначе главный редактор мог бы
+        // незаметно подменить файл, который уже смотрят согласующие. Действующую редакцию (не
+        // отправленную на согласование — ApprovalStatus NotRequired/Draft/Approved/Rejected) это
+        // не ограничивает, её можно менять напрямую, как и раньше.
+        if (lastRedaction.ApprovalStatus == RedactionApprovalStatus.Pending)
+            throw new InvalidOperationException(
+                "Редакция отправлена на согласование — сначала отзовите согласование во вкладке " +
+                "«Согласование», чтобы редактировать её напрямую");
 
         var hasChanges = false;
 

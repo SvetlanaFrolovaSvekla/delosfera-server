@@ -43,7 +43,7 @@ public class VndActualizationRequestsController : ControllerBase
     {
         try
         {
-            return Ok(await _service.DecideRequestAsync(requestId, request.Approve, _currentUser.UserId));
+            return Ok(await _service.DecideRequestAsync(requestId, request, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }

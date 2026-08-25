@@ -69,6 +69,25 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
     /// <summary>Сдвигать ли DueActualizationDate после публикации текущего цикла</summary>
     public bool ActualizationShiftNextPeriod { get; set; }
 
+    /// <summary>Заявлено ли, что в этом цикле актуализация пройдёт без изменений документа —
+    /// решается при старте цикла (StartAsync/ConfirmStartAfterRequestAsync). Пока true, новая
+    /// редакция в рамках цикла не создаётся — либо ответственный сразу подтверждает отсутствие
+    /// изменений (VndActualizationService.ConfirmNoChangesAsync), либо (если требуется
+    /// согласование) существующая действующая редакция ещё раз проходит согласование без
+    /// загрузки нового файла (см. послабление в VndApprovalService.StartAsync). Как только
+    /// кто-то всё же загружает новую редакцию (VndService.AddRedactionAsync) - флаг сбрасывается,
+    /// потому что план "без изменений" больше не в силе.</summary>
+    public bool ActualizationPlannedNoChanges { get; set; }
+
+    /// <summary>Пройден ли шаг "Выполнить актуализацию" в текущем открытом цикле — на этом шаге
+    /// фиксируются финальные ActualizationShiftNextPeriod/ActualizationPlannedNoChanges (см.
+    /// VndActualizationService.PerformAsync — для прямого старта главным редактором — и
+    /// ConfirmStartAfterRequestAsync — для пути "по заявке", где этот шаг совмещён со стартом).
+    /// Пока false — цикл формально начат (StartAsync), но ответственный ещё не выполнил
+    /// "Выполнить актуализацию": в частности, загрузка новой редакции во вкладке «Редакции»
+    /// заблокирована до этого момента.</summary>
+    public bool ActualizationPerformed { get; set; }
+
     // --- Классификаторы
     public ICollection<Rubric> Rubrics { get; set; } = new List<Rubric>();
 

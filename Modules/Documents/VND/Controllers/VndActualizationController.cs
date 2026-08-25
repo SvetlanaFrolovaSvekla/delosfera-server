@@ -57,7 +57,25 @@ public class VndActualizationController : ControllerBase
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
-    /// <summary>Подтвердить старт актуализации после одобренной заявки (только сдвиг периода)</summary>
+    /// <summary>Выполнить актуализацию (шаг Б для цикла, начатого напрямую через /start) —
+    /// зафиксировать финальные сдвиг срока/"без изменений". Доступно ответственному за
+    /// актуализацию или главному редактору ВНД</summary>
+    [HttpPost("perform")]
+    [ProducesResponseType(typeof(VndActualizationStateResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndActualizationStateResponse>> Perform(
+        int vndId, [FromBody] PerformActualizationRequest request)
+    {
+        try
+        {
+            return Ok(await _service.PerformAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
+    /// <summary>Подтвердить старт актуализации после одобренной заявки — совмещает старт цикла
+    /// и шаг "Выполнить актуализацию" (для пути "по заявке")</summary>
     [HttpPost("confirm-start")]
     [ProducesResponseType(typeof(VndActualizationStateResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<VndActualizationStateResponse>> ConfirmStart(
@@ -69,6 +87,22 @@ public class VndActualizationController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    /// <summary>Подтвердить, что заявленная "актуализация без изменений" прошла без изменений
+    /// (только когда согласование для цикла не требуется) — OnActualization → Consolidation
+    /// напрямую, без загрузки новой редакции</summary>
+    [HttpPost("confirm-no-changes")]
+    [ProducesResponseType(typeof(VndActualizationStateResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndActualizationStateResponse>> ConfirmNoChanges(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.ConfirmNoChangesAsync(vndId, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
     /// <summary>Опубликовать новую редакцию после консолидации (Consolidation → Active)</summary>
@@ -96,6 +130,21 @@ public class VndActualizationController : ControllerBase
         try
         {
             return Ok(await _service.GetHistoryAsync(vndId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    }
+
+    /// <summary>Все заявки на доступ к актуализации этого документа (любого статуса) — кто
+    /// когда запросил доступ и кто его выдал/отклонил. Доступно всем, кто может просматривать
+    /// ВНД (не только главному редактору — в отличие от /vnd/actualization/requests)</summary>
+    [HttpGet("requests")]
+    [RequirePermission(PermissionCode.ViewVnd)]
+    [ProducesResponseType(typeof(List<VndActualizationRequestResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<VndActualizationRequestResponse>>> GetRequests(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.GetRequestHistoryAsync(vndId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
     }
