@@ -130,6 +130,17 @@ public class DelosferaDbContext : DbContext
     public DbSet<AcknowledgementEntry> AcknowledgementEntries => Set<AcknowledgementEntry>();
 
     /// <summary>
+    /// Оргструктура из портала: настройки связи и история проходов.
+    /// Сама структура ложится в справочник подразделений, отдельной копии нет —
+    /// иначе у банка стало бы два дерева, расходящихся со временем.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Integrations.OrgStructure.OrgStructureSettings> OrgStructureSettings =>
+        Set<delosfera_server.Modules.Integrations.OrgStructure.OrgStructureSettings>();
+
+    public DbSet<delosfera_server.Modules.Integrations.OrgStructure.OrgSyncRun> OrgSyncRuns =>
+        Set<delosfera_server.Modules.Integrations.OrgStructure.OrgSyncRun>();
+
+    /// <summary>
     /// Доверенности: кто, кому, на что и на какой срок. Отвечает на вопрос
     /// «вправе ли этот человек подписать вот это сегодня».
     /// </summary>
