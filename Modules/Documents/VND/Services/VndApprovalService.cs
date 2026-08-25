@@ -243,8 +243,17 @@ public class VndApprovalService : IVndApprovalService
 
                 await _db.SaveChangesAsync();
 
-                if (process.Stages.All(s => s.PrimaryDecision != ApprovalStageDecision.Pending))
+                if (decision == ApprovalStageDecision.Rejected)
+                {
+                    // Отклонение - не то же самое, что "согласовано с замечаниями": оно не ждёт
+                    // решения остальных, а сразу прекращает весь процесс (см. RejectApprovalAsync).
+                    await RejectApprovalAsync(process, currentUserId, request.Comment);
+                    await _db.SaveChangesAsync();
+                }
+                else if (process.Stages.All(s => s.PrimaryDecision != ApprovalStageDecision.Pending))
+                {
                     await CompletePrimaryPhaseAsync(process);
+                }
                 break;
 
             case ApprovalProcessStatus.Repeated:
@@ -261,10 +270,18 @@ public class VndApprovalService : IVndApprovalService
 
                 await _db.SaveChangesAsync();
 
-                var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
-                if (repeatStages.All(s =>
-                        s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending))
-                    await CompleteRepeatPhaseAsync(process);
+                if (decision == ApprovalStageDecision.Rejected)
+                {
+                    await RejectApprovalAsync(process, currentUserId, request.Comment);
+                    await _db.SaveChangesAsync();
+                }
+                else
+                {
+                    var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
+                    if (repeatStages.All(s =>
+                            s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending))
+                        await CompleteRepeatPhaseAsync(process);
+                }
                 break;
 
             case ApprovalProcessStatus.FinalHold:
@@ -279,7 +296,14 @@ public class VndApprovalService : IVndApprovalService
 
                 await _db.SaveChangesAsync();
 
-                if (decision is ApprovalStageDecision.ApprovedWithComment or ApprovalStageDecision.Rejected)
+                if (decision == ApprovalStageDecision.Rejected)
+                {
+                    // В отличие от замечания на финальной выдержке (которое лишь возвращает на
+                    // доработку в рамках того же процесса), отклонение прекращает его совсем.
+                    await RejectApprovalAsync(process, currentUserId, request.Comment);
+                    await _db.SaveChangesAsync();
+                }
+                else if (decision == ApprovalStageDecision.ApprovedWithComment)
                 {
                     // Замечание на финальной выдержке - возвращаем на доработку.
                     // Матрица разногласий предыдущего круга сохраняется как есть.
@@ -732,9 +756,10 @@ public class VndApprovalService : IVndApprovalService
         if (save) await _db.SaveChangesAsync();
     }
 
-    /// <summary>Кто-то на финальной выдержке оставил замечание/отклонил - возвращаем
-    /// процесс на доработку. Матрица разногласий предыдущего круга (если была) не трогается,
-    /// инициатор сможет дополнить/почистить её строки заново на фронте.</summary>
+    /// <summary>Кто-то на финальной выдержке оставил замечание (не отклонение - оно прекращает
+    /// процесс совсем, см. RejectApprovalAsync) - возвращаем процесс на доработку. Матрица
+    /// разногласий предыдущего круга (если была) не трогается, инициатор сможет дополнить/
+    /// почистить её строки заново на фронте.</summary>
     private async Task ReturnToRevisionFromFinalHoldAsync(VndApprovalProcess process)
     {
         process.Status = ApprovalProcessStatus.RevisionNeeded;
@@ -742,6 +767,60 @@ public class VndApprovalService : IVndApprovalService
         await NotifyAsync(
             VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
             NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+    }
+
+    /// <summary>Отклонение редакции одним из согласующих - жёсткое немедленное завершение
+    /// процесса согласования, в отличие от "согласовано с замечаниями" (которое лишь возвращает
+    /// на доработку в рамках того же процесса и ждёт решения остальных). Редакция и документ
+    /// возвращаются в черновик/актуализацию - как при отзыве согласования (CancelAsync), только
+    /// это происходит автоматически по решению согласующего, без отдельного действия инициатора
+    /// или главного редактора. Всем остальным согласующим, чьё решение на активной на момент
+    /// отклонения фазе ещё не принято, снимается задача - решать больше не по чему.</summary>
+    private async Task RejectApprovalAsync(VndApprovalProcess process, int rejectedByUserId, string? comment)
+    {
+        var phaseAtRejection = process.Status;
+
+        process.Status = ApprovalProcessStatus.Rejected;
+        process.CompletedAt = DateTime.UtcNow;
+
+        var redaction = process.Redaction!;
+        var vnd = process.Vnd!;
+
+        redaction.ApprovalStatus = RedactionApprovalStatus.Draft;
+        vnd.Status = redaction.Number <= 1 ? VndStatus.Draft : VndStatus.OnActualization;
+
+        var rejecter = await _db.Users.FindAsync(rejectedByUserId);
+        var rejecterName = rejecter?.FullName ?? "—";
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Rejected, process.VndId, vnd.Code, rejectedByUserId,
+            new ActivityText(
+                $"{rejecterName} отклонил(а) редакцию {redaction.Code} ВНД «{vnd.TitleRu}» — согласование прекращено",
+                $"{rejecterName} rejected revision {redaction.Code} of VND \"{vnd.TitleRu}\" — approval process stopped",
+                $"{rejecterName} «{vnd.TitleRu}» ВНДисинин {redaction.Code} редакциясын четке какты — макулдашуу токтотулду"),
+            $"/base-vnd/{process.VndId}");
+
+        bool IsPendingOnPhase(VndApprovalStage s) => phaseAtRejection switch
+        {
+            ApprovalProcessStatus.Primary => s.PrimaryDecision == ApprovalStageDecision.Pending,
+            ApprovalProcessStatus.Repeated => s.ParticipatesInRepeat &&
+                (s.RepeatDecision is null || s.RepeatDecision == ApprovalStageDecision.Pending),
+            ApprovalProcessStatus.FinalHold =>
+                s.FinalHoldDecision is null || s.FinalHoldDecision == ApprovalStageDecision.Pending,
+            _ => false
+        };
+
+        var pendingApproverIds = process.Stages
+            .Where(s => s.ApproverUserId != rejectedByUserId && IsPendingOnPhase(s))
+            .Select(s => s.ApproverUserId)
+            .Distinct()
+            .ToArray();
+
+        if (pendingApproverIds.Length > 0)
+            await NotifyAsync(
+                VndApprovalNotificationMessages.ProcessRejectedTaskCancelled(
+                    rejecterName, redaction.Code, vnd.TitleRu, comment),
+                NotificationCategory.Approval, process.VndId, rejectedByUserId, pendingApproverIds);
     }
 
     private async Task FinalizeApprovalAsync(VndApprovalProcess process, bool afterRevision)
@@ -1191,6 +1270,7 @@ public class VndApprovalService : IVndApprovalService
         ApprovalProcessStatus.FinalHold => "final_hold",
         ApprovalProcessStatus.Approved => "approved",
         ApprovalProcessStatus.Cancelled => "cancelled",
+        ApprovalProcessStatus.Rejected => "rejected",
         _ => "primary"
     };
 

@@ -810,6 +810,63 @@ public class VndService : IVndService
         return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
     }
 
+    /// <summary>Только для главного редактора: делает черновик редакции действующим/текущим
+    /// НАПРЯМУЮ, минуя весь процесс согласования целиком - тот же результат, что и загрузка
+    /// редакции без согласования (см. ветку RequiresApproval=false в UploadRedactionAsync выше),
+    /// только применительно к уже загруженному черновику, который иначе пошёл бы по обычному
+    /// пути согласования. Рядом с обычной кнопкой "Отправить на согласование" - альтернатива
+    /// для случаев, когда главный редактор явно берёт ответственность на себя.</summary>
+    public async Task<VndRedactionResponse> PublishRedactionWithoutApprovalAsync(
+        int vndId, int redactionId, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        if (!IsChiefEditor())
+            throw new UnauthorizedAccessException(
+                "Сделать редакцию действующей без согласования может только главный редактор");
+
+        var redaction = await _db.VndRedactions
+                            .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
+                        ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
+
+        if (redaction.ApprovalStatus != RedactionApprovalStatus.Draft)
+            throw new InvalidOperationException(
+                "Сделать действующей без согласования можно только черновик редакции");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+
+        redaction.RequiresApproval = false;
+        redaction.ApprovalStatus = RedactionApprovalStatus.NotRequired;
+
+        vnd.CurrentRedactionId = redaction.Id;
+        vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // Если документ был в цикле актуализации - консолидация обязательна, даже если сама
+        // редакция обошлась без согласования (см. тот же принцип в UploadRedactionAsync).
+        var enteringConsolidation = vnd.Status == VndStatus.OnActualization;
+        vnd.Status = enteringConsolidation ? VndStatus.Consolidation : VndStatus.Active;
+
+        if (enteringConsolidation)
+            await StampConsolidationStartedAsync(vndId);
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Other, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} сделал(а) редакцию {redaction.Code} ВНД «{vnd.TitleRu}» действующей " +
+                "без согласования (главный редактор)",
+                $"{actorName} made revision {redaction.Code} of VND \"{vnd.TitleRu}\" active " +
+                "without approval (chief editor)",
+                $"{actorName} «{vnd.TitleRu}» ВНДисинин {redaction.Code} редакциясын макулдашуусуз " +
+                "колдонуудагы кылды (башкы редактор)"),
+            $"/base-vnd/{vndId}");
+
+        await _db.SaveChangesAsync();
+
+        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+    }
+
 
     public async Task<List<VndRedactionResponse>> GetRedactionsAsync(int vndId)
     {

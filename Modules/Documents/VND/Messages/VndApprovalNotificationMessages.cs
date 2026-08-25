@@ -83,6 +83,23 @@ public static class VndApprovalNotificationMessages
                 $"Себеби: «{comment}».",
         Severity: NotificationSeverity.Urgent); // отклонение — требует немедленной реакции инициатора
 
+    /// <summary>Отклонение одним из согласующих немедленно прекращает весь процесс согласования
+    /// (в отличие от "согласовано с замечаниями") - остальным согласующим, у которых решение
+    /// ещё не принято, задача снимается. Отдельно от Rejected(...) выше, который уходит только
+    /// инициатору с текстом причины; это уведомление - для ОСТАЛЬНЫХ согласующих маршрута.</summary>
+    public static NotificationText ProcessRejectedTaskCancelled(
+        string approverName, string redactionCode, string vndTitle, string? comment) => new(
+        TitleRu: "Согласование прекращено — редакция отклонена",
+        TitleEn: "Approval stopped — revision rejected",
+        TitleKg: "Макулдашуу токтотулду — редакция четке кагылды",
+        BodyRu: $"{approverName} отклонил(а) редакцию {redactionCode} документа «{vndTitle}». " +
+                $"Причина: «{comment}». Согласование по ней прекращено, ваша задача больше не актуальна.",
+        BodyEn: $"{approverName} rejected revision {redactionCode} of the document \"{vndTitle}\". " +
+                $"Reason: \"{comment}\". The approval process has been stopped, your task is no longer relevant.",
+        BodyKg: $"{approverName} «{vndTitle}» документинин {redactionCode} редакциясын четке какты. " +
+                $"Себеби: «{comment}». Ал боюнча макулдашуу токтотулду, сиздин тапшырмаңыз мындан ары актуалдуу эмес.",
+        Severity: NotificationSeverity.Urgent);
+
     public static NotificationText ApprovedAfterRevision(string redactionCode, string vndTitle) => new(
         TitleRu: "Редакция согласована после доработки",
         TitleEn: "Revision approved after revision",

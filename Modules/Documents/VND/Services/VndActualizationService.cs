@@ -147,8 +147,7 @@ public class VndActualizationService : IVndActualizationService
         }
 
         // --- Если ответственным назначен не сам инициировавший старт, а другой пользователь —
-        // тот должен узнать, что ему нужно выполнить шаг "Выполнить актуализацию" (баг №1:
-        // раньше об этом не было ни уведомления, ни задачи).
+        // тот должен узнать, что ему нужно выполнить шаг "Выполнить актуализацию" 
         if (responsibleUserId != currentUserId)
         {
             await NotifyAsync(
@@ -286,8 +285,7 @@ public class VndActualizationService : IVndActualizationService
     /// <summary>Решение по заявке — approve/reject. При одобрении главный редактор может
     /// скорректировать пожелание заявителя насчёт сдвига срока (тогда заявителю отдельно
     /// уходит уведомление об этом). Одновременно все ОСТАЛЬНЫЕ pending-заявки по этому же ВНД
-    /// автоматически отклоняются — решать по ним больше нечего, раз ответственный уже назначен
-    /// (без отдельного комментария, по договорённости).</summary>
+    /// автоматически отклоняются.</summary>
     public async Task<VndActualizationRequestResponse> DecideRequestAsync(
         int requestId, ActualizationRequestDecisionRequest request, int currentUserId)
     {

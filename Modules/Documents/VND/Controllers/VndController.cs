@@ -158,7 +158,25 @@ public class VndController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
-    
+
+    /// <summary>Только для главного редактора: сделать черновик редакции действующим/текущим
+    /// напрямую, минуя согласование целиком (кнопка "Сделать актуальной редакцией без
+    /// согласования" рядом с обычной "Отправить на согласование").</summary>
+    [HttpPost("{vndId:int}/redactions/{redactionId:int}/publish-without-approval")]
+    [RequirePermission(PermissionCode.ViewVnd)]
+    [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<VndRedactionResponse>> PublishRedactionWithoutApproval(int vndId, int redactionId)
+    {
+        try
+        {
+            return Ok(await _service.PublishRedactionWithoutApprovalAsync(vndId, redactionId, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
     /// <summary>Обновление реквизитов ВНД (кнопка "Изменить реквизиты")</summary>
     [HttpPut("{id:int}/requisites")]
     [RequirePermission(PermissionCode.EditVndRequisites)]
