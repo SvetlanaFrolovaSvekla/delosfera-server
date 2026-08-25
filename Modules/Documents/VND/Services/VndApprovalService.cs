@@ -84,7 +84,8 @@ public class VndApprovalService : IVndApprovalService
 
         var alreadyRunning = await _db.VndApprovalProcesses
             .AnyAsync(x => x.RedactionId == lastRedaction.Id && x.Status != ApprovalProcessStatus.Approved
-                                                             && x.Status != ApprovalProcessStatus.Cancelled);
+                                                             && x.Status != ApprovalProcessStatus.Cancelled
+                                                             && x.Status != ApprovalProcessStatus.Rejected);
         if (alreadyRunning)
             throw new InvalidOperationException("По этой редакции уже запущено согласование");
 
