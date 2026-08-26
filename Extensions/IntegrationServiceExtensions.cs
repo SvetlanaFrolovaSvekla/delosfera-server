@@ -20,6 +20,7 @@ public static class IntegrationServiceExtensions
         builder.Services.AddScoped<IDirectorySettingsService, DirectorySettingsService>();
 
         builder.Services.Configure<MailOptions>(builder.Configuration.GetSection(MailOptions.Section));
+        builder.Services.AddScoped<IMailSettingsService, MailSettingsService>();
         builder.Services.AddScoped<IMailQueue, MailQueue>();
         builder.Services.AddHostedService<MailWorker>();
 

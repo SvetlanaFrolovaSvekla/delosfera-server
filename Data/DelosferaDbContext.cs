@@ -130,6 +130,20 @@ public class DelosferaDbContext : DbContext
     public DbSet<AcknowledgementEntry> AcknowledgementEntries => Set<AcknowledgementEntry>();
 
     /// <summary>
+    /// Настройки почтовых уведомлений. В базе, а не в конфигурации сервера:
+    /// выключить рассылку должен уметь администратор, не трогая сервер.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Integrations.Mail.MailSettings> MailSettings =>
+        Set<delosfera_server.Modules.Integrations.Mail.MailSettings>();
+
+    /// <summary>
+    /// Представления журналов: наборы колонок в списках документов.
+    /// Требование банка — настраивать их без программирования.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Documents.Models.JournalView> JournalViews =>
+        Set<delosfera_server.Modules.Documents.Models.JournalView>();
+
+    /// <summary>
     /// Оргструктура из портала: настройки связи и история проходов.
     /// Сама структура ложится в справочник подразделений, отдельной копии нет —
     /// иначе у банка стало бы два дерева, расходящихся со временем.

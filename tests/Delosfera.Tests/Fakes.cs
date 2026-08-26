@@ -19,11 +19,17 @@ internal sealed class FakeCurrentUser(int userId, params PermissionCode[] permis
     public bool HasPermission(PermissionCode permission) => _permissions.Contains(permission);
 }
 
-/// <summary>Уведомления в тестах не проверяем — пустая реализация.</summary>
-internal sealed class NoopNotificationService : INotificationService
+/// <summary>
+/// Уведомления в большинстве тестов не проверяем — пустая реализация.
+///
+/// Не sealed: тестам про круг адресатов нужно знать, кому ушло, и они
+/// переопределяют CreateAsync. Дублировать ради этого все десять методов
+/// интерфейса значило бы править две заглушки при каждом его изменении.
+/// </summary>
+internal class NoopNotificationService : INotificationService
 {
     // CreateAsync — единственный метод, который дёргает тестируемый путь (уведомления при переходах).
-    public Task<int> CreateAsync(CreateNotificationRequest request, int? currentUserId) => Task.FromResult(0);
+    public virtual Task<int> CreateAsync(CreateNotificationRequest request, int? currentUserId) => Task.FromResult(0);
     public Task DeleteForUserAsync(int id, int currentUserId) => Task.CompletedTask;
     public Task<int> MarkAllAsReadAsync(int currentUserId, NotificationCategory? category) => Task.FromResult(0);
     public Task<PagedNotificationResponse> SearchAsync(NotificationFilterRequest request, int currentUserId, string languageCode) => throw new NotImplementedException();

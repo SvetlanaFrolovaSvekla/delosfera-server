@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260826060047_JournalViews")]
+    partial class JournalViews
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -4848,79 +4851,6 @@ namespace delosfera_server.Migrations
                         .HasName("pk_directory_settings");
 
                     b.ToTable("directory_settings", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Integrations.Mail.MailSettings", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("BaseUrl")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)")
-                        .HasColumnName("base_url");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<bool>("Enabled")
-                        .HasColumnType("boolean")
-                        .HasColumnName("enabled");
-
-                    b.Property<string>("FromAddress")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("from_address");
-
-                    b.Property<string>("FromName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("from_name");
-
-                    b.Property<string>("Host")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("host");
-
-                    b.Property<int>("MaxAttempts")
-                        .HasColumnType("integer")
-                        .HasColumnName("max_attempts");
-
-                    b.Property<string>("PasswordEncrypted")
-                        .HasMaxLength(1024)
-                        .HasColumnType("character varying(1024)")
-                        .HasColumnName("password_encrypted");
-
-                    b.Property<int>("Port")
-                        .HasColumnType("integer")
-                        .HasColumnName("port");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<bool>("UseSsl")
-                        .HasColumnType("boolean")
-                        .HasColumnName("use_ssl");
-
-                    b.Property<string>("User")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("user");
-
-                    b.HasKey("Id")
-                        .HasName("pk_mail_settings");
-
-                    b.ToTable("mail_settings", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Integrations.Mail.OutgoingEmail", b =>
