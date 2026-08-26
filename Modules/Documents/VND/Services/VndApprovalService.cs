@@ -22,6 +22,19 @@ public class VndApprovalService : IVndApprovalService
     // MAX_DEADLINE_MINUTES на клиенте (src/constants/coordinationParams.ts).
     private const int MaxDeadlineMinutes = 90 * 24 * 60;
 
+    // Максимальная длина комментария к резолюции согласующего и комментария инициатора
+    // при повторной отправке. Должна совпадать с MAX_RESOLUTION_COMMENT_LENGTH на клиенте
+    // (src/constants/coordinationParams.ts) — там ограничение только визуальное (maxLength
+    // на textarea), реальную защиту от прямых запросов к API даёт именно эта проверка.
+    private const int MaxResolutionCommentLength = 35000;
+
+    // Максимальное число файлов, которые согласующий может приложить к своей резолюции за
+    // один раз, и максимальный размер КАЖДОГО отдельного файла (не суммарно). Должны
+    // совпадать с MAX_RESOLUTION_ATTACHMENTS и MAX_RESOLUTION_ATTACHMENT_SIZE_BYTES на
+    // клиенте (src/constants/coordinationParams.ts).
+    private const int MaxResolutionAttachments = 5;
+    private const long MaxResolutionAttachmentSizeBytes = 50L * 1024 * 1024;
+
     private readonly DelosferaDbContext _db;
     private readonly IFileStorageService _fileService;
     private readonly INotificationService _notifications;
@@ -219,6 +232,20 @@ public class VndApprovalService : IVndApprovalService
              || request.Decision == ApprovalDecisionType.Reject)
             && string.IsNullOrWhiteSpace(request.Comment))
             throw new InvalidOperationException("Для этого решения необходимо оставить комментарий/сообщение");
+
+        if (request.Comment is { Length: > MaxResolutionCommentLength })
+            throw new InvalidOperationException(
+                $"Комментарий не может превышать {MaxResolutionCommentLength} символов");
+
+        if (request.Files is { Count: > MaxResolutionAttachments })
+            throw new InvalidOperationException(
+                $"К резолюции нельзя приложить больше {MaxResolutionAttachments} файлов");
+
+        var oversizedFile = request.Files?.FirstOrDefault(f => f.Length > MaxResolutionAttachmentSizeBytes);
+        if (oversizedFile is not null)
+            throw new InvalidOperationException(
+                $"Файл \"{oversizedFile.FileName}\" превышает максимальный размер " +
+                $"{MaxResolutionAttachmentSizeBytes / 1024 / 1024} МБ на один файл");
 
         var decision = request.Decision switch
         {
@@ -449,6 +476,10 @@ public class VndApprovalService : IVndApprovalService
         if (!request.AgreesWithAllRemarks && process.DisagreementMatrixRows.Count == 0)
             throw new InvalidOperationException(
                 "Если вы не согласны со всеми замечаниями, заполните матрицу разногласий (хотя бы одна строка)");
+
+        if (request.Comment is { Length: > MaxResolutionCommentLength })
+            throw new InvalidOperationException(
+                $"Комментарий не может превышать {MaxResolutionCommentLength} символов");
 
         var redaction = process.Redaction!;
 
