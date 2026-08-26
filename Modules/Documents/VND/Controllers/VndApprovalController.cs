@@ -101,6 +101,12 @@ public class VndApprovalController : ControllerBase
     public async Task<ActionResult<ApprovalProcessResponse>> Resubmit(
         int vndId, [FromForm] ResubmitAfterRevisionRequest request)
     {
+        // См. комментарий в Decide() выше — биндинг List<IFormFile> через комплексный
+        // [FromForm]-объект ненадёжен, забираем файлы напрямую из Request.Form.Files.
+        request.NewAttachments = Request.Form.Files
+            .Where(f => f.Name == nameof(ResubmitAfterRevisionRequest.NewAttachments))
+            .ToList();
+
         try
         {
             return Ok(await _service.ResubmitAfterRevisionAsync(vndId, request, _currentUser.UserId));

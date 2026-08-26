@@ -29,6 +29,15 @@ public class VndRedaction : IAuditableEntity
     public int? DocFileEnId { get; set; }
     public FileAttachment? DocFileEn { get; set; }
 
+    /// <summary>Когда документ на соответствующем языке в последний раз заменялся файлом
+    /// (в т.ч. при повторной отправке после замечаний — см. ResubmitAfterRevisionAsync).
+    /// Null, если документ ни разу не заменялся после создания редакции — то есть это
+    /// исходный файл, приложенный при создании редакции (см. CreatedAt в этом случае).
+    /// Используется на фронте для метки "Обновлено, дата" рядом с документом редакции.</summary>
+    public DateTime? DocRuUpdatedAt { get; set; }
+    public DateTime? DocKgUpdatedAt { get; set; }
+    public DateTime? DocEnUpdatedAt { get; set; }
+
     /// <summary>Таблица изменений и дополнений (ТИД) — Word-файл, обязателен, если у ВНД уже была
     /// предыдущая редакция (Number > 1, то есть документ актуализируется, а не создаётся впервые).
     /// При повторной отправке после замечаний (ResubmitAfterRevisionAsync) обновляется тем же файлом

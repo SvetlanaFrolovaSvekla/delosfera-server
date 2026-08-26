@@ -41,6 +41,11 @@ public class VndResponse
     /// <summary>Заявлено ли, что текущий цикл актуализации пройдёт без изменений документа.</summary>
     public bool ActualizationPlannedNoChanges { get; set; }
 
+    /// <summary>Сдвигать ли DueActualizationDate после публикации текущего цикла — зафиксировано
+    /// на шаге "Выполнить актуализацию" (см. ActualizationPerformed). Пока этот шаг не пройден,
+    /// значение ещё не окончательное.</summary>
+    public bool ActualizationShiftNextPeriod { get; set; }
+
     /// <summary>Пройден ли шаг "Выполнить актуализацию" в текущем открытом цикле — пока false,
     /// значения ActualizationPlannedNoChanges/сдвига срока ещё не окончательные, и загрузка новой
     /// редакции заблокирована (см. VndDocument.ActualizationPerformed).</summary>

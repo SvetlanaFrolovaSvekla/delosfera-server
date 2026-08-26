@@ -216,6 +216,61 @@ public class VndActualizationService : IVndActualizationService
         return await BuildStateResponseAsync(vnd);
     }
 
+    /// <summary>Изменить уже зафиксированные на шаге "Выполнить актуализацию" настройки (сдвиг
+    /// срока/"без изменений") — пока цикл ещё не ушёл дальше OnActualization (то есть редакция ещё
+    /// не отправлена на согласование и не опубликована напрямую). Доступно назначенному
+    /// ответственному или главному редактору — как и сам шаг PerformAsync. В отличие от PerformAsync
+    /// требует, чтобы шаг уже был выполнен (ActualizationPerformed == true), и не трогает этот флаг.</summary>
+    public async Task<VndActualizationStateResponse> UpdatePerformedSettingsAsync(
+        int vndId, PerformActualizationRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        if (vnd.Status != VndStatus.OnActualization)
+            throw new InvalidOperationException(
+                "Изменить настройки актуализации можно только в процессе актуализации");
+
+        if (!vnd.ActualizationPerformed)
+            throw new InvalidOperationException("Шаг «Выполнить актуализацию» ещё не пройден");
+
+        if (vnd.ActualizationResponsibleUserId != currentUserId && !IsChiefEditor())
+            throw new UnauthorizedAccessException(
+                "Изменить настройки актуализации может только назначенный ответственный или главный редактор ВНД");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+
+        vnd.ActualizationShiftNextPeriod = request.ShiftNextPeriod;
+        vnd.ActualizationPlannedNoChanges = request.PlannedNoChanges;
+
+        var openRecord = await _db.Set<VndActualizationRecord>()
+            .Where(r => r.VndId == vndId && r.PublishedAt == null)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync();
+
+        if (openRecord is not null)
+        {
+            openRecord.ShiftNextPeriod = request.ShiftNextPeriod;
+            openRecord.PlannedNoChanges = request.PlannedNoChanges;
+        }
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ProcessStarted, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} изменил(а) настройки актуализации ВНД «{vnd.TitleRu}»" +
+                (request.PlannedNoChanges ? " (заявлено без изменений)" : ""),
+                $"{actorName} changed actualization settings for VND \"{vnd.TitleRu}\"" +
+                (request.PlannedNoChanges ? " (declared as no changes)" : ""),
+                $"{actorName} «{vnd.TitleRu}» ВНДисинин актуализация жөндөөлөрүн өзгөрттү" +
+                (request.PlannedNoChanges ? " (өзгөртүүсүз деп жарыяланды)" : "")),
+            $"/base-vnd/{vndId}");
+
+        await _db.SaveChangesAsync();
+
+        return await BuildStateResponseAsync(vnd);
+    }
+
     public async Task<VndActualizationRequestResponse> RequestAccessAsync(
         int vndId, RequestActualizationAccessRequest request, int currentUserId)
     {

@@ -15,6 +15,12 @@ public interface IVndActualizationService
     Task<VndActualizationStateResponse> PerformAsync(
         int vndId, PerformActualizationRequest request, int currentUserId);
 
+    /// <summary>Изменить уже зафиксированные на шаге "Выполнить актуализацию" настройки (сдвиг
+    /// срока/"без изменений") — пока цикл ещё не ушёл дальше OnActualization. Доступно назначенному
+    /// ответственному или главному редактору</summary>
+    Task<VndActualizationStateResponse> UpdatePerformedSettingsAsync(
+        int vndId, PerformActualizationRequest request, int currentUserId);
+
     /// <summary>Запросить доступ к актуализации — для ActualizeVnd...ByRequest</summary>
     Task<VndActualizationRequestResponse> RequestAccessAsync(
         int vndId, RequestActualizationAccessRequest request, int currentUserId);

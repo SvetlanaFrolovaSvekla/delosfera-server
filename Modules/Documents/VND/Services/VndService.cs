@@ -438,6 +438,7 @@ public class VndService : IVndService
         ActualizationResponsibleUserName = x.ActualizationResponsibleUser?.FullName,
         ActualizationRequiresApproval = x.ActualizationRequiresApproval,
         ActualizationPlannedNoChanges = x.ActualizationPlannedNoChanges,
+        ActualizationShiftNextPeriod = x.ActualizationShiftNextPeriod,
         ActualizationPerformed = x.ActualizationPerformed,
         AdoptionDate = x.AdoptionDate,
         AdoptionCode = x.AdoptionCode,
@@ -474,10 +475,19 @@ public class VndService : IVndService
         DocFileRuId = x.DocFileRuId,
         DocFileKgId = x.DocFileKgId,
         DocFileEnId = x.DocFileEnId,
+        DocRuUpdatedAt = x.DocRuUpdatedAt,
+        DocKgUpdatedAt = x.DocKgUpdatedAt,
+        DocEnUpdatedAt = x.DocEnUpdatedAt,
         TidFileId = x.TidFileId,
         RequiresApproval = x.RequiresApproval,
         ApprovalStatus = x.ApprovalStatus.ToString(),
         AttachmentFileIds = x.Attachments.Select(a => a.FileAttachmentId).ToList(),
+        Attachments = x.Attachments.Select(a => new VndRedactionAttachmentResponse
+        {
+            FileId = a.FileAttachmentId,
+            FileName = a.FileAttachment?.OriginalFileName ?? $"Вложение_{a.FileAttachmentId}",
+            SizeBytes = a.FileAttachment?.SizeBytes ?? 0
+        }).ToList(),
         CreatedAt = x.CreatedAt
     };
 
@@ -728,7 +738,9 @@ public class VndService : IVndService
         foreach (var file in request.Attachments ?? [])
         {
             var saved = await _fileService.SaveAsync(file, currentUserId);
-            attachmentEntities.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
+            // FileAttachment = saved заполняет навигацию сразу в памяти (без лишнего запроса к
+            // БД) — нужно, чтобы ToRedactionResponse ниже сразу получил оригинальное имя файла.
+            attachmentEntities.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id, FileAttachment = saved });
         }
 
         var nextNumber = (lastRedaction?.Number ?? 0) + 1;
@@ -796,7 +808,7 @@ public class VndService : IVndService
                 "Отправить редакцию на согласование может только причастный к этому ВНД пользователь");
 
         var redaction = await _db.VndRedactions
-                            .Include(x => x.Attachments)
+                            .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment)
                             .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
                         ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
 
@@ -827,6 +839,7 @@ public class VndService : IVndService
                 "Сделать редакцию действующей без согласования может только главный редактор");
 
         var redaction = await _db.VndRedactions
+                            .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment)
                             .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
                         ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
 
@@ -875,7 +888,7 @@ public class VndService : IVndService
 
         var redactions = await _db.VndRedactions
             .Where(x => x.VndId == vndId)
-            .Include(x => x.Attachments)
+            .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment)
             .OrderBy(x => x.Number)
             .ToListAsync();
 
@@ -1150,7 +1163,7 @@ public class VndService : IVndService
         var lastRedaction = await _db.VndRedactions
                                 .Where(r => r.VndId == vndId)
                                 .OrderByDescending(r => r.Number)
-                                .Include(r => r.Attachments)
+                                .Include(r => r.Attachments).ThenInclude(a => a.FileAttachment)
                                 .FirstOrDefaultAsync()
                             ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
 

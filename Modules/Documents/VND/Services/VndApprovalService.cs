@@ -490,28 +490,64 @@ public class VndApprovalService : IVndApprovalService
             throw new InvalidOperationException(
                 "При актуализации ВНД необходимо приложить обновлённый файл ТИД вместе с исправленной редакцией");
 
+        // Момент замены — общий для всех документов, заменённых в рамках одной отправки,
+        // чтобы метки "Обновлено, дата" на фронте показывали одно и то же время.
+        var resubmittedAt = DateTime.UtcNow;
+
         if (request.DocRu is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocRu, currentUserId);
             redaction.DocFileRuId = saved.Id;
+            redaction.DocRuUpdatedAt = resubmittedAt;
         }
 
         if (request.DocKg is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocKg, currentUserId);
             redaction.DocFileKgId = saved.Id;
+            redaction.DocKgUpdatedAt = resubmittedAt;
+        }
+        else if (request.RemoveDocKg)
+        {
+            // Явное удаление документа на кыргызском без замены (см. ResubmitAfterRevisionRequest.RemoveDocKg).
+            redaction.DocFileKgId = null;
+            redaction.DocKgUpdatedAt = null;
         }
 
         if (request.DocEn is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocEn, currentUserId);
             redaction.DocFileEnId = saved.Id;
+            redaction.DocEnUpdatedAt = resubmittedAt;
+        }
+        else if (request.RemoveDocEn)
+        {
+            redaction.DocFileEnId = null;
+            redaction.DocEnUpdatedAt = null;
         }
 
         if (request.Tid is not null)
         {
             var saved = await _fileService.SaveAsync(request.Tid, currentUserId);
             redaction.TidFileId = saved.Id;
+        }
+
+        // Новые вложения к редакции - добавляем в уже отслеживаемую EF навигацию, FK на редакцию
+        // проставится автоматически при SaveChangesAsync (не требует предварительной загрузки
+        // коллекции, см. AddRedactionAsync в VndService для того же паттерна на создании).
+        foreach (var file in request.NewAttachments ?? [])
+        {
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            redaction.Attachments.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
+        }
+
+        if (request.RemovedAttachmentFileIds is { Count: > 0 })
+        {
+            var toRemove = await _db.Set<VndRedactionAttachment>()
+                .Where(a => a.VndRedactionId == redaction.Id &&
+                            request.RemovedAttachmentFileIds.Contains(a.FileAttachmentId))
+                .ToListAsync();
+            _db.Set<VndRedactionAttachment>().RemoveRange(toRemove);
         }
 
         process.RepeatInitiatorComment = request.Comment;
