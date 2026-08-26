@@ -223,6 +223,8 @@ public class DelosferaDbContext : DbContext
     public DbSet<Tender> Tenders => Set<Tender>();
     public DbSet<CommissionMember> CommissionMembers => Set<CommissionMember>();
     public DbSet<TenderBid> TenderBids => Set<TenderBid>();
+    public DbSet<CommissionVote> CommissionVotes => Set<CommissionVote>();
+    public DbSet<TenderMeetingChange> TenderMeetingChanges => Set<TenderMeetingChange>();
     public DbSet<ProcurementContract> ProcurementContracts => Set<ProcurementContract>();
     public DbSet<DeliveryAct> DeliveryActs => Set<DeliveryAct>();
     public DbSet<ProcurementPlan> ProcurementPlans => Set<ProcurementPlan>();

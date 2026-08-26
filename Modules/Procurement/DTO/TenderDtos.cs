@@ -11,7 +11,12 @@ public class CommissionMemberDto
     public CommissionRole Role { get; set; }
     public required string RoleTitle { get; set; }
     public bool IsBoardMember { get; set; }
+
+    /// <summary>Постоянные члены по п. 120: УБУиО, Юридическая служба, Управление безопасности.</summary>
     public bool IsAccountant { get; set; }
+    public bool IsLegal { get; set; }
+    public bool IsSecurity { get; set; }
+
     public bool AttendedOpening { get; set; }
     public string? DissentingOpinion { get; set; }
 
@@ -41,6 +46,33 @@ public class TenderBidDto
     public string? Specification { get; set; }
     public bool IsWinner { get; set; }
     public bool SupplierBlacklisted { get; set; }
+
+    /// <summary>Как проголосовали по этой заявке (п. 24.2).</summary>
+    public List<BidVoteDto> Votes { get; set; } = [];
+
+    public int VotesFor { get; set; }
+    public int VotesAgainst { get; set; }
+    public int VotesAbstained { get; set; }
+
+    /// <summary>
+    /// Заявка прошла голосованием: за неё большинство голосовавших, либо при
+    /// равенстве «за» подал председатель — его голос решающий (п. 24.3).
+    /// </summary>
+    public bool Carried { get; set; }
+
+    /// <summary>Почему заявка не прошла — показывается рядом с итогом голосования.</summary>
+    public string? VoteOutcomeNote { get; set; }
+}
+
+/// <summary>Голос одного члена комиссии по заявке.</summary>
+public class BidVoteDto
+{
+    public int MemberId { get; set; }
+    public required string MemberName { get; set; }
+    public required string RoleTitle { get; set; }
+    public bool IsChairman { get; set; }
+    public VoteChoice Choice { get; set; }
+    public required string ChoiceTitle { get; set; }
 }
 
 /// <summary>Карточка конкурса (PRC-13..16).</summary>
@@ -70,13 +102,18 @@ public class TenderDto
     public List<CommissionMemberDto> Commission { get; set; } = [];
     public List<TenderBidDto> Bids { get; set; } = [];
 
-    /// <summary>Требования к составу комиссии для этой суммы (PRC-14).</summary>
+    /// <summary>Назначенное заседание комиссии; переносы — в MeetingChanges.</summary>
+    public DateOnly? MeetingDate { get; set; }
+    public List<MeetingChangeDto> MeetingChanges { get; set; } = [];
+
+    /// <summary>Состав комиссии по п. 120 Положения: пять членов с правом голоса.</summary>
     public int RequiredSize { get; set; }
     public int RequiredBoardMembers { get; set; }
-    public bool RequiresAccountant { get; set; }
-    public bool RequiresBoardChairman { get; set; }
 
-    /// <summary>Кворум заседания — не менее двух третей состава (PRC-15).</summary>
+    /// <summary>Куратор инициатора — он не может быть председателем комиссии (п. 120).</summary>
+    public int? InitiatorCuratorUserId { get; set; }
+
+    /// <summary>Кворум заседания — не менее двух третей состава (п. 24.1).</summary>
     public int QuorumRequired { get; set; }
     public int Attended { get; set; }
     public bool HasQuorum { get; set; }
@@ -102,6 +139,44 @@ public class CommissionMemberRequest
     public CommissionRole Role { get; set; } = CommissionRole.Member;
     public bool IsBoardMember { get; set; }
     public bool IsAccountant { get; set; }
+    public bool IsLegal { get; set; }
+    public bool IsSecurity { get; set; }
+}
+
+/// <summary>Перенос заседания комиссии — или назначение его впервые.</summary>
+public class MeetingChangeDto
+{
+    public DateOnly? FromDate { get; set; }
+    public DateOnly ToDate { get; set; }
+    public required string Reason { get; set; }
+    public required string ByUserName { get; set; }
+    public DateTime At { get; set; }
+}
+
+public class MeetingScheduleRequest
+{
+    public DateOnly Date { get; set; }
+
+    /// <summary>Основание переноса. При первом назначении не требуется.</summary>
+    public string? Reason { get; set; }
+}
+
+/// <summary>
+/// Внесение голосов по заявке по итогам очного заседания (п. 24.2).
+///
+/// Голоса приходят пачкой на одну заявку, а не по одному: заседание проходит
+/// целиком, и вносить его результат частями значит оставлять протокол
+/// недописанным между сохранениями.
+/// </summary>
+public class BidVotesRequest
+{
+    public List<MemberVote> Votes { get; set; } = [];
+
+    public class MemberVote
+    {
+        public int MemberId { get; set; }
+        public VoteChoice Choice { get; set; }
+    }
 }
 
 public class TenderBidRequest

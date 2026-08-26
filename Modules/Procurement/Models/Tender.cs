@@ -73,6 +73,13 @@ public class Tender : IAuditableEntity
 
     public DateOnly? OpenedOn { get; set; }
 
+    /// <summary>
+    /// Заседание комиссии по вскрытию и решению. Решения принимаются очно (п. 24.2),
+    /// поэтому у заседания есть дата: без неё нельзя ни собрать людей, ни объяснить,
+    /// почему голоса внесены задним числом.
+    /// </summary>
+    public DateOnly? MeetingDate { get; set; }
+
     /// <summary>Приказ Председателя Правления об утверждении состава комиссии (PRC-14).</summary>
     public string? CommissionOrderNumber { get; set; }
     public DateOnly? CommissionOrderDate { get; set; }
@@ -89,6 +96,39 @@ public class Tender : IAuditableEntity
 
     public ICollection<CommissionMember> Commission { get; set; } = new List<CommissionMember>();
     public ICollection<TenderBid> Bids { get; set; } = new List<TenderBid>();
+
+    /// <summary>Переносы заседания — по одному на каждый сдвиг.</summary>
+    public ICollection<TenderMeetingChange> MeetingChanges { get; set; } = new List<TenderMeetingChange>();
+}
+
+/// <summary>
+/// Перенос заседания комиссии.
+///
+/// Заседание срывается по обычным причинам: не собрался кворум, заболел
+/// председатель, поставщик просит продлить приём. Сектор закупок переносит дату —
+/// но перенос остаётся записью, а не тихой правкой поля: по срокам закупки потом
+/// задают вопросы, и «почему решение приняли на три недели позже» должно иметь
+/// письменный ответ.
+/// </summary>
+public class TenderMeetingChange
+{
+    public int Id { get; set; }
+
+    public int TenderId { get; set; }
+    public Tender? Tender { get; set; }
+
+    /// <summary>С какой даты перенесли. Пусто — заседание назначается впервые.</summary>
+    public DateOnly? FromDate { get; set; }
+
+    public DateOnly ToDate { get; set; }
+
+    /// <summary>Основание переноса — печатается в протоколе.</summary>
+    public required string Reason { get; set; }
+
+    public int ByUserId { get; set; }
+    public User? By { get; set; }
+
+    public DateTime At { get; set; }
 }
 
 /// <summary>Член комиссии по закупке (PRC-14).</summary>
@@ -107,8 +147,20 @@ public class CommissionMember
     /// <summary>Член Правления — от их числа зависит допустимость состава.</summary>
     public bool IsBoardMember { get; set; }
 
-    /// <summary>Представитель УБУиО — обязателен для закупок свыше порога.</summary>
+    // Постоянные члены комиссии по п. 120 Положения: УБУиО, Юридическая служба и
+    // Управление безопасности. Требование безусловное — порога суммы у него нет.
+    // Признаки хранятся у члена комиссии, а не выводятся из подразделения:
+    // в комиссию входит «руководитель/работник», а сотрудник может числиться
+    // в другом СП и исполнять эту роль по приказу.
+
+    /// <summary>Представитель УБУиО.</summary>
     public bool IsAccountant { get; set; }
+
+    /// <summary>Представитель Юридической службы.</summary>
+    public bool IsLegal { get; set; }
+
+    /// <summary>Представитель Управления безопасности.</summary>
+    public bool IsSecurity { get; set; }
 
     /// <summary>Участвовал в заседании — от этого считается кворум (PRC-15).</summary>
     public bool AttendedOpening { get; set; }
@@ -161,4 +213,42 @@ public class TenderBid
     public string? Specification { get; set; }
 
     public bool IsWinner { get; set; }
+
+    /// <summary>Голоса членов комиссии по этой заявке.</summary>
+    public ICollection<CommissionVote> Votes { get; set; } = new List<CommissionVote>();
+}
+
+/// <summary>Как проголосовал член комиссии (п. 24.2 Положения).</summary>
+public enum VoteChoice
+{
+    For = 1,
+    Against = 2,
+    Abstained = 3,
+}
+
+/// <summary>
+/// Голос члена комиссии по конкретной заявке (п. 24.2 Положения).
+///
+/// Заседание очное, поэтому голоса вносит в систему секретарь или Сектор закупок
+/// по итогам заседания, а не каждый член сам. Отсюда отдельное поле «кто внёс»:
+/// подпись под протоколом ставит член комиссии, но запись в системе делает не он,
+/// и путать эти два действия нельзя.
+/// </summary>
+public class CommissionVote
+{
+    public int Id { get; set; }
+
+    public int BidId { get; set; }
+    public TenderBid? Bid { get; set; }
+
+    public int MemberId { get; set; }
+    public CommissionMember? Member { get; set; }
+
+    public VoteChoice Choice { get; set; }
+
+    /// <summary>Кто внёс голос в систему — секретарь комиссии или Сектор закупок.</summary>
+    public int RecordedByUserId { get; set; }
+    public User? RecordedBy { get; set; }
+
+    public DateTime At { get; set; }
 }

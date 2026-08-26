@@ -190,11 +190,14 @@ public class AuthorityMatrixService : IAuthorityMatrixService
             Note($"Сумма превышает {Money(p.ProtocolThreshold)} — оформляется протокол закупки (PRC-10)",
                 "п. 11.1 Положения и Приложение № 2");
 
-        if (rule.CommissionRequired && amount > p.CommissionBoardChairThreshold)
-            Note($"Свыше {Money(p.CommissionBoardChairThreshold)} председателем комиссии назначается член Правления, не курирующий инициирующее СП");
-
-        if (rule.CommissionRequired && amount > p.CommissionAccountantThreshold)
-            Note($"Свыше {Money(p.CommissionAccountantThreshold)} в состав комиссии включается сотрудник УБУиО");
+        // Состав комиссии Положение задаёт без оговорок про сумму: пять сотрудников,
+        // председатель — член Правления, не курирующий инициатора, постоянные члены —
+        // УБУиО, Юридическая служба, Управление безопасности. Пороги 3 и 5 млн, при
+        // которых эти требования включались раньше, в Положении отсутствовали.
+        if (rule.CommissionRequired)
+            Note("Комиссия из 5 сотрудников: председатель — член Правления, не курирующий инициатора закупки; " +
+                 "постоянные члены — УБУиО, Юридическая служба, Управление безопасности",
+                "п. 120 Положения");
 
         if (rule.ApprovalAuthority is ApprovalAuthority.Board or ApprovalAuthority.SupervisoryBoard or ApprovalAuthority.Shareholders)
             Note($"Этап «Вынесение на {AuthorityTitle(rule.ApprovalAuthority)}»: продолжение — после загрузки выписки из протокола (PRC-06)");
@@ -245,8 +248,6 @@ public class AuthorityMatrixService : IAuthorityMatrixService
             BalanceAssets: Get("BalanceAssets", 0m),
             Nsk: Get("Nsk", 0m),
             ProtocolThreshold: Get("ProtocolThreshold", 50_000m),
-            CommissionAccountantThreshold: Get("CommissionAccountantThreshold", 5_000_000m),
-            CommissionBoardChairThreshold: Get("CommissionBoardChairThreshold", 3_000_000m),
             // Ноль означает «Положение в базу ВНД ещё не загружено»: тогда примечание
             // остаётся текстом с номером пункта, но без ссылки.
             RegulationDocumentId: Get("RegulationDocumentId", 0m) is var id && id > 0 ? (int)id : null);
@@ -256,7 +257,5 @@ public class AuthorityMatrixService : IAuthorityMatrixService
         decimal BalanceAssets,
         decimal Nsk,
         decimal ProtocolThreshold,
-        decimal CommissionAccountantThreshold,
-        decimal CommissionBoardChairThreshold,
         int? RegulationDocumentId);
 }

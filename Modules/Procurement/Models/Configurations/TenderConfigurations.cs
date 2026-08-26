@@ -31,6 +31,57 @@ public class TenderConfiguration : IEntityTypeConfiguration<Tender>
             .WithOne(x => x.Tender!)
             .HasForeignKey(x => x.TenderId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        b.HasMany(x => x.MeetingChanges)
+            .WithOne(x => x.Tender!)
+            .HasForeignKey(x => x.TenderId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class TenderMeetingChangeConfiguration : IEntityTypeConfiguration<TenderMeetingChange>
+{
+    public void Configure(EntityTypeBuilder<TenderMeetingChange> b)
+    {
+        b.ToTable("procurement_tender_meeting_change");
+        b.Property(x => x.Reason).HasMaxLength(500);
+
+        b.HasIndex(x => new { x.TenderId, x.At });
+
+        b.HasOne(x => x.By)
+            .WithMany()
+            .HasForeignKey(x => x.ByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class CommissionVoteConfiguration : IEntityTypeConfiguration<CommissionVote>
+{
+    public void Configure(EntityTypeBuilder<CommissionVote> b)
+    {
+        b.ToTable("procurement_commission_vote");
+        b.Property(x => x.Choice).HasConversion<int>();
+
+        // Один член комиссии — один голос по заявке. Повторное внесение должно
+        // менять уже поставленный голос, а не добавлять второй.
+        b.HasIndex(x => new { x.BidId, x.MemberId }).IsUnique();
+
+        b.HasOne(x => x.Bid)
+            .WithMany(x => x.Votes)
+            .HasForeignKey(x => x.BidId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Голоса уходят вместе с членом комиссии: если человека из состава
+        // исключили, его голос перестаёт существовать, а не остаётся сиротой.
+        b.HasOne(x => x.Member)
+            .WithMany()
+            .HasForeignKey(x => x.MemberId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.HasOne(x => x.RecordedBy)
+            .WithMany()
+            .HasForeignKey(x => x.RecordedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 

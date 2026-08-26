@@ -79,6 +79,16 @@ public class TenderController : ControllerBase
     public async Task<IActionResult> Score(int bidId, [FromBody] BidScoreRequest request) =>
         await Run(() => _tenders.ScoreBidAsync(bidId, request, _currentUser.UserId));
 
+    /// <summary>Назначить заседание комиссии или перенести его на другую дату.</summary>
+    [HttpPost("tenders/{tenderId:int}/meeting")]
+    public async Task<IActionResult> Meeting(int tenderId, [FromBody] MeetingScheduleRequest request) =>
+        await Run(() => _tenders.ScheduleMeetingAsync(tenderId, request, _currentUser.UserId));
+
+    /// <summary>Внести результаты очного голосования комиссии по заявке.</summary>
+    [HttpPost("bids/{bidId:int}/votes")]
+    public async Task<IActionResult> Votes(int bidId, [FromBody] BidVotesRequest request) =>
+        await Run(() => _tenders.RecordVotesAsync(bidId, request, _currentUser.UserId));
+
     /// <summary>Определить победителя конкурса.</summary>
     [HttpPost("tenders/{tenderId:int}/bids/{bidId:int}/winner")]
     public async Task<IActionResult> Winner(int tenderId, int bidId) =>

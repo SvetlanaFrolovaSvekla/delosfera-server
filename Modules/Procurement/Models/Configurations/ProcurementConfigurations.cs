@@ -81,18 +81,10 @@ public class ProcurementParameterConfiguration : IEntityTypeConfiguration<Procur
                 Unit = "сом", SourceNote = "PRC-10; целевое значение — открытый вопрос В-4 (50 000 против 100 000)",
                 CreatedAt = seedDate, UpdatedAt = seedDate,
             },
-            new
-            {
-                Id = 4, Code = "CommissionAccountantThreshold", TitleRu = "Порог включения сотрудника УБУиО в комиссию", Value = 5_000_000m,
-                Unit = "сом", SourceNote = "PRC-14",
-                CreatedAt = seedDate, UpdatedAt = seedDate,
-            },
-            new
-            {
-                Id = 5, Code = "CommissionBoardChairThreshold", TitleRu = "Порог назначения председателем комиссии члена Правления", Value = 3_000_000m,
-                Unit = "сом", SourceNote = "PRC-14: председатель — член Правления, не курирующий инициирующее СП",
-                CreatedAt = seedDate, UpdatedAt = seedDate,
-            },
+            // Параметры 4 и 5 — «порог включения УБУиО» (5 млн) и «порог председателя
+            // из Правления» (3 млн) — удалены: в Положении таких порогов нет, п. 120
+            // требует и того, и другого безусловно. Пока пороги существовали, мелкие
+            // конкурсы проходили составом, который Положение не допускает.
             new
             {
                 Id = 6, Code = "CuratorActApprovalThreshold", TitleRu = "Порог утверждения акта курирующим членом Правления", Value = 1_000_000m,
@@ -124,8 +116,12 @@ public class AuthorityMatrixRuleConfiguration : IEntityTypeConfiguration<Authori
 
         var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        // Начальные значения — Матрица полномочий Положения о закупках
-        // (утв. Правлением, протокол № 23(8) от 28.05.2024, с изм. 28.03.2025 и 28.04.2025).
+        // Начальные значения — Приложение № 1 «Матрица полномочий» Положения о закупках
+        // товаров, работ и услуг (утв. Правлением, протокол № 38(3) от 30.06.2026).
+        // Этой редакцией отменена предыдущая — № 23(8) от 28.05.2024 с изменениями
+        // 28.03.2025 и 28.04.2025, по которой матрица была заведена изначально.
+        //
+        // Девять правил — девять столбцов Приложения № 1, в том же порядке.
         b.HasData(
             // --- обычные закупки ---
             new
@@ -144,7 +140,10 @@ public class AuthorityMatrixRuleConfiguration : IEntityTypeConfiguration<Authori
                 MinValue = (decimal?)100_000m, MaxValue = (decimal?)500_000m,
                 ApprovalChainRu = "Куратор", CommissionRequired = false,
                 CommissionSize = (int?)null, CommissionMinBoardMembers = (int?)null,
-                ApprovalAuthority = ApprovalAuthority.None,
+                // Приложение № 1, столбец «Прямое заключение договора, от 100 000 до
+                // 500 000»: расход утверждает куратор инициатора. Стояло None —
+                // «утверждение не требуется», и закупка проходила вовсе без него.
+                ApprovalAuthority = ApprovalAuthority.Curator,
                 CommissionNoteRu = "Комиссия не создаётся; обязательно обоснование применения метода (п. 6.6 Положения)",
                 SortOrder = 20, IsActive = true, CreatedAt = seedDate, UpdatedAt = seedDate,
             },
@@ -182,7 +181,11 @@ public class AuthorityMatrixRuleConfiguration : IEntityTypeConfiguration<Authori
             {
                 Id = 6, MethodId = 3, IsAffiliated = false, MinBase = ThresholdBase.PercentOfAssets, MaxBase = ThresholdBase.PercentOfAssets,
                 MinValue = (decimal?)50m, MaxValue = (decimal?)null,
-                ApprovalChainRu = "Куратор + Правление + Совет директоров", CommissionRequired = true,
+                // Приложение № 1, столбец «Конкурс, от 50% балансовой стоимости активов»:
+                // согласуют куратор и Правление, а расход утверждает Общее собрание
+                // акционеров. Совет директоров в цепочке согласования не участвует —
+                // он утверждает расход по предыдущему столбцу, 20–50%.
+                ApprovalChainRu = "Куратор + Правление", CommissionRequired = true,
                 CommissionSize = (int?)5, CommissionMinBoardMembers = (int?)2,
                 ApprovalAuthority = ApprovalAuthority.Shareholders,
                 CommissionNoteRu = "Комиссия из 5 членов, не менее 2 членов Правления",
