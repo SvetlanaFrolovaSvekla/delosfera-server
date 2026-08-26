@@ -49,14 +49,27 @@ public class ApprovalStageResponse
     public required string PrimaryDecision { get; set; }
     public string? PrimaryComment { get; set; }
     public DateTime? PrimaryDecidedAt { get; set; }
+    public List<ApprovalStageAttachmentResponse> PrimaryAttachments { get; set; } = [];
 
     public bool ParticipatesInRepeat { get; set; }
 
     public string? RepeatDecision { get; set; }
     public string? RepeatComment { get; set; }
     public DateTime? RepeatDecidedAt { get; set; }
+    public List<ApprovalStageAttachmentResponse> RepeatAttachments { get; set; } = [];
 
     public string? FinalHoldDecision { get; set; }
     public string? FinalHoldComment { get; set; }
     public DateTime? FinalHoldDecidedAt { get; set; }
+    public List<ApprovalStageAttachmentResponse> FinalHoldAttachments { get; set; } = [];
+}
+
+/// <summary>Файл, приложенный согласующим к резолюции. Список пуст, если редакция уже
+/// согласована — вложения к этому моменту физически удалены, остаётся только текст комментария.</summary>
+public class ApprovalStageAttachmentResponse
+{
+    public int Id { get; set; }
+    public int FileId { get; set; }
+    public required string FileName { get; set; }
+    public long SizeBytes { get; set; }
 }

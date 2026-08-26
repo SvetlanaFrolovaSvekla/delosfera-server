@@ -42,8 +42,7 @@ public class VndActualizationService : IVndActualizationService
     /// чем просто ActualizeAnyVnd(With/Without)Approval: пользователь с правом создавать ВНД
     /// (CreateVndWithApproval/CreateVndWithoutApproval) тоже действует как главный редактор
     /// (см. VndService.IsChiefEditor/VndApprovalService.IsChiefEditor — тот же набор прав).
-    /// Раньше PublishAsync/ConfirmNoChangesAsync использовали разные наборы прав — это и было
-    /// багом (см. фронтовый OpenVndPage.canConsolidate, который чинится тем же способом).</summary>
+    /// </summary>
     private bool IsChiefEditor() =>
         _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
         || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
@@ -148,8 +147,7 @@ public class VndActualizationService : IVndActualizationService
         }
 
         // --- Если ответственным назначен не сам инициировавший старт, а другой пользователь —
-        // тот должен узнать, что ему нужно выполнить шаг "Выполнить актуализацию" (баг №1:
-        // раньше об этом не было ни уведомления, ни задачи).
+        // тот должен узнать, что ему нужно выполнить шаг "Выполнить актуализацию" 
         if (responsibleUserId != currentUserId)
         {
             await NotifyAsync(
@@ -287,8 +285,7 @@ public class VndActualizationService : IVndActualizationService
     /// <summary>Решение по заявке — approve/reject. При одобрении главный редактор может
     /// скорректировать пожелание заявителя насчёт сдвига срока (тогда заявителю отдельно
     /// уходит уведомление об этом). Одновременно все ОСТАЛЬНЫЕ pending-заявки по этому же ВНД
-    /// автоматически отклоняются — решать по ним больше нечего, раз ответственный уже назначен
-    /// (без отдельного комментария, по договорённости).</summary>
+    /// автоматически отклоняются.</summary>
     public async Task<VndActualizationRequestResponse> DecideRequestAsync(
         int requestId, ActualizationRequestDecisionRequest request, int currentUserId)
     {

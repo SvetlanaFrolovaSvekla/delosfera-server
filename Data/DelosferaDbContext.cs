@@ -70,7 +70,8 @@ public class DelosferaDbContext : DbContext
     public DbSet<PlanItemEvent> PlanItemEvents => Set<PlanItemEvent>();
     public DbSet<ActualizationSettings> ActualizationSettings => Set<ActualizationSettings>();
     public DbSet<VndApprovalStage> VndApprovalStages => Set<VndApprovalStage>();
-    
+    public DbSet<VndApprovalStageAttachment> VndApprovalStageAttachments => Set<VndApprovalStageAttachment>();
+
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
 

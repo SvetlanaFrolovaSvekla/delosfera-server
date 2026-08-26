@@ -38,7 +38,7 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
 
         var canViewOtherDrafts = _currentUser.HasPermission(PermissionCode.ViewOtherUsersDrafts);
 
-        return await _db.VndRedactions
+        var canAccessRedactionFile = await _db.VndRedactions
             .Where(r => r.DocFileRuId == fileId
                         || r.DocFileKgId == fileId
                         || r.DocFileEnId == fileId
@@ -47,5 +47,17 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
             .AnyAsync(r => r.Vnd!.Status != VndStatus.Draft
                            || canViewOtherDrafts
                            || r.Vnd.CreatedByUserId == userId, ct);
+        if (canAccessRedactionFile) return true;
+
+        // Вложения к резолюциям согласующих (VndApprovalStageAttachment): доступны инициатору
+        // процесса и всем согласующим на маршруте этого же процесса — пока идёт согласование,
+        // им нужно видеть, что именно приложили друг другу. Как только редакция становится
+        // согласованной, вложения физически удаляются (см. VndApprovalService.CleanupStageAttachmentsAsync),
+        // так что этот доступ актуален лишь на время самого согласования.
+        return await _db.Set<VndApprovalStageAttachment>()
+            .Where(a => a.FileAttachmentId == fileId)
+            .AnyAsync(a => a.VndApprovalStage!.ApprovalProcess!.InitiatorUserId == userId
+                           || a.VndApprovalStage.ApprovalProcess.Stages.Any(s => s.ApproverUserId == userId)
+                           || canViewOtherDrafts, ct);
     }
 }

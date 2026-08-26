@@ -1,4 +1,5 @@
-﻿using delosfera_server.Common.Authorization;
+﻿using System.Linq;
+using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
@@ -53,12 +54,22 @@ public class VndApprovalController : ControllerBase
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
     }
 
-    /// <summary>Решение согласующего по своему этапу</summary>
+    /// <summary>Решение согласующего по своему этапу. multipart/form-data — согласующий
+    /// может приложить файлы к своей резолюции (см. <see cref="ApprovalDecisionRequest.Files"/>).</summary>
     [HttpPost("stages/{stageId:int}/decision")]
+    [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<ApprovalProcessResponse>> Decide(
-        int vndId, int stageId, [FromBody] ApprovalDecisionRequest request)
+        int vndId, int stageId, [FromForm] ApprovalDecisionRequest request)
     {
+        // Биндинг List<IFormFile> через комплексный [FromForm]-объект у ASP.NET Core ненадёжен -
+        // на некоторых конфигурациях подхватывает только один файл или вовсе теряет вложения.
+        // Забираем файлы напрямую из Request.Form.Files — это работает всегда, вне зависимости
+        // от версии биндера.
+        request.Files = Request.Form.Files
+            .Where(f => f.Name == nameof(ApprovalDecisionRequest.Files))
+            .ToList();
+
         try
         {
             return Ok(await _service.DecideAsync(vndId, stageId, request, _currentUser.UserId));

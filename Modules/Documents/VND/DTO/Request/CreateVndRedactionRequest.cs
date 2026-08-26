@@ -1,4 +1,5 @@
 ﻿namespace delosfera_server.Modules.Documents.VND.DTO.Request;
+using System.ComponentModel.DataAnnotations;
 
 public class CreateVndRedactionRequest
 {
@@ -11,6 +12,7 @@ public class CreateVndRedactionRequest
     /// редакции нового ВНД не требуется.</summary>
     public IFormFile? Tid { get; set; }
     
+    [StringLength(500, ErrorMessage = "Описание редакции не может превышать 500 символов!")]
     public string? Description { get; set; }
     
     public List<IFormFile>? Attachments { get; set; }
