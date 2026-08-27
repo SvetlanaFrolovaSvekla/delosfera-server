@@ -95,6 +95,16 @@ public class VndApprovalService : IVndApprovalService
             throw new InvalidOperationException(
                 "На согласование можно отправить только редакцию в статусе черновика (ещё не отправленную)");
 
+        // Актуализационная редакция (Number > 1) не может уйти на согласование без ТИД — раньше это
+        // проверялось при самой загрузке (AddRedactionAsync), теперь ТИД прикладывается отдельным
+        // шагом позже (кнопка "Сформировать или загрузить ТИД"), поэтому проверка переехала сюда и в
+        // VndService.PublishRedactionWithoutApprovalAsync. В цикле "без изменений" (isNoChangesReviewRound)
+        // ТИД уже должен быть проставлен с прошлого цикла, так что проверка там безопасный no-op.
+        if (lastRedaction.Number > 1 && lastRedaction.TidFileId is null)
+            throw new InvalidOperationException(
+                "Прежде чем отправить редакцию на согласование, приложите файл ТИД " +
+                "(Таблица изменений и дополнений) — кнопка «Сформировать или загрузить ТИД»");
+
         var alreadyRunning = await _db.VndApprovalProcesses
             .AnyAsync(x => x.RedactionId == lastRedaction.Id && x.Status != ApprovalProcessStatus.Approved
                                                              && x.Status != ApprovalProcessStatus.Cancelled

@@ -20,5 +20,9 @@ public interface IVndService
     Task DeleteLinkAsync(int vndId, int linkId);
     Task<VndRedactionResponse> EditLastRevisionDirectlyAsync(
         int vndId, EditLastRevisionDirectlyRequest request, int currentUserId);
+    /// <summary>Приложить ТИД к последней редакции (кнопка "Сформировать или загрузить ТИД") —
+    /// см. UploadRedactionTidRequest</summary>
+    Task<VndRedactionResponse> UploadTidForLastRedactionAsync(
+        int vndId, UploadRedactionTidRequest request, int currentUserId);
     Task<List<VndQuickSearchResponse>> QuickSearchAsync(string query, string languageCode, int limit);
 }

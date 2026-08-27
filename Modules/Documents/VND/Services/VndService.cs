@@ -688,12 +688,11 @@ public class VndService : IVndService
                 $"Редакция {lastRedaction.Code} {reason}. Завершите работу с ней, прежде чем загружать новую.");
         }
 
-        // Если у ВНД уже есть предыдущая редакция — это актуализация документа, и ТИД обязателен.
-        // Для самой первой редакции нового ВНД (lastRedaction == null) ТИД не нужен.
-        var requiresTid = lastRedaction is not null;
-        if (requiresTid && request.Tid is null)
-            throw new InvalidOperationException(
-                "При актуализации ВНД необходимо приложить файл ТИД (Таблица изменений и дополнений)");
+        // ТИД больше не требуется прямо при загрузке редакции (даже при актуализации) — его можно
+        // приложить отдельным шагом позже, кнопкой "Сформировать или загрузить ТИД" на странице
+        // ВНД (см. UploadTidForLastRedactionAsync ниже). Но отправить такую редакцию на
+        // согласование или опубликовать без согласования без ТИД всё ещё нельзя — это
+        // проверяется в VndApprovalService.StartAsync и PublishRedactionWithoutApprovalAsync.
 
         // Вторую и последующие редакции можно добавлять только в рамках открытого цикла
         // актуализации (см. VndActualizationService.StartAsync/ConfirmStartAfterRequestAsync) —
@@ -846,6 +845,14 @@ public class VndService : IVndService
         if (redaction.ApprovalStatus != RedactionApprovalStatus.Draft)
             throw new InvalidOperationException(
                 "Сделать действующей без согласования можно только черновик редакции");
+
+        // Актуализационная редакция (Number > 1) не может миновать согласование без ТИД —
+        // раньше это проверялось при самой загрузке (AddRedactionAsync), теперь ТИД
+        // прикладывается отдельным шагом, поэтому проверка переехала сюда и в StartAsync.
+        if (redaction.Number > 1 && redaction.TidFileId is null)
+            throw new InvalidOperationException(
+                "Прежде чем сделать редакцию действующей без согласования, приложите файл ТИД " +
+                "(Таблица изменений и дополнений) — кнопка «Сформировать или загрузить ТИД»");
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
@@ -1212,6 +1219,43 @@ public class VndService : IVndService
         // намеренно не трогаем — это прямое редактирование "как есть", без цикла актуализации.
         if (hasChanges)
             vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        await _db.SaveChangesAsync();
+
+        return ToRedactionResponse(lastRedaction, vnd.CurrentRedactionId);
+    }
+
+    /// <summary>Кнопка "Сформировать или загрузить ТИД" — прикладывает файл ТИД (Таблица изменений
+    /// и дополнений) к уже загруженному черновику последней редакции отдельным шагом, после того
+    /// как поле ТИД убрали из самой формы загрузки редакции (см. AddRedactionAsync выше). Пока
+    /// редакция остаётся черновиком (не отправлена на согласование), ТИД можно приложить или
+    /// заменить сколько угодно раз; отправить на согласование или опубликовать без согласования
+    /// такую редакцию без ТИД нельзя — см. VndApprovalService.StartAsync и
+    /// PublishRedactionWithoutApprovalAsync.</summary>
+    public async Task<VndRedactionResponse> UploadTidForLastRedactionAsync(
+        int vndId, UploadRedactionTidRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
+            throw new UnauthorizedAccessException(
+                "Приложить ТИД может только разработчик, куратор, ответственный исполнитель, " +
+                "инициатор, ответственный за актуализацию или главный редактор ВНД");
+
+        var lastRedaction = await _db.VndRedactions
+                                .Where(r => r.VndId == vndId)
+                                .OrderByDescending(r => r.Number)
+                                .Include(r => r.Attachments).ThenInclude(a => a.FileAttachment)
+                                .FirstOrDefaultAsync()
+                            ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
+
+        if (lastRedaction.ApprovalStatus != RedactionApprovalStatus.Draft)
+            throw new InvalidOperationException(
+                "Приложить ТИД можно только к редакции в статусе черновика (ещё не отправленной на согласование)");
+
+        var saved = await _fileService.SaveAsync(request.Tid, currentUserId);
+        lastRedaction.TidFileId = saved.Id;
 
         await _db.SaveChangesAsync();
 

@@ -256,7 +256,27 @@ public class VndController : ControllerBase
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
-    
+
+    /// <summary>Кнопка "Сформировать или загрузить ТИД" — прикладывает файл ТИД к черновику
+    /// последней редакции отдельным шагом (поле ТИД убрано из формы загрузки редакции).</summary>
+    [HttpPut("{vndId:int}/redactions/last/tid")]
+    [Consumes("multipart/form-data")]
+    [RequirePermission(PermissionCode.ViewVnd)]
+    [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<VndRedactionResponse>> UploadTidForLastRedaction(
+        int vndId, [FromForm] UploadRedactionTidRequest request)
+    {
+        try
+        {
+            return Ok(await _service.UploadTidForLastRedactionAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
     /// <summary>Быстрый поиск ВНД для строки поиска в шапке — по коду и названию (RU/EN/KG)</summary>
     [HttpGet("quick-search")]
     [RequirePermission(PermissionCode.ViewVnd)]

@@ -581,10 +581,20 @@ public class VndActualizationService : IVndActualizationService
             throw new UnauthorizedAccessException(
                 "Опубликовать редакцию может только ответственный за актуализацию, инициатор согласования или главный редактор ВНД");
 
+        // Реквизиты обязательны к обновлению прямо в этой же операции - см. комментарий в
+        // PublishVndActualizationRequest. Пустой AdoptionCode - явный признак незаполненной
+        // формы (required в DTO гарантирует только присутствие поля в JSON, не его содержимое).
+        if (string.IsNullOrWhiteSpace(request.AdoptionCode))
+            throw new InvalidOperationException("Укажите № принятия для консолидации редакции");
+
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        vnd.AdoptionCode = request.AdoptionCode;
+        vnd.AdoptionDate = request.AdoptionDate;
+        vnd.EffectiveDate = request.EffectiveDate;
 
         if (vnd.ActualizationShiftNextPeriod)
         {
