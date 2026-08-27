@@ -15,6 +15,9 @@ public interface IPlanService
     Task<PlanDto> AddItemAsync(int planId, PlanItemRequest request, int actorUserId);
     Task<PlanDto> RemoveItemAsync(int itemId, int actorUserId);
     Task<PlanDto> ApproveAsync(int planId, PlanApproveRequest request, int actorUserId);
+
+    /// <summary>Позиции для выбора в заявке: поиск по коду и предмету.</summary>
+    Task<List<PlanItemLookupDto>> SearchItemsAsync(string? query, int? orgUnitId, int limit);
 }
 
 /// <summary>
@@ -119,8 +122,9 @@ public class PlanService : IPlanService
 
         // Позиция, на которую уже сослались заявки, не удаляется: иначе закупки
         // задним числом станут внеплановыми.
-        var used = await _db.ProcurementRequests.CountAsync(r => r.PlanItem != null
-                                                                 && r.PlanItem.Contains(item.Code));
+        var used = await _db.ProcurementRequests.CountAsync(
+            r => r.PlanItemId == item.Id
+                 || (r.PlanItemId == null && r.PlanItem != null && r.PlanItem.Contains(item.Code)));
         if (used > 0)
             throw new InvalidOperationException(
                 $"На позицию «{item.Code}» ссылаются заявки ({used}) — удаление невозможно");
@@ -169,7 +173,7 @@ public class PlanService : IPlanService
         // Заявки года: факт исполнения плана считается по ним, а не хранится отдельно.
         var requests = await _db.ProcurementRequests
             .Where(r => r.CreatedAt.Year == plan.Year)
-            .Select(r => new {r.Id, r.PlanItem, r.Amount})
+            .Select(r => new {r.Id, r.PlanItemId, r.PlanItem, r.Amount})
             .ToListAsync();
 
         var dto = new PlanDto
@@ -187,10 +191,14 @@ public class PlanService : IPlanService
 
         foreach (var item in plan.Items)
         {
-            // Инициатор пишет ссылку свободным текстом («п. 4.2 Плана закупок на 2026 год»),
-            // поэтому позиция ищется вхождением кода, а не точным равенством.
+            // Заявка ссылается на позицию по-настоящему — по ссылке. Заявки прошлых
+            // лет ссылки не имеют: у них позиция вписана текстом («п. 4.2 Плана
+            // закупок на 2026 год»), и для них остаётся поиск вхождением кода.
             var linked = requests
-                .Where(r => r.PlanItem is not null && r.PlanItem.Contains(item.Code, StringComparison.OrdinalIgnoreCase))
+                .Where(r => r.PlanItemId == item.Id
+                            || (r.PlanItemId is null
+                                && r.PlanItem is not null
+                                && r.PlanItem.Contains(item.Code, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
             foreach (var r in linked)
@@ -224,6 +232,78 @@ public class PlanService : IPlanService
         dto.UnplannedAmount = unplanned.Sum(r => r.Amount);
 
         return dto;
+    }
+
+    /// <summary>
+    /// Позиции для выбора в заявке.
+    ///
+    /// Только утверждённые планы: позиция черновика ещё может исчезнуть или сменить
+    /// код, а заявка ссылается на неё всерьёз. Позиции своего подразделения идут
+    /// первыми — инициатор почти всегда выбирает из них, а чужие нужны редко.
+    /// </summary>
+    public async Task<List<PlanItemLookupDto>> SearchItemsAsync(string? query, int? orgUnitId, int limit)
+    {
+        var q = query?.Trim();
+
+        var items = _db.ProcurementPlanItems
+            .AsNoTracking()
+            .Include(i => i.Plan)
+            .Include(i => i.OrgUnit)
+            .Where(i => i.Plan!.Status == PlanStatus.Approved);
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var pattern = $"%{q}%";
+            items = items.Where(i => EF.Functions.ILike(i.Code, pattern)
+                                     || EF.Functions.ILike(i.Subject, pattern));
+        }
+
+        var found = await items
+            .OrderByDescending(i => i.Plan!.Year)
+            .ThenBy(i => i.Code)
+            .Take(Math.Clamp(limit, 1, 100))
+            .ToListAsync();
+
+        // Выбранное по позициям считаем одним запросом: по ссылке, а для заявок
+        // прошлых лет — по коду, как было до появления справочника.
+        var ids = found.Select(i => i.Id).ToList();
+        var codes = found.Select(i => i.Code).ToList();
+
+        var related = await _db.ProcurementRequests
+            .AsNoTracking()
+            .Where(r => (r.PlanItemId != null && ids.Contains(r.PlanItemId.Value))
+                        || (r.PlanItemId == null && r.PlanItem != null && codes.Contains(r.PlanItem)))
+            .Select(r => new {r.Id, r.PlanItemId, r.PlanItem, r.Amount})
+            .ToListAsync();
+
+        decimal Used(ProcurementPlanItem item) =>
+            related.Where(r => r.PlanItemId == item.Id
+                               || (r.PlanItemId == null && r.PlanItem == item.Code))
+                   .Sum(r => r.Amount);
+
+        var result = found.Select(i =>
+        {
+            var used = Used(i);
+            return new PlanItemLookupDto
+            {
+                Id = i.Id,
+                Code = i.Code,
+                Subject = i.Subject,
+                Year = i.Plan!.Year,
+                PlannedAmount = i.PlannedAmount,
+                UsedAmount = used,
+                RemainingAmount = i.PlannedAmount - used,
+                Quarter = i.Quarter,
+                OrgUnitId = i.OrgUnitId,
+                OrgUnitTitle = i.OrgUnit?.TitleRu,
+                SubjectKindTitle = SubjectKindTitle(i.SubjectKind),
+            };
+        });
+
+        // Свои позиции наверх — порядок внутри групп уже задан запросом.
+        return orgUnitId is { } unit
+            ? result.OrderByDescending(i => i.OrgUnitId == unit).ToList()
+            : result.ToList();
     }
 
     private static string StatusTitle(PlanStatus status) => status switch

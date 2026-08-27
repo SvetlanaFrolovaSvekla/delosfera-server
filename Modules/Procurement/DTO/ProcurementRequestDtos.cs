@@ -55,7 +55,10 @@ public class ProcurementCreateRequest
     public decimal Amount { get; set; }
     public bool IsAffiliated { get; set; }
     public bool HasBudget { get; set; }
-    public string? PlanItem { get; set; }
+
+    /// <summary>Выбранная позиция Плана закупок; пусто — закупка внеплановая.</summary>
+    public int? PlanItemId { get; set; }
+
     public bool HasSpecification { get; set; }
 
     /// <summary>Желаемое окно объявления закупки: «с» и «по».</summary>
@@ -94,7 +97,11 @@ public class ProcurementCardDto
     public decimal Amount { get; set; }
     public bool IsAffiliated { get; set; }
     public bool HasBudget { get; set; }
+
+    /// <summary>Позиция Плана: ссылка и её код с предметом для показа.</summary>
+    public int? PlanItemId { get; set; }
     public string? PlanItem { get; set; }
+
     public bool HasSpecification { get; set; }
 
     /// <summary>Желаемое окно объявления закупки: «с» и «по».</summary>

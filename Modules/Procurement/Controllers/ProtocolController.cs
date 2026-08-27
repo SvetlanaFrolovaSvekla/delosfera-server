@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Procurement.DTO;
 using delosfera_server.Modules.Procurement.Services;
 using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Procurement.Controllers;
 
@@ -36,11 +38,13 @@ public class ProtocolController : ControllerBase
 
     /// <summary>Сформировать или пересобрать протокол по текущей сравнительной таблице.</summary>
     [HttpPost("requests/{id:int}/protocol")]
+    [RequirePermission(PermissionCode.ManageProcurementProtocol)]
     public async Task<IActionResult> Generate(int id) =>
         await Run(() => _protocols.GenerateAsync(id, _currentUser.UserId));
 
     /// <summary>Заполнить разделы: виза УПиА, оценка эксперта, особое мнение, основание выбора.</summary>
     [HttpPut("requests/{id:int}/protocol")]
+    [RequirePermission(PermissionCode.ManageProcurementProtocol)]
     public async Task<IActionResult> Update(int id, [FromBody] ProtocolUpdateRequest request) =>
         await Run(() => _protocols.UpdateAsync(id, request, _currentUser.UserId));
 

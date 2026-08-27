@@ -11,7 +11,15 @@ public record DemoAccount(
     string FullName,
     string RoleTitle,
     string Purpose,
-    PermissionCode[] Permissions);
+    PermissionCode[] Permissions,
+    /// <summary>
+    /// По какому слову искать подразделение учётки в справочнике. Без
+    /// подразделения не строится маршрут согласования, и закупка встаёт на
+    /// «не указано инициирующее подразделение». Слово, а не идентификатор:
+    /// оргструктура приходит из портала, и номера у каждого банка свои.
+    /// Не нашли — оставляем пусто, выдумывать подразделение нельзя.
+    /// </summary>
+    string? UnitMatch = null);
 
 /// <summary>
 /// Учётные записи для обкатки бизнес-подразделениями.
@@ -36,8 +44,10 @@ public static class DemoAccountsSeeder
     public const string Domain = "@test.local";
 
     /// <summary>
-    /// Шесть, а не пять: без делопроизводителя поток служебной записки обрывается
-    /// на регистрации, и проверить его до конца некому.
+    /// Шесть ролей общего контура — без делопроизводителя поток служебной записки
+    /// обрывается на регистрации, и проверить его до конца некому. Плюс три роли
+    /// закупок: бюджетный контроль, организатор процедуры и секретарь комиссии.
+    /// Закупку ведут разные люди, и пройти её одной учёткой нельзя.
     /// </summary>
     public static readonly DemoAccount[] Accounts =
     [
@@ -51,7 +61,8 @@ public static class DemoAccountsSeeder
                 PermissionCode.ExportVnd,
                 PermissionCode.ViewMeetings,
                 PermissionCode.ReportMeetingExecution,
-            ]),
+            ],
+            UnitMatch: "Управление делами"),
 
         new(
             "manager" + Domain,
@@ -67,7 +78,8 @@ public static class DemoAccountsSeeder
                 PermissionCode.ViewLimitedStatistics,
                 PermissionCode.ViewMeetings,
                 PermissionCode.ReportMeetingExecution,
-            ]),
+            ],
+            UnitMatch: "Управление делами"),
 
         new(
             "clerk" + Domain,
@@ -119,6 +131,51 @@ public static class DemoAccountsSeeder
                 PermissionCode.ViewMeetings,
             ]),
 
+        // Закупка проходит через три роли, которых до этого на стенде не было, и
+        // без них процесс обрывался: заявку заводили, а вести её было некому.
+
+        new(
+            "budget" + Domain,
+            "Тестовый Бюджетный контролёр",
+            "УПиА — бюджетный контроль",
+            "Визирует заявки на закупку: предусмотрен ли расход бюджетом Банка",
+            [
+                PermissionCode.ViewVnd,
+                PermissionCode.ActAsApprover,
+                PermissionCode.ViewAllProcurements,
+            ],
+            UnitMatch: "планирования и бюджетирования"),
+
+        new(
+            "purchaser" + Domain,
+            "Тестовый Закупщик",
+            "Сектор закупок",
+            "Организатор закупки: конкурс, комиссия, объявление, договоры, поставщики",
+            [
+                PermissionCode.ViewVnd,
+                PermissionCode.ActAsApprover,
+                PermissionCode.ViewAllProcurements,
+                PermissionCode.ConductProcurement,
+                PermissionCode.ManageProcurementProtocol,
+                PermissionCode.ManageProcurementContracts,
+                PermissionCode.ManageProcurementPlan,
+                PermissionCode.ManageSuppliers,
+            ],
+            UnitMatch: "Административный отдел"),
+
+        new(
+            "commission" + Domain,
+            "Тестовый Секретарь комиссии",
+            "Секретарь комиссии по закупкам",
+            "Ведёт заседание комиссии: явка, голоса, особые мнения, протокол",
+            [
+                PermissionCode.ViewVnd,
+                PermissionCode.ViewAllProcurements,
+                PermissionCode.RecordCommissionDecisions,
+                PermissionCode.ManageProcurementProtocol,
+            ],
+            UnitMatch: "Административный отдел"),
+
         new(
             "admin" + Domain,
             "Тестовый Администратор",
@@ -148,6 +205,19 @@ public static class DemoAccountsSeeder
         var hash = hasher.Hash(password);
         var now = DateTime.UtcNow;
         var changed = false;
+
+        // Подразделения читаем один раз: их две сотни, а учёток девять.
+        var units = db.OrganizationUnits
+            .Select(u => new {u.Id, u.TitleRu})
+            .ToList();
+
+        int? FindUnit(string? match)
+        {
+            if (string.IsNullOrWhiteSpace(match)) return null;
+            return units
+                .FirstOrDefault(u => u.TitleRu.Contains(match, StringComparison.OrdinalIgnoreCase))
+                ?.Id;
+        }
 
         foreach (var account in Accounts)
         {
@@ -181,6 +251,7 @@ public static class DemoAccountsSeeder
                     PasswordHash = hash,
                     IsActive = true,
                     Source = UserSource.Local,
+                    OrgUnitId = FindUnit(account.UnitMatch),
                     CreatedAt = now,
                     UpdatedAt = now,
                 };
@@ -199,6 +270,10 @@ public static class DemoAccountsSeeder
             user.LockedUntil = null;
             user.FailedLoginAttempts = 0;
             user.UpdatedAt = now;
+
+            // Подразделение проставляем только если его нет: если банк переставил
+            // учётку в другое СП осознанно, умолчание не вправе это отменять.
+            user.OrgUnitId ??= FindUnit(account.UnitMatch);
 
             if (user.Roles.All(r => r.Id != role.Id))
                 user.Roles.Add(role);

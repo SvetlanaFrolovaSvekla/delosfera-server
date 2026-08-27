@@ -63,6 +63,50 @@ public static class RolePermissionDefaults
             PermissionCode.ViewCorrespondence,
             PermissionCode.ViewPowersOfAttorney,
         ]),
+
+        // ── Закупки ──────────────────────────────────────────────────────────
+        //
+        // Заявку заводит любой сотрудник, поэтому права на это нет. Дальше
+        // процесс расходится по ролям: Сектор закупок ведёт процедуру,
+        // секретарь комиссии оформляет её решения, УПиА смотрит бюджет.
+
+        ("Администратор", [
+            PermissionCode.ViewAllProcurements,
+            PermissionCode.ConductProcurement,
+            PermissionCode.RecordCommissionDecisions,
+            PermissionCode.ManageProcurementProtocol,
+            PermissionCode.ManageProcurementContracts,
+            PermissionCode.ManageProcurementPlan,
+            PermissionCode.ManageSuppliers,
+        ]),
+
+        // Сектор закупок — организатор: конкурс, комиссия, публикация, договоры,
+        // поставщики. Голоса за комиссию он не вносит: это дело её секретаря.
+        ("Сектор закупок", [
+            PermissionCode.ViewAllProcurements,
+            PermissionCode.ConductProcurement,
+            PermissionCode.ManageProcurementProtocol,
+            PermissionCode.ManageProcurementContracts,
+            PermissionCode.ManageProcurementPlan,
+            PermissionCode.ManageSuppliers,
+        ]),
+
+        // Секретарь комиссии ведёт протокол заседания: явка, голоса, заключения.
+        ("Секретарь комиссии", [
+            PermissionCode.ViewAllProcurements,
+            PermissionCode.RecordCommissionDecisions,
+            PermissionCode.ManageProcurementProtocol,
+        ]),
+
+        // УПиА визирует бюджет по маршруту, отдельного права на это не нужно —
+        // но чтобы визировать, надо видеть чужие заявки, а не только свои.
+        ("УПиА", [
+            PermissionCode.ViewAllProcurements,
+        ]),
+
+        ("бюджетир", [
+            PermissionCode.ViewAllProcurements,
+        ]),
     ];
 
     /// <summary>

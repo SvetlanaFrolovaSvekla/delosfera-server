@@ -182,6 +182,36 @@ public class ProcurementRequestService : IProcurementRequestService
         if (await _db.ProcurementRequests.AnyAsync(x => x.DocumentId == document.Id))
             throw new InvalidOperationException("По этому документу заявка на закупку уже заведена");
 
+        // Позиция Плана выбирается из справочника, поэтому её проверяем: код и
+        // предмет для карточки берём из самой позиции, а не с чужих слов.
+        var planItem = request.PlanItemId is { } planItemId
+            ? await _db.ProcurementPlanItems
+                  .Include(i => i.Plan)
+                  .FirstOrDefaultAsync(i => i.Id == planItemId)
+              ?? throw new KeyNotFoundException("Позиция Плана закупок не найдена")
+            : null;
+
+        if (planItem is not null && planItem.Plan!.Status != PlanStatus.Approved)
+            throw new InvalidOperationException(
+                "Ссылаться можно только на позицию утверждённого Плана: в черновике позиции ещё меняются");
+
+        // Инициирующее подразделение — подразделение инициатора, если он его не
+        // переопределил. Раньше поле оставалось пустым, и заявка упиралась в
+        // «Не указано инициирующее подразделение» на ровном месте.
+        var initiatorUnitId = request.InitiatorUnitId
+                              ?? await _db.Users
+                                  .Where(u => u.Id == actorUserId)
+                                  .Select(u => u.OrgUnitId)
+                                  .FirstOrDefaultAsync();
+
+        var curatorUserId = request.CuratorUserId
+                            ?? (initiatorUnitId is { } unitId
+                                ? await _db.OrganizationUnits
+                                    .Where(u => u.Id == unitId)
+                                    .Select(u => u.CuratorUserId)
+                                    .FirstOrDefaultAsync()
+                                : null);
+
         var entity = new ProcurementRequest
         {
             DocumentId = document.Id,
@@ -191,12 +221,13 @@ public class ProcurementRequestService : IProcurementRequestService
             Amount = request.Amount,
             IsAffiliated = request.IsAffiliated,
             HasBudget = request.HasBudget,
-            PlanItem = request.PlanItem?.Trim(),
+            PlanItemId = planItem?.Id,
+            PlanItem = planItem is null ? null : $"{planItem.Code} — {planItem.Subject}",
             HasSpecification = request.HasSpecification,
             AnnouncementFrom = request.AnnouncementFrom,
             AnnouncementTo = request.AnnouncementTo,
-            InitiatorUnitId = request.InitiatorUnitId,
-            CuratorUserId = request.CuratorUserId,
+            InitiatorUnitId = initiatorUnitId,
+            CuratorUserId = curatorUserId,
             MethodId = method.Id,
             MatrixRuleId = resolved.RuleId,
             ApprovalChain = resolved.ApprovalChain,
@@ -282,6 +313,7 @@ public class ProcurementRequestService : IProcurementRequestService
             Amount = r.Amount,
             IsAffiliated = r.IsAffiliated,
             HasBudget = r.HasBudget,
+            PlanItemId = r.PlanItemId,
             PlanItem = r.PlanItem,
             HasSpecification = r.HasSpecification,
             AnnouncementFrom = r.AnnouncementFrom,
