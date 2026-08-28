@@ -41,18 +41,11 @@ public static class SzStatus
     public const string OnRevision = "OnRevision";
 
     /// <summary>
-    /// Подписана, ждёт решения подписанта о дальнейшем ходе.
-    ///
-    /// Подпись — это согласие с текстом, а не указание, что делать дальше.
-    /// Дальше записка расходится: вопрос выносится на коллегиальный орган,
-    /// потребность в закупке уходит в Сектор закупок, остальное идёт на
-    /// исполнение. Решает это подписант — он последний, кто видел записку
-    /// целиком, и выше него по ней никого нет.
-    /// </summary>
-    public const string OnSignerDecision = "OnSignerDecision";
-
-    /// <summary>
     /// Вынесена на коллегиальный орган: ждёт включения в повестку и решения.
+    ///
+    /// Выносит тот, кому записка адресована, — и только если он вправе: это
+    /// Председатель Правления или исполняющий его обязанности. Начальник
+    /// управления вопрос на Правление не выносит.
     ///
     /// Секретарь органа берёт её из «Вопросов на рассмотрение» в повестку
     /// конкретного заседания — на какое именно, система решить не может.
@@ -83,7 +76,7 @@ public static class SzStatus
     /// <summary>Все коды — для валидации фильтров реестра.</summary>
     public static readonly string[] All =
     [
-        Draft, OnApproval, PendingRegistration, OnSigning, OnSignerDecision, OnBoardReview,
+        Draft, OnApproval, PendingRegistration, OnSigning, OnBoardReview,
         Registered, OnRevision, OnAddresseeDecision, OnExecution, Executed, Rejected,
         Withdrawn, Archived
     ];
@@ -96,7 +89,7 @@ public static class SzStatus
     /// </summary>
     public static readonly string[] Active =
     [
-        Draft, OnApproval, PendingRegistration, OnSigning, OnSignerDecision, OnBoardReview,
+        Draft, OnApproval, PendingRegistration, OnSigning, OnBoardReview,
         Registered, OnRevision, OnAddresseeDecision, OnExecution
     ];
 }

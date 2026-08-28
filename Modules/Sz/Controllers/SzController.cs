@@ -191,15 +191,18 @@ public class SzController : ControllerBase
     /// и запустить маршрут согласования (SZ-01).
     /// </summary>
     /// <summary>
-    /// Решение подписанта о дальнейшем ходе записки: на коллегиальный орган,
-    /// в Сектор закупок либо на исполнение.
+    /// Вынести вопрос по записке на коллегиальный орган.
+    ///
+    /// Доступно тому, кому записка адресована, и только с правом на это:
+    /// Председателю Правления и исполняющему его обязанности.
     /// </summary>
-    [HttpPost("{id:int}/signer-decision")]
-    public async Task<IActionResult> SignerDecision(int id, [FromBody] SzSignerDecisionRequest request)
+    [HttpPost("{id:int}/to-body")]
+    [RequirePermission(PermissionCode.SubmitSzToBody)]
+    public async Task<IActionResult> ToBody(int id, [FromBody] SzToBodyRequest request)
     {
         try
         {
-            return Ok(await _sz.DecideAsSignerAsync(id, request, _currentUser.UserId));
+            return Ok(await _sz.SubmitToBodyAsync(id, request, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
         catch (UnauthorizedAccessException ex) { return StatusCode(403, new {message = ex.Message}); }

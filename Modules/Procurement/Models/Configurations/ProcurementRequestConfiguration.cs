@@ -49,6 +49,13 @@ public class ProcurementRequestConfiguration : IEntityTypeConfiguration<Procurem
             .HasForeignKey(x => x.PlanItemId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Файл ТЗ живёт во вложениях документа: удаление вложения не должно
+        // рушить заявку, поэтому ссылка просто обнуляется.
+        b.HasOne(x => x.SpecificationAttachment)
+            .WithMany()
+            .HasForeignKey(x => x.SpecificationAttachmentId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         b.HasOne(x => x.InitiatorUnit)
             .WithMany()
             .HasForeignKey(x => x.InitiatorUnitId)

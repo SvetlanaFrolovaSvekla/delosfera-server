@@ -76,7 +76,11 @@ public class SzDocument : IAuditableEntity
     public DateTime? AddresseeDecisionAt { get; set; }
     public int? AddresseeDecisionByUserId { get; set; }
 
-    /// <summary>Подписант (Председатель / Заместитель Председателя Правления).</summary>
+    /// <summary>
+    /// Подписант. Оставлен ради записок, заведённых до объединения ролей: раньше
+    /// подписант был отдельным человеком, теперь записку подписывает тот, кому
+    /// она адресована.
+    /// </summary>
     public int? SignerUserId { get; set; }
     public User? SignerUser { get; set; }
 
@@ -130,6 +134,15 @@ public class SzDocument : IAuditableEntity
 
     /// <summary>Поручения по записке: исполнена, когда все они закрыты.</summary>
     public ICollection<SzAssignment> Assignments { get; set; } = new List<SzAssignment>();
+
+    /// <summary>
+    /// Кого автор предлагает в исполнители.
+    ///
+    /// Это ещё не поручения: поручения выдаёт адресат резолюцией, когда подпишет
+    /// записку. Но автор знает, кому вопрос по существу, и подсказать это адресату
+    /// дешевле, чем заставлять его искать исполнителей с нуля.
+    /// </summary>
+    public ICollection<SzProposedAssignee> ProposedAssignees { get; set; } = new List<SzProposedAssignee>();
 
     /// <summary>Обоснование последнего продления срока (норматив 14 дней продлевает СП-исполнитель).</summary>
     public string? DueDateExtensionReason { get; set; }
@@ -213,4 +226,19 @@ public class SzDocument : IAuditableEntity
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>Предложенный исполнитель — подсказка адресату при выдаче поручений.</summary>
+public class SzProposedAssignee
+{
+    public int Id { get; set; }
+
+    public int SzDocumentId { get; set; }
+    public SzDocument? SzDocument { get; set; }
+
+    public int UserId { get; set; }
+    public User? User { get; set; }
+
+    /// <summary>Порядок в списке — так его составил автор.</summary>
+    public int Order { get; set; }
 }

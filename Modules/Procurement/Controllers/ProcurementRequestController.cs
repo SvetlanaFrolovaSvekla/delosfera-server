@@ -46,6 +46,34 @@ public class ProcurementRequestController : ControllerBase
         await Run(() => _requests.CreateAsync(request, _currentUser.UserId));
 
     /// <summary>Отправить заявку на согласование.</summary>
+    /// <summary>Править заявку, пока она черновик или вернулась на доработку.</summary>
+    [HttpPut("requests/{id:int}")]
+    public async Task<IActionResult> Update(int id, [FromBody] ProcurementCreateRequest request)
+    {
+        try
+        {
+            return Ok(await _requests.UpdateAsync(id, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new {message = ex.Message}); }
+        catch (ArgumentException ex) { return BadRequest(new {message = ex.Message}); }
+        catch (InvalidOperationException ex) { return BadRequest(new {message = ex.Message}); }
+    }
+
+    /// <summary>Удалить черновик заявки — только автору и только до отправки.</summary>
+    [HttpDelete("requests/{id:int}")]
+    public async Task<IActionResult> Delete(int id)
+    {
+        try
+        {
+            await _requests.DeleteAsync(id, _currentUser.UserId);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new {message = ex.Message}); }
+        catch (InvalidOperationException ex) { return BadRequest(new {message = ex.Message}); }
+    }
+
     [HttpPost("requests/{id:int}/submit")]
     public async Task<IActionResult> Submit(int id) =>
         await Run(() => _requests.SubmitAsync(id, _currentUser.UserId));

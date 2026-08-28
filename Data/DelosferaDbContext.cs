@@ -241,6 +241,7 @@ public class DelosferaDbContext : DbContext
     public DbSet<SzEmployee> SzEmployees => Set<SzEmployee>();
     public DbSet<SzAssignment> SzAssignments => Set<SzAssignment>();
     public DbSet<SzApprover> SzApprovers => Set<SzApprover>(); // согласующие, выбранные автором записки
+    public DbSet<SzProposedAssignee> SzProposedAssignees => Set<SzProposedAssignee>(); // кого автор предлагает в исполнители
 
     // --- Заседания Правления, КПА и комитетов (ТЗ «Исполнение решений КПА, Правления и Комитетов») ---
     public DbSet<Meeting> Meetings => Set<Meeting>();

@@ -15,6 +15,12 @@ public interface IProcurementRequestService
     Task<ProcurementCountersDto> CountersAsync(int currentUserId);
     Task<ProcurementCardDto> GetAsync(int id);
     Task<ProcurementCardDto> CreateAsync(ProcurementCreateRequest request, int actorUserId);
+
+    /// <summary>Править заявку, пока она черновик или вернулась на доработку.</summary>
+    Task<ProcurementCardDto> UpdateAsync(int id, ProcurementCreateRequest request, int actorUserId);
+
+    /// <summary>Удалить черновик заявки — только автору и только до отправки.</summary>
+    Task DeleteAsync(int id, int actorUserId);
     Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId);
 }
 
@@ -226,7 +232,8 @@ public class ProcurementRequestService : IProcurementRequestService
             HasBudget = request.HasBudget,
             PlanItemId = planItem?.Id,
             PlanItem = planItem is null ? null : $"{planItem.Code} — {planItem.Subject}",
-            HasSpecification = request.HasSpecification,
+            HasSpecification = request.HasSpecification || request.SpecificationAttachmentId is not null,
+            SpecificationAttachmentId = request.SpecificationAttachmentId,
             AnnouncementFrom = request.AnnouncementFrom,
             AnnouncementTo = request.AnnouncementTo,
             InitiatorUnitId = initiatorUnitId,
@@ -328,6 +335,107 @@ public class ProcurementRequestService : IProcurementRequestService
         return слова.Count == 0 ? null : string.Join(" | ", слова);
     }
 
+    /// <summary>
+    /// Правка заявки до отправки.
+    ///
+    /// Без неё заявка, сохранённая неполной, оставалась такой навсегда: отправить
+    /// нельзя, исправить нечем, остаётся завести новую и бросить эту в реестре.
+    ///
+    /// Способ и состав согласования пересчитываются: сумма могла измениться, а
+    /// вместе с ней — и порог матрицы. Оставить прежнее решение значило бы
+    /// отправить заявку по маршруту, к которому она уже не относится.
+    /// </summary>
+    public async Task<ProcurementCardDto> UpdateAsync(
+        int id, ProcurementCreateRequest request, int actorUserId)
+    {
+        var entity = await LoadAsync(id);
+
+        if (entity.Document!.AuthorId != actorUserId)
+            throw new UnauthorizedAccessException("Править заявку может только её автор");
+
+        if (entity.Document.StatusCode is not (ProcurementStatus.Draft or ProcurementStatus.OnRevision))
+            throw new InvalidOperationException(
+                "Править можно черновик или заявку, возвращённую на доработку");
+
+        if (string.IsNullOrWhiteSpace(request.Subject))
+            throw new ArgumentException("Укажите предмет закупки");
+
+        if (request.Amount <= 0)
+            throw new ArgumentException("Укажите ориентировочную сумму закупки");
+
+        var resolved = await _matrix.ResolveAsync(new MatrixResolveRequest
+        {
+            Amount = request.Amount,
+            IsAffiliated = request.IsAffiliated,
+            PreferredMethod = ParseMethod(request.PreferredMethod),
+        });
+
+        if (resolved.RequiresJustification && string.IsNullOrWhiteSpace(request.MethodJustification))
+            throw new ArgumentException(
+                $"Для способа «{resolved.MethodTitle}» обязательно обоснование применения метода");
+
+        var method = await _db.ProcurementMethods.FirstAsync(m => m.Code.ToString() == resolved.MethodCode);
+
+        var planItem = request.PlanItemId is { } planItemId
+            ? await _db.ProcurementPlanItems.Include(i => i.Plan)
+                  .FirstOrDefaultAsync(i => i.Id == planItemId)
+              ?? throw new KeyNotFoundException("Позиция Плана закупок не найдена")
+            : null;
+
+        entity.Subject = request.Subject.Trim();
+        entity.Justification = request.Justification?.Trim();
+        entity.SubjectKind = request.SubjectKind;
+        entity.Amount = request.Amount;
+        entity.IsAffiliated = request.IsAffiliated;
+        entity.HasBudget = request.HasBudget;
+        entity.PlanItemId = planItem?.Id;
+        entity.PlanItem = planItem is null ? null : $"{planItem.Code} — {planItem.Subject}";
+        entity.HasSpecification = request.HasSpecification;
+        entity.SpecificationAttachmentId = request.SpecificationAttachmentId;
+        entity.AnnouncementFrom = request.AnnouncementFrom;
+        entity.AnnouncementTo = request.AnnouncementTo;
+        entity.InitiatorUnitId = request.InitiatorUnitId ?? entity.InitiatorUnitId;
+        entity.CuratorUserId = request.CuratorUserId ?? entity.CuratorUserId;
+        entity.MethodId = method.Id;
+        entity.MatrixRuleId = resolved.RuleId;
+        entity.ApprovalChain = resolved.ApprovalChain;
+        entity.ApprovalAuthority = resolved.ApprovalAuthority;
+        entity.MethodJustification = request.MethodJustification?.Trim();
+        entity.ProtocolRequired = resolved.ProtocolRequired;
+        entity.Document.Title = entity.Subject;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("ProcurementRequest", entity.Id, "Updated", actorUserId,
+            new {entity.Subject, entity.Amount, method = method.ShortTitleRu});
+
+        return await BuildCardAsync(await LoadAsync(id));
+    }
+
+    /// <summary>
+    /// Удаление черновика.
+    ///
+    /// Заявка, заведённая по ошибке, иначе остаётся в реестре навсегда: отправить
+    /// её нельзя, а убрать нечем. Удаляется только своя и только до отправки —
+    /// после неё заявку уже видели согласующие.
+    /// </summary>
+    public async Task DeleteAsync(int id, int actorUserId)
+    {
+        var entity = await LoadAsync(id);
+
+        if (entity.Document!.AuthorId != actorUserId)
+            throw new UnauthorizedAccessException("Удалить заявку может только её автор");
+
+        if (entity.Document.StatusCode != ProcurementStatus.Draft)
+            throw new InvalidOperationException("Удаляется только черновик заявки");
+
+        _db.ProcurementRequests.Remove(entity);
+        _db.Documents.Remove(entity.Document);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("ProcurementRequest", id, "Deleted", actorUserId,
+            new {entity.Subject});
+    }
+
     public async Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId)
     {
         var entity = await LoadAsync(id);
@@ -369,6 +477,7 @@ public class ProcurementRequestService : IProcurementRequestService
             .Include(r => r.Method)
             .Include(r => r.InitiatorUnit)
             .Include(r => r.CuratorUser)
+            .Include(r => r.SpecificationAttachment)
             .AsQueryable();
 
     private async Task<ProcurementRequest> LoadAsync(int id) =>
@@ -392,7 +501,11 @@ public class ProcurementRequestService : IProcurementRequestService
             HasBudget = r.HasBudget,
             PlanItemId = r.PlanItemId,
             PlanItem = r.PlanItem,
-            HasSpecification = r.HasSpecification,
+            HasSpecification = r.HasSpecification || r.SpecificationAttachmentId is not null,
+            InitiatorUnitId = r.InitiatorUnitId,
+            CuratorUserId = r.CuratorUserId,
+            SpecificationAttachmentId = r.SpecificationAttachmentId,
+            SpecificationFileName = r.SpecificationAttachment?.FileName,
             AnnouncementFrom = r.AnnouncementFrom,
             AnnouncementTo = r.AnnouncementTo,
             InitiatorName = r.Document.Author?.FullName,
@@ -447,7 +560,7 @@ public class ProcurementRequestService : IProcurementRequestService
 
     private static void FillBlockers(ProcurementCardDto card, ProcurementRequest r)
     {
-        if (!r.HasSpecification)
+        if (r.SpecificationAttachmentId is null && !r.HasSpecification)
             card.Blockers.Add("Не приложено техническое задание (спецификация)");
 
         if (r.InitiatorUnitId is null)

@@ -75,6 +75,9 @@ public class ProcurementCreateRequest
 
     public bool HasSpecification { get; set; }
 
+    /// <summary>Вложение с техническим заданием — из вложений этой же заявки.</summary>
+    public int? SpecificationAttachmentId { get; set; }
+
     /// <summary>Желаемое окно объявления закупки: «с» и «по».</summary>
     public DateOnly? AnnouncementFrom { get; set; }
     public DateOnly? AnnouncementTo { get; set; }
@@ -111,6 +114,17 @@ public class ProcurementCardDto
     public decimal Amount { get; set; }
     public bool IsAffiliated { get; set; }
     public bool HasBudget { get; set; }
+
+    /// <summary>
+    /// Идентификаторы для правки: экран правки заполняет ими форму, а показывает
+    /// человеку названия — они рядом.
+    /// </summary>
+    public int? InitiatorUnitId { get; set; }
+    public int? CuratorUserId { get; set; }
+
+    /// <summary>Приложенное техническое задание.</summary>
+    public int? SpecificationAttachmentId { get; set; }
+    public string? SpecificationFileName { get; set; }
 
     /// <summary>Позиция Плана: ссылка и её код с предметом для показа.</summary>
     public int? PlanItemId { get; set; }

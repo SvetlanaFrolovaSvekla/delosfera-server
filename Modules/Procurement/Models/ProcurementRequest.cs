@@ -60,8 +60,24 @@ public class ProcurementRequest : IAuditableEntity
     /// </summary>
     public string? PlanItem { get; set; }
 
-    /// <summary>Техническое задание приложено файлом или структурированным текстом.</summary>
+    /// <summary>
+    /// Техническое задание приложено.
+    ///
+    /// У заявок, заведённых до появления файла ТЗ, это отметка, поставленная
+    /// руками: файла за ней нет. Новые заявки ставят её по факту приложенного
+    /// документа — см. SpecificationAttachmentId.
+    /// </summary>
     public bool HasSpecification { get; set; }
+
+    /// <summary>
+    /// Файл технического задания среди вложений заявки.
+    ///
+    /// Отдельной ссылкой, а не просто вложением: без ТЗ заявку не отправить, и
+    /// проверка должна опираться на конкретный документ, а не на галочку, которую
+    /// поставили, потому что она мешала двигаться дальше.
+    /// </summary>
+    public int? SpecificationAttachmentId { get; set; }
+    public DocumentAttachment? SpecificationAttachment { get; set; }
 
     /// <summary>
     /// Желаемые сроки объявления закупки: с какой даты объявление публикуется и по какую

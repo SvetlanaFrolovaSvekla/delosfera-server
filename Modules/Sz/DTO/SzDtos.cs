@@ -20,6 +20,9 @@ public class SzSaveRequest
     /// <summary>Согласующие в порядке прохождения.</summary>
     public List<int> ApproverUserIds { get; set; } = [];
 
+    /// <summary>Кого автор предлагает в исполнители — подсказка адресату.</summary>
+    public List<int> ProposedAssigneeUserIds { get; set; } = [];
+
     /// <summary>Согласование параллельное; иначе — по очереди.</summary>
     public bool ApprovalIsParallel { get; set; }
 
@@ -129,6 +132,9 @@ public class SzDetails : SzListItem
 
     public int? AddresseeUserId { get; set; }
     public string? AddresseeUser { get; set; }
+
+    /// <summary>Кого автор предложил в исполнители — подсказка адресату.</summary>
+    public List<SzApproverDto> ProposedAssignees { get; set; } = [];
 
     /// <summary>Согласующие в порядке прохождения маршрута.</summary>
     public List<SzApproverDto> Approvers { get; set; } = [];
@@ -262,36 +268,16 @@ public class SzForceStatusRequest
     public required string Reason { get; set; }
 }
 
-/// <summary>Куда записка идёт после подписания.</summary>
-public enum SzSignerRoute
-{
-    /// <summary>На коллегиальный орган — вопросом в повестку.</summary>
-    Board = 1,
 
-    /// <summary>В Сектор закупок — заявкой на закупку.</summary>
-    Procurement = 2,
+
+/// <summary>Вынесение вопроса по записке на коллегиальный орган.</summary>
+public class SzToBodyRequest
+{
+    public MeetingBody Body { get; set; }
 
     /// <summary>
-    /// На исполнение. Нужен для записок, которым ни орган, ни закупка не нужны:
-    /// кадровое перемещение, ответ на запрос, внутреннее распоряжение.
+    /// Формулировка вопроса для повестки. Тема записки и вопрос заседания —
+    /// разные тексты; пусто — секретарь возьмёт тему записки.
     /// </summary>
-    Execution = 3,
-}
-
-/// <summary>Решение подписанта о дальнейшем ходе записки.</summary>
-public class SzSignerDecisionRequest
-{
-    public SzSignerRoute Route { get; set; }
-
-    /// <summary>Орган, на который выносится вопрос. Нужен только для Board.</summary>
-    public MeetingBody? Body { get; set; }
-
-    /// <summary>
-    /// Формулировка вопроса для повестки либо предмет закупки — смотря куда
-    /// записка идёт. Пусто — берётся тема записки.
-    /// </summary>
-    public string? Subject { get; set; }
-
-    /// <summary>Пояснение к решению — попадает в журнал действий.</summary>
-    public string? Note { get; set; }
+    public string? Question { get; set; }
 }

@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260828094355_SzAddresseeSignsAndProposedAssignees")]
+    partial class SzAddresseeSignsAndProposedAssignees
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -7295,10 +7298,6 @@ namespace delosfera_server.Migrations
                         .HasColumnName("search_vector")
                         .HasComputedColumnSql("to_tsvector('russian', coalesce(subject, '') || ' ' || coalesce(justification, '') || ' ' || coalesce(plan_item, ''))", true);
 
-                    b.Property<int?>("SpecificationAttachmentId")
-                        .HasColumnType("integer")
-                        .HasColumnName("specification_attachment_id");
-
                     b.Property<string>("Subject")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -7339,9 +7338,6 @@ namespace delosfera_server.Migrations
                         .HasDatabaseName("ix_procurement_request_search_vector");
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchVector"), "GIN");
-
-                    b.HasIndex("SpecificationAttachmentId")
-                        .HasDatabaseName("ix_procurement_request_specification_attachment_id");
 
                     b.ToTable("procurement_request", (string)null);
                 });
@@ -11738,12 +11734,6 @@ namespace delosfera_server.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_procurement_request_procurement_plan_item_plan_item_id");
 
-                    b.HasOne("delosfera_server.Modules.Documents.Models.DocumentAttachment", "SpecificationAttachment")
-                        .WithMany()
-                        .HasForeignKey("SpecificationAttachmentId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_procurement_request_document_attachment_specification_attac");
-
                     b.Navigation("CuratorUser");
 
                     b.Navigation("Document");
@@ -11755,8 +11745,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("Method");
 
                     b.Navigation("PlanItemRef");
-
-                    b.Navigation("SpecificationAttachment");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Procurement.Models.ProposalFile", b =>
