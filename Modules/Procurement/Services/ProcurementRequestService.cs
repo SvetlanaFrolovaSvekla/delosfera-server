@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Models;
+using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
@@ -36,16 +37,18 @@ public class ProcurementRequestService : IProcurementRequestService
     private readonly IAuditService _audit;
     private readonly IAuthorityMatrixService _matrix;
     private readonly IProcurementRouteService _routes;
+    private readonly IBankClock _clock;
 
     public ProcurementRequestService(
         DelosferaDbContext db, IDocumentService documents, IAuditService audit,
-        IAuthorityMatrixService matrix, IProcurementRouteService routes)
+        IAuthorityMatrixService matrix, IProcurementRouteService routes, IBankClock clock)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
         _matrix = matrix;
         _routes = routes;
+        _clock = clock;
     }
 
     public async Task<PagedResult<ProcurementListItemDto>> SearchAsync(
@@ -251,6 +254,80 @@ public class ProcurementRequestService : IProcurementRequestService
         return await BuildCardAsync(await LoadAsync(entity.Id));
     }
 
+    /// <summary>
+    /// Похожие закупки того же подразделения за последние два месяца (п. 10.3).
+    ///
+    /// Положение требует возвращать заявку на консолидацию, если аналогичную
+    /// продукцию закупают дважды и более за два месяца: так закупка дробится и
+    /// каждая часть проходит по более мягкому порогу, чем целое. Отследить это
+    /// глазами нельзя — заявки подают разные люди в разные недели.
+    ///
+    /// Сходство ищется поисковым вектором по предмету: точного признака
+    /// «аналогичной продукции» Положение не даёт, а совпадение слов в предмете —
+    /// то немногое, на что можно опереться. Поэтому это подсказка организатору,
+    /// а не запрет: решение о консолидации принимает он.
+    /// </summary>
+    private async Task<List<SimilarRequestDto>> FindSimilarAsync(ProcurementRequest request)
+    {
+        if (request.InitiatorUnitId is null || string.IsNullOrWhiteSpace(request.Subject))
+            return [];
+
+        var since = _clock.Today.AddMonths(-2).ToDateTime(TimeOnly.MinValue).ToUniversalTime();
+
+        var запрос = BuildSimilarityQuery(request.Subject);
+        if (запрос is null) return [];
+
+        return await _db.ProcurementRequests
+            .AsNoTracking()
+            .Include(r => r.Document)
+            .Where(r => r.Id != request.Id
+                        && r.InitiatorUnitId == request.InitiatorUnitId
+                        && r.SubjectKind == request.SubjectKind
+                        && r.CreatedAt >= since
+                        && r.Document!.StatusCode != ProcurementStatus.Cancelled
+                        && r.Document.StatusCode != ProcurementStatus.Rejected
+                        && r.SearchVector!.Matches(EF.Functions.ToTsQuery("russian", запрос)))
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(10)
+            .Select(r => new SimilarRequestDto
+            {
+                Id = r.Id,
+                RegNumber = r.Document!.RegNumber,
+                Subject = r.Subject,
+                Amount = r.Amount,
+                CreatedAt = r.CreatedAt,
+                StatusCode = r.Document.StatusCode,
+            })
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Полнотекстовый запрос для поиска похожих закупок.
+    ///
+    /// Слова соединяются через ИЛИ, а не И. Дробление выглядит как «Картриджи для
+    /// принтеров, партия 1» и «…партия 2»: требуя совпадения всех слов, мы не
+    /// нашли бы ровно тот случай, ради которого ищем. Короткие слова отбрасываем —
+    /// предлоги и номера партий только шумят.
+    ///
+    /// Возвращает null, если опереться не на что: искать по одному предлогу
+    /// значит вывалить организатору весь реестр.
+    /// </summary>
+    public static string? BuildSimilarityQuery(string? subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject)) return null;
+
+        var слова = subject
+            .Split([' ', ',', ';', '.', '(', ')', '«', '»', '"', '/', '\n', '\t'],
+                StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => w.Trim().ToLowerInvariant())
+            .Where(w => w.Length >= 4 && w.Any(char.IsLetter))
+            .Distinct()
+            .Take(8)
+            .ToList();
+
+        return слова.Count == 0 ? null : string.Join(" | ", слова);
+    }
+
     public async Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId)
     {
         var entity = await LoadAsync(id);
@@ -357,6 +434,12 @@ public class ProcurementRequestService : IProcurementRequestService
             card.SourceSzId = link.FromDocumentId;
             card.SourceSzRegNumber = link.RegNumber;
         }
+
+        // Похожие закупки ищем только пока заявка ещё в работе: по завершённой
+        // консолидировать уже нечего, а запрос стоит полнотекстового поиска.
+        if (r.Document.StatusCode is ProcurementStatus.Draft or ProcurementStatus.OnRevision
+                                  or ProcurementStatus.OnApproval)
+            card.SimilarRequests = await FindSimilarAsync(r);
 
         FillBlockers(card, r);
         return card;
