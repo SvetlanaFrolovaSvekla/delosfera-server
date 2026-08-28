@@ -48,10 +48,12 @@ public static class RolePermissionDefaults
         // на уровне подразделений, и знать об этом заранее — часть работы.
         ("Правлени", [
             PermissionCode.ViewAllSz,
+            PermissionCode.SubmitSzToBody,
         ]),
 
         ("Председател", [
             PermissionCode.ViewAllSz,
+            PermissionCode.SubmitSzToBody,
         ]),
 
         // Секретарь органа отбирает вопросы и видит переписку по своим темам.
@@ -86,6 +88,7 @@ public static class RolePermissionDefaults
         ("Администратор", [
             PermissionCode.ViewAllSz,
             PermissionCode.RegisterSz,
+            PermissionCode.SubmitSzToBody,
             PermissionCode.ViewAllProcurements,
             PermissionCode.ConductProcurement,
             PermissionCode.RecordCommissionDecisions,
