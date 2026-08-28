@@ -1199,6 +1199,13 @@ public class VndService : IVndService
             lastRedaction.DocFileKgId = saved.Id;
             hasChanges = true;
         }
+        else if (request.RemoveDocKg && lastRedaction.DocFileKgId is not null)
+        {
+            // Явное удаление документа на кыргызском без замены (тот же паттерн, что и в
+            // VndApprovalService.ResubmitAfterRevisionAsync).
+            lastRedaction.DocFileKgId = null;
+            hasChanges = true;
+        }
 
         if (request.DocEn is not null)
         {
@@ -1206,11 +1213,37 @@ public class VndService : IVndService
             lastRedaction.DocFileEnId = saved.Id;
             hasChanges = true;
         }
+        else if (request.RemoveDocEn && lastRedaction.DocFileEnId is not null)
+        {
+            lastRedaction.DocFileEnId = null;
+            hasChanges = true;
+        }
 
         if (request.Description is not null && request.Description != lastRedaction.Description)
         {
             lastRedaction.Description = request.Description;
             hasChanges = true;
+        }
+
+        // Новые вложения - добавляем в уже отслеживаемую EF навигацию (тот же паттерн, что и в
+        // VndApprovalService.ResubmitAfterRevisionAsync).
+        foreach (var file in request.NewAttachments ?? [])
+        {
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            lastRedaction.Attachments.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
+            hasChanges = true;
+        }
+
+        if (request.RemovedAttachmentFileIds is { Count: > 0 })
+        {
+            var toRemove = lastRedaction.Attachments
+                .Where(a => request.RemovedAttachmentFileIds.Contains(a.FileAttachmentId))
+                .ToList();
+            if (toRemove.Count > 0)
+            {
+                _db.Set<VndRedactionAttachment>().RemoveRange(toRemove);
+                hasChanges = true;
+            }
         }
 
         // RevisionChangedDate фиксирует факт правки содержимого редакции — обновляем,
