@@ -24,6 +24,10 @@ public class VndRedactionResponse
     /// (первая редакция документа)</summary>
     public int? TidFileId { get; set; }
 
+    /// <summary>Лист согласования — формируется автоматически, когда согласование редакции
+    /// окончательно завершается. Null, пока редакция не согласована.</summary>
+    public int? ApprovalSheetFileId { get; set; }
+
     public bool RequiresApproval { get; set; }
     public required string ApprovalStatus { get; set; }
 

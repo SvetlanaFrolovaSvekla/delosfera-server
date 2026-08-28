@@ -52,6 +52,14 @@ public class VndRedaction : IAuditableEntity
     // --- Прочие вложения (Word/Excel/презентации и др.)
     public ICollection<VndRedactionAttachment> Attachments { get; set; } = new List<VndRedactionAttachment>();
 
+    /// <summary>Лист согласования — формируется автоматически по шаблону (см.
+    /// ApprovalSheetGenerator) в момент, когда согласование редакции окончательно завершается
+    /// (см. VndApprovalService.FinalizeApprovalAsync). Null, пока редакция не согласована. Это
+    /// отдельное "специальное" вложение — не входит в Attachments, показывается в интерфейсе в
+    /// отдельном блоке "Специальные вложения".</summary>
+    public int? ApprovalSheetFileId { get; set; }
+    public FileAttachment? ApprovalSheetFile { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

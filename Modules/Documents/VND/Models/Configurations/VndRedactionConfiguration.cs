@@ -42,6 +42,11 @@ public class VndRedactionConfiguration : IEntityTypeConfiguration<VndRedaction>
             .HasForeignKey(x => x.TidFileId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(x => x.ApprovalSheetFile)
+            .WithMany()
+            .HasForeignKey(x => x.ApprovalSheetFileId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasMany(x => x.Attachments)
             .WithOne(x => x.VndRedaction)
             .HasForeignKey(x => x.VndRedactionId)

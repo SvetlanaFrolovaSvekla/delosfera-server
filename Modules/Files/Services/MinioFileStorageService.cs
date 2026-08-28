@@ -51,6 +51,38 @@ public class MinioFileStorageService : IFileStorageService
         return entity;
     }
 
+    public async Task<FileAttachment> SaveGeneratedAsync(
+        byte[] content, string fileName, string contentType, int userId, CancellationToken ct = default)
+    {
+        var hash = Convert.ToHexStringLower(SHA256.HashData(content));
+        var objectName = $"{Guid.NewGuid()}/{fileName}";
+
+        await using (var stream = new MemoryStream(content))
+        {
+            await _minio.PutObjectAsync(new PutObjectArgs()
+                .WithBucket(_bucket)
+                .WithObject(objectName)
+                .WithStreamData(stream)
+                .WithObjectSize(content.LongLength)
+                .WithContentType(contentType), ct);
+        }
+
+        var entity = new FileAttachment
+        {
+            OriginalFileName = fileName,
+            ContentType = contentType,
+            SizeBytes = content.LongLength,
+            StorageKey = objectName,
+            Bucket = _bucket,
+            Hash = hash,
+            UploadedByUserId = userId
+        };
+
+        _db.FileAttachments.Add(entity);
+        await _db.SaveChangesAsync(ct);
+        return entity;
+    }
+
     public async Task<(Stream, string, string)> DownloadAsync(int fileId, CancellationToken ct = default)
     {
         var meta = await _db.FileAttachments.FindAsync([fileId], ct)

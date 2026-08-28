@@ -41,6 +41,7 @@ public class VndApprovalService : IVndApprovalService
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<VndApprovalService> _logger;
     private readonly IActivityLogService _activityLog;
+    private readonly IApprovalSheetGenerator _approvalSheetGenerator;
 
     public VndApprovalService(
         DelosferaDbContext db,
@@ -48,7 +49,8 @@ public class VndApprovalService : IVndApprovalService
         INotificationService notifications,
         ICurrentUserService currentUser,
         ILogger<VndApprovalService> logger,
-        IActivityLogService activityLog)
+        IActivityLogService activityLog,
+        IApprovalSheetGenerator approvalSheetGenerator)
     {
         _db = db;
         _fileService = fileService;
@@ -56,6 +58,7 @@ public class VndApprovalService : IVndApprovalService
         _currentUser = currentUser;
         _logger = logger;
         _activityLog = activityLog;
+        _approvalSheetGenerator = approvalSheetGenerator;
     }
 
     private bool IsChiefEditor() =>
@@ -937,6 +940,12 @@ public class VndApprovalService : IVndApprovalService
         // (PrimaryComment/RepeatComment/FinalHoldComment) остаётся как есть.
         await CleanupStageAttachmentsAsync(process);
 
+        // Формируем Лист согласования по шаблону: название ВНД, ФИО и должность каждого
+        // согласующего, единая дата (момент окончательного согласования) и результат
+        // "Согласовано" для всех строк. Достижимо и из фонового таймаут-джоба
+        // (ProcessTimeoutsAsync) - без HTTP-запроса, поэтому генерация полностью на сервере.
+        await GenerateApprovalSheetAsync(process, redaction);
+
         // Согласование завершено, но документ ещё не публикуется автоматически -
         // CurrentRedactionId и RevisionChangedDate выставит VndActualizationService.PublishAsync
         // в момент явной публикации из статуса Consolidation.
@@ -976,6 +985,55 @@ public class VndApprovalService : IVndApprovalService
 
         await NotifyAsync(
             notice, NotificationCategory.Approval, process.VndId, null, consolidationRecipients.ToArray());
+    }
+
+    /// <summary>Формирует и сохраняет Лист согласования редакции (см. ApprovalSheetGenerator),
+    /// заполняя его ФИО/должностью всех согласующих этого процесса (process.Stages - по одной
+    /// строке на согласующего, порядок как в маршрутном листе) и датой этого момента - она общая
+    /// для всех строк, т.к. фиксирует не решение конкретного согласующего, а момент, когда
+    /// редакция в целом стала согласованной.</summary>
+    private async Task GenerateApprovalSheetAsync(VndApprovalProcess process, VndRedaction redaction)
+    {
+        var approverIds = process.Stages
+            .OrderBy(s => s.Order)
+            .Select(s => s.ApproverUserId)
+            .ToList();
+
+        var usersById = await _db.Users
+            .Include(u => u.Position)
+            .Where(u => approverIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id);
+
+        var approvers = approverIds
+            .Select(id => usersById.TryGetValue(id, out var u)
+                ? new ApprovalSheetApproverInfo(u.FullName, u.Position?.TitleRu)
+                : new ApprovalSheetApproverInfo("", null))
+            .ToList();
+
+        var approvedAt = process.CompletedAt ?? DateTime.UtcNow;
+
+        byte[] content;
+        try
+        {
+            content = _approvalSheetGenerator.Generate(process.Vnd!.TitleRu, approvedAt, approvers);
+        }
+        catch (Exception ex)
+        {
+            // Лист согласования - вспомогательный документ; сбой его генерации не должен срывать
+            // само согласование редакции (уже зафиксированное выше).
+            _logger.LogError(ex, "Не удалось сформировать Лист согласования для редакции {RedactionId}",
+                redaction.Id);
+            return;
+        }
+
+        var fileName = $"{redaction.Code}_Лист_согласования.docx";
+        const string wordContentType =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+        var saved = await _fileService.SaveGeneratedAsync(
+            content, fileName, wordContentType, process.InitiatorUserId);
+
+        redaction.ApprovalSheetFileId = saved.Id;
     }
 
     /// <summary>Если инициатор согласования сам числится согласующим на одном из этапов, его
