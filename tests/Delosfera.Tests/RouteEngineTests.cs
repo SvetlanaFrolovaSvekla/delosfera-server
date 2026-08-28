@@ -394,27 +394,5 @@ public class RouteEngineTests
         return (instance.Id, participant.Id);
     }
 
-    /// <summary>Замещений нет: проверяется движок, а не подмена согласующего.</summary>
-    private sealed class NoSubstitutions : ISubstitutionService
-    {
-        public Task<List<SubstitutionDto>> ListAsync(int? userId) => Task.FromResult(new List<SubstitutionDto>());
 
-        public Task<SubstitutionDto> CreateAsync(SubstitutionCreateRequest request, int actorUserId) =>
-            throw new NotSupportedException();
-
-        public Task<SubstitutionDto> CancelAsync(int id, int actorUserId) => throw new NotSupportedException();
-
-        public Task<List<int>> GetActingForUserIdsAsync(int substituteUserId) =>
-            Task.FromResult(new List<int>());
-    }
-
-    /// <summary>Уведомления в этих проверках не участвуют — важны переходы состояний.</summary>
-    private sealed class SilentNotifier : IWorkflowNotifier
-    {
-        public Task TaskAssignedAsync(IEnumerable<int> participantIds) => Task.CompletedTask;
-        public Task OverdueAsync(int participantId, bool escalated) => Task.CompletedTask;
-
-        public Task RouteFinishedAsync(int routeInstanceId, RouteInstanceStatus status, string? comment) =>
-            Task.CompletedTask;
-    }
 }

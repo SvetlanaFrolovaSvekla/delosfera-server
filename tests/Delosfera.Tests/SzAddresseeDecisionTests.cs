@@ -158,7 +158,10 @@ public class SzAddresseeDecisionTests
         // а не видимости реестра.
         var currentUser = new FakeCurrentUser(0, PermissionCode.ViewAllSz);
 
-        return (new SzService(db, documents, audit, engine, new PassthroughHtml(), currentUser, handler), engine);
+        var procurement = new SzProcurementService(db, documents, audit);
+
+        return (new SzService(db, documents, audit, engine, new PassthroughHtml(),
+            currentUser, handler, procurement), engine);
     }
 
     /// <summary>
@@ -309,36 +312,6 @@ public class SzAddresseeDecisionTests
             Task.FromResult(new List<int>());
     }
 
-    /// <summary>Уведомления адресату здесь не проверяются — важен переход статуса.</summary>
-    private sealed class SilentNotifications : INotificationService
-    {
-        public Task<int> CreateAsync(CreateNotificationRequest request, int? currentUserId) =>
-            Task.FromResult(0);
-
-        public Task<PagedNotificationResponse> SearchAsync(
-            NotificationFilterRequest request, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task<NotificationResponse> GetByIdAsync(int id, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task<NotificationResponse> MarkAsReadAsync(int id, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task<NotificationResponse> MarkAsUnreadAsync(int id, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task<int> MarkAllAsReadAsync(int currentUserId, NotificationCategory? category) =>
-            throw new NotSupportedException();
-
-        public Task<NotificationResponse> ToggleFavoriteAsync(int id, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task DeleteForUserAsync(int id, int currentUserId) => throw new NotSupportedException();
-
-        public Task<NotificationCountsResponse> GetCountsAsync(int currentUserId) =>
-            throw new NotSupportedException();
-    }
 
     private sealed class SilentNotifier : IWorkflowNotifier
     {

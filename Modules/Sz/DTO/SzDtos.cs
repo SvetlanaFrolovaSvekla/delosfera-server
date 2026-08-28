@@ -1,6 +1,8 @@
 using System.Text.Json;
 using delosfera_server.Modules.Sz.Models;
 
+using delosfera_server.Modules.Meetings.Models;
+
 namespace delosfera_server.Modules.Sz.DTO;
 
 /// <summary>Создание/правка черновика служебной записки.</summary>
@@ -258,4 +260,38 @@ public class SzForceStatusRequest
 
     /// <summary>Основание перевода — попадает в журнал действий.</summary>
     public required string Reason { get; set; }
+}
+
+/// <summary>Куда записка идёт после подписания.</summary>
+public enum SzSignerRoute
+{
+    /// <summary>На коллегиальный орган — вопросом в повестку.</summary>
+    Board = 1,
+
+    /// <summary>В Сектор закупок — заявкой на закупку.</summary>
+    Procurement = 2,
+
+    /// <summary>
+    /// На исполнение. Нужен для записок, которым ни орган, ни закупка не нужны:
+    /// кадровое перемещение, ответ на запрос, внутреннее распоряжение.
+    /// </summary>
+    Execution = 3,
+}
+
+/// <summary>Решение подписанта о дальнейшем ходе записки.</summary>
+public class SzSignerDecisionRequest
+{
+    public SzSignerRoute Route { get; set; }
+
+    /// <summary>Орган, на который выносится вопрос. Нужен только для Board.</summary>
+    public MeetingBody? Body { get; set; }
+
+    /// <summary>
+    /// Формулировка вопроса для повестки либо предмет закупки — смотря куда
+    /// записка идёт. Пусто — берётся тема записки.
+    /// </summary>
+    public string? Subject { get; set; }
+
+    /// <summary>Пояснение к решению — попадает в журнал действий.</summary>
+    public string? Note { get; set; }
 }

@@ -21,6 +21,8 @@ namespace delosfera_server.Modules.Sz.Services;
 public class SzRouteCompletionHandler : IRouteCompletionHandler
 {
     /// <summary>Тип задачи адресата — по нему её находят и закрывают при решении.</summary>
+    public const string SignerDecisionTask = "Решение подписанта";
+
     public const string AddresseeDecisionTask = "AddresseeDecision";
 
     private readonly DelosferaDbContext _db;
@@ -79,7 +81,12 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
             RouteInstanceStatus.Approved when !подписание && !ужеЗарегистрирована
                 => SzStatus.PendingRegistration,
 
-            // Подписано — дальше решение адресата, а если его нет, то исполнение.
+            // Подписано — подписант решает, куда записка идёт дальше: на
+            // коллегиальный орган, в Сектор закупок или на исполнение. Подпись
+            // говорит «с текстом согласен», но не говорит, что делать дальше.
+            RouteInstanceStatus.Approved when подписание => SzStatus.OnSignerDecision,
+
+            // Подписанта нет — записка идёт прежним путём.
             RouteInstanceStatus.Approved when sz.AddresseeUserId is not null => SzStatus.OnAddresseeDecision,
             RouteInstanceStatus.Approved => SzStatus.OnExecution,
 
@@ -99,6 +106,38 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
             await CreateAddresseeTaskAsync(sz);
             await NotifyAddresseeAsync(sz, actorUserId);
         }
+
+        // Подписант только что подписал — и тут же должен решить, куда записка
+        // идёт. Без задачи в списке это решение теряется: он закрыл карточку,
+        // а записка стоит и ждёт его же.
+        if (status == SzStatus.OnSignerDecision)
+            await CreateSignerDecisionTaskAsync(sz);
+    }
+
+    /// <summary>Задача подписанту: решить, куда записка идёт после подписания.</summary>
+    public async Task CreateSignerDecisionTaskAsync(SzDocument sz)
+    {
+        if (sz.SignerUserId is not { } signer) return;
+
+        var exists = await _db.WorkflowTasks.AnyAsync(t =>
+            t.DocumentId == sz.DocumentId
+            && t.Type == SignerDecisionTask
+            && t.State == WorkflowTaskState.Open);
+
+        if (exists) return;
+
+        _db.WorkflowTasks.Add(new WorkflowTask
+        {
+            DocumentId = sz.DocumentId,
+            SourceEntityId = sz.Id,
+            AssigneeUserId = signer,
+            Type = SignerDecisionTask,
+            DueAt = sz.DueDate?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+            State = WorkflowTaskState.Open,
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>

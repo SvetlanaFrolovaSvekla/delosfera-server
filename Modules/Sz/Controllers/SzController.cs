@@ -190,6 +190,23 @@ public class SzController : ControllerBase
     /// Зарегистрировать записку: присвоить номер, дату, срок исполнения
     /// и запустить маршрут согласования (SZ-01).
     /// </summary>
+    /// <summary>
+    /// Решение подписанта о дальнейшем ходе записки: на коллегиальный орган,
+    /// в Сектор закупок либо на исполнение.
+    /// </summary>
+    [HttpPost("{id:int}/signer-decision")]
+    public async Task<IActionResult> SignerDecision(int id, [FromBody] SzSignerDecisionRequest request)
+    {
+        try
+        {
+            return Ok(await _sz.DecideAsSignerAsync(id, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new {message = ex.Message}); }
+        catch (ArgumentException ex) { return BadRequest(new {message = ex.Message}); }
+        catch (InvalidOperationException ex) { return BadRequest(new {message = ex.Message}); }
+    }
+
     [HttpPost("{id:int}/register")]
     [RequirePermission(PermissionCode.RegisterSz)]
     public async Task<IActionResult> Register(int id, [FromBody] RegisterRequest? req = null)

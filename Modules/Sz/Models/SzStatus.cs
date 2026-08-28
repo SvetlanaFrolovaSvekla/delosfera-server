@@ -41,6 +41,25 @@ public static class SzStatus
     public const string OnRevision = "OnRevision";
 
     /// <summary>
+    /// Подписана, ждёт решения подписанта о дальнейшем ходе.
+    ///
+    /// Подпись — это согласие с текстом, а не указание, что делать дальше.
+    /// Дальше записка расходится: вопрос выносится на коллегиальный орган,
+    /// потребность в закупке уходит в Сектор закупок, остальное идёт на
+    /// исполнение. Решает это подписант — он последний, кто видел записку
+    /// целиком, и выше него по ней никого нет.
+    /// </summary>
+    public const string OnSignerDecision = "OnSignerDecision";
+
+    /// <summary>
+    /// Вынесена на коллегиальный орган: ждёт включения в повестку и решения.
+    ///
+    /// Секретарь органа берёт её из «Вопросов на рассмотрение» в повестку
+    /// конкретного заседания — на какое именно, система решить не может.
+    /// </summary>
+    public const string OnBoardReview = "OnBoardReview";
+
+    /// <summary>
     /// Согласование пройдено, записка у адресата: решение по существу выносит он,
     /// и до этого решения записка не считается отработанной.
     /// </summary>
@@ -64,8 +83,9 @@ public static class SzStatus
     /// <summary>Все коды — для валидации фильтров реестра.</summary>
     public static readonly string[] All =
     [
-        Draft, OnApproval, PendingRegistration, OnSigning, Registered, OnRevision,
-        OnAddresseeDecision, OnExecution, Executed, Rejected, Withdrawn, Archived
+        Draft, OnApproval, PendingRegistration, OnSigning, OnSignerDecision, OnBoardReview,
+        Registered, OnRevision, OnAddresseeDecision, OnExecution, Executed, Rejected,
+        Withdrawn, Archived
     ];
 
     /// <summary>
@@ -76,7 +96,7 @@ public static class SzStatus
     /// </summary>
     public static readonly string[] Active =
     [
-        Draft, OnApproval, PendingRegistration, OnSigning, Registered,
-        OnRevision, OnAddresseeDecision, OnExecution
+        Draft, OnApproval, PendingRegistration, OnSigning, OnSignerDecision, OnBoardReview,
+        Registered, OnRevision, OnAddresseeDecision, OnExecution
     ];
 }

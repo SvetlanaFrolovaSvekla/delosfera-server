@@ -267,6 +267,8 @@ public static class SzStatusTitles
         SzStatus.Registered => "Зарегистрирована",
         SzStatus.OnApproval => "На согласовании",
         SzStatus.OnSigning => "На подписании",
+        SzStatus.OnSignerDecision => "Решение подписанта",
+        SzStatus.OnBoardReview => "Вынесена на заседание",
         SzStatus.OnRevision => "На доработке",
         SzStatus.OnAddresseeDecision => "На решении адресата",
         SzStatus.OnExecution => "На исполнении",

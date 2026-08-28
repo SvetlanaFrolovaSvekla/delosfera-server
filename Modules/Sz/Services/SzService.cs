@@ -33,6 +33,12 @@ public interface ISzService
     Task<SzDetails> DecideAsAddresseeAsync(int id, string decision, int actorUserId);
 
     /// <summary>
+    /// Решение подписанта о дальнейшем ходе записки: на коллегиальный орган,
+    /// в Сектор закупок либо на исполнение.
+    /// </summary>
+    Task<SzDetails> DecideAsSignerAsync(int id, SzSignerDecisionRequest request, int actorUserId);
+
+    /// <summary>
     /// Зарегистрировать: присвоить номер, дату и срок исполнения, запустить маршрут
     /// согласования (SZ-01). Шаблон берётся из вида записки или указывается явно.
     /// </summary>
@@ -66,12 +72,14 @@ public class SzService : ISzService
     private readonly IDocumentHtmlService _html;
     private readonly ICurrentUserService _currentUser;
     private readonly SzRouteCompletionHandler _addresseeTasks;
+    private readonly ISzProcurementService _procurement;
 
     public SzService(
         DelosferaDbContext db, IDocumentService documents, IAuditService audit,
         IRouteEngine routeEngine, IDocumentHtmlService html, ICurrentUserService currentUser,
-        SzRouteCompletionHandler addresseeTasks)
+        SzRouteCompletionHandler addresseeTasks, ISzProcurementService procurement)
     {
+        _procurement = procurement;
         _currentUser = currentUser;
         _addresseeTasks = addresseeTasks;
         _db = db;
@@ -474,6 +482,93 @@ public class SzService : ISzService
         await _db.SaveChangesAsync();
 
         await _audit.LogAsync("Sz", sz.Id, "AddresseeDecided", actorUserId);
+
+        return (await GetAsync(sz.Id))!;
+    }
+
+    /// <summary>
+    /// Решение подписанта о дальнейшем ходе записки.
+    ///
+    /// Подпись говорит «с текстом согласен», но не говорит, что делать дальше.
+    /// Дальше записка расходится по трём путям, и выбирает подписант — он
+    /// последний, кто видел её целиком, и выше него по ней никого нет.
+    ///
+    /// На орган записка уходит не сразу в повестку: секретарь берёт её из
+    /// «Вопросов на рассмотрение» в повестку конкретного заседания. На какое
+    /// именно — система решить не может, это дело секретаря.
+    /// </summary>
+    public async Task<SzDetails> DecideAsSignerAsync(
+        int id, SzSignerDecisionRequest request, int actorUserId)
+    {
+        var sz = await _db.SzDocuments.Include(x => x.Document)
+            .FirstOrDefaultAsync(x => x.Id == id)
+            ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        if (sz.Document!.StatusCode != SzStatus.OnSignerDecision)
+            throw new InvalidOperationException(
+                "Решение о дальнейшем ходе выносится после подписания записки");
+
+        if (sz.SignerUserId != actorUserId)
+            throw new UnauthorizedAccessException(
+                "Решение о дальнейшем ходе записки выносит её подписант");
+
+        var subject = request.Subject?.Trim();
+
+        switch (request.Route)
+        {
+            case SzSignerRoute.Board:
+            {
+                var body = request.Body
+                    ?? throw new ArgumentException("Укажите орган, на который выносится вопрос");
+
+                sz.SubmitToBody = body;
+                sz.SubmitToBodyQuestion = subject;
+                sz.SubmitToBodyRequestedAt = DateTime.UtcNow;
+                sz.SubmitToBodyRequestedByUserId = actorUserId;
+
+                await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnBoardReview, actorUserId);
+                break;
+            }
+
+            case SzSignerRoute.Procurement:
+            {
+                // Сначала перевод, потом заявка: закупочный контур принимает
+                // записку, переданную на исполнение, — по ней он и заводит заявку.
+                // Обратный порядок означал бы заявку по записке, которая ещё
+                // никуда не передана.
+                await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, actorUserId);
+                await _db.SaveChangesAsync();
+
+                // Проверки вида записки, суммы и бюджета остаются за закупочным
+                // контуром: дублировать их здесь значит однажды разойтись.
+                await _procurement.HandOverAsync(
+                    sz.Id, new SzProcurementHandoffRequest {Subject = subject, Note = request.Note}, actorUserId);
+                break;
+            }
+
+            default:
+                // Ни орган, ни закупка: записка идёт обычным путём. Если у неё
+                // назван адресат, решение по существу выносит он.
+                await MoveAfterSigningAsync(sz, actorUserId);
+                break;
+        }
+
+        var task = await _db.WorkflowTasks.FirstOrDefaultAsync(t =>
+            t.DocumentId == sz.DocumentId
+            && t.Type == SzRouteCompletionHandler.SignerDecisionTask
+            && t.State == WorkflowTaskState.Open);
+
+        if (task is not null) task.State = WorkflowTaskState.Done;
+
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", sz.Id, "SignerDecided", actorUserId, new
+        {
+            route = request.Route.ToString(),
+            body = request.Body?.ToString(),
+            subject,
+            note = request.Note,
+        });
 
         return (await GetAsync(sz.Id))!;
     }
