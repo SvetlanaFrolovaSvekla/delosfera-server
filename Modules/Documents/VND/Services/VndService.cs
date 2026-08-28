@@ -336,6 +336,16 @@ public class VndService : IVndService
         || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
         || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
 
+    /// <summary>Право реально обойти согласование - строже, чем IsChiefEditor(). Права
+    /// CreateVndWithApproval/ActualizeAnyVndWithApproval дают возможность создавать/актуализировать
+    /// ВНД, но результат всё равно уходит на согласование - наличие только одного из них (например,
+    /// у роли "Редактор ВНД") не должно позволять пропустить согласование целиком (см.
+    /// PublishRedactionWithoutApprovalAsync ниже). IsChiefEditor() шире и используется отдельно -
+    /// для доступа к документам, к которым пользователь явно не привязан.</summary>
+    private bool CanPublishWithoutApproval() =>
+        _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
+
     private static ActualizationBucket MapActualizationBucketKey(string key) => key.ToLowerInvariant() switch
     {
         "normal" => ActualizationBucket.Normal,
@@ -717,11 +727,17 @@ public class VndService : IVndService
         // при старте цикла (StartAsync/ConfirmStartAfterRequestAsync) — не доверяем тому, что
         // прислал клиент в request.RequiresApproval, иначе обычный редактор без прав на
         // актуализацию без согласования мог бы обойти это ограничение, отредактировав запрос
-        // напрямую. Вне цикла актуализации (первая редакция нового ВНД) решение остаётся за
-        // тем, кто загружает, как и раньше.
+        // напрямую.
+        // Вне цикла актуализации (первая редакция нового ВНД) решение в обычном случае остаётся
+        // за тем, кто загружает — но опубликовать её сразу действующей, без согласования
+        // (RequiresApproval = false), может только тот, у кого есть право
+        // CreateVndWithoutApproval (сейчас — главный редактор и администратор); иначе, даже если
+        // клиент прислал RequiresApproval = false (напрямую отредактировав запрос, минуя
+        // скрытый на фронте чекбокс — см. canSkipApproval в VndUploadRedactionModal), редакция
+        // всё равно уходит на согласование.
         var effectiveRequiresApproval = vnd.Status == VndStatus.OnActualization
             ? vnd.ActualizationRequiresApproval
-            : request.RequiresApproval;
+            : request.RequiresApproval || !CanPublishWithoutApproval();
 
         // Раз загружается настоящая новая редакция — план "актуализация без изменений" (если он
         // был) больше не в силе: изменения всё-таки есть.
@@ -895,7 +911,7 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        if (!IsChiefEditor())
+        if (!CanPublishWithoutApproval())
             throw new UnauthorizedAccessException(
                 "Сделать редакцию действующей без согласования может только главный редактор");
 
