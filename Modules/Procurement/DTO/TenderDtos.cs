@@ -90,6 +90,11 @@ public class TenderDto
     public bool IsLimited { get; set; }
 
     public DateOnly? PublishedOn { get; set; }
+
+    /// <summary>Где объявление размещено; пусто — размещение не отмечено.</summary>
+    public string? PublishedAt { get; set; }
+    public string? PublicationConfirmedByName { get; set; }
+    public DateTime? PublicationConfirmedAt { get; set; }
     public DateOnly? SubmissionDeadline { get; set; }
     public DateOnly? OpenedOn { get; set; }
 
@@ -205,6 +210,13 @@ public class AttendanceRequest
 public class TenderPublishRequest
 {
     public DateOnly SubmissionDeadline { get; set; }
+}
+
+/// <summary>Отметка о фактическом размещении объявления.</summary>
+public class PublicationConfirmRequest
+{
+    /// <summary>Где выложено: сайт Банка, tenders.kg, разосланные приглашения.</summary>
+    public string? PublishedAt { get; set; }
 }
 
 public class TenderFailRequest

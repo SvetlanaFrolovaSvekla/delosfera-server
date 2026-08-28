@@ -72,6 +72,12 @@ public class TenderController : ControllerBase
     public async Task<IActionResult> Publish(int tenderId, [FromBody] TenderPublishRequest request) =>
         await Run(() => _tenders.PublishAsync(tenderId, request, _currentUser.UserId));
 
+    /// <summary>Отметить, что объявление размещено (или приглашения разосланы).</summary>
+    [HttpPost("tenders/{tenderId:int}/publication")]
+    [RequirePermission(PermissionCode.ConductProcurement)]
+    public async Task<IActionResult> ConfirmPublication(int tenderId, [FromBody] PublicationConfirmRequest request) =>
+        await Run(() => _tenders.ConfirmPublicationAsync(tenderId, request, _currentUser.UserId));
+
     /// <summary>Зарегистрировать конкурсную заявку поставщика.</summary>
     [HttpPost("tenders/{tenderId:int}/bids")]
     [RequirePermission(PermissionCode.ConductProcurement)]

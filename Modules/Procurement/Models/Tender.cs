@@ -62,8 +62,24 @@ public class Tender : IAuditableEntity
     /// <summary>Конкурс с ограниченным участием — объявление не публикуется (PRC-13).</summary>
     public bool IsLimited { get; set; }
 
-    /// <summary>Дата публикации объявления на сайте Банка и tenders.kg.</summary>
+    /// <summary>Дата, с которой конкурс считается объявленным.</summary>
     public DateOnly? PublishedOn { get; set; }
+
+    /// <summary>
+    /// Где объявление выложено на самом деле.
+    ///
+    /// Система собирает текст объявления, но выкладывает его человек: у сайта
+    /// Банка и у tenders.kg нет согласованного API. Пока отметки нет, объявление
+    /// считается неразмещённым — иначе выходит, что система выдала текст и
+    /// забыла о нём, а срок приёма заявок уже идёт.
+    /// </summary>
+    public string? PublishedAt { get; set; }
+
+    /// <summary>Когда сотрудник отметил размещение.</summary>
+    public DateTime? PublicationConfirmedAt { get; set; }
+
+    public int? PublicationConfirmedByUserId { get; set; }
+    public User? PublicationConfirmedBy { get; set; }
 
     /// <summary>
     /// Окончательный срок приёма заявок. Конкурсный период — не менее 5 рабочих дней

@@ -14,6 +14,7 @@ public interface ITenderService
     Task<TenderDto> AddMemberAsync(int tenderId, CommissionMemberRequest request, int actorUserId);
     Task<TenderDto> RemoveMemberAsync(int memberId, int actorUserId);
     Task<TenderDto> PublishAsync(int tenderId, TenderPublishRequest request, int actorUserId);
+    Task<TenderDto> ConfirmPublicationAsync(int tenderId, PublicationConfirmRequest request, int actorUserId);
     Task<TenderDto> AddBidAsync(int tenderId, TenderBidRequest request, int actorUserId);
     Task<TenderDto> OpenBidsAsync(int tenderId, int actorUserId);
     Task<TenderDto> SetAttendanceAsync(int memberId, AttendanceRequest request, int actorUserId);
@@ -43,8 +44,17 @@ public interface ITenderService
 /// </summary>
 public class TenderService : ITenderService
 {
-    /// <summary>Минимальный конкурсный период в рабочих днях (PRC-13).</summary>
+    /// <summary>Минимальный конкурсный период в рабочих днях (п. 8.2/8.3 Положения).</summary>
     private const int MinTenderPeriodWorkdays = 5;
+
+    /// <summary>
+    /// Предельный конкурсный период в рабочих днях (п. 8.2/8.3 Положения).
+    ///
+    /// Верхняя граница не формальность: закупку нельзя держать открытой месяцами,
+    /// иначе цены в поданных заявках перестают отражать рынок, а потребность,
+    /// ради которой закупку затевали, успевает измениться.
+    /// </summary>
+    private const int MaxTenderPeriodWorkdays = 30;
 
     /// <summary>Стандартный состав комиссии по Положению.</summary>
     private const int DefaultCommissionSize = 5;
@@ -203,9 +213,17 @@ public class TenderService : ITenderService
         var today = _clock.Today;
         var minDeadline = AddWorkdays(today, MinTenderPeriodWorkdays);
 
+        var maxDeadline = AddWorkdays(today, MaxTenderPeriodWorkdays);
+
         if (request.SubmissionDeadline < minDeadline)
             throw new InvalidOperationException(
-                $"Конкурсный период — не менее {MinTenderPeriodWorkdays} рабочих дней: срок приёма не раньше {minDeadline:dd.MM.yyyy} (PRC-13)");
+                $"Конкурсный период — не менее {MinTenderPeriodWorkdays} рабочих дней: "
+                + $"срок приёма не раньше {minDeadline:dd.MM.yyyy} (п. 8.2/8.3 Положения)");
+
+        if (request.SubmissionDeadline > maxDeadline)
+            throw new InvalidOperationException(
+                $"Конкурсный период — не более {MaxTenderPeriodWorkdays} рабочих дней: "
+                + $"срок приёма не позже {maxDeadline:dd.MM.yyyy} (п. 8.2/8.3 Положения)");
 
         tender.PublishedOn = today;
         tender.SubmissionDeadline = request.SubmissionDeadline;
@@ -218,6 +236,37 @@ public class TenderService : ITenderService
             tender.SubmissionDeadline,
             channel = tender.IsLimited ? "приглашения участникам" : "сайт Банка и tenders.kg",
         });
+
+        return await BuildAsync((await LoadAsync(tenderId))!);
+    }
+
+    /// <summary>
+    /// Отметить, что объявление действительно размещено.
+    ///
+    /// Ограниченному конкурсу отметка тоже нужна: объявление там не публикуется,
+    /// но приглашения кому-то рассылают, и дата рассылки — начало конкурсного
+    /// периода ровно так же.
+    /// </summary>
+    public async Task<TenderDto> ConfirmPublicationAsync(
+        int tenderId, PublicationConfirmRequest request, int actorUserId)
+    {
+        var tender = await LoadAsync(tenderId) ?? throw new KeyNotFoundException("Конкурс не найден");
+
+        if (tender.Status != TenderStatus.Published)
+            throw new InvalidOperationException("Размещение отмечается у объявленного конкурса");
+
+        var where = request.PublishedAt?.Trim();
+        if (string.IsNullOrWhiteSpace(where))
+            throw new ArgumentException(tender.IsLimited
+                ? "Укажите, кому разосланы приглашения"
+                : "Укажите, где размещено объявление: сайт Банка, tenders.kg");
+
+        tender.PublishedAt = where;
+        tender.PublicationConfirmedAt = DateTime.UtcNow;
+        tender.PublicationConfirmedByUserId = actorUserId;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("Tender", tenderId, "PublicationConfirmed", actorUserId, new {where});
 
         return await BuildAsync((await LoadAsync(tenderId))!);
     }
@@ -271,6 +320,11 @@ public class TenderService : ITenderService
 
         if (tender.Status != TenderStatus.Published)
             throw new InvalidOperationException("Вскрываются заявки объявленного конкурса");
+
+        if (string.IsNullOrWhiteSpace(tender.PublishedAt))
+            throw new InvalidOperationException(tender.IsLimited
+                ? "Не отмечена рассылка приглашений: без неё конкурсный период не начался"
+                : "Не отмечено размещение объявления: без него конкурсный период не начался");
 
         if (tender.SubmissionDeadline is { } deadline && _clock.Today <= deadline)
             throw new InvalidOperationException(
@@ -589,7 +643,8 @@ public class TenderService : ITenderService
             .Include(t => t.Commission).ThenInclude(m => m.User)
             .Include(t => t.Bids).ThenInclude(b => b.Supplier)
             .Include(t => t.Bids).ThenInclude(b => b.Votes).ThenInclude(v => v.Member).ThenInclude(m => m!.User)
-            .Include(t => t.MeetingChanges).ThenInclude(c => c.By);
+            .Include(t => t.MeetingChanges).ThenInclude(c => c.By)
+            .Include(t => t.PublicationConfirmedBy);
 
     private async Task<Tender?> LoadAsync(int id) => await Query().FirstOrDefaultAsync(t => t.Id == id);
 
@@ -690,6 +745,9 @@ public class TenderService : ITenderService
             Amount = amount,
             IsLimited = t.IsLimited,
             PublishedOn = t.PublishedOn,
+            PublishedAt = t.PublishedAt,
+            PublicationConfirmedAt = t.PublicationConfirmedAt,
+            PublicationConfirmedByName = t.PublicationConfirmedBy?.FullName,
             SubmissionDeadline = t.SubmissionDeadline,
             OpenedOn = t.OpenedOn,
             CommissionOrderNumber = t.CommissionOrderNumber,
@@ -895,6 +953,13 @@ public class TenderService : ITenderService
 
         if (string.IsNullOrWhiteSpace(t.CommissionOrderNumber))
             dto.Blockers.Add("Не указан приказ Председателя Правления об утверждении комиссии");
+
+        // Объявление выдано, но никто не отметил, что оно выложено. Срок приёма
+        // при этом идёт — значит шаг незакрыт, и это должно быть видно.
+        if (t.Status == TenderStatus.Published && string.IsNullOrWhiteSpace(t.PublishedAt))
+            dto.Blockers.Add(t.IsLimited
+                ? "Не отмечена рассылка приглашений участникам"
+                : "Не отмечено размещение объявления на сайте Банка и tenders.kg");
 
         if (t.Status == TenderStatus.Opened && !dto.HasQuorum)
             dto.Blockers.Add($"Нет кворума: {dto.Attended} из {dto.QuorumRequired}");
