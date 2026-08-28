@@ -505,8 +505,7 @@ public class SzService : ISzService
         // согласовано и внесено в книгу регистрации, и менять там больше нечего.
         if (sz.SignerUserId is { } signer)
         {
-            var instance = await _routeEngine.InstantiateForApproversAsync(
-                sz.DocumentId, approverUserIds: [], parallel: false, signerUserId: signer);
+            var instance = await _routeEngine.InstantiateForSignerAsync(sz.DocumentId, signer);
 
             await _routeEngine.StartAsync(instance.Id, actorUserId);
             sz.Document.CurrentRouteInstanceId = instance.Id;

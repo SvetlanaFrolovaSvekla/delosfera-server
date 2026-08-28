@@ -183,6 +183,93 @@ public class RouteEngineTests
         Assert.Equal(ResolutionType.Rejected, participant.Resolution!.Type);
     }
 
+    /// <summary>
+    /// Маршрут подписания строится без согласующих.
+    ///
+    /// В служебных записках подписание отделено от согласования: визируют, потом
+    /// регистрируют, и только потом подписывают. Маршрут подписания строили общим
+    /// методом с пустым списком согласующих — тот отказывал, и регистрация падала
+    /// с «Не выбран ни один согласующий», а человек видел «Не удалось
+    /// зарегистрировать записку» без объяснения.
+    /// </summary>
+    [Fact]
+    public async Task InstantiateForSigner_BuildsSigningStepWithoutApprovers()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+
+        var user = new User
+        {
+            FullName = "Подписант записки",
+            Email = $"signer-{Guid.NewGuid():N}@keremetbank.kg",
+            PasswordHash = "x",
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var document = new Document
+        {
+            Type = DocumentType.Sz,
+            Title = "Записка на подпись",
+            StatusCode = "PendingRegistration",
+            AuthorId = user.Id,
+        };
+        db.Documents.Add(document);
+        await db.SaveChangesAsync();
+
+        var engine = NewEngine(db);
+        var instance = await engine.InstantiateForSignerAsync(document.Id, user.Id);
+
+        var step = Assert.Single(await db.RouteSteps
+            .Include(x => x.Participants)
+            .Where(x => x.RouteInstanceId == instance.Id)
+            .ToListAsync());
+
+        Assert.Equal(StepKind.Signing, step.Kind);
+        Assert.Equal(user.Id, Assert.Single(step.Participants).UserId);
+
+        // Запуск делает подписанта активным: иначе записка ждёт молча, и в его
+        // задачах она не появляется.
+        await engine.StartAsync(instance.Id, user.Id);
+
+        var participant = await db.RouteParticipants
+            .SingleAsync(p => p.RouteStep!.RouteInstanceId == instance.Id);
+
+        Assert.Equal(ParticipantState.Active, participant.State);
+    }
+
+    /// <summary>
+    /// Маршрут согласования без согласующих по-прежнему отвергается: отказ верный,
+    /// ошибка была в том, что этим методом строили подписание.
+    /// </summary>
+    [Fact]
+    public async Task InstantiateForApprovers_WithoutApprovers_IsRefused()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+
+        var user = new User
+        {
+            FullName = "Подписант записки",
+            Email = $"signer-{Guid.NewGuid():N}@keremetbank.kg",
+            PasswordHash = "x",
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var document = new Document
+        {
+            Type = DocumentType.Sz,
+            Title = "Записка без согласующих",
+            StatusCode = "PendingRegistration",
+            AuthorId = user.Id,
+        };
+        db.Documents.Add(document);
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            NewEngine(db).InstantiateForApproversAsync(
+                document.Id, approverUserIds: [], parallel: false, signerUserId: user.Id));
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private static RouteEngine NewEngine(DelosferaDbContext db) =>
