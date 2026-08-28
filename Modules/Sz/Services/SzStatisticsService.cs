@@ -265,6 +265,8 @@ public static class SzStatusTitles
         SzStatus.Draft => "Черновик",
         SzStatus.PendingRegistration => "Ждёт регистрации",
         SzStatus.Registered => "Зарегистрирована",
+        SzStatus.OnApproval => "На согласовании",
+        SzStatus.OnSigning => "На подписании",
         SzStatus.OnRevision => "На доработке",
         SzStatus.OnAddresseeDecision => "На решении адресата",
         SzStatus.OnExecution => "На исполнении",

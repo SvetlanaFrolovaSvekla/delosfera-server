@@ -34,11 +34,24 @@ public static class RolePermissionDefaults
             PermissionCode.ManageHrOrders,
         ]),
 
-        // Делопроизводство: книга регистрации — их основная работа.
+        // Делопроизводство: книга регистрации — их основная работа. Реестр записок
+        // целиком нужен им по той же причине: они его и ведут.
         ("Делопроизвод", [
             PermissionCode.ViewCorrespondence,
             PermissionCode.RegisterCorrespondence,
             PermissionCode.ViewPowersOfAttorney,
+            PermissionCode.ViewAllSz,
+            PermissionCode.RegisterSz,
+        ]),
+
+        // Правление видит реестр записок целиком: до них доходит то, что не решилось
+        // на уровне подразделений, и знать об этом заранее — часть работы.
+        ("Правлени", [
+            PermissionCode.ViewAllSz,
+        ]),
+
+        ("Председател", [
+            PermissionCode.ViewAllSz,
         ]),
 
         // Секретарь органа отбирает вопросы и видит переписку по своим темам.
@@ -71,6 +84,8 @@ public static class RolePermissionDefaults
         // секретарь комиссии оформляет её решения, УПиА смотрит бюджет.
 
         ("Администратор", [
+            PermissionCode.ViewAllSz,
+            PermissionCode.RegisterSz,
             PermissionCode.ViewAllProcurements,
             PermissionCode.ConductProcurement,
             PermissionCode.RecordCommissionDecisions,

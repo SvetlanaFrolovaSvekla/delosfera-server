@@ -19,7 +19,14 @@ public record DemoAccount(
     /// оргструктура приходит из портала, и номера у каждого банка свои.
     /// Не нашли — оставляем пусто, выдумывать подразделение нельзя.
     /// </summary>
-    string? UnitMatch = null);
+    string? UnitMatch = null,
+
+    /// <summary>
+    /// Назначить учётку руководителем своего подразделения — но только если
+    /// руководитель там не назначен. Настоящего начальника подменять нельзя:
+    /// на нём висит согласование и видимость записок отдела.
+    /// </summary>
+    bool HeadsUnit = false);
 
 /// <summary>
 /// Учётные записи для обкатки бизнес-подразделениями.
@@ -79,7 +86,11 @@ public static class DemoAccountsSeeder
                 PermissionCode.ViewMeetings,
                 PermissionCode.ReportMeetingExecution,
             ],
-            UnitMatch: "Управление делами"),
+            UnitMatch: "Управление делами",
+            // Руководитель обкатки должен и правда возглавлять своё подразделение:
+            // видимость реестра записок держится на этом признаке, а не на праве,
+            // и без него роль нечем проверить.
+            HeadsUnit: true),
 
         new(
             "clerk" + Domain,
@@ -211,6 +222,17 @@ public static class DemoAccountsSeeder
             .Select(u => new {u.Id, u.TitleRu})
             .ToList();
 
+        void SetHeadIfVacant(DemoAccount account, User user)
+        {
+            if (!account.HeadsUnit || user.OrgUnitId is not { } unitId) return;
+
+            var unit = db.OrganizationUnits.FirstOrDefault(u => u.Id == unitId);
+            if (unit is null || unit.HeadUserId is not null) return;
+
+            unit.HeadUserId = user.Id;
+            unit.UpdatedAt = DateTime.UtcNow;
+        }
+
         int? FindUnit(string? match)
         {
             if (string.IsNullOrWhiteSpace(match)) return null;
@@ -257,6 +279,10 @@ public static class DemoAccountsSeeder
                 };
                 user.Roles.Add(role);
                 db.Users.Add(user);
+                db.SaveChanges();
+
+                SetHeadIfVacant(account, user);
+
                 changed = true;
                 continue;
             }
@@ -274,6 +300,8 @@ public static class DemoAccountsSeeder
             // Подразделение проставляем только если его нет: если банк переставил
             // учётку в другое СП осознанно, умолчание не вправе это отменять.
             user.OrgUnitId ??= FindUnit(account.UnitMatch);
+
+            SetHeadIfVacant(account, user);
 
             if (user.Roles.All(r => r.Id != role.Id))
                 user.Roles.Add(role);

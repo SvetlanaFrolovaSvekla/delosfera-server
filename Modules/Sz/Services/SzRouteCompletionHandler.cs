@@ -61,13 +61,31 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
         //
         // Согласование пройдено — записка не идёт сразу в исполнение: если у неё есть
         // адресат, решение по существу выносит он, и до этого исполнять нечего.
+        // По записке проходят два маршрута: согласование и подписание. Куда вести
+        // дальше — зависит от того, какой из них завершился, а различает их текущий
+        // статус записки: до регистрации она на согласовании, после — у подписанта.
+        var подписание = sz.Document!.StatusCode == SzStatus.OnSigning;
+
+        // Записки, заведённые до перестройки порядка, получили номер ещё до
+        // согласования. Отправлять их «ждать регистрации» нельзя: регистрация
+        // выдаст второй номер тому, что уже занесено в книгу под первым.
+        var ужеЗарегистрирована = sz.Document.RegNumber is not null;
+
         var status = routeStatus switch
         {
+            // Согласование пройдено — записка идёт на регистрацию: номер получает
+            // то, с чем уже согласились. Кроме записок прежнего порядка: у них
+            // номер уже есть, и они идут дальше сразу.
+            RouteInstanceStatus.Approved when !подписание && !ужеЗарегистрирована
+                => SzStatus.PendingRegistration,
+
+            // Подписано — дальше решение адресата, а если его нет, то исполнение.
             RouteInstanceStatus.Approved when sz.AddresseeUserId is not null => SzStatus.OnAddresseeDecision,
             RouteInstanceStatus.Approved => SzStatus.OnExecution,
+
             RouteInstanceStatus.Rejected => SzStatus.Rejected,
             RouteInstanceStatus.OnRevision => SzStatus.OnRevision,
-            RouteInstanceStatus.Running => SzStatus.Registered,
+            RouteInstanceStatus.Running => подписание ? SzStatus.OnSigning : SzStatus.OnApproval,
             _ => null
         };
         if (status is null || sz.Document!.StatusCode == status) return;
@@ -88,7 +106,7 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
     /// читают и забывают, а записка остаётся ждать решения, и по списку задач не
     /// видно, что человек кому-то должен ответ.
     /// </summary>
-    private async Task CreateAddresseeTaskAsync(SzDocument sz)
+    public async Task CreateAddresseeTaskAsync(SzDocument sz)
     {
         var exists = await _db.WorkflowTasks.AnyAsync(t =>
             t.DocumentId == sz.DocumentId
@@ -119,7 +137,7 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
     /// Адресат узнаёт о записке только из уведомления: в его задачах она не появляется —
     /// согласующим он не был.
     /// </summary>
-    private async Task NotifyAddresseeAsync(SzDocument sz, int actorUserId)
+    public async Task NotifyAddresseeAsync(SzDocument sz, int actorUserId)
     {
         await _notifications.CreateAsync(new CreateNotificationRequest
         {

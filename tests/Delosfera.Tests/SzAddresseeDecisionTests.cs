@@ -154,10 +154,15 @@ public class SzAddresseeDecisionTests
         var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
         var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
 
-        return (new SzService(db, documents, audit, engine, new PassthroughHtml()), engine);
+        // Право «видеть все записки» — чтобы проверка касалась движения записки,
+        // а не видимости реестра.
+        var currentUser = new FakeCurrentUser(0, PermissionCode.ViewAllSz);
+
+        return (new SzService(db, documents, audit, engine, new PassthroughHtml(), currentUser, handler), engine);
     }
 
-    /// <summary>Записка, отправленная на согласование: один согласующий, один адресат.</summary>
+    /// <summary>Записка, отправленная на согласование: один согласующий, один адресат.
+    /// Номера у неё ещё нет — он присваивается после согласования.</summary>
     private static async Task<(int SzId, int AddresseeId, int ApproverId)> SeedSubmittedAsync(
         DelosferaDbContext db, ISzService service, IRouteEngine engine)
     {
@@ -196,11 +201,24 @@ public class SzAddresseeDecisionTests
 
         await engine.ResolveAsync(participant.Id, ResolutionType.Approved, null, approverId);
 
+        // Согласование идёт до регистрации: согласованная записка ждёт номера,
+        // а к адресату попадает уже зарегистрированной.
         var afterApproval = await db.SzDocuments.AsNoTracking()
             .Include(x => x.Document)
             .SingleAsync(x => x.Id == szId);
 
-        Assert.Equal(SzStatus.OnAddresseeDecision, afterApproval.Document!.StatusCode);
+        Assert.Equal(SzStatus.PendingRegistration, afterApproval.Document!.StatusCode);
+
+        await service.RegisterAsync(szId, approverId);
+
+        // Подписанта у этой записки нет, поэтому после регистрации она идёт
+        // прямо к адресату за решением по существу.
+        var afterRegistration = await db.SzDocuments.AsNoTracking()
+            .Include(x => x.Document)
+            .SingleAsync(x => x.Id == szId);
+
+        Assert.Equal(SzStatus.OnAddresseeDecision, afterRegistration.Document!.StatusCode);
+        Assert.NotNull(afterRegistration.Document.RegNumber);
 
         return (szId, addresseeId, approverId);
     }

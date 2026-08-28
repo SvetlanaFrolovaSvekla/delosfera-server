@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using delosfera_server.Modules.Users.Models;
+using delosfera_server.Common.Authorization;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
@@ -189,6 +191,7 @@ public class SzController : ControllerBase
     /// и запустить маршрут согласования (SZ-01).
     /// </summary>
     [HttpPost("{id:int}/register")]
+    [RequirePermission(PermissionCode.RegisterSz)]
     public async Task<IActionResult> Register(int id, [FromBody] RegisterRequest? req = null)
     {
         try
@@ -200,6 +203,29 @@ public class SzController : ControllerBase
     }
 
     /// <summary>Отозвать записку с согласования с обоснованием — возвращается в черновик.</summary>
+    /// <summary>
+    /// Перевести записку в другой статус вручную — право администратора системы.
+    /// Обоснование обязательно и попадает в журнал действий.
+    /// </summary>
+    [HttpPost("{id:int}/force-status")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> ForceStatus(int id, [FromBody] SzForceStatusRequest request)
+    {
+        try
+        {
+            return Ok(await _sz.ForceStatusAsync(
+                id, request.StatusCode, request.Reason, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
+        catch (ArgumentException ex) { return BadRequest(new {message = ex.Message}); }
+        catch (InvalidOperationException ex) { return BadRequest(new {message = ex.Message}); }
+    }
+
+    /// <summary>Статусы, доступные для ручного перевода.</summary>
+    [HttpGet("statuses")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public IActionResult Statuses() => Ok(SzStatus.All);
+
     [HttpPost("{id:int}/withdraw")]
     public async Task<IActionResult> Withdraw(int id, [FromBody] WithdrawRequest req)
     {

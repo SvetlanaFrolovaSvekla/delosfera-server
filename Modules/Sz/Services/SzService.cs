@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Models;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
+using delosfera_server.Modules.Users.Models;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.DTO;
@@ -44,6 +46,12 @@ public interface ISzService
 
     /// <summary>Записки, где текущий пользователь — активный согласующий («СЗ, согласую я»).</summary>
     Task<PagedResult<SzListItem>> InboxAsync(int currentUserId, int page, int pageSize);
+
+    /// <summary>
+    /// Перевести записку в произвольный статус — право администратора.
+    /// Обходит процесс, поэтому требует обоснования и остаётся в журнале действий.
+    /// </summary>
+    Task<SzDetails> ForceStatusAsync(int id, string statusCode, string reason, int actorUserId);
 }
 
 public class SzService : ISzService
@@ -56,11 +64,16 @@ public class SzService : ISzService
     private readonly IAuditService _audit;
     private readonly IRouteEngine _routeEngine;
     private readonly IDocumentHtmlService _html;
+    private readonly ICurrentUserService _currentUser;
+    private readonly SzRouteCompletionHandler _addresseeTasks;
 
     public SzService(
         DelosferaDbContext db, IDocumentService documents, IAuditService audit,
-        IRouteEngine routeEngine, IDocumentHtmlService html)
+        IRouteEngine routeEngine, IDocumentHtmlService html, ICurrentUserService currentUser,
+        SzRouteCompletionHandler addresseeTasks)
     {
+        _currentUser = currentUser;
+        _addresseeTasks = addresseeTasks;
         _db = db;
         _documents = documents;
         _audit = audit;
@@ -77,9 +90,7 @@ public class SzService : ISzService
         if (request.MineOnly)
             query = query.Where(x => x.Document!.AuthorId == currentUserId);
         else
-            // Чужие черновики не показываются в общем реестре — они ещё не документы.
-            query = query.Where(x => x.Document!.StatusCode != SzStatus.Draft
-                                  || x.Document!.AuthorId == currentUserId);
+            query = await ApplyVisibilityAsync(query, currentUserId);
 
         var statuses = request.Statuses.Count > 0
             ? request.Statuses.Where(s => SzStatus.All.Contains(s)).ToArray()
@@ -139,6 +150,93 @@ public class SzService : ISzService
             Page = page,
             PageSize = pageSize
         };
+    }
+
+    /// <summary>
+    /// Кому какие записки видны в реестре.
+    ///
+    /// Раньше реестр показывал все записки банка любому вошедшему — кроме чужих
+    /// черновиков. Служебная записка часто содержит то, что касается одного
+    /// подразделения: оклады, перемещения, спорные закупки. Общий реестр на всех
+    /// означал, что это читает кто угодно.
+    ///
+    /// Три круга:
+    ///   • сотрудник — свои записки, пришедшие к нему на согласование и те, по
+    ///     которым у него есть поручение;
+    ///   • руководитель подразделения — всё по своему подразделению и вложенным
+    ///     в него: управление отвечает за свои отделы;
+    ///   • Председатель, заместители и делопроизводство — весь реестр.
+    ///
+    /// Чужой черновик не показывается никому, включая последний круг: черновик —
+    /// ещё не документ, и автор вправе передумать, ни перед кем не объясняясь.
+    /// </summary>
+    private async Task<IQueryable<SzDocument>> ApplyVisibilityAsync(
+        IQueryable<SzDocument> query, int currentUserId)
+    {
+        // Чужие черновики отсекаются всегда и первым делом.
+        query = query.Where(x => x.Document!.StatusCode != SzStatus.Draft
+                                 || x.Document!.AuthorId == currentUserId);
+
+        if (_currentUser.HasPermission(PermissionCode.ViewAllSz))
+            return query;
+
+        var units = await VisibleUnitIdsAsync(currentUserId);
+
+        return query.Where(x =>
+            // свои
+            x.Document!.AuthorId == currentUserId
+            // подразделение, которым руководит
+            || (x.AuthorUnitId != null && units.Contains(x.AuthorUnitId.Value))
+            // пришло на согласование — на любом круге, не только на текущем
+            || x.Approvers.Any(a => a.UserId == currentUserId)
+            || _db.RouteParticipants.Any(p => p.UserId == currentUserId
+                                              && p.RouteStep!.RouteInstance!.DocumentId == x.DocumentId)
+            // назначен адресатом или подписантом
+            || x.AddresseeUserId == currentUserId
+            || x.SignerUserId == currentUserId
+            // есть поручение по записке
+            || x.Assignments.Any(a => a.AssigneeUserId == currentUserId));
+    }
+
+    /// <summary>
+    /// Подразделения, записки которых видит руководитель: его собственное и все
+    /// вложенные. Управление отвечает за свои отделы, значит и видеть должно их.
+    ///
+    /// Пусто, если человек ничем не руководит.
+    /// </summary>
+    private async Task<List<int>> VisibleUnitIdsAsync(int currentUserId)
+    {
+        var headed = await _db.OrganizationUnits
+            .Where(u => u.HeadUserId == currentUserId)
+            .Select(u => u.Id)
+            .ToListAsync();
+
+        if (headed.Count == 0) return headed;
+
+        // Дерево читаем целиком один раз: подразделений пара сотен, а спуск по
+        // родителям запросом на каждый уровень — это запрос на каждый уровень.
+        var all = await _db.OrganizationUnits
+            .Select(u => new {u.Id, u.ParentId})
+            .ToListAsync();
+
+        var byParent = all
+            .Where(u => u.ParentId != null)
+            .GroupBy(u => u.ParentId!.Value)
+            .ToDictionary(g => g.Key, g => g.Select(u => u.Id).ToList());
+
+        var result = new HashSet<int>(headed);
+        var queue = new Queue<int>(headed);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!byParent.TryGetValue(current, out var children)) continue;
+
+            foreach (var child in children)
+                if (result.Add(child)) queue.Enqueue(child);
+        }
+
+        return result.ToList();
     }
 
     public async Task<SzDetails?> GetAsync(int id)
@@ -243,12 +341,13 @@ public class SzService : ISzService
 
     public async Task<SzDetails> SubmitAsync(int id, int actorUserId)
     {
-        var sz = await _db.SzDocuments.Include(x => x.Document)
+        var sz = await _db.SzDocuments.Include(x => x.Document).Include(x => x.Kind)
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
-        if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision))
-            throw new InvalidOperationException("Отправить можно только черновик или записку с доработки");
+        if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision or SzStatus.Withdrawn))
+            throw new InvalidOperationException(
+                "Отправить можно черновик, записку с доработки или отозванную");
 
         if (string.IsNullOrWhiteSpace(sz.Body))
             throw new InvalidOperationException("Заполните текст служебной записки");
@@ -262,61 +361,44 @@ public class SzService : ISzService
             .Select(a => a.UserId)
             .ToListAsync();
 
-        if (approvers.Count == 0)
+        // Согласование идёт до регистрации, поэтому номер здесь не присваивается:
+        // регистрируют то, с чем уже согласились. Маршрут строится по названным
+        // автором согласующим, а если он их не назвал — по шаблону вида записки.
+        var instance = approvers.Count > 0
+            ? await _routeEngine.InstantiateForApproversAsync(
+                sz.DocumentId, approvers, sz.ApprovalIsParallel, signerUserId: null)
+            : await InstantiateFromKindAsync(sz);
+
+        await _routeEngine.StartAsync(instance.Id, actorUserId);
+        sz.Document.CurrentRouteInstanceId = instance.Id;
+        sz.ApprovalRounds++;
+
+        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnApproval, actorUserId);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", sz.Id, "SubmittedForApproval", actorUserId, new
         {
-            // Согласующих автор не выбрал — записка идёт прежним путём: делопроизводитель
-            // регистрирует её и запускает маршрут по шаблону вида (SZ-01).
-            await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.PendingRegistration, actorUserId);
-            await _audit.LogAsync("Sz", sz.Id, "Submitted", actorUserId);
-
-            return (await GetAsync(sz.Id))!;
-        }
-
-        // Автор назвал согласующих сам — отдельная регистрация делопроизводителем
-        // здесь ничего не решает, но номер и срок записка получить обязана: без них
-        // на неё нельзя сослаться и по ней нельзя посчитать просрочку.
-        await RegisterAndStartAsync(sz, approvers, actorUserId);
+            approvers = approvers.Count,
+            parallel = sz.ApprovalIsParallel,
+            round = sz.ApprovalRounds,
+            routeInstanceId = instance.Id,
+        });
 
         return (await GetAsync(sz.Id))!;
     }
 
     /// <summary>
-    /// Присвоить записке номер и срок и запустить согласование по выбранным автором
-    /// согласующим.
+    /// Маршрут согласования из шаблона вида записки — когда автор согласующих не назвал.
     /// </summary>
-    private async Task RegisterAndStartAsync(SzDocument sz, List<int> approvers, int actorUserId)
+    private async Task<RouteInstance> InstantiateFromKindAsync(SzDocument sz)
     {
-        var kind = sz.Kind ?? await _db.SzKinds.FirstOrDefaultAsync(k => k.Id == sz.KindId);
+        var templateId = sz.Kind?.RouteTemplateId
+            ?? (await _db.SzKinds.Where(k => k.Id == sz.KindId)
+                    .Select(k => k.RouteTemplateId).FirstOrDefaultAsync())
+            ?? throw new InvalidOperationException(
+                "Не задан маршрут согласования: назовите согласующих или пропишите шаблон в виде записки");
 
-        var number = await _documents.RegisterAsync(
-            sz.DocumentId, "Sz", "global", NumberPattern, actorUserId);
-
-        sz.RegisteredOn = Today;
-        sz.RegisteredByUserId = actorUserId;
-        sz.DueDate = sz.RegisteredOn.Value.AddDays(kind?.ExecutionDays ?? 14);
-        sz.ApprovalRounds++;
-
-        // Подписант, если он назван в карточке, замыкает маршрут отдельным этапом:
-        // раньше поле заполнялось, а действия под него не было — человека назначали,
-        // и на этом всё заканчивалось.
-        var instance = await _routeEngine.InstantiateForApproversAsync(
-            sz.DocumentId, approvers, sz.ApprovalIsParallel, signerUserId: sz.SignerUserId);
-
-        await _routeEngine.StartAsync(instance.Id, actorUserId);
-        sz.Document!.CurrentRouteInstanceId = instance.Id;
-
-        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.Registered, actorUserId);
-        await _db.SaveChangesAsync();
-
-        await _audit.LogAsync("Sz", sz.Id, "Submitted", actorUserId, new
-        {
-            number,
-            registeredOn = sz.RegisteredOn,
-            dueDate = sz.DueDate,
-            approvers = approvers.Count,
-            parallel = sz.ApprovalIsParallel,
-            routeInstanceId = instance.Id,
-        });
+        return await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, templateId);
     }
 
     public async Task<SzDetails> SetApproversAsync(int id, IReadOnlyList<int> userIds, bool parallel, int actorUserId)
@@ -403,25 +485,8 @@ public class SzService : ISzService
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
         if (sz.Document!.StatusCode != SzStatus.PendingRegistration)
-            throw new InvalidOperationException("Регистрируются только записки, ожидающие регистрации");
-
-        // Согласующие, названные автором, важнее шаблона вида: шаблон — это умолчание
-        // на случай, когда состав не выбран.
-        var approvers = await _db.SzApprovers
-            .Where(a => a.SzDocumentId == sz.Id)
-            .OrderBy(a => a.Order)
-            .Select(a => a.UserId)
-            .ToListAsync();
-
-        if (approvers.Count > 0 && templateId is null)
-        {
-            await RegisterAndStartAsync(sz, approvers, actorUserId);
-            return (await GetAsync(sz.Id))!;
-        }
-
-        var routeTemplateId = templateId ?? sz.Kind?.RouteTemplateId
-            ?? throw new InvalidOperationException(
-                "Не задан маршрут согласования: укажите шаблон или пропишите его в виде записки");
+            throw new InvalidOperationException(
+                "Регистрируется согласованная записка: она ещё не прошла согласование");
 
         var number = await _documents.RegisterAsync(
             sz.DocumentId, "Sz", "global", NumberPattern, actorUserId);
@@ -430,26 +495,58 @@ public class SzService : ISzService
         sz.RegisteredByUserId = actorUserId;
         // Норматив исполнения берётся из вида записки (по инструкции — 14 дней).
         sz.DueDate = sz.RegisteredOn.Value.AddDays(sz.Kind?.ExecutionDays ?? 14);
-        sz.ApprovalRounds++;
 
-        // Регистрация запускает согласование (SZ-01): маршрут строится из шаблона вида.
-        var instance = await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, routeTemplateId);
-
-        // Подписант из карточки замыкает маршрут: шаблон описывает согласование,
-        // а кто подписывает — решает автор записки.
-        if (sz.SignerUserId is { } signer)
-            await _routeEngine.AppendSigningStepAsync(instance.Id, signer);
-
-        await _routeEngine.StartAsync(instance.Id, actorUserId);
-        sz.Document.CurrentRouteInstanceId = instance.Id;
-
-        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.Registered, actorUserId);
         await _db.SaveChangesAsync();
 
         await _audit.LogAsync("Sz", sz.Id, "Registered", actorUserId,
-            new { number, registeredOn = sz.RegisteredOn, dueDate = sz.DueDate, routeInstanceId = instance.Id });
+            new { number, registeredOn = sz.RegisteredOn, dueDate = sz.DueDate });
 
+        // Подписант получает записку после регистрации: он подписывает то, что уже
+        // согласовано и внесено в книгу регистрации, и менять там больше нечего.
+        if (sz.SignerUserId is { } signer)
+        {
+            var instance = await _routeEngine.InstantiateForApproversAsync(
+                sz.DocumentId, approverUserIds: [], parallel: false, signerUserId: signer);
+
+            await _routeEngine.StartAsync(instance.Id, actorUserId);
+            sz.Document.CurrentRouteInstanceId = instance.Id;
+
+            await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnSigning, actorUserId);
+            await _db.SaveChangesAsync();
+
+            await _audit.LogAsync("Sz", sz.Id, "SentToSigner", actorUserId,
+                new { signer, routeInstanceId = instance.Id });
+
+            return (await GetAsync(sz.Id))!;
+        }
+
+        // Подписанта нет — записка идёт дальше сразу: к адресату за решением по
+        // существу, а если адресата не назвали, то на исполнение.
+        await MoveAfterSigningAsync(sz, actorUserId);
         return (await GetAsync(sz.Id))!;
+    }
+
+    /// <summary>
+    /// Куда записка идёт после подписания: к адресату за решением либо сразу на
+    /// исполнение. Общий путь для двух случаев — подписант был и подписант не нужен.
+    /// </summary>
+    private async Task MoveAfterSigningAsync(SzDocument sz, int actorUserId)
+    {
+        if (sz.AddresseeUserId is null)
+        {
+            await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, actorUserId);
+            await _db.SaveChangesAsync();
+            return;
+        }
+
+        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnAddresseeDecision, actorUserId);
+        await _db.SaveChangesAsync();
+
+        // Задача и уведомление адресату — тем же способом, что и при завершении
+        // маршрута подписания: адресат согласующим не был, и без задачи в списке
+        // он о записке не узнает.
+        await _addresseeTasks.CreateAddresseeTaskAsync(sz);
+        await _addresseeTasks.NotifyAddresseeAsync(sz, actorUserId);
     }
 
     public async Task<SzDetails> WithdrawAsync(int id, string reason, int actorUserId)
@@ -466,8 +563,11 @@ public class SzService : ISzService
             throw new InvalidOperationException("Отозвать записку может только её автор");
 
         // Отзыв возможен на согласовании и доработке, но не когда записка уже исполняется.
-        if (sz.Document.StatusCode is not (SzStatus.Registered or SzStatus.OnRevision or SzStatus.PendingRegistration))
-            throw new InvalidOperationException("Отозвать можно записку на регистрации, согласовании или доработке");
+        if (sz.Document.StatusCode is not (SzStatus.OnApproval or SzStatus.OnRevision
+                                           or SzStatus.PendingRegistration or SzStatus.OnSigning
+                                           or SzStatus.Registered))
+            throw new InvalidOperationException(
+                "Отозвать можно записку на согласовании, доработке, регистрации или подписании");
 
         if (sz.Document.CurrentRouteInstanceId is int instanceId)
         {
@@ -479,11 +579,63 @@ public class SzService : ISzService
 
         sz.WithdrawReason = reason.Trim();
 
-        // По ТЗ отозванная записка возвращается автору черновиком; повтор пойдёт с первого этапа.
-        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.Draft, actorUserId);
+        // Записка получает статус «Отозвана», а не возвращается черновиком.
+        // Раньше отзыв вёл в черновик, и статус «Отозвана» не выставлялся нигде:
+        // в статистике строка всегда нулевая, а в архив по этому признаку записка
+        // не попадала никогда, хотя условие архивации его учитывало.
+        //
+        // Отозванную можно отправить снова — она вернётся в согласование с первого
+        // этапа. Так у отзыва остаётся след, а у автора — возможность передумать.
+        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.Withdrawn, actorUserId);
         await _db.SaveChangesAsync();
 
         await _audit.LogAsync("Sz", sz.Id, "Withdrawn", actorUserId, new { reason = sz.WithdrawReason });
+
+        return (await GetAsync(sz.Id))!;
+    }
+
+    /// <summary>
+    /// Ручной перевод записки в другой статус.
+    ///
+    /// Обычно статус ведёт процесс: согласование, регистрация, подписание. Но
+    /// записка застревает по причинам вне системы — уволился согласующий, маршрут
+    /// собрали не так, обкатка требует пройти этап заново. Без этой возможности
+    /// такие записки правят прямо в базе, и следа не остаётся вовсе.
+    ///
+    /// Поэтому: только администратору, только с обоснованием и обязательно в
+    /// журнал действий — вместе с тем, откуда и куда переведено.
+    /// </summary>
+    public async Task<SzDetails> ForceStatusAsync(int id, string statusCode, string reason, int actorUserId)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException(
+                "Укажите основание перевода: он обходит обычный ход записки и остаётся в журнале");
+
+        if (!SzStatus.All.Contains(statusCode))
+            throw new ArgumentException($"Неизвестный статус записки: {statusCode}");
+
+        var sz = await _db.SzDocuments.Include(x => x.Document)
+            .FirstOrDefaultAsync(x => x.Id == id)
+            ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        var previous = sz.Document!.StatusCode;
+        if (previous == statusCode)
+            throw new InvalidOperationException($"Записка уже в статусе «{statusCode}»");
+
+        // Незавершённый маршрут при ручном переводе прерывается: иначе согласующие
+        // продолжают видеть задачи по записке, которая ушла в другую сторону.
+        if (sz.Document.CurrentRouteInstanceId is int instanceId
+            && statusCode is not (SzStatus.OnApproval or SzStatus.OnSigning))
+        {
+            await _routeEngine.InterruptAsync(instanceId, actorUserId);
+            sz.Document.CurrentRouteInstanceId = null;
+        }
+
+        await _documents.ChangeStatusAsync(sz.DocumentId, statusCode, actorUserId);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", sz.Id, "StatusForced", actorUserId,
+            new { from = previous, to = statusCode, reason = reason.Trim() });
 
         return (await GetAsync(sz.Id))!;
     }

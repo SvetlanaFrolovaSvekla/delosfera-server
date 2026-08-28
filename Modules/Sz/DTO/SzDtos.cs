@@ -250,3 +250,12 @@ public class SzEmployeeDto
     /// <summary>Значения полей, своих для этого человека: оклад, даты.</summary>
     public JsonElement? Values { get; set; }
 }
+
+/// <summary>Ручной перевод записки в другой статус администратором.</summary>
+public class SzForceStatusRequest
+{
+    public required string StatusCode { get; set; }
+
+    /// <summary>Основание перевода — попадает в журнал действий.</summary>
+    public required string Reason { get; set; }
+}

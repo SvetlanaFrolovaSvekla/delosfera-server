@@ -136,6 +136,13 @@ public class UserController : ControllerBase
                 u.FullName,
                 position = u.Position != null ? u.Position.TitleRu : null,
                 orgUnit = u.OrgUnit != null ? u.OrgUnit.TitleRu : null,
+                // Не только название: по выбранному человеку подставляется его
+                // подразделение, а для этого нужен идентификатор, а не строка.
+                orgUnitId = u.OrgUnitId,
+                // Член Правления — такие идут первыми в подборе согласующих.
+                isBoardMember = u.Roles.Any(r => r.PermissionCodes.Contains((int)PermissionCode.MemberOfBoard)),
+                // Руководит подразделением — второй по старшинству в том же подборе.
+                isUnitHead = _db.OrganizationUnits.Any(o => o.HeadUserId == u.Id),
             })
             .ToListAsync(ct));
 
