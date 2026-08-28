@@ -733,14 +733,7 @@ public class VndService : IVndService
         var docEn = request.DocEn is not null ? await _fileService.SaveAsync(request.DocEn, currentUserId) : null;
         var tid = request.Tid is not null ? await _fileService.SaveAsync(request.Tid, currentUserId) : null;
 
-        var attachmentEntities = new List<VndRedactionAttachment>();
-        foreach (var file in request.Attachments ?? [])
-        {
-            var saved = await _fileService.SaveAsync(file, currentUserId);
-            // FileAttachment = saved заполняет навигацию сразу в памяти (без лишнего запроса к
-            // БД) — нужно, чтобы ToRedactionResponse ниже сразу получил оригинальное имя файла.
-            attachmentEntities.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id, FileAttachment = saved });
-        }
+        var attachmentEntities = await BuildAttachmentEntitiesAsync(vndId, request, currentUserId);
 
         var nextNumber = (lastRedaction?.Number ?? 0) + 1;
 
@@ -793,6 +786,75 @@ public class VndService : IVndService
         }
 
         return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+    }
+
+    /// <summary>
+    /// Собирает вложения новой редакции из двух источников:
+    /// - request.ExistingAttachmentFileIds — файлы, перенесённые "как есть" из предыдущих редакций
+    ///   этого же ВНД (см. блок "Вложения" в VndUploadRedactionModal, предзаполненный вложениями
+    ///   последней редакции) - без повторной загрузки, просто новая привязка к тому же FileAttachmentId;
+    /// - request.Attachments — новые файлы, которые пользователь выбрал через проводник. Каждый
+    ///   такой файл ПЕРЕД загрузкой в MinIO сверяется по SHA-256 с файлами, уже приложенными к
+    ///   какой-либо редакции ЭТОГО ВНД (включая только что перенесённые/загруженные в этом же
+    ///   запросе) — если содержимое совпадает, файл не грузится повторно, переиспользуется
+    ///   существующий FileAttachmentId. Сверка нарочно ограничена этим ВНД (не всей системой) —
+    ///   вложение может использоваться в другом, не связанном ВНД, и должно спокойно исчезать при
+    ///   удалении текущего документа (см. DeleteAsync ниже), не задевая чужие ссылки.
+    /// </summary>
+    private async Task<List<VndRedactionAttachment>> BuildAttachmentEntitiesAsync(
+        int vndId, CreateVndRedactionRequest request, int currentUserId)
+    {
+        // Пул "кандидатов на переиспользование" — все файлы вложений, когда-либо приложенные
+        // к редакциям этого ВНД. FileAttachment подгружаем сразу (Include), он нужен и для
+        // сверки по хешу, и для навигации в новых VndRedactionAttachment (см. комментарий ниже).
+        var candidateAttachments = await _db.Set<VndRedactionAttachment>()
+            .Where(a => a.VndRedaction!.VndId == vndId)
+            .Include(a => a.FileAttachment)
+            .Select(a => a.FileAttachment!)
+            .ToListAsync();
+        // Один и тот же файл может встречаться у нескольких редакций этого ВНД - дедуп по id
+        // делаем на стороне .NET (после выборки), чтобы не полагаться на трансляцию Distinct()
+        // по entity-типу в SQL.
+        var candidatesById = candidateAttachments
+            .GroupBy(f => f.Id)
+            .ToDictionary(g => g.Key, g => g.First());
+        var candidates = candidatesById.Values.ToList();
+
+        var attachmentEntities = new List<VndRedactionAttachment>();
+
+        // Перенесённые без изменений вложения предыдущей редакции - только те id, что
+        // действительно принадлежат этому ВНД (см. XML-комментарий у ExistingAttachmentFileIds).
+        // Один и тот же id мог быть прислан дважды (например, повторный клик) - Distinct на входе.
+        foreach (var fileId in (request.ExistingAttachmentFileIds ?? []).Distinct())
+        {
+            if (candidatesById.TryGetValue(fileId, out var existing))
+                attachmentEntities.Add(new VndRedactionAttachment {FileAttachmentId = existing.Id, FileAttachment = existing});
+        }
+
+        foreach (var file in request.Attachments ?? [])
+        {
+            var hash = await _fileService.ComputeHashAsync(file);
+            // Ищем среди кандидатов ЭТОГО ВНД (включая уже перенесённые/только что загруженные
+            // выше в этом же цикле - candidates пополняется ниже при реальной загрузке) файл
+            // с тем же содержимым - совпадение по хешу и размеру.
+            var duplicate = candidates.FirstOrDefault(f => f.Hash == hash && f.SizeBytes == file.Length);
+
+            if (duplicate is not null)
+            {
+                attachmentEntities.Add(new VndRedactionAttachment {FileAttachmentId = duplicate.Id, FileAttachment = duplicate});
+                continue;
+            }
+
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            // FileAttachment = saved заполняет навигацию сразу в памяти (без лишнего запроса к
+            // БД) — нужно, чтобы ToRedactionResponse ниже сразу получил оригинальное имя файла.
+            attachmentEntities.Add(new VndRedactionAttachment {FileAttachmentId = saved.Id, FileAttachment = saved});
+            // Пополняем пул кандидатов - если следующий файл в этом же запросе побайтово
+            // совпадёт с только что загруженным, он тоже переиспользует его вместо повторной загрузки.
+            candidates.Add(saved);
+        }
+
+        return attachmentEntities;
     }
 
     // Отправка редакции на согласование: переводит черновик редакции в Pending и ВНД в Review.

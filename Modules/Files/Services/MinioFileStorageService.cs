@@ -1,4 +1,5 @@
-﻿using delosfera_server.Data;
+﻿using System.Security.Cryptography;
+using delosfera_server.Data;
 using delosfera_server.Modules.Files.Models;
 using Minio;
 using Minio.DataModel.Args;
@@ -22,6 +23,7 @@ public class MinioFileStorageService : IFileStorageService
     {
         var ext = ValidateFile(file);
         await ValidateContentSignatureAsync(file, ext, ct);
+        var hash = await ComputeHashAsync(file, ct);
 
         var objectName = $"{Guid.NewGuid()}/{file.FileName}";
 
@@ -40,6 +42,7 @@ public class MinioFileStorageService : IFileStorageService
             SizeBytes = file.Length,
             StorageKey = objectName,
             Bucket = _bucket,
+            Hash = hash,
             UploadedByUserId = userId
         };
 
@@ -74,6 +77,13 @@ public class MinioFileStorageService : IFileStorageService
 
         _db.FileAttachments.Remove(meta);
         await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<string> ComputeHashAsync(IFormFile file, CancellationToken ct = default)
+    {
+        await using var stream = file.OpenReadStream();
+        var bytes = await SHA256.HashDataAsync(stream, ct);
+        return Convert.ToHexStringLower(bytes);
     }
 
     // Изображения нужны наравне с документами: к записке и заявке чаще всего

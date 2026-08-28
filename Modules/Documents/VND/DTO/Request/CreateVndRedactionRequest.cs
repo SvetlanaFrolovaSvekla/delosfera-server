@@ -15,6 +15,18 @@ public class CreateVndRedactionRequest
     [StringLength(500, ErrorMessage = "Описание редакции не может превышать 500 символов!")]
     public string? Description { get; set; }
     
+    /// <summary>Новые файлы вложений (то, что реально нужно загрузить в хранилище). Если по
+    /// содержимому (SHA-256) файл совпадает с уже приложенным где-то в редакциях этого же ВНД -
+    /// он не грузится повторно, переиспользуется существующий FileAttachmentId (см.
+    /// VndService.AddRedactionAsync).</summary>
     public List<IFormFile>? Attachments { get; set; }
+
+    /// <summary>Id уже существующих файлов вложений (из предыдущей редакции этого же ВНД),
+    /// которые нужно перенести в новую редакцию как есть, без повторной загрузки - см. блок
+    /// "Вложения" в VndUploadRedactionModal (предзаполняется вложениями последней редакции).
+    /// Каждый id обязан принадлежать вложению одной из существующих редакций ЭТОГО ВНД -
+    /// иначе перенос игнорируется (см. проверку в AddRedactionAsync).</summary>
+    public List<int>? ExistingAttachmentFileIds { get; set; }
+
     public bool RequiresApproval { get; set; }
 }
