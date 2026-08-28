@@ -142,13 +142,54 @@ public class WorkflowNotifier : IWorkflowNotifier
 
         if (title.Length == 0) return;
 
-        await SafeSendAsync([document.AuthorId], title, body, document, severity);
+        await SafeSendAsync(await OutcomeRecipientsAsync(document), title, body, document, severity);
     }
 
     // ── внутреннее ───────────────────────────────────────────────────────────
 
     private async Task<Document?> LoadDocumentAsync(int documentId) =>
         await _db.Documents.FirstOrDefaultAsync(d => d.Id == documentId);
+
+    /// <summary>
+    /// Кому сообщать об исходе согласования.
+    ///
+    /// Задание банка требует извещать не только автора: «уведомления должны
+    /// отправляться всем — исполнителю, создателю, кто регистрирует, начальник СП».
+    /// Прежде уходило одному автору, и начальник узнавал об отклонении документа
+    /// своего подразделения от подчинённого, а делопроизводитель — когда документ
+    /// не приходил на регистрацию.
+    ///
+    /// Это касается только исхода: завершения, отклонения, возврата, остановки.
+    /// Промежуточные шаги остаются у участников — письмо на каждый шаг маршрута
+    /// быстро приучает не читать письма вовсе.
+    /// </summary>
+    private async Task<List<int>> OutcomeRecipientsAsync(Document document)
+    {
+        var recipients = new HashSet<int> {document.AuthorId};
+
+        // Начальник подразделения автора. Если автор сам начальник — он уже
+        // в списке, и повтор отсеет HashSet.
+        var headId = await _db.Users
+            .Where(u => u.Id == document.AuthorId && u.OrgUnit != null)
+            .Select(u => u.OrgUnit!.HeadUserId)
+            .FirstOrDefaultAsync();
+
+        if (headId is { } head) recipients.Add(head);
+
+        // Делопроизводитель, зарегистрировавший записку. Поле есть только
+        // у служебных записок: у прочих контуров регистрация устроена иначе.
+        if (document.Type == DocumentType.Sz)
+        {
+            var registrarId = await _db.SzDocuments
+                .Where(s => s.DocumentId == document.Id)
+                .Select(s => s.RegisteredByUserId)
+                .FirstOrDefaultAsync();
+
+            if (registrarId is { } registrar) recipients.Add(registrar);
+        }
+
+        return recipients.ToList();
+    }
 
     /// <summary>
     /// Сбой рассылки не должен ронять согласование: резолюция уже вынесена, и откат

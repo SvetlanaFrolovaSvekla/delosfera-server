@@ -168,7 +168,7 @@ public class DocumentAttachmentTests
         NewServiceWithStorage(DelosferaDbContext db)
     {
         var audit = new AuditService(db);
-        var signatures = new SignatureService(db, audit);
+        var signatures = new SignatureService(db, audit, new FakeFingerprints(), new NoRegulation());
         var storage = new InMemoryFileStorage(db);
 
         var service = new DocumentAttachmentService(

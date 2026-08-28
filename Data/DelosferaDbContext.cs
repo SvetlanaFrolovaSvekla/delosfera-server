@@ -19,7 +19,23 @@ namespace delosfera_server.Data;
 
 public class DelosferaDbContext : DbContext
 {
+    /// <summary>
+    /// Кто сейчас работает — нужен журналу изменений настроек. Необязательная
+    /// зависимость: контекст поднимают и вне запроса (миграции, фоновые службы),
+    /// и требовать там текущего пользователя нечего.
+    /// </summary>
+    private readonly Common.Services.Authorization.ICurrentUserService? _currentUser;
+
     public DelosferaDbContext(DbContextOptions<DelosferaDbContext> options) : base(options) { }
+
+    public DelosferaDbContext(
+        DbContextOptions<DelosferaDbContext> options,
+        Common.Services.Authorization.ICurrentUserService currentUser) : base(options) =>
+        _currentUser = currentUser;
+
+    /// <summary>Журнал изменений справочников и настроек — пишется самим контекстом.</summary>
+    public DbSet<delosfera_server.Modules.Settings.Models.SettingsChange> SettingsChanges =>
+        Set<delosfera_server.Modules.Settings.Models.SettingsChange>();
 
     public DbSet<TypeVnd> TypesVnd => Set<TypeVnd>(); // Справочник: типы ВНД
     public DbSet<SecurityLevel> SecurityLevels => Set<SecurityLevel>(); // Справочник: Уровни секретности
@@ -106,9 +122,81 @@ public class DelosferaDbContext : DbContext
     public DbSet<delosfera_server.Modules.Help.Models.HelpArticle> HelpArticles =>
         Set<delosfera_server.Modules.Help.Models.HelpArticle>();
 
+    /// <summary>Снимки экрана в статьях инструкции — связь для проверки доступа.</summary>
+    public DbSet<delosfera_server.Modules.Help.Models.HelpArticleImage> HelpArticleImages =>
+        Set<delosfera_server.Modules.Help.Models.HelpArticleImage>();
+
     // --- Ознакомление с документами (Б-19) ---
     public DbSet<AcknowledgementSheet> AcknowledgementSheets => Set<AcknowledgementSheet>();
     public DbSet<AcknowledgementEntry> AcknowledgementEntries => Set<AcknowledgementEntry>();
+
+    /// <summary>
+    /// Настройки почтовых уведомлений. В базе, а не в конфигурации сервера:
+    /// выключить рассылку должен уметь администратор, не трогая сервер.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Integrations.Mail.MailSettings> MailSettings =>
+        Set<delosfera_server.Modules.Integrations.Mail.MailSettings>();
+
+    /// <summary>
+    /// Представления журналов: наборы колонок в списках документов.
+    /// Требование банка — настраивать их без программирования.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Documents.Models.JournalView> JournalViews =>
+        Set<delosfera_server.Modules.Documents.Models.JournalView>();
+
+    /// <summary>
+    /// Оргструктура из портала: настройки связи и история проходов.
+    /// Сама структура ложится в справочник подразделений, отдельной копии нет —
+    /// иначе у банка стало бы два дерева, расходящихся со временем.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Integrations.OrgStructure.OrgStructureSettings> OrgStructureSettings =>
+        Set<delosfera_server.Modules.Integrations.OrgStructure.OrgStructureSettings>();
+
+    public DbSet<delosfera_server.Modules.Integrations.OrgStructure.OrgSyncRun> OrgSyncRuns =>
+        Set<delosfera_server.Modules.Integrations.OrgStructure.OrgSyncRun>();
+
+    /// <summary>
+    /// Доверенности: кто, кому, на что и на какой срок. Отвечает на вопрос
+    /// «вправе ли этот человек подписать вот это сегодня».
+    /// </summary>
+    public DbSet<delosfera_server.Modules.PowerOfAttorney.Models.PowerOfAttorney> PowersOfAttorney =>
+        Set<delosfera_server.Modules.PowerOfAttorney.Models.PowerOfAttorney>();
+
+    public DbSet<delosfera_server.Modules.PowerOfAttorney.Models.PoaFile> PoaFiles =>
+        Set<delosfera_server.Modules.PowerOfAttorney.Models.PoaFile>();
+
+    /// <summary>
+    /// Регулярные обязательства: заседания комитетов, отчёты, пересмотр политик,
+    /// график сдачи в НБКР. Регулятор мыслит периодичностью — здесь она и живёт.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Obligations.Models.RecurringObligation> RecurringObligations =>
+        Set<delosfera_server.Modules.Obligations.Models.RecurringObligation>();
+
+    public DbSet<delosfera_server.Modules.Obligations.Models.ObligationPeriod> ObligationPeriods =>
+        Set<delosfera_server.Modules.Obligations.Models.ObligationPeriod>();
+
+    /// <summary>
+    /// Книга регистрации корреспонденции: входящие и исходящие письма, запросы
+    /// регулятора, обращения клиентов, запросы по счетам.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Correspondence.Models.CorrespondenceLetter> CorrespondenceLetters =>
+        Set<delosfera_server.Modules.Correspondence.Models.CorrespondenceLetter>();
+
+    public DbSet<delosfera_server.Modules.Correspondence.Models.Correspondent> Correspondents =>
+        Set<delosfera_server.Modules.Correspondence.Models.Correspondent>();
+
+    public DbSet<delosfera_server.Modules.Correspondence.Models.LetterFile> LetterFiles =>
+        Set<delosfera_server.Modules.Correspondence.Models.LetterFile>();
+
+    /// <summary>
+    /// Приказы по личному составу. Книга ведётся отдельно от приказов по основной
+    /// деятельности: срок хранения у неё особый.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.Hr.Models.HrOrder> HrOrders =>
+        Set<delosfera_server.Modules.Hr.Models.HrOrder>();
+
+    public DbSet<delosfera_server.Modules.Hr.Models.HrOrderEmployee> HrOrderEmployees =>
+        Set<delosfera_server.Modules.Hr.Models.HrOrderEmployee>();
 
     /// <summary>Пожелания и замечания сотрудников с экранов системы — обкатка подразделениями.</summary>
     public DbSet<delosfera_server.Modules.Feedback.Models.FeedbackItem> FeedbackItems =>
@@ -191,13 +279,83 @@ public class DelosferaDbContext : DbContext
     public override int SaveChanges()
     {
         ApplyAuditInfo();
-        return base.SaveChanges();
+
+        var pending = CollectSettingsChanges();
+        var saved = base.SaveChanges();
+
+        return saved + WriteSettingsChanges(pending, () => base.SaveChanges());
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         ApplyAuditInfo();
-        return base.SaveChangesAsync(cancellationToken);
+
+        var pending = CollectSettingsChanges();
+        var saved = await base.SaveChangesAsync(cancellationToken);
+
+        if (pending.Count == 0) return saved;
+
+        delosfera_server.Modules.Settings.Services.SettingsChangeCollector.FillIds(pending);
+        SettingsChanges.AddRange(pending.Select(p => p.Change));
+
+        return saved + await base.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Готовит записи журнала до сохранения — после него старые значения полей
+    /// уже недоступны.
+    /// </summary>
+    private List<(delosfera_server.Modules.Settings.Models.SettingsChange Change,
+                  Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry Entry)> CollectSettingsChanges()
+    {
+        if (_currentUser is null) return [];
+
+        // Вне запроса текущего пользователя нет, и обращение к нему бросает
+        // исключение: фоновые службы — чистка журнала посещений, закрытие
+        // истёкших доверенностей, календарь обязательств — работают без
+        // HttpContext и упали бы на первом же сохранении.
+        //
+        // Их правки в журнал настроек и не нужны: журнал ведут ради ответа на
+        // вопрос «кто поменял», а у службы ответа нет.
+        int userId;
+        try
+        {
+            userId = _currentUser.UserId;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+
+        var pending = delosfera_server.Modules.Settings.Services.SettingsChangeCollector.Collect(
+            ChangeTracker, userId == 0 ? null : userId);
+
+        // ФИО берём из уже отслеживаемых сущностей, если человек там есть.
+        // Отдельного запроса не делаем: журнал не повод ходить в базу при
+        // каждом сохранении справочника — недостающее имя подставит выдача.
+        if (pending.Count > 0 && userId != 0)
+        {
+            var name = ChangeTracker.Entries<Modules.Users.Models.User>()
+                .FirstOrDefault(e => e.Entity.Id == userId)?.Entity.FullName;
+
+            if (name is not null)
+                foreach (var (change, _) in pending) change.UserName = name;
+        }
+
+        return pending;
+    }
+
+    private int WriteSettingsChanges(
+        List<(delosfera_server.Modules.Settings.Models.SettingsChange Change,
+              Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry Entry)> pending,
+        Func<int> save)
+    {
+        if (pending.Count == 0) return 0;
+
+        delosfera_server.Modules.Settings.Services.SettingsChangeCollector.FillIds(pending);
+        SettingsChanges.AddRange(pending.Select(p => p.Change));
+
+        return save();
     }
 
     private void ApplyAuditInfo()

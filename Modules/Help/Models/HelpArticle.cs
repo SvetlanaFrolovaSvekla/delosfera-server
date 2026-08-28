@@ -76,6 +76,9 @@ public class HelpArticle
     public int? UpdatedByUserId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>Снимки экрана, использованные в статье.</summary>
+    public ICollection<HelpArticleImage> Images { get; set; } = new List<HelpArticleImage>();
 }
 
 /// <summary>
@@ -98,4 +101,14 @@ public static class HelpBlockKind
 
     /// <summary>Ссылка на действующий документ в базе ВНД.</summary>
     public const string Vnd = "vnd";
+
+    /// <summary>
+    /// Снимок экрана с нумерованными выносками: «нажмите 1, затем 2».
+    ///
+    /// Выноски нумерованные, а не нарисованные стрелки: стрелку пришлось бы
+    /// рисовать в графическом редакторе и перерисовывать при каждой правке
+    /// интерфейса, а номер ставится мышью прямо в системе и переносится вместе
+    /// с изображением.
+    /// </summary>
+    public const string Image = "image";
 }

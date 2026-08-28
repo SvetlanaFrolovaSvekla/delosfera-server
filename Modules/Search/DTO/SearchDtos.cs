@@ -9,6 +9,18 @@ public enum SearchScope
     Procurement = 2,
     Contract = 3,
     Meeting = 4,
+
+    /// <summary>
+    /// Внутренние нормативные документы. Самое объёмное содержимое системы —
+    /// и до сих пор единственный контур, до которого общий поиск не доходил.
+    /// </summary>
+    Vnd = 5,
+
+    /// <summary>Входящая и исходящая корреспонденция.</summary>
+    Correspondence = 6,
+
+    /// <summary>Доверенности.</summary>
+    PowerOfAttorney = 7,
 }
 
 public class SearchRequest
@@ -93,6 +105,9 @@ public static class SearchScopeMap
         SearchScope.Procurement => "Закупки",
         SearchScope.Contract => "Договоры",
         SearchScope.Meeting => "Заседания",
+        SearchScope.Vnd => "Нормативные документы",
+        SearchScope.Correspondence => "Корреспонденция",
+        SearchScope.PowerOfAttorney => "Доверенности",
         _ => scope.ToString(),
     };
 

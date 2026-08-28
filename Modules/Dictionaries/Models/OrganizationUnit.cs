@@ -30,6 +30,25 @@ public class OrganizationUnit : IAuditableEntity, ITranslatableEntity, IHierarch
     /// </summary>
     public bool RequiresPaperSz { get; set; }
 
+    /// <summary>
+    /// Что это за узел: коллегиальный орган, управление или отдел.
+    ///
+    /// Приходит из портала. Раньше вид угадывался по вложенности — есть внутри
+    /// подразделения, значит управление, — и ошибался на управлении без отделов
+    /// и на комитете, у которого отделы есть.
+    /// </summary>
+    public OrgUnitKind Kind { get; set; } = OrgUnitKind.Unknown;
+
+    /// <summary>
+    /// Идентификатор подразделения в портале, откуда приходит оргструктура.
+    /// Пусто у подразделений, заведённых руками.
+    ///
+    /// Сопоставляем по нему, а не по названию: при переименовании в портале
+    /// сопоставление по названию завело бы двойника, а прежнее подразделение
+    /// осталось бы висеть со всеми привязанными к нему людьми и документами.
+    /// </summary>
+    public int? ExternalId { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

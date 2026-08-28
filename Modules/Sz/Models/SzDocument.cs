@@ -2,6 +2,7 @@ using System.Text.Json;
 using delosfera_server.Common.Models;
 using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Modules.Users.Models;
 
 using NpgsqlTypes;
@@ -94,6 +95,31 @@ public class SzDocument : IAuditableEntity
 
     /// <summary>Сколько раз записка уходила на согласование — повтор идёт с первого этапа.</summary>
     public int ApprovalRounds { get; set; }
+
+    // --- вынесение на коллегиальный орган ---
+
+    /// <summary>
+    /// На какой орган выносится вопрос записки: Правление, КПА, Кредитный комитет.
+    /// Пусто — записка решается в рабочем порядке и на заседание не идёт.
+    ///
+    /// Отметку ставит автор или адресат при вынесении решения. Дальше записка
+    /// попадает в отбор к секретарю этого органа — и только он решает, включать ли
+    /// её в повестку и на какое заседание. Пометка автора — это заявка, а не
+    /// распоряжение: повестку формирует секретарь.
+    /// </summary>
+    public MeetingBody? SubmitToBody { get; set; }
+
+    /// <summary>
+    /// Формулировка вопроса для повестки. Тема записки и вопрос заседания — разные
+    /// тексты: записка называется «О приобретении сервера», а в повестку идёт
+    /// «О приобретении сервера для резервного копирования (докладчик — Иванов И.И.)».
+    /// Пусто — секретарь возьмёт тему записки.
+    /// </summary>
+    public string? SubmitToBodyQuestion { get; set; }
+
+    public DateTime? SubmitToBodyRequestedAt { get; set; }
+    public int? SubmitToBodyRequestedByUserId { get; set; }
+    public User? SubmitToBodyRequestedByUser { get; set; }
 
     // --- исполнение ---
 

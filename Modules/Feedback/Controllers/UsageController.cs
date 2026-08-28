@@ -117,6 +117,203 @@ public class UsageController : ControllerBase
         return Ok(new { accepted = rows.Count });
     }
 
+    /// <summary>
+    /// Отчёт целиком: показатели, дни, разделы и поимённый список сотрудников.
+    ///
+    /// Одним запросом, а не шестью: страница показывает всё сразу, и шесть
+    /// обращений подряд означали бы шесть разных мгновений — цифры в шапке
+    /// расходились бы с таблицей под ней.
+    ///
+    /// В список входят и те, кто не заходил ни разу. Они и есть главный вопрос
+    /// к отчёту: молчание подразделения читают как «замечаний нет», а обычно
+    /// это «мы не начинали».
+    /// </summary>
+    [HttpGet("report")]
+    [RequirePermission(PermissionCode.ViewFullStatistics)]
+    public async Task<IActionResult> Report([FromQuery] int days = 30, CancellationToken ct = default)
+    {
+        var (from, to) = Period(days);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var weekAgo = today.AddDays(-7);
+
+        var visits = _db.PageVisits.AsNoTracking().Where(v => v.VisitedAt >= from && v.VisitedAt < to);
+
+        // Показатели шапки
+        var totalOpens = await visits.CountAsync(ct);
+        var reached = await visits.Select(v => v.UserId).Distinct().CountAsync(ct);
+
+        var enabled = await _db.Users.CountAsync(u => u.IsActive && u.BlockedAt == null, ct);
+
+        var todayCount = await _db.PageVisits.AsNoTracking()
+            .Where(v => v.VisitedAt >= today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc))
+            .Select(v => v.UserId).Distinct().CountAsync(ct);
+
+        var weekCount = await _db.PageVisits.AsNoTracking()
+            .Where(v => v.VisitedAt >= weekAgo.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc))
+            .Select(v => v.UserId).Distinct().CountAsync(ct);
+
+        // Ни разу не заходили — за всё время, а не за период: человек, зашедший
+        // однажды в марте, уже не «ни разу», даже если в этом месяце его не было.
+        var everVisited = await _db.PageVisits.AsNoTracking()
+            .Select(v => v.UserId).Distinct().CountAsync(ct);
+        var neverVisited = Math.Max(enabled - everVisited, 0);
+
+        // По дням
+        var byDay = await visits
+            .GroupBy(v => v.VisitedAt.Date)
+            .Select(g => new { Day = g.Key, Users = g.Select(v => v.UserId).Distinct().Count() })
+            .OrderBy(x => x.Day)
+            .ToListAsync(ct);
+
+        // По разделам: сводим маршруты в разделы уже в памяти — сопоставление
+        // живёт в коде, а не в базе, и переносить его в запрос незачем.
+        var byRoute = await visits
+            .GroupBy(v => v.RoutePath)
+            .Select(g => new { Route = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var sections = byRoute
+            .GroupBy(r => SectionMap.Title(r.Route))
+            .Select(g => new { title = g.Key, count = g.Sum(x => x.Count) })
+            .OrderByDescending(x => x.count)
+            .Take(15)
+            .ToList();
+
+        // Поимённо: сначала те, кто заходил, потом молчавшие.
+        var active = await visits
+            .GroupBy(v => v.UserId)
+            .Select(g => new
+            {
+                UserId = g.Key,
+                Opens = g.Count(),
+                Days = g.Select(v => v.VisitedAt.Date).Distinct().Count(),
+                Last = g.Max(v => v.VisitedAt),
+            })
+            .ToListAsync(ct);
+
+        var stats = active.ToDictionary(a => a.UserId);
+
+        var people = await _db.Users.AsNoTracking()
+            .Where(u => u.IsActive && u.BlockedAt == null)
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName,
+                Position = u.Position == null ? null : u.Position.TitleRu,
+                OrgUnit = u.OrgUnit == null ? null : u.OrgUnit.TitleRu,
+            })
+            .ToListAsync(ct);
+
+        var employees = people
+            .Select(p =>
+            {
+                stats.TryGetValue(p.Id, out var s);
+                return new
+                {
+                    userId = p.Id,
+                    fullName = p.FullName,
+                    position = p.Position,
+                    orgUnit = p.OrgUnit,
+                    days = s?.Days ?? 0,
+                    opens = s?.Opens ?? 0,
+                    lastVisit = s?.Last,
+                };
+            })
+            .OrderByDescending(e => e.opens).ThenBy(e => e.fullName)
+            .ToList();
+
+        return Ok(new
+        {
+            days,
+            from,
+            to,
+            summary = new
+            {
+                reached,
+                enabled,
+                // Доля справочника: сколько сотрудников из заведённых вообще
+                // пользуются системой. Это и есть ответ на «внедрилось ли».
+                share = enabled == 0 ? 0 : (int)Math.Round(reached * 100.0 / enabled),
+                totalOpens,
+                today = todayCount,
+                week = weekCount,
+                neverVisited,
+            },
+            byDay,
+            sections,
+            employees,
+        });
+    }
+
+    /// <summary>Тот же отчёт таблицей — для разбора в Excel.</summary>
+    [HttpGet("report.csv")]
+    [RequirePermission(PermissionCode.ViewFullStatistics)]
+    public async Task<IActionResult> ReportCsv([FromQuery] int days = 30, CancellationToken ct = default)
+    {
+        var (from, to) = Period(days);
+
+        var active = await _db.PageVisits.AsNoTracking()
+            .Where(v => v.VisitedAt >= from && v.VisitedAt < to)
+            .GroupBy(v => v.UserId)
+            .Select(g => new
+            {
+                UserId = g.Key,
+                Opens = g.Count(),
+                Days = g.Select(v => v.VisitedAt.Date).Distinct().Count(),
+                Last = g.Max(v => v.VisitedAt),
+            })
+            .ToListAsync(ct);
+
+        var stats = active.ToDictionary(a => a.UserId);
+
+        var people = await _db.Users.AsNoTracking()
+            .Where(u => u.IsActive && u.BlockedAt == null)
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName,
+                Position = u.Position == null ? null : u.Position.TitleRu,
+                OrgUnit = u.OrgUnit == null ? null : u.OrgUnit.TitleRu,
+            })
+            .OrderBy(u => u.FullName)
+            .ToListAsync(ct);
+
+        var text = new System.Text.StringBuilder();
+
+        // Разделитель — точка с запятой: Excel с русскими настройками разбирает
+        // запятую как десятичный знак и складывает всю строку в одну ячейку.
+        text.AppendLine("Сотрудник;Должность;Подразделение;Дней с посещениями;Открытий;Последний вход");
+
+        foreach (var person in people)
+        {
+            stats.TryGetValue(person.Id, out var s);
+
+            text.AppendLine(string.Join(';',
+                Csv(person.FullName),
+                Csv(person.Position),
+                Csv(person.OrgUnit),
+                s?.Days ?? 0,
+                s?.Opens ?? 0,
+                s is null ? "" : s.Last.ToString("dd.MM.yyyy HH:mm")));
+        }
+
+        // Метка порядка байтов: без неё Excel открывает кириллицу как «ЗаголовокЛ».
+        var bytes = System.Text.Encoding.UTF8.GetPreamble()
+            .Concat(System.Text.Encoding.UTF8.GetBytes(text.ToString()))
+            .ToArray();
+
+        return File(bytes, "text/csv", $"посещения-{days}дн.csv");
+    }
+
+    /// <summary>Экранирует значение для CSV: кавычки удваиваются, разделители прячутся.</summary>
+    private static string Csv(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        return value.Contains(';') || value.Contains('"') || value.Contains('\n')
+            ? "\"" + value.Replace("\"", "\"\"") + "\""
+            : value;
+    }
+
     /// <summary>Общая картина за период: сколько заходов, кто был, что открывали.</summary>
     [HttpGet("overview")]
     [RequirePermission(PermissionCode.ViewFullStatistics)]

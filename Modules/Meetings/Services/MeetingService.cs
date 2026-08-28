@@ -43,35 +43,98 @@ public class MeetingService : IMeetingService
         _clock = clock;
     }
 
+    /// <summary>
+    /// Журнал заседаний.
+    ///
+    /// Отбор по доступу и подсчёты идут в базе, а не в памяти. Раньше журнал
+    /// вычитывал все заседания со всеми вопросами и поручениями, а отбирал уже
+    /// после: на двухстах заседаниях это десять тысяч строк ради списка из
+    /// двадцати. Заодно это чинило бы себя молча — при пустом журнале разницы
+    /// не видно.
+    ///
+    /// Приглашённые теперь тоже учитываются. Прежняя проверка читала
+    /// <c>i.Guests</c>, которого не было в загрузке, — ленивой загрузки в
+    /// проекте нет, коллекция всегда оказывалась пустой, и сотрудник, указанный
+    /// в вопросе только приглашённым, заседания в журнале не видел.
+    /// </summary>
     public async Task<List<MeetingListItemDto>> ListAsync(MeetingFilterRequest filter)
     {
-        var query = _db.Meetings
-            .Include(m => m.Secretary)
-            .Include(m => m.Items).ThenInclude(i => i.Assignments)
-            .AsNoTracking()
-            .AsQueryable();
+        var query = _db.Meetings.AsNoTracking().AsQueryable();
 
         if (filter.Body is { } body) query = query.Where(m => m.Body == body);
         if (filter.Year is { } year) query = query.Where(m => m.Year == year);
         if (filter.From is { } from) query = query.Where(m => m.Date >= from);
         if (filter.To is { } to) query = query.Where(m => m.Date <= to);
 
-        var meetings = await query
-            .OrderByDescending(m => m.Date)
-            .ThenByDescending(m => m.Number)
-            .ToListAsync();
+        // Органы, повестку которых человек видит целиком: секретарь и члены
+        // органа. Право проверяется по каждому органу, а их три — считаем
+        // список заранее и передаём в запрос значением.
+        var openBodies = Enum.GetValues<MeetingBody>()
+            .Where(b => _access.SeesAllItems(b))
+            .ToArray();
+
+        var me = _currentUser.UserId;
+
+        query = query.Where(m =>
+            openBodies.Contains(m.Body)
+            || m.Items.Any(i =>
+                i.SpeakerUserId == me
+                || i.SpeakerHeadUserId == me
+                || i.DeputySecretaryUserId == me
+                || i.ControllerUserId == me
+                || i.Guests.Any(g => g.UserId == me)
+                || i.Assignments.Any(a => a.UserId == me)));
 
         var today = _clock.Today;
 
-        var result = meetings
-            .Where(m => _access.SeesAllItems(m.Body) || HasOwnItems(m))
-            .Select(m => ToListItem(m, today))
-            .ToList();
+        // Просрочка считается подзапросом здесь же: иначе пришлось бы тянуть
+        // поручения целиком ради одного числа в строке.
+        var projected = query
+            .OrderByDescending(m => m.Date)
+            .ThenByDescending(m => m.Number)
+            .Select(m => new
+            {
+                m.Id, m.Body, m.Number, m.Year, m.Form, m.Date, m.Time, m.NotifiedAt,
+                SecretaryName = m.Secretary == null ? null : m.Secretary.FullName,
+                ItemCount = m.Items.Count,
+                AssignmentCount = m.Items.Sum(i => i.Assignments.Count),
+                OverdueCount = m.Items
+                    .SelectMany(i => i.Assignments)
+                    .Count(a => a.DueDate != null
+                                && a.DueDate < today
+                                && OpenStatuses.Contains(a.Status)),
+            });
 
-        return filter.OverdueOnly
-            ? result.Where(m => m.OverdueCount > 0).ToList()
-            : result;
+        if (filter.OverdueOnly)
+            projected = projected.Where(x => x.OverdueCount > 0);
+
+        var rows = await projected.ToListAsync();
+
+        return rows.Select(x => new MeetingListItemDto
+        {
+            Id = x.Id,
+            Body = x.Body,
+            BodyTitle = MeetingTitles.Body(x.Body),
+            Number = x.Number,
+            Year = x.Year,
+            Form = x.Form,
+            FormTitle = MeetingTitles.Form(x.Form),
+            Date = x.Date,
+            Time = x.Time,
+            SecretaryName = x.SecretaryName,
+            ItemCount = x.ItemCount,
+            AssignmentCount = x.AssignmentCount,
+            OverdueCount = x.OverdueCount,
+            NotifiedAt = x.NotifiedAt,
+        }).ToList();
     }
+
+    /// <summary>
+    /// Состояния, при которых поручение считается открытым. Список значением,
+    /// а не вызовом метода: внутри запроса к базе метод не переводится в SQL.
+    /// </summary>
+    private static readonly ExecutionStatus[] OpenStatuses =
+        Enum.GetValues<ExecutionStatus>().Where(MeetingTitles.IsOpen).ToArray();
 
     public async Task<MeetingDto> GetAsync(int id)
     {

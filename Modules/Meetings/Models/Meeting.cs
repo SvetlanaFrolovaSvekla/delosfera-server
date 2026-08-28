@@ -69,6 +69,17 @@ public class AgendaItem : IAuditableEntity
 
     public required string Topic { get; set; }
 
+    /// <summary>
+    /// Служебная записка, из которой вырос вопрос. Заполняется, когда секретарь
+    /// отобрал записку с отметкой «вынести на орган»; при ручном вводе вопроса пусто.
+    ///
+    /// Связь идёт отсюда, а не из записки: повестку формирует секретарь, и это он
+    /// решает, какая записка станет вопросом. Записка о своём попадании в повестку
+    /// не распоряжается — она только просит.
+    /// </summary>
+    public int? SourceSzId { get; set; }
+    public Sz.Models.SzDocument? SourceSz { get; set; }
+
     /// <summary>Поисковый вектор по теме, решению и номеру протокола (GEN-04).</summary>
     public NpgsqlTsVector? SearchVector { get; set; }
 

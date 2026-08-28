@@ -144,7 +144,16 @@ public class SzService : ISzService
     public async Task<SzDetails?> GetAsync(int id)
     {
         var sz = await BaseQuery().FirstOrDefaultAsync(x => x.Id == id);
-        return sz is null ? null : ToDetails(sz);
+        if (sz is null) return null;
+
+        var details = ToDetails(sz);
+
+        // Включена ли записка в повестку. Спрашиваем только для карточки, а не для
+        // реестра: в списке это лишний запрос на каждую строку, а нужно оно лишь
+        // затем, чтобы не предлагать менять отметку, когда вопрос уже заведён.
+        details.InAgenda = await _db.AgendaItems.AnyAsync(a => a.SourceSzId == id);
+
+        return details;
     }
 
     public async Task<SzDetails> CreateDraftAsync(SzSaveRequest request, int authorId)
@@ -676,6 +685,9 @@ public class SzService : ISzService
             .ToList();
         d.SignerUserId = x.SignerUserId;
         d.SignerUser = x.SignerUser?.FullName;
+        d.SubmitToBody = x.SubmitToBody?.ToString();
+        d.SubmitToBodyQuestion = x.SubmitToBodyQuestion;
+        d.SubmitToBodyRequestedAt = x.SubmitToBodyRequestedAt;
         d.RegisteredByUserId = x.RegisteredByUserId;
         d.RubricIds = x.Rubrics.Select(r => r.Id).ToList();
         d.Rubrics = x.Rubrics.Select(r => r.TitleRu).ToList();

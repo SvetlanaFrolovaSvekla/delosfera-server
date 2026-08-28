@@ -14,6 +14,9 @@ public static class MeetingServiceExtensions
         builder.Services.AddScoped<IMeetingService, MeetingService>();
         builder.Services.AddScoped<IAgendaService, AgendaService>();
         builder.Services.AddScoped<IAgendaFileService, AgendaFileService>();
+
+        // Отбор записок с отметкой «вынести на орган» в повестку — решает секретарь
+        builder.Services.AddScoped<IAgendaCandidateService, AgendaCandidateService>();
         builder.Services.AddScoped<IMeetingNotificationService, MeetingNotificationService>();
         builder.Services.AddScoped<IMeetingRegistryService, MeetingRegistryService>();
 

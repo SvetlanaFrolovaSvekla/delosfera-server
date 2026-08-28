@@ -117,6 +117,26 @@ builder.AddSearchServices();
 // растёт быстрее всех таблиц, поэтому вместе со сбором сразу заводим и чистку.
 builder.Services.AddHostedService<delosfera_server.Modules.Feedback.Services.PageVisitCleanupWorker>();
 
+// Доверенности. Состояние хранится, а не считается по датам, — значит кто-то должен
+// закрывать истёкшие, иначе реестр отвечает неправдой на вопрос «вправе ли он».
+builder.Services.AddScoped<
+    delosfera_server.Modules.PowerOfAttorney.Services.IPoaService,
+    delosfera_server.Modules.PowerOfAttorney.Services.PoaService>();
+builder.Services.AddHostedService<delosfera_server.Modules.PowerOfAttorney.Services.PoaExpiryWorker>();
+
+// Регулярные обязательства: календарь заседаний комитетов, отчётов и пересмотра
+// политик. Периоды заводятся вперёд, заседания закрывают их сами.
+builder.Services.AddScoped<
+    delosfera_server.Modules.Obligations.Services.IObligationService,
+    delosfera_server.Modules.Obligations.Services.ObligationService>();
+builder.Services.AddHostedService<delosfera_server.Modules.Obligations.Services.ObligationWorker>();
+
+// Канцелярия: книга регистрации входящих и исходящих. Запросы регулятора и
+// обращения клиентов — категории писем, а не отдельные реестры.
+builder.Services.AddScoped<
+    delosfera_server.Modules.Correspondence.Services.ILetterService,
+    delosfera_server.Modules.Correspondence.Services.LetterService>();
+
 
 // Адреса фронтенда задаются конфигурацией: на стенде это localhost, в банке —
 // адрес развёрнутого клиента. Захардкоженный localhost означал бы, что на любом
@@ -237,18 +257,53 @@ using (var scope = app.Services.CreateScope())
             app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Demo"));
     }
 
+    // Права на новые разделы существующим ролям. Без этого раздел после выкладки
+    // не видит никто: право заведено, но ни одной роли не принадлежит.
+    await delosfera_server.Modules.Users.Services.RolePermissionDefaults.ApplyAsync(
+        db,
+        app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("RoleDefaults"));
+
+    // Пароль администратору выдаётся только так — из настройки, не из хеша в коде.
+    // Блок находит уже заведённую учётную запись и ставит ей пароль; новых он не
+    // создаёт. Учётные записи приходят из справочника банка, и завести здесь ещё
+    // одну означало бы человека без подразделения и должности.
     var adminEmail = app.Configuration["Bootstrap:AdminEmail"];
     var adminPassword = app.Configuration["Bootstrap:AdminPassword"];
     if (!string.IsNullOrWhiteSpace(adminEmail) && !string.IsNullOrWhiteSpace(adminPassword))
     {
+        var bootstrapLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Bootstrap");
         var hasher = scope.ServiceProvider.GetRequiredService<IUserPasswordHasher>();
         var admin = db.Users.FirstOrDefault(u => u.Email == adminEmail);
+
         if (admin is not null)
         {
             admin.PasswordHash = hasher.Hash(adminPassword);
             admin.IsActive = true;
             admin.BlockedAt = null;
             db.SaveChanges();
+
+            bootstrapLog.LogInformation(
+                "Пароль выдан учётной записи {Email}. Войти можно ею.", adminEmail);
+        }
+        else
+        {
+            // Молчать здесь нельзя. Развёртывание выглядело бы успешным, а войти
+            // было бы нечем: приложение стартовало, health отвечает, и только на
+            // экране входа выясняется, что пароля нет ни у кого. Причина — опечатка
+            // в адресе или адрес, которого нет в справочнике.
+            var known = db.Users
+                .Where(u => u.IsActive)
+                .OrderBy(u => u.Id)
+                .Select(u => u.Email)
+                .Take(5)
+                .ToList();
+
+            bootstrapLog.LogError(
+                "Bootstrap:AdminEmail = «{Email}» — такой учётной записи нет, пароль выдать некому. " +
+                "Блок меняет пароль существующей записи, а не создаёт новую. " +
+                "Укажите адрес из справочника, например: {Known}. " +
+                "Всего активных записей: {Count}.",
+                adminEmail, string.Join(", ", known), db.Users.Count(u => u.IsActive));
         }
     }
 }

@@ -12,6 +12,16 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
 
         builder.HasIndex(x => x.Code).IsUnique();
 
+        // Полнотекстовый поиск по коду и названию. Вычисляемая колонка, а не поле,
+        // которое надо помнить обновлять; словарь константой — иначе выражение не
+        // immutable и Postgres не примет его в генерируемую колонку.
+        builder.Property(x => x.SearchVector)
+            .HasComputedColumnSql(
+                "to_tsvector('russian', coalesce(title_ru, '') || ' ' || coalesce(code, '') || ' ' || coalesce(title_kg, ''))",
+                stored: true);
+
+        builder.HasIndex(x => x.SearchVector).HasMethod("GIN");
+
         builder.HasOne(x => x.Type).WithMany().HasForeignKey(x => x.TypeId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Developer).WithMany().HasForeignKey(x => x.DeveloperId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.CuratorDeveloper).WithMany().HasForeignKey(x => x.CuratorDeveloperId)

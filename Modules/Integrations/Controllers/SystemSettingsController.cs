@@ -6,6 +6,8 @@ using delosfera_server.Common.Services.Authorization.Ldap;
 using delosfera_server.Modules.Integrations.Directory;
 using delosfera_server.Modules.Users.Models;
 
+using delosfera_server.Modules.Integrations.Mail;
+
 namespace delosfera_server.Modules.Integrations.Controllers;
 
 /// <summary>
@@ -123,4 +125,5 @@ public class SystemSettingsController : ControllerBase
             return Ok(new {success = false, message = ex.Message});
         }
     }
+
 }

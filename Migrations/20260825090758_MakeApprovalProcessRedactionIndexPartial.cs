@@ -8,25 +8,29 @@ namespace delosfera_server.Migrations
     public partial class MakeApprovalProcessRedactionIndexPartial : Migration
     {
         /// <inheritdoc />
+        /// <remarks>
+        /// Перезапись role.permission_codes из этой миграции убрана намеренно.
+        ///
+        /// Она вписывала ролям «Администратор» и «Главный редактор ВНД» набор
+        /// прав до 37 включительно — таким он был в ветке разработки. На стенде
+        /// у этих ролей права до 43: доверенности, корреспонденция, банковская
+        /// тайна, кадровые приказы. Применив её как есть, мы молча срезали бы
+        /// шесть прав у одиннадцати человек, и заметили бы это тогда, когда
+        /// администратор не смог бы открыть доверенности.
+        ///
+        /// Списком прав распоряжается справочник ролей, а не миграция: набор
+        /// меняется по мере появления возможностей, и фиксировать его снимком
+        /// на дату — значит однажды откатить чужую работу.
+        ///
+        /// Частичный индекс — то, ради чего миграция и заводилась, — сохранён.
+        /// </remarks>
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropIndex(
                 name: "ix_vnd_approval_process_redaction_id",
                 table: "vnd_approval_process");
 
-            migrationBuilder.UpdateData(
-                table: "role",
-                keyColumn: "id",
-                keyValue: 1,
-                column: "permission_codes",
-                value: new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37 });
 
-            migrationBuilder.UpdateData(
-                table: "role",
-                keyColumn: "id",
-                keyValue: 4,
-                column: "permission_codes",
-                value: new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37 });
 
             migrationBuilder.CreateIndex(
                 name: "ix_vnd_approval_process_redaction_id",
@@ -43,19 +47,7 @@ namespace delosfera_server.Migrations
                 name: "ix_vnd_approval_process_redaction_id",
                 table: "vnd_approval_process");
 
-            migrationBuilder.UpdateData(
-                table: "role",
-                keyColumn: "id",
-                keyValue: 1,
-                column: "permission_codes",
-                value: new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36 });
 
-            migrationBuilder.UpdateData(
-                table: "role",
-                keyColumn: "id",
-                keyValue: 4,
-                column: "permission_codes",
-                value: new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36 });
 
             migrationBuilder.CreateIndex(
                 name: "ix_vnd_approval_process_redaction_id",

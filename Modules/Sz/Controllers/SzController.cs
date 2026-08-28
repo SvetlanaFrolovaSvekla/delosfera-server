@@ -175,6 +175,15 @@ public class SzController : ControllerBase
         public required string Reason { get; set; }
     }
 
+    public class SubmitToBodyRequest
+    {
+        /// <summary>Орган, на который выносится вопрос. Пусто — снять отметку.</summary>
+        public Meetings.Models.MeetingBody? Body { get; set; }
+
+        /// <summary>Предлагаемая формулировка вопроса для повестки.</summary>
+        public string? Question { get; set; }
+    }
+
     /// <summary>
     /// Зарегистрировать записку: присвоить номер, дату, срок исполнения
     /// и запустить маршрут согласования (SZ-01).
@@ -200,6 +209,63 @@ public class SzController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    /// <summary>
+    /// Поставить или снять отметку «вынести на коллегиальный орган».
+    ///
+    /// Это заявка, а не распоряжение: записка встаёт в очередь к секретарю органа,
+    /// и он решает, включать ли её в повестку. Ставит автор записки или адресат —
+    /// первый знает, что вопрос выходит за его полномочия, второй приходит к этому
+    /// при вынесении решения.
+    /// </summary>
+    [HttpPost("{id:int}/submit-to-body")]
+    public async Task<IActionResult> SubmitToBody(int id, [FromBody] SubmitToBodyRequest req)
+    {
+        var sz = await _db.SzDocuments
+            .Include(s => s.Document)
+            .FirstOrDefaultAsync(s => s.Id == id);
+
+        if (sz is null) return NotFound(new { message = "Записка не найдена." });
+
+        var userId = _currentUser.UserId;
+        var isAuthor = sz.Document?.AuthorId == userId;
+        var isAddressee = sz.AddresseeUserId == userId;
+
+        if (!isAuthor && !isAddressee)
+            return Forbid();
+
+        // Уже в повестке — снимать и переставлять отметку поздно: вопрос заведён,
+        // и решать его судьбу теперь секретарю через саму повестку.
+        var inAgenda = await _db.AgendaItems.AnyAsync(a => a.SourceSzId == id);
+        if (inAgenda)
+            return Conflict(new { message = "Записка уже включена в повестку заседания." });
+
+        if (req.Body is null)
+        {
+            sz.SubmitToBody = null;
+            sz.SubmitToBodyQuestion = null;
+            sz.SubmitToBodyRequestedAt = null;
+            sz.SubmitToBodyRequestedByUserId = null;
+        }
+        else
+        {
+            sz.SubmitToBody = req.Body;
+            sz.SubmitToBodyQuestion = string.IsNullOrWhiteSpace(req.Question)
+                ? null
+                : req.Question.Trim();
+            sz.SubmitToBodyRequestedAt = DateTime.UtcNow;
+            sz.SubmitToBodyRequestedByUserId = userId;
+        }
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            body = sz.SubmitToBody?.ToString(),
+            question = sz.SubmitToBodyQuestion,
+            requestedAt = sz.SubmitToBodyRequestedAt,
+        });
     }
 
     /// <summary>«СЗ, согласую я»: записки, ждущие резолюции текущего пользователя.</summary>

@@ -128,11 +128,41 @@ public class TasksService : ITasksService
     /// ActualizationResponsibleUserId == null), задачу по-прежнему видит инициатор.</summary>
     public async Task<List<VndTaskResponse>> GetConsolidationTasksAsync(int userId)
     {
-        var docs = await _db.VndDocuments
-            .Where(x => x.Status == VndStatus.Consolidation
-                        && (x.ActualizationResponsibleUserId == userId
-                            || (x.ActualizationResponsibleUserId == null && x.CreatedByUserId == userId)))
+        // Кому показываем задачу — ровно тем, кто может её выполнить. Правило
+        // одно на всю консолидацию и живёт в VndActualizationService.PublishAsync:
+        //
+        //   есть цикл актуализации → назначенный ответственный;
+        //   цикла нет             → инициатор согласования последней редакции.
+        //
+        // Раньше здесь во втором случае стоял создатель документа. Создатель
+        // и инициатор согласования — разные люди, и задача приходила одному,
+        // а выполнить её мог другой: в списке она висела, а на карточке кнопки
+        // не было. Именно на это пожаловалась Эсенова 24 августа.
+        //
+        // Главного редактора здесь нет намеренно: он может опубликовать любой
+        // документ, и если добавить его сюда, ему в задачи посыпались бы все
+        // консолидации банка, а не его собственные.
+        var candidates = await _db.VndDocuments
+            .Where(x => x.Status == VndStatus.Consolidation)
+            .Select(x => new
+            {
+                Doc = x,
+                InitiatorUserId = x.Redactions
+                    .OrderByDescending(r => r.Number)
+                    .Take(1)
+                    .SelectMany(r => _db.VndApprovalProcesses
+                        .Where(p => p.RedactionId == r.Id)
+                        .Select(p => (int?)p.InitiatorUserId))
+                    .FirstOrDefault(),
+            })
             .ToListAsync();
+
+        var docs = candidates
+            .Where(x => x.Doc.ActualizationResponsibleUserId == userId
+                        || (x.Doc.ActualizationResponsibleUserId == null
+                            && x.InitiatorUserId == userId))
+            .Select(x => x.Doc)
+            .ToList();
 
         if (docs.Count == 0) return new List<VndTaskResponse>();
 

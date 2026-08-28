@@ -29,23 +29,35 @@ public interface IMailQueue
 public class MailQueue : IMailQueue
 {
     private readonly DelosferaDbContext _db;
-    private readonly MailOptions _options;
+    private readonly IMailSettingsService _settings;
+    private readonly delosfera_server.Common.Security.ISecretProtector _protector;
     private readonly ILogger<MailQueue> _logger;
 
-    public MailQueue(DelosferaDbContext db, IOptions<MailOptions> options, ILogger<MailQueue> logger)
+    public MailQueue(
+        DelosferaDbContext db,
+        IMailSettingsService settings,
+        delosfera_server.Common.Security.ISecretProtector protector,
+        ILogger<MailQueue> logger)
     {
         _db = db;
-        _options = options.Value;
+        _settings = settings;
+        _protector = protector;
         _logger = logger;
     }
 
-    public bool Enabled => _options.Enabled;
+    /// <summary>
+    /// Читаем настройки при каждом обращении, а не запоминаем при создании:
+    /// администратор выключает рассылку в интерфейсе и вправе ожидать, что она
+    /// прекратится сразу, а не после перезапуска приложения.
+    /// </summary>
+    public bool Enabled => _settings.LoadAsync().GetAwaiter().GetResult().Enabled;
 
     public async Task EnqueueAsync(
         IEnumerable<int> userIds, string subject, string body, string? url, int? notificationId,
         CancellationToken ct = default)
     {
-        if (!_options.Enabled) return;
+        var settings = await _settings.LoadAsync(ct);
+        if (!settings.Enabled) return;
 
         var ids = userIds.Distinct().ToList();
         if (ids.Count == 0) return;
@@ -63,7 +75,7 @@ public class MailQueue : IMailQueue
             {
                 ToAddress = recipient.Email,
                 Subject = subject,
-                Body = BuildBody(recipient.FullName, body, url),
+                Body = BuildBody(recipient.FullName, body, url, settings.BaseUrl),
                 NotificationId = notificationId,
                 CreatedAt = DateTime.UtcNow,
             });
@@ -74,7 +86,8 @@ public class MailQueue : IMailQueue
 
     public async Task<int> FlushAsync(CancellationToken ct = default)
     {
-        if (!_options.Enabled) return 0;
+        var settings = await _settings.LoadAsync(ct);
+        if (!settings.Enabled) return 0;
 
         var pending = await _db.OutgoingEmails
             .Where(e => e.SentAt == null && !e.Failed)
@@ -84,7 +97,7 @@ public class MailQueue : IMailQueue
 
         if (pending.Count == 0) return 0;
 
-        using var client = CreateClient();
+        using var client = CreateClient(settings);
         var sent = 0;
 
         foreach (var email in pending)
@@ -93,7 +106,7 @@ public class MailQueue : IMailQueue
             {
                 using var message = new MailMessage
                 {
-                    From = new MailAddress(_options.FromAddress, _options.FromName),
+                    From = new MailAddress(settings.FromAddress, settings.FromName),
                     Subject = email.Subject,
                     Body = email.Body,
                     IsBodyHtml = false,
@@ -113,7 +126,7 @@ public class MailQueue : IMailQueue
 
                 // Исчерпав попытки, письмо помечается неудачей, а не удаляется: иначе
                 // недоставленное уведомление исчезнет вместе со следом о проблеме.
-                if (email.Attempts >= _options.MaxAttempts)
+                if (email.Attempts >= settings.MaxAttempts)
                 {
                     email.Failed = true;
                     _logger.LogError(ex,
@@ -127,13 +140,17 @@ public class MailQueue : IMailQueue
         return sent;
     }
 
-    private SmtpClient CreateClient()
+    private SmtpClient CreateClient(MailSettings settings)
     {
-        var client = new SmtpClient(_options.Host, _options.Port) {EnableSsl = _options.UseSsl};
+        var client = new SmtpClient(settings.Host, settings.Port) {EnableSsl = settings.UseSsl};
 
-        if (!string.IsNullOrWhiteSpace(_options.User))
+        if (!string.IsNullOrWhiteSpace(settings.User))
         {
-            client.Credentials = new NetworkCredential(_options.User, _options.Password);
+            client.Credentials = new NetworkCredential(
+                settings.User,
+                string.IsNullOrEmpty(settings.PasswordEncrypted)
+                    ? string.Empty
+                    : _protector.Unprotect(settings.PasswordEncrypted));
         }
         else
         {
@@ -145,11 +162,11 @@ public class MailQueue : IMailQueue
         return client;
     }
 
-    private string BuildBody(string fullName, string body, string? url)
+    private static string BuildBody(string fullName, string body, string? url, string baseUrl)
     {
         var link = string.IsNullOrWhiteSpace(url)
             ? string.Empty
-            : $"\n\nОткрыть в системе: {_options.BaseUrl.TrimEnd('/')}{url}";
+            : $"\n\nОткрыть в системе: {baseUrl.TrimEnd('/')}{url}";
 
         return $"""
                 {fullName}, здравствуйте!
