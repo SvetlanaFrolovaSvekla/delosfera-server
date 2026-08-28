@@ -801,6 +801,27 @@ public class VndApprovalService : IVndApprovalService
 
     private async Task CompleteRepeatPhaseAsync(VndApprovalProcess process, bool save = true)
     {
+        // Зеркалит проверку в CompletePrimaryPhaseAsync: если на повторном согласовании кто-то
+        // СНОВА оставил замечания (Rejected до сюда не доходит - обрабатывается отдельно и сразу
+        // прекращает весь процесс, см. RejectApprovalAsync) - это ещё один круг доработки, а не
+        // переход на финальную выдержку. На финальную выдержку процесс должен попадать только
+        // тогда, когда очередной круг повторного согласования прошёл вообще без замечаний.
+        var hasRemarks = process.Stages
+            .Where(s => s.ParticipatesInRepeat)
+            .Any(s => s.RepeatDecision is ApprovalStageDecision.ApprovedWithComment);
+
+        if (hasRemarks)
+        {
+            process.Status = ApprovalProcessStatus.RevisionNeeded;
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
+                NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+
+            if (save) await _db.SaveChangesAsync();
+            return;
+        }
+
         process.Status = ApprovalProcessStatus.FinalHold;
         process.FinalHoldStartedAt = DateTime.UtcNow;
 
