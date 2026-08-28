@@ -154,10 +154,76 @@ public class SzAddresseeDecisionTests
         var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
         var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
 
-        return (new SzService(db, documents, audit, engine, new PassthroughHtml()), engine);
+        // Право «видеть все записки» — чтобы проверка касалась движения записки,
+        // а не видимости реестра.
+        var currentUser = new FakeCurrentUser(0, PermissionCode.ViewAllSz);
+
+        var procurement = new SzProcurementService(db, documents, audit);
+
+        return (new SzService(db, documents, audit, engine, new PassthroughHtml(),
+            currentUser, handler, procurement), engine);
     }
 
-    /// <summary>Записка, отправленная на согласование: один согласующий, один адресат.</summary>
+    /// <summary>
+    /// Регистрация записки с подписантом.
+    ///
+    /// Подписание идёт отдельным маршрутом после регистрации, и строить его надо
+    /// маршрутом подписанта, а не маршрутом согласующих с пустым их списком: тот
+    /// отказывается, и регистрация падает с «Не выбран ни один согласующий».
+    /// На стенде это выглядело как «Не удалось зарегистрировать записку».
+    /// </summary>
+    [Fact]
+    public async Task Register_WithSigner_SendsMemoToSigning()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (service, engine) = NewService(db);
+
+        var author = await AddUserAsync(db, "Автор записки");
+        var approver = await AddUserAsync(db, "Согласующий записки");
+        var signer = await AddUserAsync(db, "Подписант записки");
+
+        var kind = await db.SzKinds.AsNoTracking().FirstAsync();
+
+        var draft = await service.CreateDraftAsync(new SzSaveRequest
+        {
+            Title = "Записка с подписантом",
+            KindId = kind.Id,
+            Body = "Текст записки",
+            CorrespondentUnitId = null,
+            AddresseeUserId = author.Id,
+            SignerUserId = signer.Id,
+            ApproverUserIds = [approver.Id],
+        }, author.Id);
+
+        await service.SubmitAsync(draft.Id, author.Id);
+
+        var sz = await db.SzDocuments.AsNoTracking().SingleAsync(x => x.Id == draft.Id);
+
+        var participant = await db.RouteParticipants
+            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == sz.DocumentId)
+            .OrderBy(p => p.Id)
+            .FirstAsync();
+
+        await engine.ResolveAsync(participant.Id, ResolutionType.Approved, null, approver.Id);
+
+        var registered = await service.RegisterAsync(draft.Id, author.Id);
+
+        // Номер присвоен, и записка ушла подписанту — а не упала на построении
+        // маршрута и не проскочила подписание.
+        Assert.NotNull(registered.RegNumber);
+        Assert.Equal(SzStatus.OnSigning, registered.StatusCode);
+
+        var signingParticipant = await db.RouteParticipants
+            .Include(p => p.RouteStep)
+            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == sz.DocumentId
+                        && p.RouteStep.Kind == StepKind.Signing)
+            .SingleAsync();
+
+        Assert.Equal(signer.Id, signingParticipant.UserId);
+    }
+
+    /// <summary>Записка, отправленная на согласование: один согласующий, один адресат.
+    /// Номера у неё ещё нет — он присваивается после согласования.</summary>
     private static async Task<(int SzId, int AddresseeId, int ApproverId)> SeedSubmittedAsync(
         DelosferaDbContext db, ISzService service, IRouteEngine engine)
     {
@@ -196,11 +262,24 @@ public class SzAddresseeDecisionTests
 
         await engine.ResolveAsync(participant.Id, ResolutionType.Approved, null, approverId);
 
+        // Согласование идёт до регистрации: согласованная записка ждёт номера,
+        // а к адресату попадает уже зарегистрированной.
         var afterApproval = await db.SzDocuments.AsNoTracking()
             .Include(x => x.Document)
             .SingleAsync(x => x.Id == szId);
 
-        Assert.Equal(SzStatus.OnAddresseeDecision, afterApproval.Document!.StatusCode);
+        Assert.Equal(SzStatus.PendingRegistration, afterApproval.Document!.StatusCode);
+
+        await service.RegisterAsync(szId, approverId);
+
+        // Подписанта у этой записки нет, поэтому после регистрации она идёт
+        // прямо к адресату за решением по существу.
+        var afterRegistration = await db.SzDocuments.AsNoTracking()
+            .Include(x => x.Document)
+            .SingleAsync(x => x.Id == szId);
+
+        Assert.Equal(SzStatus.OnAddresseeDecision, afterRegistration.Document!.StatusCode);
+        Assert.NotNull(afterRegistration.Document.RegNumber);
 
         return (szId, addresseeId, approverId);
     }
@@ -233,36 +312,6 @@ public class SzAddresseeDecisionTests
             Task.FromResult(new List<int>());
     }
 
-    /// <summary>Уведомления адресату здесь не проверяются — важен переход статуса.</summary>
-    private sealed class SilentNotifications : INotificationService
-    {
-        public Task<int> CreateAsync(CreateNotificationRequest request, int? currentUserId) =>
-            Task.FromResult(0);
-
-        public Task<PagedNotificationResponse> SearchAsync(
-            NotificationFilterRequest request, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task<NotificationResponse> GetByIdAsync(int id, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task<NotificationResponse> MarkAsReadAsync(int id, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task<NotificationResponse> MarkAsUnreadAsync(int id, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task<int> MarkAllAsReadAsync(int currentUserId, NotificationCategory? category) =>
-            throw new NotSupportedException();
-
-        public Task<NotificationResponse> ToggleFavoriteAsync(int id, int currentUserId, string languageCode) =>
-            throw new NotSupportedException();
-
-        public Task DeleteForUserAsync(int id, int currentUserId) => throw new NotSupportedException();
-
-        public Task<NotificationCountsResponse> GetCountsAsync(int currentUserId) =>
-            throw new NotSupportedException();
-    }
 
     private sealed class SilentNotifier : IWorkflowNotifier
     {

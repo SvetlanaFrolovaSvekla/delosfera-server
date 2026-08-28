@@ -42,6 +42,13 @@ public class ProcurementRequestConfiguration : IEntityTypeConfiguration<Procurem
             .HasForeignKey(x => x.MatrixRuleId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        // Позицию Плана, на которую уже сослались заявки, удалять нельзя: иначе
+        // отчёт об исполнении потеряет и план, и связь с фактом.
+        b.HasOne(x => x.PlanItemRef)
+            .WithMany()
+            .HasForeignKey(x => x.PlanItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         b.HasOne(x => x.InitiatorUnit)
             .WithMany()
             .HasForeignKey(x => x.InitiatorUnitId)

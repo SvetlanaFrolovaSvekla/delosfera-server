@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260828055459_SzApprovalBeforeRegistration")]
+    partial class SzApprovalBeforeRegistration
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -4181,10 +4184,6 @@ namespace delosfera_server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("ApprovalSheetFileId")
-                        .HasColumnType("integer")
-                        .HasColumnName("approval_sheet_file_id");
-
                     b.Property<int>("ApprovalStatus")
                         .HasColumnType("integer")
                         .HasColumnName("approval_status");
@@ -4202,10 +4201,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
-                    b.Property<DateTime?>("DocEnUpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("doc_en_updated_at");
-
                     b.Property<int?>("DocFileEnId")
                         .HasColumnType("integer")
                         .HasColumnName("doc_file_en_id");
@@ -4217,14 +4212,6 @@ namespace delosfera_server.Migrations
                     b.Property<int>("DocFileRuId")
                         .HasColumnType("integer")
                         .HasColumnName("doc_file_ru_id");
-
-                    b.Property<DateTime?>("DocKgUpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("doc_kg_updated_at");
-
-                    b.Property<DateTime?>("DocRuUpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("doc_ru_updated_at");
 
                     b.Property<int>("Number")
                         .HasColumnType("integer")
@@ -4248,9 +4235,6 @@ namespace delosfera_server.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_vnd_redaction");
-
-                    b.HasIndex("ApprovalSheetFileId")
-                        .HasDatabaseName("ix_vnd_redaction_approval_sheet_file_id");
 
                     b.HasIndex("Code")
                         .IsUnique()
@@ -4473,10 +4457,6 @@ namespace delosfera_server.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
-
-                    b.Property<string>("Hash")
-                        .HasColumnType("text")
-                        .HasColumnName("hash");
 
                     b.Property<string>("OriginalFileName")
                         .IsRequired()
@@ -10952,12 +10932,6 @@ namespace delosfera_server.Migrations
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedaction", b =>
                 {
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "ApprovalSheetFile")
-                        .WithMany()
-                        .HasForeignKey("ApprovalSheetFileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_redaction_file_attachments_approval_sheet_file_id");
-
                     b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileEn")
                         .WithMany()
                         .HasForeignKey("DocFileEnId")
@@ -10989,8 +10963,6 @@ namespace delosfera_server.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_vnd_redaction_vnd_document_vnd_id");
-
-                    b.Navigation("ApprovalSheetFile");
 
                     b.Navigation("DocFileEn");
 

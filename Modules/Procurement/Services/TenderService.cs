@@ -14,11 +14,19 @@ public interface ITenderService
     Task<TenderDto> AddMemberAsync(int tenderId, CommissionMemberRequest request, int actorUserId);
     Task<TenderDto> RemoveMemberAsync(int memberId, int actorUserId);
     Task<TenderDto> PublishAsync(int tenderId, TenderPublishRequest request, int actorUserId);
+    Task<TenderDto> ConfirmPublicationAsync(int tenderId, PublicationConfirmRequest request, int actorUserId);
     Task<TenderDto> AddBidAsync(int tenderId, TenderBidRequest request, int actorUserId);
     Task<TenderDto> OpenBidsAsync(int tenderId, int actorUserId);
     Task<TenderDto> SetAttendanceAsync(int memberId, AttendanceRequest request, int actorUserId);
     Task<TenderDto> SetConclusionAsync(int memberId, ExpertConclusionRequest request, int actorUserId);
     Task<TenderDto> ScoreBidAsync(int bidId, BidScoreRequest request, int actorUserId);
+
+    /// <summary>Назначить заседание комиссии или перенести его на другую дату.</summary>
+    Task<TenderDto> ScheduleMeetingAsync(int tenderId, MeetingScheduleRequest request, int actorUserId);
+
+    /// <summary>Внести результаты очного голосования по заявке (п. 24.2).</summary>
+    Task<TenderDto> RecordVotesAsync(int bidId, BidVotesRequest request, int actorUserId);
+
     Task<TenderDto> DeclareWinnerAsync(int tenderId, int bidId, int actorUserId);
     Task<TenderDto> FailAsync(int tenderId, TenderFailRequest request, int actorUserId);
 }
@@ -27,14 +35,26 @@ public interface ITenderService
 /// Конкурс по закупке (PRC-13..17): комиссия, публикация, конкурсный период,
 /// вскрытие заявок, оценка и определение победителя.
 ///
-/// Проверки состава комиссии и кворума считаются от суммы закупки и параметров
-/// справочника, а не зашиты числами: пороги Положения меняются, а правило
-/// «нечётный состав, не менее 3, кворум 2/3» остаётся.
+/// Состав комиссии задан п. 120 Положения жёстко и без порогов по сумме: пять
+/// сотрудников Банка; председатель — член Правления, не курирующий инициатора
+/// закупки; постоянные члены — УБУиО, Юридическая служба и Управление безопасности.
+/// Раньше присутствие УБУиО и председателя-правленца включалось только выше сумм
+/// 5 и 3 млн — таких порогов в Положении нет, и мелкие конкурсы проходили составом,
+/// который оно не допускает.
 /// </summary>
 public class TenderService : ITenderService
 {
-    /// <summary>Минимальный конкурсный период в рабочих днях (PRC-13).</summary>
+    /// <summary>Минимальный конкурсный период в рабочих днях (п. 8.2/8.3 Положения).</summary>
     private const int MinTenderPeriodWorkdays = 5;
+
+    /// <summary>
+    /// Предельный конкурсный период в рабочих днях (п. 8.2/8.3 Положения).
+    ///
+    /// Верхняя граница не формальность: закупку нельзя держать открытой месяцами,
+    /// иначе цены в поданных заявках перестают отражать рынок, а потребность,
+    /// ради которой закупку затевали, успевает измениться.
+    /// </summary>
+    private const int MaxTenderPeriodWorkdays = 30;
 
     /// <summary>Стандартный состав комиссии по Положению.</summary>
     private const int DefaultCommissionSize = 5;
@@ -103,6 +123,8 @@ public class TenderService : ITenderService
                     Role = m.Role,
                     IsBoardMember = m.IsBoardMember,
                     IsAccountant = m.IsAccountant,
+                    IsLegal = m.IsLegal,
+                    IsSecurity = m.IsSecurity,
                 });
             }
 
@@ -147,6 +169,8 @@ public class TenderService : ITenderService
             Role = request.Role,
             IsBoardMember = request.IsBoardMember,
             IsAccountant = request.IsAccountant,
+            IsLegal = request.IsLegal,
+            IsSecurity = request.IsSecurity,
         });
 
         await _db.SaveChangesAsync();
@@ -189,9 +213,17 @@ public class TenderService : ITenderService
         var today = _clock.Today;
         var minDeadline = AddWorkdays(today, MinTenderPeriodWorkdays);
 
+        var maxDeadline = AddWorkdays(today, MaxTenderPeriodWorkdays);
+
         if (request.SubmissionDeadline < minDeadline)
             throw new InvalidOperationException(
-                $"Конкурсный период — не менее {MinTenderPeriodWorkdays} рабочих дней: срок приёма не раньше {minDeadline:dd.MM.yyyy} (PRC-13)");
+                $"Конкурсный период — не менее {MinTenderPeriodWorkdays} рабочих дней: "
+                + $"срок приёма не раньше {minDeadline:dd.MM.yyyy} (п. 8.2/8.3 Положения)");
+
+        if (request.SubmissionDeadline > maxDeadline)
+            throw new InvalidOperationException(
+                $"Конкурсный период — не более {MaxTenderPeriodWorkdays} рабочих дней: "
+                + $"срок приёма не позже {maxDeadline:dd.MM.yyyy} (п. 8.2/8.3 Положения)");
 
         tender.PublishedOn = today;
         tender.SubmissionDeadline = request.SubmissionDeadline;
@@ -204,6 +236,37 @@ public class TenderService : ITenderService
             tender.SubmissionDeadline,
             channel = tender.IsLimited ? "приглашения участникам" : "сайт Банка и tenders.kg",
         });
+
+        return await BuildAsync((await LoadAsync(tenderId))!);
+    }
+
+    /// <summary>
+    /// Отметить, что объявление действительно размещено.
+    ///
+    /// Ограниченному конкурсу отметка тоже нужна: объявление там не публикуется,
+    /// но приглашения кому-то рассылают, и дата рассылки — начало конкурсного
+    /// периода ровно так же.
+    /// </summary>
+    public async Task<TenderDto> ConfirmPublicationAsync(
+        int tenderId, PublicationConfirmRequest request, int actorUserId)
+    {
+        var tender = await LoadAsync(tenderId) ?? throw new KeyNotFoundException("Конкурс не найден");
+
+        if (tender.Status != TenderStatus.Published)
+            throw new InvalidOperationException("Размещение отмечается у объявленного конкурса");
+
+        var where = request.PublishedAt?.Trim();
+        if (string.IsNullOrWhiteSpace(where))
+            throw new ArgumentException(tender.IsLimited
+                ? "Укажите, кому разосланы приглашения"
+                : "Укажите, где размещено объявление: сайт Банка, tenders.kg");
+
+        tender.PublishedAt = where;
+        tender.PublicationConfirmedAt = DateTime.UtcNow;
+        tender.PublicationConfirmedByUserId = actorUserId;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("Tender", tenderId, "PublicationConfirmed", actorUserId, new {where});
 
         return await BuildAsync((await LoadAsync(tenderId))!);
     }
@@ -257,6 +320,11 @@ public class TenderService : ITenderService
 
         if (tender.Status != TenderStatus.Published)
             throw new InvalidOperationException("Вскрываются заявки объявленного конкурса");
+
+        if (string.IsNullOrWhiteSpace(tender.PublishedAt))
+            throw new InvalidOperationException(tender.IsLimited
+                ? "Не отмечена рассылка приглашений: без неё конкурсный период не начался"
+                : "Не отмечено размещение объявления: без него конкурсный период не начался");
 
         if (tender.SubmissionDeadline is { } deadline && _clock.Today <= deadline)
             throw new InvalidOperationException(
@@ -384,6 +452,123 @@ public class TenderService : ITenderService
         return await BuildAsync((await LoadAsync(bid.TenderId))!);
     }
 
+    /// <summary>
+    /// Назначить заседание или перенести его.
+    ///
+    /// Заседание срывается по обычным причинам — не собрался кворум, заболел
+    /// председатель. У Сектора закупок на этом шаге два хода: сдвинуть дату или
+    /// внести голоса состоявшегося заседания. Перенос требует основания: по
+    /// срокам закупки потом задают вопросы.
+    /// </summary>
+    public async Task<TenderDto> ScheduleMeetingAsync(
+        int tenderId, MeetingScheduleRequest request, int actorUserId)
+    {
+        var tender = await LoadAsync(tenderId) ?? throw new KeyNotFoundException("Конкурс не найден");
+
+        if (tender.Status is TenderStatus.Decided or TenderStatus.Failed or TenderStatus.Cancelled)
+            throw new InvalidOperationException("Конкурс завершён — заседание уже не назначить");
+
+        var isMove = tender.MeetingDate is not null && tender.MeetingDate != request.Date;
+
+        if (isMove && string.IsNullOrWhiteSpace(request.Reason))
+            throw new ArgumentException(
+                "Укажите основание переноса: оно печатается в протоколе и объясняет сдвиг сроков");
+
+        _db.TenderMeetingChanges.Add(new TenderMeetingChange
+        {
+            TenderId = tender.Id,
+            FromDate = tender.MeetingDate,
+            ToDate = request.Date,
+            Reason = string.IsNullOrWhiteSpace(request.Reason)
+                ? "Заседание назначено"
+                : request.Reason.Trim(),
+            ByUserId = actorUserId,
+            At = DateTime.UtcNow,
+        });
+
+        tender.MeetingDate = request.Date;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("Tender", tenderId, isMove ? "MeetingMoved" : "MeetingScheduled", actorUserId, new
+        {
+            to = request.Date,
+            request.Reason,
+        });
+
+        return await BuildAsync((await LoadAsync(tenderId))!);
+    }
+
+    /// <summary>
+    /// Внести результаты очного голосования по заявке (п. 24.2 Положения).
+    ///
+    /// Голоса вносит секретарь или Сектор закупок по итогам заседания: голосование
+    /// очное, а система лишь фиксирует его результат. Повторное внесение заменяет
+    /// голоса целиком — заседание переголосовало, а не добавило ещё по голосу.
+    /// </summary>
+    public async Task<TenderDto> RecordVotesAsync(int bidId, BidVotesRequest request, int actorUserId)
+    {
+        var bid = await _db.TenderBids
+                      .Include(b => b.Supplier)
+                      .Include(b => b.Votes)
+                      .FirstOrDefaultAsync(b => b.Id == bidId)
+                  ?? throw new KeyNotFoundException("Конкурсная заявка не найдена");
+
+        if (!bid.IsAdmitted)
+            throw new InvalidOperationException(
+                "Голосуют только по допущенной заявке: недопущенная в отборе не участвует");
+
+        var tender = await LoadAsync(bid.TenderId) ?? throw new KeyNotFoundException("Конкурс не найден");
+
+        if (tender.Status != TenderStatus.Opened)
+            throw new InvalidOperationException("Голосование проводится после вскрытия заявок");
+
+        if (tender.MeetingDate is null)
+            throw new InvalidOperationException(
+                "Сначала назначьте дату заседания: решения принимаются очно (п. 24.2 Положения)");
+
+        var voters = tender.Commission.Where(m => IsVoting(m.Role)).ToDictionary(m => m.Id);
+
+        foreach (var vote in request.Votes)
+        {
+            if (!voters.TryGetValue(vote.MemberId, out var member))
+                throw new InvalidOperationException(
+                    "Голос принят только от члена комиссии с правом голоса: у секретаря и эксперта его нет");
+
+            // Не голосовавший не может голосовать: явка и голос — разные вещи,
+            // и расхождение между ними должно быть видно, а не сглажено.
+            if (!member.AttendedOpening)
+                throw new InvalidOperationException(
+                    $"{member.User?.FullName ?? "Член комиссии"} не отмечен как участник заседания — голос принять нельзя");
+        }
+
+        _db.CommissionVotes.RemoveRange(bid.Votes);
+
+        var now = DateTime.UtcNow;
+        foreach (var vote in request.Votes)
+        {
+            _db.CommissionVotes.Add(new CommissionVote
+            {
+                BidId = bid.Id,
+                MemberId = vote.MemberId,
+                Choice = vote.Choice,
+                RecordedByUserId = actorUserId,
+                At = now,
+            });
+        }
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("Tender", bid.TenderId, "VotesRecorded", actorUserId, new
+        {
+            supplier = bid.Supplier?.Title,
+            meeting = tender.MeetingDate,
+            forVotes = request.Votes.Count(v => v.Choice == VoteChoice.For),
+            against = request.Votes.Count(v => v.Choice == VoteChoice.Against),
+            abstained = request.Votes.Count(v => v.Choice == VoteChoice.Abstained),
+        });
+
+        return await BuildAsync((await LoadAsync(bid.TenderId))!);
+    }
+
     public async Task<TenderDto> DeclareWinnerAsync(int tenderId, int bidId, int actorUserId)
     {
         var tender = await LoadAsync(tenderId) ?? throw new KeyNotFoundException("Конкурс не найден");
@@ -394,13 +579,25 @@ public class TenderService : ITenderService
 
         if (!card.HasQuorum)
             throw new InvalidOperationException(
-                $"Нет кворума: присутствует {card.Attended} из {card.QuorumRequired} требуемых членов комиссии (PRC-15)");
+                $"Нет кворума: присутствует {card.Attended} из {card.QuorumRequired} требуемых членов комиссии (п. 24.1 Положения)");
 
         var winner = tender.Bids.FirstOrDefault(b => b.Id == bidId)
                      ?? throw new KeyNotFoundException("Заявка не найдена в этом конкурсе");
 
         if (!winner.IsAdmitted)
             throw new InvalidOperationException("Победителем может стать только допущенная заявка");
+
+        // Победителя определяет голосование, а не нажатие кнопки: решение комиссии
+        // принято, если за него большинство голосовавших (п. 24.2).
+        var voted = card.Bids.FirstOrDefault(b => b.Id == bidId);
+
+        if (voted is null || voted.Votes.Count == 0)
+            throw new InvalidOperationException(
+                "По заявке не внесены голоса комиссии: решение принимается открытым голосованием (п. 24.2 Положения)");
+
+        if (!voted.Carried)
+            throw new InvalidOperationException(
+                voted.VoteOutcomeNote ?? "Заявка не набрала большинства голосов комиссии");
 
         foreach (var b in tender.Bids)
             b.IsWinner = b.Id == winner.Id;
@@ -444,7 +641,10 @@ public class TenderService : ITenderService
         _db.Tenders
             .Include(t => t.Request).ThenInclude(r => r!.Method)
             .Include(t => t.Commission).ThenInclude(m => m.User)
-            .Include(t => t.Bids).ThenInclude(b => b.Supplier);
+            .Include(t => t.Bids).ThenInclude(b => b.Supplier)
+            .Include(t => t.Bids).ThenInclude(b => b.Votes).ThenInclude(v => v.Member).ThenInclude(m => m!.User)
+            .Include(t => t.MeetingChanges).ThenInclude(c => c.By)
+            .Include(t => t.PublicationConfirmedBy);
 
     private async Task<Tender?> LoadAsync(int id) => await Query().FirstOrDefaultAsync(t => t.Id == id);
 
@@ -518,12 +718,20 @@ public class TenderService : ITenderService
             parameters.TryGetValue(code, out var v) ? v : fallback;
 
         var amount = t.Request!.Amount;
-        var accountantThreshold = Param("CommissionAccountantThreshold", 5_000_000m);
-        var chairmanThreshold = Param("CommissionBoardChairThreshold", 3_000_000m);
 
         // Требования к составу берутся из правила матрицы, по которому построена заявка.
         var rule = t.Request.MatrixRuleId is { } ruleId
             ? await _db.AuthorityMatrixRules.FirstOrDefaultAsync(r => r.Id == ruleId)
+            : null;
+
+        // Куратор инициирующего подразделения: председателем комиссии он быть не
+        // может (п. 120). Проверять это должна система, а не память секретаря —
+        // иначе конфликт интересов вскроется на обжаловании, а не на заседании.
+        var initiatorCuratorId = t.Request.InitiatorUnitId is { } unitId
+            ? await _db.OrganizationUnits
+                .Where(u => u.Id == unitId)
+                .Select(u => u.CuratorUserId)
+                .FirstOrDefaultAsync()
             : null;
 
         var dto = new TenderDto
@@ -537,16 +745,19 @@ public class TenderService : ITenderService
             Amount = amount,
             IsLimited = t.IsLimited,
             PublishedOn = t.PublishedOn,
+            PublishedAt = t.PublishedAt,
+            PublicationConfirmedAt = t.PublicationConfirmedAt,
+            PublicationConfirmedByName = t.PublicationConfirmedBy?.FullName,
             SubmissionDeadline = t.SubmissionDeadline,
             OpenedOn = t.OpenedOn,
             CommissionOrderNumber = t.CommissionOrderNumber,
             CommissionOrderDate = t.CommissionOrderDate,
             PreviousTenderId = t.PreviousTenderId,
             FailureReason = t.FailureReason,
+            MeetingDate = t.MeetingDate,
             RequiredSize = rule?.CommissionSize ?? DefaultCommissionSize,
             RequiredBoardMembers = rule?.CommissionMinBoardMembers ?? 0,
-            RequiresAccountant = amount > accountantThreshold,
-            RequiresBoardChairman = amount > chairmanThreshold,
+            InitiatorCuratorUserId = initiatorCuratorId,
             Commission = t.Commission.Select(m => new CommissionMemberDto
             {
                 Id = m.Id,
@@ -556,6 +767,8 @@ public class TenderService : ITenderService
                 RoleTitle = RoleTitle(m.Role),
                 IsBoardMember = m.IsBoardMember,
                 IsAccountant = m.IsAccountant,
+                IsLegal = m.IsLegal,
+                IsSecurity = m.IsSecurity,
                 AttendedOpening = m.AttendedOpening,
                 DissentingOpinion = m.DissentingOpinion,
                 IsVoting = IsVoting(m.Role),
@@ -578,8 +791,33 @@ public class TenderService : ITenderService
                 Specification = b.Specification,
                 IsWinner = b.IsWinner,
                 SupplierBlacklisted = b.Supplier.IsBlacklisted,
+                Votes = b.Votes
+                    .OrderBy(v => v.Member!.Role)
+                    .Select(v => new BidVoteDto
+                    {
+                        MemberId = v.MemberId,
+                        MemberName = v.Member?.User?.FullName ?? "—",
+                        RoleTitle = RoleTitle(v.Member!.Role),
+                        IsChairman = v.Member.Role == CommissionRole.Chairman,
+                        Choice = v.Choice,
+                        ChoiceTitle = ChoiceTitle(v.Choice),
+                    }).ToList(),
             }).ToList(),
         };
+
+        foreach (var bid in dto.Bids)
+            FillVoteOutcome(bid);
+
+        dto.MeetingChanges = t.MeetingChanges
+            .OrderBy(c => c.At)
+            .Select(c => new MeetingChangeDto
+            {
+                FromDate = c.FromDate,
+                ToDate = c.ToDate,
+                Reason = c.Reason,
+                ByUserName = c.By?.FullName ?? "—",
+                At = c.At,
+            }).ToList();
 
         // Имя файла заключения — чтобы в карточке была видна не цифра вложения,
         // а название документа, который эксперт приложил.
@@ -609,32 +847,119 @@ public class TenderService : ITenderService
         return dto;
     }
 
+    /// <summary>
+    /// Итог голосования по заявке (п. 24.2–24.3 Положения).
+    ///
+    /// Решение принято, если «за» — большинство голосовавших. Воздержавшиеся
+    /// считаются голосовавшими: они пришли и приняли участие, просто не поддержали
+    /// ни одну сторону, — поэтому большинство считается от всех поданных голосов.
+    /// При равенстве «за» и «против» решает голос председателя.
+    /// </summary>
+    private static void FillVoteOutcome(TenderBidDto bid)
+    {
+        bid.VotesFor = bid.Votes.Count(v => v.Choice == VoteChoice.For);
+        bid.VotesAgainst = bid.Votes.Count(v => v.Choice == VoteChoice.Against);
+        bid.VotesAbstained = bid.Votes.Count(v => v.Choice == VoteChoice.Abstained);
+
+        if (bid.Votes.Count == 0)
+        {
+            bid.Carried = false;
+            bid.VoteOutcomeNote = null;
+            return;
+        }
+
+        if (bid.VotesFor > bid.Votes.Count / 2)
+        {
+            bid.Carried = true;
+            bid.VoteOutcomeNote = $"За — {bid.VotesFor} из {bid.Votes.Count}";
+            return;
+        }
+
+        if (bid.VotesFor == bid.VotesAgainst)
+        {
+            var chairman = bid.Votes.FirstOrDefault(v => v.IsChairman);
+
+            if (chairman is null)
+            {
+                bid.Carried = false;
+                bid.VoteOutcomeNote =
+                    $"Голоса разделились поровну ({bid.VotesFor} на {bid.VotesAgainst}), " +
+                    "а председатель не голосовал — решающего голоса нет (п. 24.3 Положения)";
+                return;
+            }
+
+            bid.Carried = chairman.Choice == VoteChoice.For;
+            bid.VoteOutcomeNote = bid.Carried
+                ? $"Голоса разделились поровну ({bid.VotesFor} на {bid.VotesAgainst}); " +
+                  "принято решающим голосом председателя (п. 24.3 Положения)"
+                : $"Голоса разделились поровну ({bid.VotesFor} на {bid.VotesAgainst}); " +
+                  "председатель голосовал против — его голос решающий (п. 24.3 Положения)";
+            return;
+        }
+
+        bid.Carried = false;
+        bid.VoteOutcomeNote =
+            $"За — {bid.VotesFor} из {bid.Votes.Count}: большинства нет";
+    }
+
+    private static string ChoiceTitle(VoteChoice choice) => choice switch
+    {
+        VoteChoice.For => "За",
+        VoteChoice.Against => "Против",
+        VoteChoice.Abstained => "Воздержался",
+        _ => choice.ToString(),
+    };
+
     private static void FillBlockers(TenderDto dto, Tender t, int voting)
     {
-        if (voting < 3)
-            dto.Blockers.Add($"Комиссия должна включать не менее 3 членов, сейчас {voting} (PRC-14)");
-        else if (voting % 2 == 0)
-            dto.Blockers.Add($"Комиссия должна быть нечётной по составу, сейчас {voting} (PRC-14)");
+        // Положение задаёт не «не менее», а ровно столько: пять сотрудников Банка
+        // (п. 120). Требование про нечётный состав было нашей выдумкой — в
+        // Положении его нет, а равенство голосов оно всё равно не исключает:
+        // от равенства защищает решающий голос председателя (п. 24.3).
+        if (voting != dto.RequiredSize)
+            dto.Blockers.Add(
+                $"Состав комиссии — {dto.RequiredSize} членов с правом голоса, сейчас {voting} (п. 120 Положения)");
 
-        if (voting > 0 && voting < dto.RequiredSize)
-            dto.Blockers.Add($"Комиссия по этой сумме — {dto.RequiredSize} членов, сейчас {voting}");
+        var chairman = t.Commission.FirstOrDefault(m => m.Role == CommissionRole.Chairman);
 
-        if (!t.Commission.Any(m => m.Role == CommissionRole.Chairman))
+        if (chairman is null)
             dto.Blockers.Add("Не назначен председатель комиссии");
+        else
+        {
+            if (!chairman.IsBoardMember)
+                dto.Blockers.Add("Председателем комиссии назначается член Правления (п. 120 Положения)");
+
+            // Куратор инициатора в председателях — прямой конфликт интересов:
+            // он же и заинтересован в закупке, которую комиссия оценивает.
+            if (dto.InitiatorCuratorUserId is { } curatorId && chairman.UserId == curatorId)
+                dto.Blockers.Add(
+                    "Председателем не может быть куратор инициатора закупки (п. 120 Положения)");
+        }
 
         var boardMembers = t.Commission.Count(m => m.IsBoardMember && IsVoting(m.Role));
         if (dto.RequiredBoardMembers > 0 && boardMembers < dto.RequiredBoardMembers)
             dto.Blockers.Add(
                 $"В комиссии должно быть не менее {dto.RequiredBoardMembers} членов Правления, сейчас {boardMembers}");
 
-        if (dto.RequiresBoardChairman && !t.Commission.Any(m => m.Role == CommissionRole.Chairman && m.IsBoardMember))
-            dto.Blockers.Add("Председателем комиссии назначается член Правления (сумма выше порога, PRC-14)");
+        // Постоянные члены по п. 120 — без оговорок про сумму закупки.
+        if (!t.Commission.Any(m => m.IsAccountant))
+            dto.Blockers.Add("В составе комиссии нет представителя УБУиО (п. 120 Положения)");
 
-        if (dto.RequiresAccountant && !t.Commission.Any(m => m.IsAccountant))
-            dto.Blockers.Add("В состав комиссии включается сотрудник УБУиО (сумма выше порога, PRC-14)");
+        if (!t.Commission.Any(m => m.IsLegal))
+            dto.Blockers.Add("В составе комиссии нет представителя Юридической службы (п. 120 Положения)");
+
+        if (!t.Commission.Any(m => m.IsSecurity))
+            dto.Blockers.Add("В составе комиссии нет представителя Управления безопасности (п. 120 Положения)");
 
         if (string.IsNullOrWhiteSpace(t.CommissionOrderNumber))
             dto.Blockers.Add("Не указан приказ Председателя Правления об утверждении комиссии");
+
+        // Объявление выдано, но никто не отметил, что оно выложено. Срок приёма
+        // при этом идёт — значит шаг незакрыт, и это должно быть видно.
+        if (t.Status == TenderStatus.Published && string.IsNullOrWhiteSpace(t.PublishedAt))
+            dto.Blockers.Add(t.IsLimited
+                ? "Не отмечена рассылка приглашений участникам"
+                : "Не отмечено размещение объявления на сайте Банка и tenders.kg");
 
         if (t.Status == TenderStatus.Opened && !dto.HasQuorum)
             dto.Blockers.Add($"Нет кворума: {dto.Attended} из {dto.QuorumRequired}");

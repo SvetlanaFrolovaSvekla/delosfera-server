@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Procurement.DTO;
 using delosfera_server.Modules.Procurement.Services;
 using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Procurement.Controllers;
 
@@ -33,26 +35,31 @@ public class ProposalController : ControllerBase
 
     /// <summary>Зарегистрировать коммерческое предложение.</summary>
     [HttpPost("requests/{id:int}/proposals")]
+    [RequirePermission(PermissionCode.ConductProcurement)]
     public async Task<IActionResult> Add(int id, [FromBody] ProposalCreateRequest request) =>
         await Run(() => _proposals.AddAsync(id, request, _currentUser.UserId));
 
     /// <summary>Заключение о соответствии техническим требованиям.</summary>
     [HttpPost("proposals/{proposalId:int}/verdict")]
+    [RequirePermission(PermissionCode.ConductProcurement)]
     public async Task<IActionResult> Verdict(int proposalId, [FromBody] ProposalVerdictRequest request) =>
         await Run(() => _proposals.SetVerdictAsync(proposalId, request, _currentUser.UserId));
 
     /// <summary>Удалить ошибочно заведённое предложение.</summary>
     /// <summary>Файлы предложения и ссылка на облако банка.</summary>
     [HttpPut("proposals/{proposalId:int}/sources")]
+    [RequirePermission(PermissionCode.ConductProcurement)]
     public async Task<IActionResult> Sources(int proposalId, [FromBody] ProposalSourcesRequest request) =>
         await Run(() => _proposals.SetSourcesAsync(proposalId, request, _currentUser.UserId));
 
     [HttpDelete("proposals/{proposalId:int}")]
+    [RequirePermission(PermissionCode.ConductProcurement)]
     public async Task<IActionResult> Delete(int proposalId) =>
         await Run(() => _proposals.DeleteAsync(proposalId, _currentUser.UserId));
 
     /// <summary>Определить победителя закупки.</summary>
     [HttpPost("requests/{id:int}/proposals/{proposalId:int}/winner")]
+    [RequirePermission(PermissionCode.ConductProcurement)]
     public async Task<IActionResult> Winner(int id, int proposalId) =>
         await Run(() => _proposals.DeclareWinnerAsync(id, proposalId, _currentUser.UserId));
 

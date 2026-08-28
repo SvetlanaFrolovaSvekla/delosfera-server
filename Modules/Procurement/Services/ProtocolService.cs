@@ -62,9 +62,25 @@ public class ProtocolService : IProtocolService
             throw new InvalidOperationException(
                 "Протокол закупки не требуется: сумма не превышает установленный порог (PRC-10)");
 
-        var comparison = await _proposals.GetComparisonAsync(requestId);
+        // Источник строк зависит от способа закупки. У конкурса отбор идёт по
+        // конкурсным заявкам, и коммерческих предложений там нет вовсе: протокол,
+        // построенный по ним, отказывался оформляться со словами «победитель не
+        // определён» — при том что победитель конкурса был определён комиссией.
+        var tender = await _db.Tenders
+            .Include(t => t.Bids).ThenInclude(b => b.Supplier)
+            .Include(t => t.Bids).ThenInclude(b => b.Votes).ThenInclude(v => v.Member).ThenInclude(m => m!.User)
+            .Include(t => t.Commission).ThenInclude(m => m.User)
+            .Where(t => t.RequestId == requestId
+                        && t.Status != TenderStatus.Cancelled
+                        && t.Status != TenderStatus.Failed)
+            .OrderByDescending(t => t.Id)
+            .FirstOrDefaultAsync();
 
-        var winner = comparison.Proposals.FirstOrDefault(p => p.IsWinner)
+        var варианты = tender is not null
+            ? TenderProtocolRows.Build(tender)
+            : TenderProtocolRows.Build(await _proposals.GetComparisonAsync(requestId));
+
+        var winner = варианты.FirstOrDefault(v => v.IsWinner)
                      ?? throw new InvalidOperationException(
                          "Протокол формируется после определения победителя закупки");
 
@@ -89,12 +105,10 @@ public class ProtocolService : IProtocolService
 
         // Резервный поставщик — следующее по цене допущенное предложение: при отказе
         // победителя закупку не проводят заново, договор заключают с ним.
-        var eligible = comparison.Proposals
-            .Where(p => p.MeetsRequirements == true && !p.SupplierBlacklisted)
-            .OrderBy(p => p.Price)
-            .ToList();
-
-        var reserve = eligible.FirstOrDefault(p => p.Id != winner.Id);
+        var reserve = варианты
+            .Where(v => v.Eligible && v.Key != winner.Key)
+            .OrderBy(v => v.Price)
+            .FirstOrDefault();
 
         protocol.MainSupplierId = winner.SupplierId;
         protocol.MainAmount = winner.Price;
@@ -107,19 +121,19 @@ public class ProtocolService : IProtocolService
             _db.ProtocolRows.RemoveRange(_db.ProtocolRows.Where(r => r.ProtocolId == protocol.Id));
 
         var order = 1;
-        protocol.Rows = comparison.Proposals
-            .OrderBy(p => p.Price)
-            .Select(p => new ProtocolRow
+        protocol.Rows = варианты
+            .OrderBy(v => v.Price)
+            .Select(v => new ProtocolRow
             {
                 Order = order++,
-                SupplierTitle = p.SupplierTitle,
-                SupplierInn = p.SupplierInn,
-                Price = p.Price,
-                Specification = p.Specification,
-                DeliveryTerms = p.DeliveryDays is { } d ? $"{d} дн." : null,
-                PaymentTerms = p.PaymentTerms,
-                InitiatorConclusion = Conclusion(p),
-                IsWinner = p.IsWinner,
+                SupplierTitle = v.SupplierTitle,
+                SupplierInn = v.SupplierInn,
+                Price = v.Price,
+                Specification = v.Specification,
+                DeliveryTerms = v.DeliveryTerms,
+                PaymentTerms = v.PaymentTerms,
+                InitiatorConclusion = v.Conclusion,
+                IsWinner = v.IsWinner,
             })
             .ToList();
 

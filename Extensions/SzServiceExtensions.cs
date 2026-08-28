@@ -19,7 +19,12 @@ public static class SzServiceExtensions
         // Статистика по запискам и её выгрузка (SZ-06)
         builder.Services.AddScoped<ISzStatisticsService, SzStatisticsService>();
         builder.Services.AddHostedService<SzDeadlineWorker>();
-        builder.Services.AddScoped<IRouteCompletionHandler, SzRouteCompletionHandler>();
+        // Обработчик нужен и сам по себе: задачу адресату ставит он, а приводит
+        // к ней не только маршрут — после регистрации без подписанта записка идёт
+        // к адресату напрямую.
+        builder.Services.AddScoped<SzRouteCompletionHandler>();
+        builder.Services.AddScoped<IRouteCompletionHandler>(sp =>
+            sp.GetRequiredService<SzRouteCompletionHandler>());
         return builder;
     }
 }

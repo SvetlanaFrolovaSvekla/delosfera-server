@@ -1,5 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using delosfera_server.Common.Services;
+using delosfera_server.Modules.Users.Services;
+using delosfera_server.Modules.Users.DTO;
+using delosfera_server.Modules.Workflow.Services;
+using delosfera_server.Modules.Workflow.Models;
 using delosfera_server.Modules.Files.Models;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Notifications.DTO.Request;
@@ -152,4 +156,59 @@ internal sealed class PassthroughHtml : IDocumentHtmlService
 {
     public string? Sanitize(string? html) => html;
     public string? ToPlainText(string? html) => html;
+}
+
+/// <summary>Уведомления адресату здесь не проверяются — важен переход статуса.</summary>
+internal sealed class SilentNotifications : INotificationService
+{
+    public Task<int> CreateAsync(CreateNotificationRequest request, int? currentUserId) =>
+        Task.FromResult(0);
+
+    public Task<PagedNotificationResponse> SearchAsync(
+        NotificationFilterRequest request, int currentUserId, string languageCode) =>
+        throw new NotSupportedException();
+
+    public Task<NotificationResponse> GetByIdAsync(int id, int currentUserId, string languageCode) =>
+        throw new NotSupportedException();
+
+    public Task<NotificationResponse> MarkAsReadAsync(int id, int currentUserId, string languageCode) =>
+        throw new NotSupportedException();
+
+    public Task<NotificationResponse> MarkAsUnreadAsync(int id, int currentUserId, string languageCode) =>
+        throw new NotSupportedException();
+
+    public Task<int> MarkAllAsReadAsync(int currentUserId, NotificationCategory? category) =>
+        throw new NotSupportedException();
+
+    public Task<NotificationResponse> ToggleFavoriteAsync(int id, int currentUserId, string languageCode) =>
+        throw new NotSupportedException();
+
+    public Task DeleteForUserAsync(int id, int currentUserId) => throw new NotSupportedException();
+
+    public Task<NotificationCountsResponse> GetCountsAsync(int currentUserId) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Замещений нет: проверяется движок, а не подмена согласующего.</summary>
+internal sealed class NoSubstitutions : ISubstitutionService
+{
+    public Task<List<SubstitutionDto>> ListAsync(int? userId) => Task.FromResult(new List<SubstitutionDto>());
+
+    public Task<SubstitutionDto> CreateAsync(SubstitutionCreateRequest request, int actorUserId) =>
+        throw new NotSupportedException();
+
+    public Task<SubstitutionDto> CancelAsync(int id, int actorUserId) => throw new NotSupportedException();
+
+    public Task<List<int>> GetActingForUserIdsAsync(int substituteUserId) =>
+        Task.FromResult(new List<int>());
+}
+
+/// <summary>Уведомления в этих проверках не участвуют — важны переходы состояний.</summary>
+internal sealed class SilentNotifier : IWorkflowNotifier
+{
+    public Task TaskAssignedAsync(IEnumerable<int> participantIds) => Task.CompletedTask;
+    public Task OverdueAsync(int participantId, bool escalated) => Task.CompletedTask;
+
+    public Task RouteFinishedAsync(int routeInstanceId, RouteInstanceStatus status, string? comment) =>
+        Task.CompletedTask;
 }

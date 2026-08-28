@@ -25,6 +25,33 @@ public class PlanItemDto
     public bool IsOverrun { get; set; }
 }
 
+/// <summary>
+/// Позиция Плана для выбора в заявке.
+///
+/// Отдаёт остаток по позиции, а не только плановую сумму: инициатору важно знать,
+/// сколько по ней уже выбрано другими заявками, — иначе перерасход обнаруживается
+/// в отчёте об исполнении, когда договоры уже заключены.
+/// </summary>
+public class PlanItemLookupDto
+{
+    public int Id { get; set; }
+    public required string Code { get; set; }
+    public required string Subject { get; set; }
+    public int Year { get; set; }
+    public decimal PlannedAmount { get; set; }
+
+    /// <summary>Уже выбрано заявками по этой позиции.</summary>
+    public decimal UsedAmount { get; set; }
+
+    /// <summary>Плановая сумма минус выбранное; отрицательное — позиция перебрана.</summary>
+    public decimal RemainingAmount { get; set; }
+
+    public int? Quarter { get; set; }
+    public string? OrgUnitTitle { get; set; }
+    public int? OrgUnitId { get; set; }
+    public required string SubjectKindTitle { get; set; }
+}
+
 /// <summary>Годовой План закупок.</summary>
 public class PlanDto
 {

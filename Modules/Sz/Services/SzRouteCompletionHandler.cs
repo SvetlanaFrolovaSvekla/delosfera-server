@@ -21,6 +21,8 @@ namespace delosfera_server.Modules.Sz.Services;
 public class SzRouteCompletionHandler : IRouteCompletionHandler
 {
     /// <summary>Тип задачи адресата — по нему её находят и закрывают при решении.</summary>
+    public const string SignerDecisionTask = "Решение подписанта";
+
     public const string AddresseeDecisionTask = "AddresseeDecision";
 
     private readonly DelosferaDbContext _db;
@@ -61,13 +63,36 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
         //
         // Согласование пройдено — записка не идёт сразу в исполнение: если у неё есть
         // адресат, решение по существу выносит он, и до этого исполнять нечего.
+        // По записке проходят два маршрута: согласование и подписание. Куда вести
+        // дальше — зависит от того, какой из них завершился, а различает их текущий
+        // статус записки: до регистрации она на согласовании, после — у подписанта.
+        var подписание = sz.Document!.StatusCode == SzStatus.OnSigning;
+
+        // Записки, заведённые до перестройки порядка, получили номер ещё до
+        // согласования. Отправлять их «ждать регистрации» нельзя: регистрация
+        // выдаст второй номер тому, что уже занесено в книгу под первым.
+        var ужеЗарегистрирована = sz.Document.RegNumber is not null;
+
         var status = routeStatus switch
         {
+            // Согласование пройдено — записка идёт на регистрацию: номер получает
+            // то, с чем уже согласились. Кроме записок прежнего порядка: у них
+            // номер уже есть, и они идут дальше сразу.
+            RouteInstanceStatus.Approved when !подписание && !ужеЗарегистрирована
+                => SzStatus.PendingRegistration,
+
+            // Подписано — подписант решает, куда записка идёт дальше: на
+            // коллегиальный орган, в Сектор закупок или на исполнение. Подпись
+            // говорит «с текстом согласен», но не говорит, что делать дальше.
+            RouteInstanceStatus.Approved when подписание => SzStatus.OnSignerDecision,
+
+            // Подписанта нет — записка идёт прежним путём.
             RouteInstanceStatus.Approved when sz.AddresseeUserId is not null => SzStatus.OnAddresseeDecision,
             RouteInstanceStatus.Approved => SzStatus.OnExecution,
+
             RouteInstanceStatus.Rejected => SzStatus.Rejected,
             RouteInstanceStatus.OnRevision => SzStatus.OnRevision,
-            RouteInstanceStatus.Running => SzStatus.Registered,
+            RouteInstanceStatus.Running => подписание ? SzStatus.OnSigning : SzStatus.OnApproval,
             _ => null
         };
         if (status is null || sz.Document!.StatusCode == status) return;
@@ -81,6 +106,38 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
             await CreateAddresseeTaskAsync(sz);
             await NotifyAddresseeAsync(sz, actorUserId);
         }
+
+        // Подписант только что подписал — и тут же должен решить, куда записка
+        // идёт. Без задачи в списке это решение теряется: он закрыл карточку,
+        // а записка стоит и ждёт его же.
+        if (status == SzStatus.OnSignerDecision)
+            await CreateSignerDecisionTaskAsync(sz);
+    }
+
+    /// <summary>Задача подписанту: решить, куда записка идёт после подписания.</summary>
+    public async Task CreateSignerDecisionTaskAsync(SzDocument sz)
+    {
+        if (sz.SignerUserId is not { } signer) return;
+
+        var exists = await _db.WorkflowTasks.AnyAsync(t =>
+            t.DocumentId == sz.DocumentId
+            && t.Type == SignerDecisionTask
+            && t.State == WorkflowTaskState.Open);
+
+        if (exists) return;
+
+        _db.WorkflowTasks.Add(new WorkflowTask
+        {
+            DocumentId = sz.DocumentId,
+            SourceEntityId = sz.Id,
+            AssigneeUserId = signer,
+            Type = SignerDecisionTask,
+            DueAt = sz.DueDate?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+            State = WorkflowTaskState.Open,
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>
@@ -88,7 +145,7 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
     /// читают и забывают, а записка остаётся ждать решения, и по списку задач не
     /// видно, что человек кому-то должен ответ.
     /// </summary>
-    private async Task CreateAddresseeTaskAsync(SzDocument sz)
+    public async Task CreateAddresseeTaskAsync(SzDocument sz)
     {
         var exists = await _db.WorkflowTasks.AnyAsync(t =>
             t.DocumentId == sz.DocumentId
@@ -119,7 +176,7 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
     /// Адресат узнаёт о записке только из уведомления: в его задачах она не появляется —
     /// согласующим он не был.
     /// </summary>
-    private async Task NotifyAddresseeAsync(SzDocument sz, int actorUserId)
+    public async Task NotifyAddresseeAsync(SzDocument sz, int actorUserId)
     {
         await _notifications.CreateAsync(new CreateNotificationRequest
         {

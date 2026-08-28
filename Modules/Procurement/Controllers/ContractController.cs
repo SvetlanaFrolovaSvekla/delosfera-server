@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Procurement.DTO;
 using delosfera_server.Modules.Procurement.Services;
 using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Procurement.Controllers;
 
@@ -34,26 +36,31 @@ public class ContractController : ControllerBase
 
     /// <summary>Заключить договор с победителем закупки.</summary>
     [HttpPost("requests/{requestId:int}/contract")]
+    [RequirePermission(PermissionCode.ManageProcurementContracts)]
     public async Task<IActionResult> Create(int requestId, [FromBody] ContractCreateRequest request) =>
         await Run(() => _contracts.CreateAsync(requestId, request, _currentUser.UserId));
 
     /// <summary>Реквизиты договора: подписание, сроки поставки и оплаты, ответственный.</summary>
     [HttpPut("contracts/{id:int}")]
+    [RequirePermission(PermissionCode.ManageProcurementContracts)]
     public async Task<IActionResult> Update(int id, [FromBody] ContractUpdateRequest request) =>
         await Run(() => _contracts.UpdateAsync(id, request, _currentUser.UserId));
 
     /// <summary>Зарегистрировать акт приёма-передачи или выполненных работ.</summary>
     [HttpPost("contracts/{id:int}/acts")]
+    [RequirePermission(PermissionCode.ManageProcurementContracts)]
     public async Task<IActionResult> AddAct(int id, [FromBody] DeliveryActRequest request) =>
         await Run(() => _contracts.AddActAsync(id, request, _currentUser.UserId));
 
     /// <summary>Утвердить акт: начальником СП либо курирующим членом Правления.</summary>
     [HttpPost("acts/{actId:int}/approve")]
+    [RequirePermission(PermissionCode.ManageProcurementContracts)]
     public async Task<IActionResult> ApproveAct(int actId, [FromQuery] bool asCurator = false) =>
         await Run(() => _contracts.ApproveActAsync(actId, asCurator, _currentUser.UserId));
 
     /// <summary>Расторгнуть договор с указанием основания.</summary>
     [HttpPost("contracts/{id:int}/terminate")]
+    [RequirePermission(PermissionCode.ManageProcurementContracts)]
     public async Task<IActionResult> Terminate(int id, [FromBody] ContractTerminateRequest request) =>
         await Run(() => _contracts.TerminateAsync(id, request, _currentUser.UserId));
 

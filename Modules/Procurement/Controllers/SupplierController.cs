@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Procurement.DTO;
 using delosfera_server.Modules.Procurement.Services;
 using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Procurement.Controllers;
 
@@ -30,21 +32,25 @@ public class SupplierController : ControllerBase
 
     /// <summary>Завести или изменить поставщика.</summary>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageSuppliers)]
     public async Task<IActionResult> Upsert([FromBody] SupplierUpsertRequest request) =>
         await Run(() => _suppliers.UpsertAsync(request, _currentUser.UserId));
 
     /// <summary>Включить в чёрный список недобросовестных поставщиков.</summary>
     [HttpPost("{id:int}/blacklist")]
+    [RequirePermission(PermissionCode.ManageSuppliers)]
     public async Task<IActionResult> Blacklist(int id, [FromBody] BlacklistRequest request) =>
         await Run(() => _suppliers.BlacklistAsync(id, request, _currentUser.UserId));
 
     /// <summary>Снять ограничение досрочно.</summary>
     [HttpDelete("{id:int}/blacklist")]
+    [RequirePermission(PermissionCode.ManageSuppliers)]
     public async Task<IActionResult> RemoveFromBlacklist(int id) =>
         await Run(() => _suppliers.RemoveFromBlacklistAsync(id, _currentUser.UserId));
 
     /// <summary>Зафиксировать заключение ДБ о благонадёжности.</summary>
     [HttpPost("{id:int}/reliability")]
+    [RequirePermission(PermissionCode.ManageSuppliers)]
     public async Task<IActionResult> Reliability(int id, [FromBody] ReliabilityRequest request) =>
         await Run(() => _suppliers.SetReliabilityAsync(id, request, _currentUser.UserId));
 

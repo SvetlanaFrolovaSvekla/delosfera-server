@@ -183,6 +183,93 @@ public class RouteEngineTests
         Assert.Equal(ResolutionType.Rejected, participant.Resolution!.Type);
     }
 
+    /// <summary>
+    /// Маршрут подписания строится без согласующих.
+    ///
+    /// В служебных записках подписание отделено от согласования: визируют, потом
+    /// регистрируют, и только потом подписывают. Маршрут подписания строили общим
+    /// методом с пустым списком согласующих — тот отказывал, и регистрация падала
+    /// с «Не выбран ни один согласующий», а человек видел «Не удалось
+    /// зарегистрировать записку» без объяснения.
+    /// </summary>
+    [Fact]
+    public async Task InstantiateForSigner_BuildsSigningStepWithoutApprovers()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+
+        var user = new User
+        {
+            FullName = "Подписант записки",
+            Email = $"signer-{Guid.NewGuid():N}@keremetbank.kg",
+            PasswordHash = "x",
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var document = new Document
+        {
+            Type = DocumentType.Sz,
+            Title = "Записка на подпись",
+            StatusCode = "PendingRegistration",
+            AuthorId = user.Id,
+        };
+        db.Documents.Add(document);
+        await db.SaveChangesAsync();
+
+        var engine = NewEngine(db);
+        var instance = await engine.InstantiateForSignerAsync(document.Id, user.Id);
+
+        var step = Assert.Single(await db.RouteSteps
+            .Include(x => x.Participants)
+            .Where(x => x.RouteInstanceId == instance.Id)
+            .ToListAsync());
+
+        Assert.Equal(StepKind.Signing, step.Kind);
+        Assert.Equal(user.Id, Assert.Single(step.Participants).UserId);
+
+        // Запуск делает подписанта активным: иначе записка ждёт молча, и в его
+        // задачах она не появляется.
+        await engine.StartAsync(instance.Id, user.Id);
+
+        var participant = await db.RouteParticipants
+            .SingleAsync(p => p.RouteStep!.RouteInstanceId == instance.Id);
+
+        Assert.Equal(ParticipantState.Active, participant.State);
+    }
+
+    /// <summary>
+    /// Маршрут согласования без согласующих по-прежнему отвергается: отказ верный,
+    /// ошибка была в том, что этим методом строили подписание.
+    /// </summary>
+    [Fact]
+    public async Task InstantiateForApprovers_WithoutApprovers_IsRefused()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+
+        var user = new User
+        {
+            FullName = "Подписант записки",
+            Email = $"signer-{Guid.NewGuid():N}@keremetbank.kg",
+            PasswordHash = "x",
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var document = new Document
+        {
+            Type = DocumentType.Sz,
+            Title = "Записка без согласующих",
+            StatusCode = "PendingRegistration",
+            AuthorId = user.Id,
+        };
+        db.Documents.Add(document);
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            NewEngine(db).InstantiateForApproversAsync(
+                document.Id, approverUserIds: [], parallel: false, signerUserId: user.Id));
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private static RouteEngine NewEngine(DelosferaDbContext db) =>
@@ -307,27 +394,5 @@ public class RouteEngineTests
         return (instance.Id, participant.Id);
     }
 
-    /// <summary>Замещений нет: проверяется движок, а не подмена согласующего.</summary>
-    private sealed class NoSubstitutions : ISubstitutionService
-    {
-        public Task<List<SubstitutionDto>> ListAsync(int? userId) => Task.FromResult(new List<SubstitutionDto>());
 
-        public Task<SubstitutionDto> CreateAsync(SubstitutionCreateRequest request, int actorUserId) =>
-            throw new NotSupportedException();
-
-        public Task<SubstitutionDto> CancelAsync(int id, int actorUserId) => throw new NotSupportedException();
-
-        public Task<List<int>> GetActingForUserIdsAsync(int substituteUserId) =>
-            Task.FromResult(new List<int>());
-    }
-
-    /// <summary>Уведомления в этих проверках не участвуют — важны переходы состояний.</summary>
-    private sealed class SilentNotifier : IWorkflowNotifier
-    {
-        public Task TaskAssignedAsync(IEnumerable<int> participantIds) => Task.CompletedTask;
-        public Task OverdueAsync(int participantId, bool escalated) => Task.CompletedTask;
-
-        public Task RouteFinishedAsync(int routeInstanceId, RouteInstanceStatus status, string? comment) =>
-            Task.CompletedTask;
-    }
 }

@@ -25,6 +25,9 @@ public interface IRouteEngine
     /// <summary>Дописать этап подписания в конец маршрута, собранного по шаблону.</summary>
     Task AppendSigningStepAsync(int routeInstanceId, int signerUserId);
 
+    /// <summary>Маршрут из одного подписанта — когда согласование уже пройдено.</summary>
+    Task<RouteInstance> InstantiateForSignerAsync(int documentId, int signerUserId, int? timeNormHours = null);
+
     Task<RouteInstance> InstantiateForApproversAsync(
         int documentId, IReadOnlyList<int> approverUserIds, bool parallel,
         int? timeNormHours = null, int? signerUserId = null);

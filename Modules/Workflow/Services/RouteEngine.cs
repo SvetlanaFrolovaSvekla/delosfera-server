@@ -108,6 +108,52 @@ public class RouteEngine : IRouteEngine
         await _audit.LogAsync(Entity, instance.Id, "SigningStepAppended", null, new {signerUserId});
     }
 
+    /// <summary>
+    /// Маршрут из одного подписанта.
+    ///
+    /// Нужен там, где подписание отделено от согласования: в служебных записках
+    /// сначала согласуют, потом регистрируют, и только потом подписывают. Общий
+    /// метод для согласующих здесь не годится — он отказывается строить маршрут
+    /// без единого согласующего, и правильно делает: маршрут согласования без
+    /// согласующих бессмыслен. Здесь согласование уже прошло.
+    /// </summary>
+    public async Task<RouteInstance> InstantiateForSignerAsync(
+        int documentId, int signerUserId, int? timeNormHours = null)
+    {
+        var instance = new RouteInstance
+        {
+            DocumentId = documentId,
+            Status = RouteInstanceStatus.Draft,
+            Steps =
+            [
+                new RouteStep
+                {
+                    Order = 1,
+                    Mode = StepMode.Sequential,
+                    Kind = StepKind.Signing,
+                    TimeNormHours = timeNormHours,
+                    Participants =
+                    [
+                        new RouteParticipant
+                        {
+                            UserId = signerUserId,
+                            Required = true,
+                            State = ParticipantState.Pending,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        _db.RouteInstances.Add(instance);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(Entity, instance.Id, "InstantiatedForSigner", null,
+            new {documentId, signer = signerUserId});
+
+        return instance;
+    }
+
     public async Task<RouteInstance> InstantiateForApproversAsync(
         int documentId, IReadOnlyList<int> approverUserIds, bool parallel,
         int? timeNormHours = null, int? signerUserId = null)

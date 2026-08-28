@@ -47,6 +47,20 @@ public class ProcurementCountersDto
 }
 
 /// <summary>Создание заявки мастером (PRC-01).</summary>
+/// <summary>
+/// Похожая закупка того же подразделения за последние два месяца (п. 10.3).
+/// Признак возможного дробления закупки.
+/// </summary>
+public class SimilarRequestDto
+{
+    public int Id { get; set; }
+    public string? RegNumber { get; set; }
+    public required string Subject { get; set; }
+    public decimal Amount { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public required string StatusCode { get; set; }
+}
+
 public class ProcurementCreateRequest
 {
     public required string Subject { get; set; }
@@ -55,7 +69,10 @@ public class ProcurementCreateRequest
     public decimal Amount { get; set; }
     public bool IsAffiliated { get; set; }
     public bool HasBudget { get; set; }
-    public string? PlanItem { get; set; }
+
+    /// <summary>Выбранная позиция Плана закупок; пусто — закупка внеплановая.</summary>
+    public int? PlanItemId { get; set; }
+
     public bool HasSpecification { get; set; }
 
     /// <summary>Желаемое окно объявления закупки: «с» и «по».</summary>
@@ -94,7 +111,11 @@ public class ProcurementCardDto
     public decimal Amount { get; set; }
     public bool IsAffiliated { get; set; }
     public bool HasBudget { get; set; }
+
+    /// <summary>Позиция Плана: ссылка и её код с предметом для показа.</summary>
+    public int? PlanItemId { get; set; }
     public string? PlanItem { get; set; }
+
     public bool HasSpecification { get; set; }
 
     /// <summary>Желаемое окно объявления закупки: «с» и «по».</summary>
@@ -130,4 +151,10 @@ public class ProcurementCardDto
 
     /// <summary>Чего не хватает, чтобы двигать заявку дальше.</summary>
     public List<string> Blockers { get; set; } = [];
+
+    /// <summary>
+    /// Похожие закупки подразделения за два месяца. Не блокируют: решение о
+    /// консолидации принимает организатор закупок (п. 10.3 Положения).
+    /// </summary>
+    public List<SimilarRequestDto> SimilarRequests { get; set; } = [];
 }
