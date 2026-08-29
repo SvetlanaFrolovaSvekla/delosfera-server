@@ -62,24 +62,7 @@ public class ProtocolService : IProtocolService
             throw new InvalidOperationException(
                 "Протокол закупки не требуется: сумма не превышает установленный порог (PRC-10)");
 
-        // Источник строк зависит от способа закупки. У конкурса отбор идёт по
-        // конкурсным заявкам, и коммерческих предложений там нет вовсе: протокол,
-        // построенный по ним, отказывался оформляться со словами «победитель не
-        // определён» — при том что победитель конкурса был определён комиссией.
-        var tender = await _db.Tenders
-            .Include(t => t.Bids).ThenInclude(b => b.Supplier)
-            .Include(t => t.Bids).ThenInclude(b => b.Votes).ThenInclude(v => v.Member).ThenInclude(m => m!.User)
-            .Include(t => t.Commission).ThenInclude(m => m.User)
-            .Where(t => t.RequestId == requestId
-                        && t.Status != TenderStatus.Cancelled
-                        && t.Status != TenderStatus.Failed)
-            .OrderByDescending(t => t.Id)
-            .FirstOrDefaultAsync();
-
-        var варианты = tender is not null
-            ? TenderProtocolRows.Build(tender)
-            : TenderProtocolRows.Build(await _proposals.GetComparisonAsync(requestId));
-
+        var варианты = await ВариантыОтбораАsync(requestId);
         var winner = варианты.FirstOrDefault(v => v.IsWinner)
                      ?? throw new InvalidOperationException(
                          "Протокол формируется после определения победителя закупки");
@@ -279,12 +262,39 @@ public class ProtocolService : IProtocolService
         return $"{prefix}{seq:D4}";
     }
 
+    /// <summary>
+    /// Варианты отбора по заявке — то, между чем выбирала комиссия.
+    ///
+    /// Источник зависит от способа закупки: у конкурса это конкурсные заявки, а
+    /// коммерческих предложений там нет вовсе. Метод один на всех, кому нужен
+    /// этот список: строки протокола и сверка его с текущим отбором обязаны
+    /// смотреть в одно место, иначе протокол сравнивается с пустотой и вечно
+    /// считается устаревшим.
+    /// </summary>
+    private async Task<List<ProtocolOption>> ВариантыОтбораАsync(int requestId)
+    {
+        var tender = await _db.Tenders
+            .Include(t => t.Bids).ThenInclude(b => b.Supplier)
+            .Include(t => t.Bids).ThenInclude(b => b.Votes).ThenInclude(v => v.Member).ThenInclude(m => m!.User)
+            .Include(t => t.Commission).ThenInclude(m => m.User)
+            .Where(t => t.RequestId == requestId
+                        && t.Status != TenderStatus.Cancelled
+                        && t.Status != TenderStatus.Failed)
+            .OrderByDescending(t => t.Id)
+            .FirstOrDefaultAsync();
+
+        return tender is not null
+            ? TenderProtocolRows.Build(tender)
+            : TenderProtocolRows.Build(await _proposals.GetComparisonAsync(requestId));
+    }
+
     private async Task<ProtocolDto> BuildAsync(ProcurementProtocol p)
     {
-        // Протокол сверяется с текущим отбором: если предложения или победитель
-        // изменились после формирования, документ помечается устаревшим.
-        var comparison = await _proposals.GetComparisonAsync(p.RequestId);
-        var currentWinner = comparison.Proposals.FirstOrDefault(x => x.IsWinner);
+        // Протокол сверяется с текущим отбором: если состав вариантов или
+        // победитель изменились после формирования, документ помечается устаревшим.
+        var варианты = await ВариантыОтбораАsync(p.RequestId);
+        var currentWinner = варианты.FirstOrDefault(x => x.IsWinner);
+        var lowestPrice = варианты.Where(v => v.Eligible).Select(v => (decimal?)v.Price).Min();
 
         var dto = new ProtocolDto
         {
@@ -334,10 +344,10 @@ public class ProtocolService : IProtocolService
             currentWinner is null ||
             currentWinner.SupplierId != p.MainSupplierId ||
             currentWinner.Price != p.MainAmount ||
-            comparison.Proposals.Count != p.Rows.Count;
+            варианты.Count != p.Rows.Count;
 
         dto.RequiresSelectionBasis =
-            comparison.LowestPrice is { } lowest && p.MainAmount is { } main && main > lowest;
+            lowestPrice is { } lowest && p.MainAmount is { } main && main > lowest;
 
         if (dto.RequiresSelectionBasis && string.IsNullOrWhiteSpace(p.SelectionBasis))
             dto.Blockers.Add("Победитель не с наименьшей ценой — заполните основание выбора (PRC-12)");
