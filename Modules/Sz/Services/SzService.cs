@@ -466,9 +466,23 @@ public class SzService : ISzService
         if (sz.AddresseeUserId != actorUserId)
             throw new UnauthorizedAccessException("Решение по записке выносит только её адресат");
 
-        if (sz.Document!.StatusCode != SzStatus.OnAddresseeDecision)
+        // Записка доходит до адресата двумя путями. Без подписания она попадает
+        // к нему прямо с согласования. А когда адресат её же и подписывает,
+        // после подписи она сразу на исполнении — резолюция здесь следующее
+        // действие того же человека, а не отдельный этап. Требовать для неё
+        // «ожидание решения» значило закрыть отписку исполнителям всем, кто
+        // записку подписал, — то есть тем, ради кого она и делалась.
+        var дошлаДоАдресата =
+            sz.Document!.StatusCode == SzStatus.OnAddresseeDecision
+            || sz.Document.StatusCode == SzStatus.OnExecution;
+
+        if (!дошлаДоАдресата)
             throw new InvalidOperationException(
                 "Решение выносится после согласования: записка ещё не дошла до адресата");
+
+        if (sz.AddresseeDecision is not null)
+            throw new InvalidOperationException(
+                "Решение по записке уже вынесено; поручения выдаются отдельно");
 
         if (string.IsNullOrWhiteSpace(decision))
             throw new InvalidOperationException("Напишите решение по записке");
