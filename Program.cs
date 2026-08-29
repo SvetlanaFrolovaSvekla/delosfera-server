@@ -256,6 +256,12 @@ using (var scope = app.Services.CreateScope())
             app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Demo"));
     }
 
+    // Роли органов банка. Строго до раздачи прав: право, у которого нет
+    // роли-держателя, закрывает действие для всех и выглядит при этом исправным.
+    await delosfera_server.Modules.Users.Services.CoreRolesSeeder.ApplyAsync(
+        db,
+        app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("CoreRoles"));
+
     // Права на новые разделы существующим ролям. Без этого раздел после выкладки
     // не видит никто: право заведено, но ни одной роли не принадлежит.
     await delosfera_server.Modules.Users.Services.RolePermissionDefaults.ApplyAsync(
