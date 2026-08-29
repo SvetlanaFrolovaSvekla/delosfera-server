@@ -24,6 +24,13 @@ public interface IGuaranteeService
 /// </summary>
 public class GuaranteeService : IGuaranteeService
 {
+    /// <summary>Предельные доли обеспечения — настраиваются параметрами закупок.</summary>
+    private const string BidSecurityShareCode = "BidSecurityShare";
+    private const string PerformanceShareCode = "PerformanceSecurityShare";
+
+    private const decimal DefaultBidSecurityShare = 0.02m;
+    private const decimal DefaultPerformanceShare = 0.05m;
+
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
     private readonly IBankClock _clock;
@@ -70,6 +77,8 @@ public class GuaranteeService : IGuaranteeService
         if (request.ValidUntil <= receivedOn)
             throw new ArgumentException("Срок действия обеспечения должен быть позже даты получения");
 
+        await ПроверитьПределАsync(request);
+
         var supplier = await ResolveSupplierAsync(request);
 
         var guarantee = new Guarantee
@@ -97,6 +106,65 @@ public class GuaranteeService : IGuaranteeService
         });
 
         return Map(await Query().FirstAsync(g => g.Id == guarantee.Id));
+    }
+
+    /// <summary>
+    /// Предел обеспечения: ГОКЗ — не более двух процентов от суммы закупки,
+    /// ГОИД — не более пяти процентов от суммы договора.
+    ///
+    /// Это потолок в пользу поставщика: банк не вправе требовать больше, а
+    /// требование сверх предела делает участие в закупке дороже, чем допускает
+    /// Положение. Проверки не было вовсе — принималась любая сумма, и завышенное
+    /// обеспечение выглядело как обычная запись в реестре.
+    ///
+    /// Доли вынесены в параметры закупок: банк меняет их сам, не дожидаясь сборки.
+    /// </summary>
+    private async Task ПроверитьПределАsync(GuaranteeCreateRequest request)
+    {
+        var (основание, доля, откуда) = request.Kind == GuaranteeKind.BidSecurity
+            ? (await СуммаЗакупкиАsync(request.TenderId),
+               await ДоляАsync(BidSecurityShareCode, DefaultBidSecurityShare),
+               "суммы закупки")
+            : (await СуммаДоговораАsync(request.ContractId),
+               await ДоляАsync(PerformanceShareCode, DefaultPerformanceShare),
+               "суммы договора");
+
+        // Основание неизвестно — конкурс или договор без суммы. Ограничивать не от
+        // чего, и придумывать предел на пустом месте хуже, чем пропустить.
+        if (основание is not { } сумма || сумма <= 0) return;
+
+        var предел = Math.Round(сумма * доля, 2, MidpointRounding.AwayFromZero);
+
+        if (request.Amount > предел)
+            throw new ArgumentException(
+                $"Обеспечение не может превышать {доля * 100:0.##}% {откуда}: " +
+                $"предел {предел:N2} сом при {сумма:N2} сом");
+    }
+
+    private async Task<decimal?> СуммаЗакупкиАsync(int? tenderId) =>
+        tenderId is not { } id
+            ? null
+            : await _db.Tenders
+                .Where(t => t.Id == id)
+                .Select(t => (decimal?)t.Request!.Amount)
+                .FirstOrDefaultAsync();
+
+    private async Task<decimal?> СуммаДоговораАsync(int? contractId) =>
+        contractId is not { } id
+            ? null
+            : await _db.ProcurementContracts
+                .Where(c => c.Id == id)
+                .Select(c => c.Amount)
+                .FirstOrDefaultAsync();
+
+    private async Task<decimal> ДоляАsync(string code, decimal fallback)
+    {
+        var value = await _db.ProcurementParameters
+            .Where(p => p.Code == code)
+            .Select(p => (decimal?)p.Value)
+            .FirstOrDefaultAsync();
+
+        return value is { } v && v > 0 ? v : fallback;
     }
 
     public async Task<GuaranteeDto> ReturnAsync(int id, GuaranteeReturnRequest request, int actorUserId)
