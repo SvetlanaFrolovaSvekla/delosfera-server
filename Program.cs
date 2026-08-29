@@ -112,6 +112,10 @@ builder.AddMeetingServices();
 builder.AddIntegrationServices();
 builder.AddSearchServices();
 
+// Разовую работу при первом обращении к данным делаем заранее и вхолостую:
+// иначе она достаётся тому, кто первым открыл раздел после выкладки.
+builder.Services.AddHostedService<delosfera_server.Common.Services.WarmupWorker>();
+
 // Обкатка подразделениями: пожелания с экранов и учёт посещаемости. Журнал заходов
 // растёт быстрее всех таблиц, поэтому вместе со сбором сразу заводим и чистку.
 builder.Services.AddHostedService<delosfera_server.Modules.Feedback.Services.PageVisitCleanupWorker>();
