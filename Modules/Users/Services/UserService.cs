@@ -53,16 +53,27 @@ public class UserService : IUserService
     private Task LogAdminAsync(int userId, string action, object? payload = null) =>
         _audit.LogAsync("User", userId, action, _currentUser.UserId == 0 ? null : _currentUser.UserId, payload);
 
-    public async Task<List<UserResponse>> GetAllAsync(
+    /// <summary>
+    /// Наибольшая страница. Запрос со страницей в тысячу записей — это тот же
+    /// полный список, только через параметр.
+    /// </summary>
+    private const int MaxPageSize = 200;
+
+    public async Task<UserPageResponse> GetPageAsync(
+        int page,
+        int pageSize,
         UserSortBy sortBy,
         string? search,
         List<int>? orgUnitIds,
         List<int>? positionIds,
         List<int>? roleIds,
-        UserSource? source,
+        List<UserSource>? sources,
         bool? isBlocked,
         string languageCode)
     {
+        page = page < 1 ? 1 : page;
+        pageSize = pageSize is < 1 or > MaxPageSize ? 20 : pageSize;
+
         IQueryable<User> query = _db.Users
             .Include(x => x.Position)
             .Include(x => x.OrgUnit)
@@ -86,8 +97,23 @@ public class UserService : IUserService
         if (roleIds is { Count: > 0 })
             query = query.Where(x => x.Roles.Any(r => roleIds.Contains(r.Id)));
 
-        if (source.HasValue)
-            query = query.Where(x => x.Source == source.Value);
+        // Несколько источников сразу — обычный случай на этой странице: раньше
+        // второй источник добирался на клиенте по уже загруженному списку, и со
+        // страницей такой отбор врал бы, показывая совпадения только в ней.
+        if (sources is {Count: > 0})
+            query = query.Where(x => sources.Contains(x.Source));
+
+        // Счёт по состояниям берём до отбора по состоянию: вкладки показывают,
+        // сколько записей за каждой из них, а не сколько на открытой.
+        var counts = await query
+            .GroupBy(_ => 1)
+            .Select(g => new UserCounts
+            {
+                All = g.Count(),
+                Active = g.Count(x => x.BlockedAt == null && x.IsActive),
+                Blocked = g.Count(x => x.BlockedAt != null || !x.IsActive),
+            })
+            .FirstOrDefaultAsync() ?? new UserCounts();
 
         // Работающей считается учётная запись, которую и не заблокировал администратор,
         // и которая активна сама по себе: отключённые в службе каталогов приходят
@@ -98,6 +124,13 @@ public class UserService : IUserService
                 ? query.Where(x => x.BlockedAt != null || !x.IsActive)
                 : query.Where(x => x.BlockedAt == null && x.IsActive);
 
+        var total = isBlocked switch
+        {
+            null => counts.All,
+            true => counts.Blocked,
+            false => counts.Active,
+        };
+
         query = sortBy switch
         {
             UserSortBy.CreatedAtAsc => query.OrderBy(x => x.CreatedAt),
@@ -107,8 +140,24 @@ public class UserService : IUserService
             _ => query.OrderBy(x => x.CreatedAt)
         };
 
-        var entities = await query.ToListAsync();
-        return entities.Select(x => ToResponse(x, languageCode)).ToList();
+        // Однофамильцы и совпадающие даты создания без второго признака идут в
+        // произвольном порядке, и одна запись может оказаться сразу на двух
+        // страницах, а другая — ни на одной.
+        query = ((IOrderedQueryable<User>)query).ThenBy(x => x.Id);
+
+        var entities = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return new UserPageResponse
+        {
+            Items = entities.Select(x => ToResponse(x, languageCode)).ToList(),
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+            Counts = counts,
+        };
     }
 
     public async Task<UserResponse> CreateAsync(CreateUserRequest request, string languageCode)

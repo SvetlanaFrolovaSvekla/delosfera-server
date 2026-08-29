@@ -24,6 +24,11 @@ public sealed class PostgresFixture : IAsyncLifetime
         .WithDatabase(TemplateDatabase)
         .WithUsername("postgres")
         .WithPassword("postgres")
+        // Каждому тесту — своя база, а каждой базе — свой пул соединений, который
+        // живёт до конца прогона. На сотне баз это упирается в предел Postgres, и
+        // набор краснеет в случайных местах с «too many clients»: падает не тот
+        // тест, который соединения занял, а тот, кому не хватило.
+        .WithCommand("-c", "max_connections=500")
         .Build();
 
     /// <summary>Строка подключения к базе-шаблону: миграции накатаны, данные — только сидовые.</summary>
@@ -71,7 +76,16 @@ public sealed class PostgresFixture : IAsyncLifetime
             await command.ExecuteNonQueryAsync();
         }
 
-        var builder = new NpgsqlConnectionStringBuilder(ConnectionString) {Database = name};
+        // Пул на каждую базу свой, и по умолчанию он готов открыть до сотни
+        // соединений. Баз за прогон — по одной на тест, и Postgres упирается в
+        // свой предел: набор начинает краснеть в случайных местах с «too many
+        // clients», причём падает не тот тест, который их занял.
+        var builder = new NpgsqlConnectionStringBuilder(ConnectionString)
+        {
+            Database = name,
+            MaxPoolSize = 4,
+        };
+
         return NewDb(builder.ConnectionString);
     }
 
