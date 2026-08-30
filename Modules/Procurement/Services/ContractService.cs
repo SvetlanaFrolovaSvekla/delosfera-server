@@ -308,6 +308,8 @@ public class ContractService : IContractService
 
         var threshold = await CuratorThresholdAsync();
 
+        await ПроверитьПравоНаПриёмкуАsync(act.ContractId, asCurator, actorUserId);
+
         if (asCurator)
         {
             if (act.Amount <= threshold)
@@ -407,6 +409,46 @@ public class ContractService : IContractService
     private async Task<ProcurementContract> LoadAsync(int id) =>
         await Query().FirstOrDefaultAsync(c => c.Id == id)
         ?? throw new KeyNotFoundException($"Договор {id} не найден");
+
+    /// <summary>
+    /// Кто подтверждает приёмку.
+    ///
+    /// Акт утверждает начальник инициирующего подразделения, а свыше порога — ещё
+    /// и курирующий член Правления. Раньше действие было закрыто правом ведения
+    /// договоров, то есть правом Сектора закупок: приёмку подтверждал не тот, кто
+    /// принимал, а тот, кто закупал. Ради этого разделения визы и заведены.
+    /// </summary>
+    private async Task ПроверитьПравоНаПриёмкуАsync(int contractId, bool asCurator, int actorUserId)
+    {
+        var роли = await _db.ProcurementContracts
+            .Where(c => c.Id == contractId)
+            .Select(c => new
+            {
+                Head = c.Request!.InitiatorUnit!.HeadUserId,
+                UnitCurator = c.Request.InitiatorUnit.CuratorUserId,
+                RequestCurator = c.Request.CuratorUserId,
+            })
+            .FirstOrDefaultAsync();
+
+        if (роли is null) return;
+
+        if (asCurator)
+        {
+            // Куратор закупки записан в самой заявке решением матрицы; если его
+            // там нет, действует куратор подразделения.
+            var куратор = роли.RequestCurator ?? роли.UnitCurator;
+
+            if (куратор is not null && куратор != actorUserId)
+                throw new UnauthorizedAccessException(
+                    "Визу ставит курирующий член Правления, закреплённый за этой закупкой");
+
+            return;
+        }
+
+        if (роли.Head is not null && роли.Head != actorUserId)
+            throw new UnauthorizedAccessException(
+                "Акт утверждает начальник инициирующего подразделения");
+    }
 
     private async Task<decimal> CuratorThresholdAsync()
     {

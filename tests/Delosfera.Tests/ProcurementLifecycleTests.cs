@@ -115,10 +115,61 @@ public class ProcurementLifecycleTests
         Assert.Equal(ProcurementStatus.Completed, await СтатусАsync(db, стенд.DocumentId));
     }
 
+    [Fact]
+    public async Task Акт_утверждает_начальник_инициирующего_подразделения()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db, сПодразделением: true);
+        var договоры = Договоры(db);
+        var contract = await ДоговорСАктомАsync(db, стенд, договоры);
+        var act = await db.DeliveryActs.FirstAsync(a => a.ContractId == contract);
+
+        await договоры.ApproveActAsync(act.Id, asCurator: false, стенд.HeadId!.Value);
+
+        Assert.NotNull((await db.DeliveryActs.FirstAsync(a => a.Id == act.Id)).UnitHeadApprovedAt);
+    }
+
+    [Fact]
+    public async Task Сектор_закупок_за_подразделение_приёмку_не_подтверждает()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db, сПодразделением: true);
+        var договоры = Договоры(db);
+        var contract = await ДоговорСАктомАsync(db, стенд, договоры);
+        var act = await db.DeliveryActs.FirstAsync(a => a.ContractId == contract);
+
+        // Приёмку подтверждает тот, кто принимал. Раньше действие было закрыто
+        // правом ведения договоров, и расписаться мог Сектор закупок.
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => договоры.ApproveActAsync(act.Id, asCurator: false, стенд.Actor));
+    }
+
+    private static async Task<int> ДоговорСАктомАsync(
+        DelosferaDbContext db, Стенд стенд, IContractService договоры)
+    {
+        var contract = new ProcurementContract
+        {
+            DocumentId = стенд.ContractDocumentId,
+            RequestId = стенд.RequestId,
+            SupplierId = стенд.SupplierId,
+            Amount = 300_000m,
+            InitialAmount = 300_000m,
+            Status = ContractStatus.Active,
+        };
+        db.ProcurementContracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        await договоры.AddActAsync(contract.Id,
+            new DeliveryActRequest {Number = "АКТ-1", Amount = 300_000m}, стенд.Actor);
+
+        return contract.Id;
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private sealed record Стенд(
-        int RequestId, int DocumentId, int ContractDocumentId, int RouteId, int SupplierId, int Actor);
+        int RequestId, int DocumentId, int ContractDocumentId, int RouteId, int SupplierId, int Actor,
+        int? HeadId = null);
 
     private static IRouteCompletionHandler Обработчик(DelosferaDbContext db)
     {
@@ -142,7 +193,7 @@ public class ProcurementLifecycleTests
             .Select(d => d.StatusCode)
             .FirstAsync();
 
-    private static async Task<Стенд> SeedAsync(DelosferaDbContext db)
+    private static async Task<Стенд> SeedAsync(DelosferaDbContext db, bool сПодразделением = false)
     {
         var автор = new User
         {
@@ -175,6 +226,32 @@ public class ProcurementLifecycleTests
         db.Documents.AddRange(doc, contractDoc);
         await db.SaveChangesAsync();
 
+        int? headId = null;
+        int? unitId = null;
+
+        if (сПодразделением)
+        {
+            var начальник = new User
+            {
+                FullName = "Начальник инициирующего подразделения",
+                Email = $"head-{Guid.NewGuid():N}@keremetbank.kg",
+                PasswordHash = "x",
+            };
+            db.Users.Add(начальник);
+            await db.SaveChangesAsync();
+
+            var unit = new delosfera_server.Modules.Dictionaries.Models.OrganizationUnit
+            {
+                TitleRu = $"Подразделение {Guid.NewGuid():N}"[..24],
+                HeadUserId = начальник.Id,
+            };
+            db.OrganizationUnits.Add(unit);
+            await db.SaveChangesAsync();
+
+            headId = начальник.Id;
+            unitId = unit.Id;
+        }
+
         var request = new ProcurementRequest
         {
             DocumentId = doc.Id,
@@ -182,6 +259,7 @@ public class ProcurementLifecycleTests
             SubjectKind = ProcurementSubjectKind.Goods,
             Amount = 300_000m,
             MethodId = method.Id,
+            InitiatorUnitId = unitId,
         };
         db.ProcurementRequests.Add(request);
 
@@ -189,6 +267,6 @@ public class ProcurementLifecycleTests
         db.RouteInstances.Add(route);
         await db.SaveChangesAsync();
 
-        return new Стенд(request.Id, doc.Id, contractDoc.Id, route.Id, поставщик.Id, автор.Id);
+        return new Стенд(request.Id, doc.Id, contractDoc.Id, route.Id, поставщик.Id, автор.Id, headId);
     }
 }

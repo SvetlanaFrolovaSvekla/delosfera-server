@@ -52,9 +52,14 @@ public class ContractController : ControllerBase
     public async Task<IActionResult> AddAct(int id, [FromBody] DeliveryActRequest request) =>
         await Run(() => _contracts.AddActAsync(id, request, _currentUser.UserId));
 
-    /// <summary>Утвердить акт: начальником СП либо курирующим членом Правления.</summary>
+    /// <summary>
+    /// Утвердить акт: начальником СП либо курирующим членом Правления.
+    ///
+    /// Права контура закупок здесь нет намеренно: приёмку подтверждает
+    /// подразделение, которое принимало, а не то, которое закупало. Кто именно
+    /// вправе поставить визу, проверяется по оргструктуре.
+    /// </summary>
     [HttpPost("acts/{actId:int}/approve")]
-    [RequirePermission(PermissionCode.ManageProcurementContracts)]
     public async Task<IActionResult> ApproveAct(int actId, [FromQuery] bool asCurator = false) =>
         await Run(() => _contracts.ApproveActAsync(actId, asCurator, _currentUser.UserId));
 
