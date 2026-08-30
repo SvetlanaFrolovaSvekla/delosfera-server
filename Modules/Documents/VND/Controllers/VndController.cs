@@ -144,20 +144,12 @@ public class VndController : ControllerBase
 
     /// <summary>Отправить черновик редакции (редакция со статусом "Требуется согласование"
     /// на согласование</summary>
-    [HttpPost("{vndId:int}/redactions/{redactionId:int}/submit")]
-    [RequirePermission(PermissionCode.ViewVnd)]
-    [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult<VndRedactionResponse>> SubmitRedaction(int vndId, int redactionId)
-    {
-        try
-        {
-            return Ok(await _service.SubmitRedactionForApprovalAsync(vndId, redactionId, _currentUser.UserId));
-        }
-        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
-        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
-    }
+    // Точки «отправить редакцию на согласование» здесь больше нет. Она меняла
+    // статус редакции на «на согласовании», не заводя самого согласования, — а
+    // запуск согласования требует черновика. Нажавший её оставлял редакцию в
+    // состоянии, из которого согласование уже не запускалось: документ отвечал
+    // «отправлено», и не двигался никуда. Согласование начинается сразу с
+    // указанием состава: POST /api/vnd/{vndId}/approval/start.
 
     /// <summary>Только для главного редактора: сделать черновик редакции действующим/текущим
     /// напрямую, минуя согласование целиком (кнопка "Сделать актуальной редакцией без

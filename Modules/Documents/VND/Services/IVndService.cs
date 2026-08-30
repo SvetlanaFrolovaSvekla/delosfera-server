@@ -11,7 +11,6 @@ public interface IVndService
     Task DeleteAsync(int id, int currentUserId);
     Task<VndRedactionResponse> AddRedactionAsync(int vndId, CreateVndRedactionRequest request, int currentUserId);
     Task<List<VndRedactionResponse>> GetRedactionsAsync(int vndId);
-    Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(int vndId, int redactionId, int currentUserId);
     Task<VndRedactionResponse> PublishRedactionWithoutApprovalAsync(int vndId, int redactionId, int currentUserId);
     Task<VndActualizationSummaryResponse> GetActualizationSummaryAsync();
     Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request, string languageCode);

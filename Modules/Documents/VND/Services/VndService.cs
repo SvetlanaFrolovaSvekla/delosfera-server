@@ -784,32 +784,6 @@ public class VndService : IVndService
         return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
     }
 
-    // Отправка редакции на согласование: переводит черновик редакции в Pending и ВНД в Review.
-    public async Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(
-        int vndId, int redactionId, int currentUserId)
-    {
-        var vnd = await _db.VndDocuments.FindAsync(vndId)
-                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
-
-        if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
-            throw new UnauthorizedAccessException(
-                "Отправить редакцию на согласование может только причастный к этому ВНД пользователь");
-
-        var redaction = await _db.VndRedactions
-                            .Include(x => x.Attachments)
-                            .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
-                        ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
-
-        if (redaction.ApprovalStatus != RedactionApprovalStatus.Draft)
-            throw new InvalidOperationException("Отправить на согласование можно только черновик редакции");
-
-        redaction.ApprovalStatus = RedactionApprovalStatus.Pending;
-        vnd.Status = VndStatus.Review;
-        await _db.SaveChangesAsync();
-
-        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
-    }
-
     /// <summary>Только для главного редактора: делает черновик редакции действующим/текущим
     /// НАПРЯМУЮ, минуя весь процесс согласования целиком - тот же результат, что и загрузка
     /// редакции без согласования (см. ветку RequiresApproval=false в UploadRedactionAsync выше),
