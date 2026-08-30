@@ -1,14 +1,39 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Meetings.Models;
+using delosfera_server.Modules.Procurement.Models;
 using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Workflow.Models;
 using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Meetings.Services;
 
 /// <summary>Записка, ожидающая отбора в повестку.</summary>
+/// <summary>Откуда вопрос пришёл к секретарю.</summary>
+public enum AgendaCandidateKind
+{
+    /// <summary>Служебная записка, вынесенная адресатом на орган.</summary>
+    Sz = 1,
+
+    /// <summary>Заявка на закупку, расход по которой утверждает орган.</summary>
+    Procurement = 2,
+}
+
 public class AgendaCandidateDto
 {
+    /// <summary>
+    /// Вид источника. Секретарю видно, что перед ним: у записки и у заявки на
+    /// закупку разные карточки и разные приложения, и открывать их надо в разных
+    /// разделах.
+    /// </summary>
+    public AgendaCandidateKind Kind { get; set; } = AgendaCandidateKind.Sz;
+
+    /// <summary>Заявка на закупку — заполнено, когда вопрос пришёл из закупок.</summary>
+    public int? ProcurementRequestId { get; set; }
+
+    /// <summary>Сумма расхода, который выносится на утверждение.</summary>
+    public decimal? Amount { get; set; }
+
     public int SzId { get; set; }
     public int DocumentId { get; set; }
     public string? Number { get; set; }
@@ -35,6 +60,11 @@ public class AgendaCandidateDto
 public interface IAgendaCandidateService
 {
     Task<List<AgendaCandidateDto>> ListAsync(MeetingBody body, CancellationToken ct = default);
+
+    /// <summary>Включить в повестку заявку на закупку, утверждаемую органом.</summary>
+    Task<AgendaItem> TakeProcurementIntoAgendaAsync(
+        int meetingId, int requestId, string? question, int? order, int currentUserId,
+        CancellationToken ct = default);
 
     Task<AgendaItem> TakeIntoAgendaAsync(
         int meetingId, int szId, string? question, int? order, int currentUserId, CancellationToken ct = default);
@@ -71,6 +101,61 @@ public class AgendaCandidateService : IAgendaCandidateService
 
     public async Task<List<AgendaCandidateDto>> ListAsync(MeetingBody body, CancellationToken ct = default)
     {
+        var записки = await ЗапискиАsync(body, ct);
+        var заявки = await ЗаявкиНаЗакупкуАsync(body, ct);
+
+        // В один список и по времени обращения: секретарю неважно, из какого
+        // раздела вопрос, — важно, что он ждёт заседания и с какого числа.
+        return записки.Concat(заявки).OrderBy(c => c.RequestedAt).ToList();
+    }
+
+    /// <summary>
+    /// Заявки на закупку, расход по которым утверждает этот орган.
+    ///
+    /// Заявка не просит вынести себя на заседание — за неё это делает Матрица
+    /// полномочий, определившая орган утверждения по сумме. Поэтому кандидатом
+    /// она становится, когда маршрут дошёл до этапа ожидания решения органа.
+    ///
+    /// Совет директоров и общее собрание акционеров сюда не попадают: заседания
+    /// этих органов система не ведёт, и делать вид, что попадают, значило бы
+    /// прятать заявку в списке, который никто не разбирает.
+    /// </summary>
+    private async Task<List<AgendaCandidateDto>> ЗаявкиНаЗакупкуАsync(
+        MeetingBody body, CancellationToken ct)
+    {
+        if (body != MeetingBody.Board) return [];
+
+        var взятые = _db.AgendaItems
+            .Where(a => a.SourceProcurementRequestId != null)
+            .Select(a => a.SourceProcurementRequestId!.Value);
+
+        return await _db.ProcurementRequests
+            .AsNoTracking()
+            .Where(r => r.ApprovalAuthority == ApprovalAuthority.Board && !взятые.Contains(r.Id))
+            .Where(r => _db.RouteInstances
+                .Any(i => i.DocumentId == r.DocumentId
+                          && i.Steps.Any(st => st.Kind == StepKind.Board
+                                               && st.Participants.Any(pt => pt.State == ParticipantState.Active))))
+            .Select(r => new AgendaCandidateDto
+            {
+                Kind = AgendaCandidateKind.Procurement,
+                ProcurementRequestId = r.Id,
+                DocumentId = r.DocumentId,
+                Number = r.Document!.RegNumber,
+                Subject = r.Subject,
+                Amount = r.Amount,
+                ProposedQuestion = r.Subject,
+                AuthorName = r.Document.Author == null ? null : r.Document.Author.FullName,
+                AuthorUnit = r.InitiatorUnit == null ? null : r.InitiatorUnit.TitleRu,
+                Status = r.Document.StatusCode,
+                RequestedAt = r.UpdatedAt,
+                FileCount = r.Document.Attachments.Count,
+            })
+            .ToListAsync(ct);
+    }
+
+    private async Task<List<AgendaCandidateDto>> ЗапискиАsync(MeetingBody body, CancellationToken ct)
+    {
         // Уже включённые в повестку из отбора уходят: вопрос заведён, работа секретаря
         // по этой записке сделана.
         var taken = _db.AgendaItems
@@ -101,6 +186,64 @@ public class AgendaCandidateService : IAgendaCandidateService
                 FileCount = s.Document.Attachments.Count,
             })
             .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Включить в повестку заявку на закупку, расход по которой утверждает орган.
+    ///
+    /// Как и записку, её включает секретарь: очередь к органу он разбирает сам.
+    /// Отличие в основании — заявка не помечена вручную, орган ей определила
+    /// Матрица полномочий по сумме расхода.
+    /// </summary>
+    public async Task<AgendaItem> TakeProcurementIntoAgendaAsync(
+        int meetingId, int requestId, string? question, int? order, int currentUserId,
+        CancellationToken ct = default)
+    {
+        var meeting = await _db.Meetings.FirstOrDefaultAsync(m => m.Id == meetingId, ct)
+            ?? throw new InvalidOperationException("Заседание не найдено.");
+
+        var request = await _db.ProcurementRequests
+            .Include(r => r.Document)
+            .FirstOrDefaultAsync(r => r.Id == requestId, ct)
+            ?? throw new InvalidOperationException("Заявка на закупку не найдена.");
+
+        if (request.ApprovalAuthority != ApprovalAuthority.Board)
+            throw new InvalidOperationException(
+                "Расход по этой заявке Правление не утверждает — на заседание она не выносится.");
+
+        if (meeting.Body != MeetingBody.Board)
+            throw new InvalidOperationException(
+                "Заявка на закупку выносится на Правление — включить её в заседание другого органа нельзя.");
+
+        if (await _db.AgendaItems.AnyAsync(a => a.SourceProcurementRequestId == requestId, ct))
+            throw new InvalidOperationException("Заявка уже включена в повестку.");
+
+        var now = DateTime.UtcNow;
+
+        var nextOrder = order ?? await _db.AgendaItems
+            .Where(a => a.MeetingId == meetingId)
+            .Select(a => (int?)a.Order)
+            .MaxAsync(ct) + 1 ?? 1;
+
+        var item = new AgendaItem
+        {
+            MeetingId = meetingId,
+            Order = nextOrder,
+            Topic = Pick(question, request.Subject)
+                    ?? $"Заявка на закупку № {request.Document?.RegNumber}",
+            SourceProcurementRequestId = requestId,
+
+            // Докладчик — инициатор закупки: он обосновывает расход перед органом.
+            SpeakerUserId = request.Document?.AuthorId,
+            SpeakerUnitId = request.InitiatorUnitId,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        _db.AgendaItems.Add(item);
+        await _db.SaveChangesAsync(ct);
+
+        return item;
     }
 
     public async Task<AgendaItem> TakeIntoAgendaAsync(

@@ -80,6 +80,17 @@ public class AgendaItem : IAuditableEntity
     public int? SourceSzId { get; set; }
     public Sz.Models.SzDocument? SourceSz { get; set; }
 
+    /// <summary>
+    /// Заявка на закупку, расход по которой утверждает орган.
+    ///
+    /// Матрица полномочий определяет орган утверждения по сумме, и заявка встаёт
+    /// на этап ожидания его решения. Раньше этот этап ни с чем не был связан:
+    /// секретарь органа о заявке не узнавал, а маршрут ждал решения, которое
+    /// никто не собирался выносить в повестку.
+    /// </summary>
+    public int? SourceProcurementRequestId { get; set; }
+    public Procurement.Models.ProcurementRequest? SourceProcurementRequest { get; set; }
+
     /// <summary>Поисковый вектор по теме, решению и номеру протокола (GEN-04).</summary>
     public NpgsqlTsVector? SearchVector { get; set; }
 

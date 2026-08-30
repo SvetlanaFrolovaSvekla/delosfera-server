@@ -6,6 +6,18 @@ using delosfera_server.Modules.Meetings.Services;
 
 namespace delosfera_server.Modules.Meetings.Controllers;
 
+/// <summary>Включение заявки на закупку в повестку.</summary>
+public class AgendaFromProcurementRequest
+{
+    public int RequestId { get; set; }
+
+    /// <summary>Формулировка вопроса. Пусто — берётся предмет закупки.</summary>
+    public string? Question { get; set; }
+
+    /// <summary>Место в повестке. Пусто — в конец.</summary>
+    public int? Order { get; set; }
+}
+
 public class TakeIntoAgendaRequest
 {
     public int SzId { get; set; }
@@ -70,6 +82,24 @@ public class AgendaCandidateController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Включить заявку на закупку в повестку заседания.</summary>
+    [HttpPost("/api/meetings/{meetingId:int}/agenda/from-procurement")]
+    public async Task<IActionResult> FromProcurement(
+        int meetingId, [FromBody] AgendaFromProcurementRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var item = await _candidates.TakeProcurementIntoAgendaAsync(
+                meetingId, request.RequestId, request.Question, request.Order, _currentUser.UserId, ct);
+
+            return Ok(new {item.Id, item.Order, item.Topic});
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new {message = ex.Message});
         }
     }
 
