@@ -64,6 +64,15 @@ public class ContractController : ControllerBase
     public async Task<IActionResult> Terminate(int id, [FromBody] ContractTerminateRequest request) =>
         await Run(() => _contracts.TerminateAsync(id, request, _currentUser.UserId));
 
+    /// <summary>
+    /// Приобрести дополнительное количество — до четверти стоимости договора,
+    /// по согласованной служебной записке (п. 6/7 раздела VIII Положения).
+    /// </summary>
+    [HttpPost("contracts/{id:int}/top-up")]
+    [RequirePermission(PermissionCode.ManageProcurementContracts)]
+    public async Task<IActionResult> TopUp(int id, [FromBody] ContractTopUpRequest request) =>
+        await Run(() => _contracts.TopUpAsync(id, request, _currentUser.UserId));
+
     private async Task<IActionResult> Run<T>(Func<Task<T>> action)
     {
         try

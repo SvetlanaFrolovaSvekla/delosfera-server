@@ -48,6 +48,13 @@ public class TenderService : ITenderService
     private const int MinTenderPeriodWorkdays = 5;
 
     /// <summary>
+    /// Срок изучения конкурсных заявок — не более десяти рабочих дней с вскрытия
+    /// (п. 11.2/11.3 Положения). Отсчёт идёт от вскрытия, а не от объявления:
+    /// изучать нечего, пока конверты не вскрыты.
+    /// </summary>
+    private const int StudyPeriodWorkdays = 10;
+
+    /// <summary>
     /// Предельный конкурсный период в рабочих днях (п. 8.2/8.3 Положения).
     ///
     /// Верхняя граница не формальность: закупку нельзя держать открытой месяцами,
@@ -211,9 +218,9 @@ public class TenderService : ITenderService
             throw new InvalidOperationException(string.Join("; ", composition));
 
         var today = _clock.Today;
-        var minDeadline = AddWorkdays(today, MinTenderPeriodWorkdays);
+        var minDeadline = Workdays.Add(today, MinTenderPeriodWorkdays);
 
-        var maxDeadline = AddWorkdays(today, MaxTenderPeriodWorkdays);
+        var maxDeadline = Workdays.Add(today, MaxTenderPeriodWorkdays);
 
         if (request.SubmissionDeadline < minDeadline)
             throw new InvalidOperationException(
@@ -694,21 +701,6 @@ public class TenderService : ITenderService
         return $"{prefix}{seq:D4}";
     }
 
-    /// <summary>Прибавить рабочие дни: выходные в конкурсный период не входят.</summary>
-    private static DateOnly AddWorkdays(DateOnly from, int workdays)
-    {
-        var date = from;
-        var added = 0;
-
-        while (added < workdays)
-        {
-            date = date.AddDays(1);
-            if (date.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
-                added++;
-        }
-
-        return date;
-    }
 
     private async Task<TenderDto> BuildAsync(Tender t)
     {
@@ -750,6 +742,12 @@ public class TenderService : ITenderService
             PublicationConfirmedByName = t.PublicationConfirmedBy?.FullName,
             SubmissionDeadline = t.SubmissionDeadline,
             OpenedOn = t.OpenedOn,
+            StudyDeadline = t.OpenedOn is { } opened
+                ? Workdays.Add(opened, StudyPeriodWorkdays)
+                : null,
+            StudyDaysLeft = t.OpenedOn is { } o
+                ? Workdays.Between(_clock.Today, Workdays.Add(o, StudyPeriodWorkdays))
+                : null,
             CommissionOrderNumber = t.CommissionOrderNumber,
             CommissionOrderDate = t.CommissionOrderDate,
             PreviousTenderId = t.PreviousTenderId,
@@ -960,6 +958,14 @@ public class TenderService : ITenderService
             dto.Blockers.Add(t.IsLimited
                 ? "Не отмечена рассылка приглашений участникам"
                 : "Не отмечено размещение объявления на сайте Банка и tenders.kg");
+
+        // Срок изучения идёт от вскрытия и заканчивается протоколом. Пока
+        // победитель не определён, просрочку надо показывать: она означает, что
+        // комиссия вышла за срок, отведённый Положением.
+        if (t.Status == TenderStatus.Opened && dto.StudyDaysLeft is { } осталось && осталось < 0)
+            dto.Blockers.Add(
+                $"Срок изучения заявок истёк {dto.StudyDeadline:dd.MM.yyyy} — " +
+                $"просрочка {-осталось} раб. дн. (п. 11.2 Положения)");
 
         if (t.Status == TenderStatus.Opened && !dto.HasQuorum)
             dto.Blockers.Add($"Нет кворума: {dto.Attended} из {dto.QuorumRequired}");
