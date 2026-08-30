@@ -148,6 +148,16 @@ public class ProcurementCardDto
     public bool ProtocolRequired { get; set; }
     public int MinProposals { get; set; }
 
+    /// <summary>
+    /// Нужен ли по этой закупке договор (раздел VII Положения) и почему.
+    ///
+    /// Решение показывается на карточке: закупка на сорок тысяч сом договора не
+    /// требует, и сотрудник не должен выяснять это по памяти — как и обратное,
+    /// когда договор нужен несмотря на малую сумму.
+    /// </summary>
+    public bool ContractRequired { get; set; }
+    public string? ContractRequirementReason { get; set; }
+
     public string? SourceSzRegNumber { get; set; }
     public int? SourceSzId { get; set; }
 

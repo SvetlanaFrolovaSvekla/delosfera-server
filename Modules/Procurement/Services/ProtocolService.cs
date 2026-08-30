@@ -13,6 +13,12 @@ namespace delosfera_server.Modules.Procurement.Services;
 public interface IProtocolService
 {
     Task<ProtocolDto?> GetAsync(int requestId);
+
+    /// <summary>
+    /// Все протоколы по заявке — по одному на заседание комиссии.
+    /// Свежие сверху: обычно нужен последний, а прежние читают ради хода дела.
+    /// </summary>
+    Task<List<ProtocolDto>> ListAsync(int requestId);
     Task<ProtocolDto> GenerateAsync(int requestId, int actorUserId);
     Task<ProtocolDto> UpdateAsync(int requestId, ProtocolUpdateRequest request, int actorUserId);
     Task<ProtocolDto> SignAsync(int requestId, ProtocolSignRequest request, int actorUserId);
@@ -50,6 +56,33 @@ public class ProtocolService : IProtocolService
         return protocol is null ? null : await BuildAsync(protocol);
     }
 
+    public async Task<List<ProtocolDto>> ListAsync(int requestId)
+    {
+        var protocols = await ProtocolQuery()
+            .Where(p => p.RequestId == requestId)
+            .OrderByDescending(p => p.MeetingDate ?? p.ProtocolDate)
+            .ThenByDescending(p => p.Id)
+            .ToListAsync();
+
+        var result = new List<ProtocolDto>(protocols.Count);
+        foreach (var p in protocols) result.Add(await BuildAsync(p));
+
+        return result;
+    }
+
+    /// <summary>
+    /// Дата заседания, итоги которого оформляются. Берётся у действующего
+    /// конкурса; у простой закупки комиссии нет, и протокол остаётся один.
+    /// </summary>
+    private async Task<DateOnly?> ДатаЗаседанияАsync(int requestId) =>
+        await _db.Tenders
+            .Where(t => t.RequestId == requestId
+                        && t.Status != TenderStatus.Cancelled
+                        && t.Status != TenderStatus.Failed)
+            .OrderByDescending(t => t.Id)
+            .Select(t => t.MeetingDate)
+            .FirstOrDefaultAsync();
+
     public async Task<ProtocolDto> GenerateAsync(int requestId, int actorUserId)
     {
         var request = await _db.ProcurementRequests
@@ -67,7 +100,11 @@ public class ProtocolService : IProtocolService
                      ?? throw new InvalidOperationException(
                          "Протокол формируется после определения победителя закупки");
 
-        var protocol = await LoadAsync(requestId);
+        // Протокол оформляется на заседание: у конкурса — на то, что назначено,
+        // у простой закупки заседаний нет и протокол один.
+        var датаЗаседания = await ДатаЗаседанияАsync(requestId);
+
+        var protocol = await LoadForMeetingAsync(requestId, датаЗаседания);
         var isNew = protocol is null;
 
         if (protocol is { Status: ProtocolStatus.Approved })
@@ -77,6 +114,7 @@ public class ProtocolService : IProtocolService
         {
             RequestId = requestId,
             ProtocolDate = _clock.Today,
+            MeetingDate = датаЗаседания,
             MethodTitle = request.Method!.TitleRu,
             Subject = request.Subject,
             ContentHash = string.Empty,
@@ -226,13 +264,30 @@ public class ProtocolService : IProtocolService
         return await BuildAsync((await LoadAsync(requestId))!);
     }
 
+    /// <summary>
+    /// Последний протокол заявки. Протоколов теперь несколько — по одному на
+    /// заседание комиссии, — и «протокол закупки» без уточнения означает
+    /// последний: именно его подписывают и по нему заключают договор.
+    /// </summary>
     private async Task<ProcurementProtocol?> LoadAsync(int requestId) =>
-        await _db.ProcurementProtocols
+        await ProtocolQuery()
+            .Where(p => p.RequestId == requestId)
+            .OrderByDescending(p => p.MeetingDate ?? p.ProtocolDate)
+            .ThenByDescending(p => p.Id)
+            .FirstOrDefaultAsync();
+
+    /// <summary>Протокол конкретного заседания — по нему решается, создавать новый или пересобрать.</summary>
+    private async Task<ProcurementProtocol?> LoadForMeetingAsync(int requestId, DateOnly? meetingDate) =>
+        await ProtocolQuery()
+            .Where(p => p.RequestId == requestId && p.MeetingDate == meetingDate)
+            .FirstOrDefaultAsync();
+
+    private IQueryable<ProcurementProtocol> ProtocolQuery() =>
+        _db.ProcurementProtocols
             .Include(p => p.Rows)
             .Include(p => p.Signatures).ThenInclude(s => s.User)
             .Include(p => p.MainSupplier)
-            .Include(p => p.ReserveSupplier)
-            .FirstOrDefaultAsync(p => p.RequestId == requestId);
+            .Include(p => p.ReserveSupplier);
 
     private async Task RevokeSignaturesAsync(int protocolId, string reason)
     {
@@ -302,6 +357,7 @@ public class ProtocolService : IProtocolService
             RequestId = p.RequestId,
             RegNumber = p.RegNumber,
             ProtocolDate = p.ProtocolDate,
+            MeetingDate = p.MeetingDate,
             Status = p.Status,
             StatusTitle = StatusTitle(p.Status),
             MethodTitle = p.MethodTitle,

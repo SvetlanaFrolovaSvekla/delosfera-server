@@ -554,9 +554,44 @@ public class ProcurementRequestService : IProcurementRequestService
                                   or ProcurementStatus.OnApproval)
             card.SimilarRequests = await FindSimilarAsync(r);
 
+        await ЗаполнитьРешениеОДоговореАsync(card, r);
+
         FillBlockers(card, r);
         return card;
     }
+
+    /// <summary>
+    /// Нужен ли договор по этой закупке — раздел VII Положения.
+    ///
+    /// Поставщик на этапе заявки ещё не выбран, поэтому нерезидентство здесь
+    /// известно только у уже заключённого договора; до отбора решение принимается
+    /// по типу предмета, сумме и наличию похожих закупок подразделения. Пороги
+    /// берутся из параметров закупок — банк меняет их без сборки.
+    /// </summary>
+    private async Task ЗаполнитьРешениеОДоговореАsync(ProcurementCardDto card, ProcurementRequest r)
+    {
+        var нерезидент = await _db.ProcurementContracts
+            .Where(c => c.RequestId == r.Id)
+            .Select(c => c.Supplier!.IsNonResident)
+            .FirstOrDefaultAsync();
+
+        var решение = ContractRequirement.Decide(
+            r.SubjectKind,
+            r.Amount,
+            supplierIsNonResident: нерезидент,
+            hasRecentSimilar: card.SimilarRequests.Count > 0,
+            goodsThreshold: await ПараметрАsync(ContractRequirement.GoodsThresholdCode),
+            worksThreshold: await ПараметрАsync(ContractRequirement.WorksThresholdCode));
+
+        card.ContractRequired = решение.Required;
+        card.ContractRequirementReason = решение.Reason;
+    }
+
+    private async Task<decimal?> ПараметрАsync(string code) =>
+        await _db.ProcurementParameters
+            .Where(p => p.Code == code)
+            .Select(p => (decimal?)p.Value)
+            .FirstOrDefaultAsync();
 
     private static void FillBlockers(ProcurementCardDto card, ProcurementRequest r)
     {

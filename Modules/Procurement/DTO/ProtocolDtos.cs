@@ -37,6 +37,12 @@ public class ProtocolDto
     public string? RegNumber { get; set; }
     public DateOnly ProtocolDate { get; set; }
 
+    /// <summary>
+    /// Заседание комиссии, итоги которого оформлены. Пусто у простой закупки:
+    /// там комиссия не собирается.
+    /// </summary>
+    public DateOnly? MeetingDate { get; set; }
+
     public ProtocolStatus Status { get; set; }
     public required string StatusTitle { get; set; }
 

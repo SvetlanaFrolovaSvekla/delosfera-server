@@ -36,6 +36,12 @@ public class ProtocolController : ControllerBase
         return protocol is null ? NoContent() : Ok(protocol);
     }
 
+    /// <summary>
+    /// Все протоколы закупки — по одному на заседание комиссии, свежие сверху.
+    /// </summary>
+    [HttpGet("requests/{id:int}/protocols")]
+    public async Task<IActionResult> List(int id) => Ok(await _protocols.ListAsync(id));
+
     /// <summary>Сформировать или пересобрать протокол по текущей сравнительной таблице.</summary>
     [HttpPost("requests/{id:int}/protocol")]
     [RequirePermission(PermissionCode.ManageProcurementProtocol)]
