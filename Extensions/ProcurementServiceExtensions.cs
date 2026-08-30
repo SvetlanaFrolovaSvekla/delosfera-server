@@ -1,4 +1,5 @@
 using delosfera_server.Modules.Procurement.Services;
+using delosfera_server.Modules.Workflow.Services;
 
 namespace delosfera_server.Extensions;
 
@@ -12,6 +13,10 @@ public static class ProcurementServiceExtensions
         builder.Services.AddScoped<IProposalService, ProposalService>();
         builder.Services.AddScoped<IProtocolService, ProtocolService>();
         builder.Services.AddScoped<IProcurementRouteService, ProcurementRouteService>();
+
+        // Статус заявки должен идти за её маршрутом. Без обработчика заявка
+        // проходила все визы и оставалась «на согласовании» навсегда.
+        builder.Services.AddScoped<IRouteCompletionHandler, ProcurementRouteCompletionHandler>();
         builder.Services.AddScoped<ITenderService, TenderService>();
         builder.Services.AddScoped<ISupplierService, SupplierService>();
         builder.Services.AddScoped<IContractService, ContractService>();

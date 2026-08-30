@@ -348,6 +348,23 @@ public class ContractService : IContractService
         {
             contract.Status = ContractStatus.Completed;
             await _documents.ChangeStatusAsync(contract.DocumentId, "Completed", actorUserId);
+
+            // Закрывается не только договор, но и закупка: обязательство исполнено,
+            // и заявка, с которой всё началось, больше не «в закупке». Без этого она
+            // оставалась в работе навсегда, а счётчик завершённых стоял на нуле.
+            var заявка = await _db.ProcurementRequests
+                .Include(r => r.Document)
+                .FirstOrDefaultAsync(r => r.Id == contract.RequestId);
+
+            if (заявка?.Document is {StatusCode: not ProcurementStatus.Completed})
+            {
+                await _documents.ChangeStatusAsync(
+                    заявка.DocumentId, ProcurementStatus.Completed, actorUserId);
+
+                await _audit.LogAsync("ProcurementRequest", заявка.Id, "Completed", actorUserId,
+                    new {contract = contract.Id});
+            }
+
             await _db.SaveChangesAsync();
             await _audit.LogAsync("ProcurementContract", contract.Id, "Completed", actorUserId, null);
         }
