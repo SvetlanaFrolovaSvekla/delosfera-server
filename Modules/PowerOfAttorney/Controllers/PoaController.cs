@@ -82,6 +82,23 @@ public class PoaController : ControllerBase
     }
 
     /// <summary>Выдать: присвоить номер по книге и перевести в действующие.</summary>
+    /// <summary>
+    /// Приложить скан доверенности. Реестр без скана отвечает на вопрос
+    /// «вправе ли он подписать» одними реквизитами.
+    /// </summary>
+    [HttpPost("{id:int}/files")]
+    [RequirePermission(PermissionCode.ManagePowersOfAttorney)]
+    public async Task<IActionResult> AddFile(int id, IFormFile file, CancellationToken ct)
+    {
+        try { return Ok(await _poa.AddFileAsync(id, file, _currentUser.UserId, ct)); }
+        catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
+    }
+
+    /// <summary>Сканы доверенности.</summary>
+    [HttpGet("{id:int}/files")]
+    public async Task<IActionResult> Files(int id, CancellationToken ct) =>
+        Ok(await _poa.FilesAsync(id, ct));
+
     [HttpPost("{id:int}/issue")]
     [RequirePermission(PermissionCode.ManagePowersOfAttorney)]
     public async Task<IActionResult> Issue(int id, CancellationToken ct)

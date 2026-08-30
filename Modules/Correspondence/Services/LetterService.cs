@@ -16,6 +16,11 @@ public interface ILetterService
     Task<LetterDto> CloseAsync(int id, string? note, int currentUserId, CancellationToken ct = default);
 
     Task<List<LetterDto>> OverdueAsync(CancellationToken ct = default);
+
+    /// <summary>Приложить к письму файл: скан оригинала, приложение, проект ответа.</summary>
+    Task<LetterFileDto> AddFileAsync(int letterId, IFormFile file, int actorUserId, CancellationToken ct = default);
+
+    Task<List<LetterFileDto>> FilesAsync(int letterId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -28,14 +33,96 @@ public interface ILetterService
 public class LetterService : ILetterService
 {
     private readonly DelosferaDbContext _db;
+    private readonly Files.Services.IFileStorageService _storage;
     private readonly Common.Services.Authorization.ICurrentUserService _currentUser;
 
     public LetterService(
         DelosferaDbContext db,
-        Common.Services.Authorization.ICurrentUserService currentUser)
+        Common.Services.Authorization.ICurrentUserService currentUser,
+        Files.Services.IFileStorageService storage)
     {
         _db = db;
         _currentUser = currentUser;
+        _storage = storage;
+    }
+
+    /// <summary>
+    /// Приложить файл к письму: скан оригинала, приложение, проект ответа.
+    ///
+    /// Смысл входящей корреспонденции — зарегистрировать пришедший документ, а
+    /// приложить его было нечем: модель файла письма существовала, счётчик
+    /// отдавался в карточке, но ни одной точки загрузки не было, и в реестре
+    /// стояли письма без самих писем.
+    /// </summary>
+    public async Task<LetterFileDto> AddFileAsync(
+        int letterId, IFormFile file, int actorUserId, CancellationToken ct = default)
+    {
+        var letter = await _db.CorrespondenceLetters.FirstOrDefaultAsync(l => l.Id == letterId, ct)
+                     ?? throw new KeyNotFoundException("Письмо не найдено");
+
+        EnsureVisible(letter);
+
+        var stored = await _storage.SaveAsync(file, actorUserId, ct);
+
+        var link = new LetterFile
+        {
+            LetterId = letterId,
+            FileId = stored.Id,
+            ContentHash = await ХешАsync(file, ct),
+            UploadedByUserId = actorUserId,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        _db.LetterFiles.Add(link);
+        await _db.SaveChangesAsync(ct);
+
+        return new LetterFileDto
+        {
+            Id = link.Id,
+            FileId = stored.Id,
+            FileName = stored.OriginalFileName,
+            SizeBytes = stored.SizeBytes,
+            ContentHash = link.ContentHash,
+            UploadedAt = link.CreatedAt,
+        };
+    }
+
+    public async Task<List<LetterFileDto>> FilesAsync(int letterId, CancellationToken ct = default)
+    {
+        var letter = await _db.CorrespondenceLetters.FirstOrDefaultAsync(l => l.Id == letterId, ct)
+                     ?? throw new KeyNotFoundException("Письмо не найдено");
+
+        EnsureVisible(letter);
+
+        return await _db.LetterFiles
+            .AsNoTracking()
+            .Where(f => f.LetterId == letterId)
+            .OrderBy(f => f.Id)
+            .Select(f => new LetterFileDto
+            {
+                Id = f.Id,
+                FileId = f.FileId,
+                FileName = f.File!.OriginalFileName,
+                SizeBytes = f.File.SizeBytes,
+                ContentHash = f.ContentHash,
+                UploadedAt = f.CreatedAt,
+            })
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Хеш содержимого на момент загрузки.
+    ///
+    /// Скан бумажного документа признаётся доказательством, когда известно, кто
+    /// его загрузил и что файл с тех пор не менялся: автора пишет журнал,
+    /// неизменность — этот хеш.
+    /// </summary>
+    private static async Task<string> ХешАsync(IFormFile file, CancellationToken ct)
+    {
+        await using var stream = file.OpenReadStream();
+        var hash = await System.Security.Cryptography.SHA256.HashDataAsync(stream, ct);
+
+        return Convert.ToHexString(hash);
     }
 
     /// <summary>
@@ -61,6 +148,24 @@ public class LetterService : ILetterService
             || l.ResponsibleUserId == userId
             || l.ResolutionByUserId == userId
             || l.CreatedByUserId == userId);
+    }
+
+    /// <summary>
+    /// То же правило, что и в Visible, но для одного письма: файлы запроса по
+    /// счетам не должен видеть тот, кому не положено само письмо.
+    /// </summary>
+    private void EnsureVisible(CorrespondenceLetter letter)
+    {
+        if (_currentUser.HasPermission(Users.Models.PermissionCode.ViewBankSecrecyInquiries)) return;
+        if (letter.Category != LetterCategory.BankSecrecyInquiry) return;
+
+        var userId = _currentUser.UserId;
+
+        if (letter.ResponsibleUserId == userId
+            || letter.ResolutionByUserId == userId
+            || letter.CreatedByUserId == userId) return;
+
+        throw new UnauthorizedAccessException("Запросы по счетам доступны ограниченному кругу");
     }
 
     public async Task<LetterDto> RegisterAsync(

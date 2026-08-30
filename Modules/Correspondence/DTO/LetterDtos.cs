@@ -129,6 +129,20 @@ public class LetterListResult
     public List<LetterDto> Items { get; set; } = [];
 }
 
+/// <summary>Файл письма: скан оригинала, приложение, проект ответа.</summary>
+public class LetterFileDto
+{
+    public int Id { get; set; }
+    public int FileId { get; set; }
+    public string? FileName { get; set; }
+    public long SizeBytes { get; set; }
+
+    /// <summary>Хеш на момент загрузки — им подтверждается неизменность скана.</summary>
+    public string? ContentHash { get; set; }
+
+    public DateTime UploadedAt { get; set; }
+}
+
 public class CorrespondentSaveRequest
 {
     public string Title { get; set; } = "";

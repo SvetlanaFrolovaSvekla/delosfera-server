@@ -98,6 +98,46 @@ public class CorrespondenceController : ControllerBase
     // ── справочник корреспондентов ──────────────────────────────
 
     /// <summary>Корреспонденты: кому пишем и кто пишет нам.</summary>
+    /// <summary>
+    /// Приложить файл к письму. Без этого регистрация письма оставалась записью
+    /// в книге без самого документа.
+    /// </summary>
+    [HttpPost("{id:int}/files")]
+    [RequirePermission(PermissionCode.RegisterCorrespondence)]
+    public async Task<IActionResult> AddFile(int id, IFormFile file, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _letters.AddFileAsync(id, file, _currentUser.UserId, ct));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new {message = ex.Message});
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new {message = ex.Message});
+        }
+    }
+
+    /// <summary>Файлы письма.</summary>
+    [HttpGet("{id:int}/files")]
+    public async Task<IActionResult> Files(int id, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _letters.FilesAsync(id, ct));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new {message = ex.Message});
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new {message = ex.Message});
+        }
+    }
+
     [HttpGet("correspondents")]
     public async Task<IActionResult> Correspondents(
         [FromQuery] string? text, [FromQuery] CorrespondentKind? kind, CancellationToken ct = default)
