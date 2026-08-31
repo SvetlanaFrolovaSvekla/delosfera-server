@@ -176,81 +176,18 @@ public class SzService : ISzService
     ///   • администратор системы — всё, включая чужие черновики: он разбирает
     ///     то, что застряло, и слепых зон у него быть не должно.
     /// </summary>
-    private async Task<IQueryable<SzDocument>> ApplyVisibilityAsync(
-        IQueryable<SzDocument> query, int currentUserId)
-    {
-        // Чужой черновик видит только администратор системы: черновик — ещё не
-        // документ, и автор вправе передумать, ни перед кем не объясняясь.
-        // Делопроизводству черновики не показываются — они ведут книгу
-        // регистрации, а регистрировать там пока нечего.
-        //
-        // Право на системные настройки, а не «просмотр чужих черновиков»: то
-        // заведено для ВНД и выдано в том числе делопроизводству.
-        if (!_currentUser.HasPermission(PermissionCode.ManageSystemSettings))
-            query = query.Where(x => x.Document!.StatusCode != SzStatus.Draft
-                                     || x.Document!.AuthorId == currentUserId);
-
-        if (_currentUser.HasPermission(PermissionCode.ViewAllSz))
-            return query;
-
-        var units = await VisibleUnitIdsAsync(currentUserId);
-
-        return query.Where(x =>
-            // свои
-            x.Document!.AuthorId == currentUserId
-            // подразделение, которым руководит
-            || (x.AuthorUnitId != null && units.Contains(x.AuthorUnitId.Value))
-            // пришло на согласование — на любом круге, не только на текущем
-            || x.Approvers.Any(a => a.UserId == currentUserId)
-            || _db.RouteParticipants.Any(p => p.UserId == currentUserId
-                                              && p.RouteStep!.RouteInstance!.DocumentId == x.DocumentId)
-            // назначен адресатом или подписантом
-            || x.AddresseeUserId == currentUserId
-            || x.SignerUserId == currentUserId
-            // есть поручение по записке
-            || x.Assignments.Any(a => a.AssigneeUserId == currentUserId));
-    }
-
     /// <summary>
-    /// Подразделения, записки которых видит руководитель: его собственное и все
-    /// вложенные. Управление отвечает за свои отделы, значит и видеть должно их.
-    ///
-    /// Пусто, если человек ничем не руководит.
+    /// Сузить выборку до записок, доступных пользователю. Само правило вынесено
+    /// в <see cref="SzVisibility"/>: им пользуется и реестр, и поиск, а
+    /// ограничение, действующее в одном месте и не действующее в другом,
+    /// ничего не ограничивает.
     /// </summary>
-    private async Task<List<int>> VisibleUnitIdsAsync(int currentUserId)
-    {
-        var headed = await _db.OrganizationUnits
-            .Where(u => u.HeadUserId == currentUserId)
-            .Select(u => u.Id)
-            .ToListAsync();
-
-        if (headed.Count == 0) return headed;
-
-        // Дерево читаем целиком один раз: подразделений пара сотен, а спуск по
-        // родителям запросом на каждый уровень — это запрос на каждый уровень.
-        var all = await _db.OrganizationUnits
-            .Select(u => new {u.Id, u.ParentId})
-            .ToListAsync();
-
-        var byParent = all
-            .Where(u => u.ParentId != null)
-            .GroupBy(u => u.ParentId!.Value)
-            .ToDictionary(g => g.Key, g => g.Select(u => u.Id).ToList());
-
-        var result = new HashSet<int>(headed);
-        var queue = new Queue<int>(headed);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            if (!byParent.TryGetValue(current, out var children)) continue;
-
-            foreach (var child in children)
-                if (result.Add(child)) queue.Enqueue(child);
-        }
-
-        return result.ToList();
-    }
+    private Task<IQueryable<SzDocument>> ApplyVisibilityAsync(
+        IQueryable<SzDocument> query, int currentUserId) =>
+        SzVisibility.ApplyAsync(
+            query, _db, currentUserId,
+            canSeeAll: _currentUser.HasPermission(PermissionCode.ViewAllSz),
+            canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
 
     public async Task<SzDetails?> GetAsync(int id)
     {

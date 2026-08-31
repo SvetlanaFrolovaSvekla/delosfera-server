@@ -103,6 +103,15 @@ public class SearchService : ISearchService
             .AsNoTracking()
             .Where(s => s.Document != null);
 
+        // Поиск подчиняется тем же кругам доступа, что и реестр записок. Без
+        // этого одно слово из текста открывало любую записку любому сотруднику —
+        // о переводе, об окладе, о взыскании: ограничение, которое обходится
+        // строкой поиска, ничего не ограничивает.
+        query = await Sz.Services.SzVisibility.ApplyAsync(
+            query, _db, _currentUser.UserId,
+            canSeeAll: _currentUser.HasPermission(Users.Models.PermissionCode.ViewAllSz),
+            canSeeOthersDrafts: _currentUser.HasPermission(Users.Models.PermissionCode.ManageSystemSettings));
+
         if (request.Statuses.Count > 0)
             query = query.Where(s => request.Statuses.Contains(s.Document!.StatusCode));
 
