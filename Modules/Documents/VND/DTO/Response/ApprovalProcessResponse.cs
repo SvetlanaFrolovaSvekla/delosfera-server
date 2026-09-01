@@ -14,9 +14,8 @@ public class ApprovalProcessResponse
 
     public string? RepeatInitiatorComment { get; set; }
 
-    /// <summary>Файлы, приложенные инициатором к RepeatInitiatorComment. Список пуст, если
-    /// редакция уже согласована — вложения к этому моменту физически удалены, остаётся
-    /// только текст комментария.</summary>
+    /// <summary>Файлы, приложенные инициатором к RepeatInitiatorComment. Остаются доступны и
+    /// после согласования редакции — часть истории согласования.</summary>
     public List<ApprovalStageAttachmentResponse> RepeatInitiatorCommentAttachments { get; set; } = [];
 
     public int PrimaryDeadlineMinutes { get; set; }
@@ -69,8 +68,8 @@ public class ApprovalStageResponse
     public List<ApprovalStageAttachmentResponse> FinalHoldAttachments { get; set; } = [];
 }
 
-/// <summary>Файл, приложенный согласующим к резолюции. Список пуст, если редакция уже
-/// согласована — вложения к этому моменту физически удалены, остаётся только текст комментария.</summary>
+/// <summary>Файл, приложенный согласующим к резолюции. Остаётся доступен и после того, как
+/// редакция станет согласованной — часть истории согласования наравне с текстом резолюции.</summary>
 public class ApprovalStageAttachmentResponse
 {
     public int Id { get; set; }

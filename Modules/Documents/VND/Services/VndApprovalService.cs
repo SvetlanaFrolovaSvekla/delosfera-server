@@ -977,10 +977,11 @@ public class VndApprovalService : IVndApprovalService
 
         redaction.ApprovalStatus = RedactionApprovalStatus.Approved;
 
-        // Редакция стала согласованной - файлы, приложенные согласующими к своим резолюциям,
-        // больше не нужны и удаляются, чтобы не копить их в БД/хранилище. Текст самих резолюций
-        // (PrimaryComment/RepeatComment/FinalHoldComment) остаётся как есть.
-        await CleanupStageAttachmentsAsync(process);
+        // Вложения к резолюциям (VndApprovalStageAttachment) и к комментарию инициатора о
+        // внесённых исправлениях (VndRepeatCommentAttachment) намеренно НЕ удаляются, когда
+        // редакция становится согласованной - они остаются частью истории согласования наравне
+        // с текстом самих резолюций/комментария (PrimaryComment/RepeatComment/FinalHoldComment/
+        // RepeatInitiatorComment).
 
         // Формируем Лист согласования по шаблону: название ВНД, ФИО и должность каждого
         // согласующего, единая дата (момент окончательного согласования) и результат
@@ -1160,9 +1161,9 @@ public class VndApprovalService : IVndApprovalService
     }
 
     /// <summary>Сохраняет файлы, приложенные согласующим к резолюции конкретной фазы, и
-    /// связывает их с этапом. Вызывается из DecideAsync до SaveChangesAsync — сами
-    /// вложения переживают до тех пор, пока редакция не станет согласованной
-    /// (см. <see cref="CleanupStageAttachmentsAsync"/>).</summary>
+    /// связывает их с этапом. Вызывается из DecideAsync до SaveChangesAsync — вложения
+    /// остаются в истории согласования бессрочно, даже после того как редакция станет
+    /// согласованной.</summary>
     private async Task AttachDecisionFilesAsync(
         VndApprovalStage stage, ApprovalStagePhase phase, List<IFormFile>? files, int userId)
     {
@@ -1182,51 +1183,6 @@ public class VndApprovalService : IVndApprovalService
                 CreatedAt = DateTime.UtcNow
             });
         }
-    }
-
-    /// <summary>Удаляет все файлы, приложенные согласующими к резолюциям этого процесса
-    /// (по всем этапам и фазам) и инициатором к комментарию о внесённых исправлениях, когда
-    /// редакция становится согласованной — чтобы не копить файлы в БД и в хранилище. Текст
-    /// резолюций и комментария (Primary/Repeat/FinalHoldComment, RepeatInitiatorComment)
-    /// не трогается.</summary>
-    private async Task CleanupStageAttachmentsAsync(VndApprovalProcess process)
-    {
-        var stageIds = process.Stages.Select(s => s.Id).ToList();
-
-        var attachments = stageIds.Count > 0
-            ? await _db.Set<VndApprovalStageAttachment>()
-                .Where(a => stageIds.Contains(a.VndApprovalStageId))
-                .ToListAsync()
-            : [];
-
-        var commentAttachments = await _db.Set<VndRepeatCommentAttachment>()
-            .Where(a => a.VndApprovalProcessId == process.Id)
-            .ToListAsync();
-
-        if (attachments.Count == 0 && commentAttachments.Count == 0) return;
-
-        foreach (var attachment in attachments.Cast<object>().Concat(commentAttachments))
-        {
-            var fileId = attachment is VndApprovalStageAttachment stageAttachment
-                ? stageAttachment.FileAttachmentId
-                : ((VndRepeatCommentAttachment)attachment).FileAttachmentId;
-            try
-            {
-                await _fileService.DeleteAsync(fileId);
-            }
-            catch (Exception ex)
-            {
-                // Сбой удаления файла из хранилища не должен срывать завершение согласования -
-                // запись о вложении всё равно будет убрана ниже, а "осиротевший" файл в бакете
-                // не критичен и может быть подчищен отдельно.
-                _logger.LogWarning(ex,
-                    "Не удалось удалить файл {FileId} вложения при завершении согласования процесса {ProcessId}",
-                    fileId, process.Id);
-            }
-        }
-
-        _db.Set<VndApprovalStageAttachment>().RemoveRange(attachments);
-        _db.Set<VndRepeatCommentAttachment>().RemoveRange(commentAttachments);
     }
 
     private async Task<List<VndApprovalStage>> BuildAndValidateStagesAsync(List<ApprovalStageRequest> requestStages)
@@ -1430,8 +1386,8 @@ public class VndApprovalService : IVndApprovalService
     };
 
     /// <summary>Вложения этапа для конкретной фазы решения (первичной/повторной/финальной).
-    /// Пусто, если согласование уже завершилось согласованием редакции — вложения к этому моменту
-    /// уже удалены, остаётся только текст резолюции.</summary>
+    /// Остаются доступны и после согласования редакции — часть истории согласования наравне
+    /// с текстом резолюции.</summary>
     private static List<ApprovalStageAttachmentResponse> ToAttachmentResponses(
         IEnumerable<VndApprovalStageAttachment> attachments, ApprovalStagePhase phase) =>
         attachments
