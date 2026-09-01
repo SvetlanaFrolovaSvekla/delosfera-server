@@ -67,9 +67,13 @@ public static class RolePermissionDefaults
         ]),
 
         // Методология ведёт нормотворчество; переписка нужна для запросов регулятора.
+        // ConsolidateAnyVnd - право консолидировать чужую согласованную редакцию (шаг
+        // Consolidation → Active), которое раньше по ошибке доставалось через куда более
+        // широкий набор прав "главного редактора" (см. PermissionCode.ConsolidateAnyVnd).
         ("Методолог", [
             PermissionCode.ViewCorrespondence,
             PermissionCode.ViewPowersOfAttorney,
+            PermissionCode.ConsolidateAnyVnd,
         ]),
 
         ("Главный редактор ВНД", [

@@ -555,17 +555,25 @@ public class VndActualizationService : IVndActualizationService
         if (vnd.Status != VndStatus.Consolidation)
             throw new InvalidOperationException("Опубликовать можно только ВНД в статусе консолидации");
 
-        var isChiefEditor = IsChiefEditor();
+        // Узкое право консолидации ("главный методолог") - НЕ то же самое, что широкий
+        // IsChiefEditor() (CreateVndWith(out)Approval / ActualizeAnyVndWith(out)Approval),
+        // который используется для остальных шагов актуализации и пускал сюда практически
+        // любого автора ВНД. Консолидировать чужую редакцию может только тот, кто реально
+        // отвечает за неё (ответственный за актуализацию/инициатор согласования), либо
+        // отдельно назначенный главный методолог (см. PermissionCode.ConsolidateAnyVnd).
+        var canConsolidateAnyVnd = _currentUser.HasPermission(PermissionCode.ConsolidateAnyVnd);
 
         bool isAuthorized;
         if (vnd.ActualizationResponsibleUserId.HasValue)
         {
-            // Публикация в рамках цикла актуализации — только назначенный ответственный или главред
-            isAuthorized = vnd.ActualizationResponsibleUserId == currentUserId || isChiefEditor;
+            // Публикация в рамках цикла актуализации — только назначенный ответственный
+            // или главный методолог
+            isAuthorized = vnd.ActualizationResponsibleUserId == currentUserId || canConsolidateAnyVnd;
         }
         else
         {
-            // Обычное согласование (вне актуализации) — публикует инициатор согласования или главред
+            // Обычное согласование (вне актуализации) — публикует инициатор согласования
+            // или главный методолог
             var lastRedaction = vnd.Redactions.OrderByDescending(r => r.Number).FirstOrDefault();
             var initiatorUserId = lastRedaction is null
                 ? (int?)null
@@ -574,12 +582,12 @@ public class VndActualizationService : IVndActualizationService
                     .Select(p => (int?)p.InitiatorUserId)
                     .FirstOrDefaultAsync();
 
-            isAuthorized = (initiatorUserId.HasValue && initiatorUserId == currentUserId) || isChiefEditor;
+            isAuthorized = (initiatorUserId.HasValue && initiatorUserId == currentUserId) || canConsolidateAnyVnd;
         }
 
         if (!isAuthorized)
             throw new UnauthorizedAccessException(
-                "Опубликовать редакцию может только ответственный за актуализацию, инициатор согласования или главный редактор ВНД");
+                "Опубликовать редакцию может только ответственный за актуализацию, инициатор согласования или главный методолог");
 
         // Реквизиты обязательны к обновлению прямо в этой же операции - см. комментарий в
         // PublishVndActualizationRequest. Пустой AdoptionCode - явный признак незаполненной

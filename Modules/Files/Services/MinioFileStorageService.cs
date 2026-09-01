@@ -122,7 +122,7 @@ public class MinioFileStorageService : IFileStorageService
     // прикладывают снимок экрана — счёта, ошибки, переписки, — и запрет на них
     // означал бы, что вставка из буфера не работает вовсе.
     private static readonly string[] AllowedExtensions =
-        [".doc", ".docx", ".pdf", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg"];
+        [".doc", ".docx", ".pdf", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".txt"];
 
     // Сигнатуры содержимого (magic bytes) — расширение можно подделать, поэтому проверяем и начало файла.
     private static readonly byte[] PdfSignature = "%PDF"u8.ToArray();                        // .pdf
@@ -150,6 +150,33 @@ public class MinioFileStorageService : IFileStorageService
     /// </summary>
     private static async Task ValidateContentSignatureAsync(IFormFile file, string ext, CancellationToken ct)
     {
+        // .txt — единственное расширение без фиксированной сигнатуры (это просто текст, а не
+        // бинарный формат с "magic bytes"). Точное совпадение здесь не проверяем, вместо этого
+        // убеждаемся, что под видом .txt не загружен один из БИНАРНЫХ форматов выше (тот же
+        // приём подмены расширения, от которого защищают сигнатуры остальных типов).
+        if (ext == ".txt")
+        {
+            if (file.Length == 0) return;
+
+            var buffer = new byte[Math.Min(8, file.Length)];
+            await using (var stream = file.OpenReadStream())
+            {
+                await stream.ReadAsync(buffer, ct);
+            }
+
+            var looksBinary =
+                StartsWith(buffer, PdfSignature) ||
+                StartsWith(buffer, ZipSignature) ||
+                StartsWith(buffer, OleSignature) ||
+                StartsWith(buffer, PngSignature) ||
+                StartsWith(buffer, JpegSignature);
+
+            if (looksBinary)
+                throw new InvalidOperationException("Содержимое файла не соответствует его расширению");
+
+            return;
+        }
+
         var expected = ext switch
         {
             ".pdf" => PdfSignature,
@@ -168,4 +195,7 @@ public class MinioFileStorageService : IFileStorageService
                 throw new InvalidOperationException("Содержимое файла не соответствует его расширению");
         }
     }
+
+    private static bool StartsWith(byte[] buffer, byte[] signature) =>
+        buffer.Length >= signature.Length && buffer.AsSpan(0, signature.Length).SequenceEqual(signature);
 }

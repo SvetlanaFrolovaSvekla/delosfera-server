@@ -225,6 +225,12 @@ public static class PermissionCatalog
             TitleRu = "Отозвать согласование любой ВНД, не будучи инициатором (главный редактор)",
             TitleEn = "Withdraw approval of any VND without being its initiator (chief editor)",
             TitleKg = "Демилгечиси болбосо да, каалаган ВНДдин макулдашуусун артка алуу (башкы редактор)"
+        },
+        [PermissionCode.ConsolidateAnyVnd] = new PermissionDescription
+        {
+            TitleRu = "Консолидировать согласованную редакцию любой ВНД, не будучи ответственным за актуализацию или инициатором (главный методолог)",
+            TitleEn = "Consolidate any VND's approved revision without being the actualization owner or the initiator (chief methodologist)",
+            TitleKg = "Актуалдаштырууга жооптуу же демилгечи болбосо да, каалаган ВНДдин макулдашылган редакциясын консолидациялоо (башкы методолог)"
         }
     };
     
