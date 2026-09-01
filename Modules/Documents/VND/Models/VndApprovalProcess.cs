@@ -30,7 +30,11 @@ public class VndApprovalProcess : IAuditableEntity
     
     public string? RepeatInitiatorComment { get; set; }
 
-    public DateTime? CompletedAt { get; set; } // Когда процесс завершился, ВНД стал действующим 
+    /// <summary>Файлы, приложенные инициатором к RepeatInitiatorComment — полностью
+    /// перезаписываются при каждой повторной отправке (см. ResubmitAfterRevisionAsync).</summary>
+    public ICollection<VndRepeatCommentAttachment> RepeatInitiatorCommentAttachments { get; set; } = new List<VndRepeatCommentAttachment>();
+
+    public DateTime? CompletedAt { get; set; } // Когда процесс завершился, ВНД стал действующим
 
     public ICollection<VndApprovalStage> Stages { get; set; } = new List<VndApprovalStage>();
 

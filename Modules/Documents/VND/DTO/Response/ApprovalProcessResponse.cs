@@ -13,7 +13,12 @@ public class ApprovalProcessResponse
     public required string Status { get; set; } // primary/revision_needed/repeated/final_hold/approved/cancelled
 
     public string? RepeatInitiatorComment { get; set; }
-    
+
+    /// <summary>Файлы, приложенные инициатором к RepeatInitiatorComment. Список пуст, если
+    /// редакция уже согласована — вложения к этому моменту физически удалены, остаётся
+    /// только текст комментария.</summary>
+    public List<ApprovalStageAttachmentResponse> RepeatInitiatorCommentAttachments { get; set; } = [];
+
     public int PrimaryDeadlineMinutes { get; set; }
     public int RepeatDeadlineMinutes { get; set; }
     public int FinalHoldDeadlineMinutes { get; set; }

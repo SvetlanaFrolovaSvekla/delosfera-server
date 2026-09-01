@@ -106,6 +106,9 @@ public class VndApprovalController : ControllerBase
         request.NewAttachments = Request.Form.Files
             .Where(f => f.Name == nameof(ResubmitAfterRevisionRequest.NewAttachments))
             .ToList();
+        request.CommentAttachments = Request.Form.Files
+            .Where(f => f.Name == nameof(ResubmitAfterRevisionRequest.CommentAttachments))
+            .ToList();
 
         try
         {

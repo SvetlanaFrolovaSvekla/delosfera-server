@@ -494,6 +494,16 @@ public class VndApprovalService : IVndApprovalService
             throw new InvalidOperationException(
                 $"Комментарий не может превышать {MaxResolutionCommentLength} символов");
 
+        if (request.CommentAttachments is { Count: > MaxResolutionAttachments })
+            throw new InvalidOperationException(
+                $"К комментарию нельзя приложить больше {MaxResolutionAttachments} файлов");
+
+        var oversizedCommentFile = request.CommentAttachments?.FirstOrDefault(f => f.Length > MaxResolutionAttachmentSizeBytes);
+        if (oversizedCommentFile is not null)
+            throw new InvalidOperationException(
+                $"Файл «{oversizedCommentFile.FileName}» превышает максимальный размер " +
+                $"{MaxResolutionAttachmentSizeBytes / 1024 / 1024} МБ на один файл");
+
         var redaction = process.Redaction!;
 
         // ТИД обязателен на каждом круге доработки, если он был обязателен при первичной подаче
@@ -564,6 +574,38 @@ public class VndApprovalService : IVndApprovalService
         }
 
         process.RepeatInitiatorComment = request.Comment;
+
+        // Комментарий полностью перезаписывается на каждый круг доработки - вложения к
+        // предыдущему комментарию больше не актуальны, удаляем вместе с файлами в хранилище
+        // и заменяем набором, пришедшим с этой отправкой (см. VndRepeatCommentAttachment).
+        var oldCommentAttachments = await _db.Set<VndRepeatCommentAttachment>()
+            .Where(a => a.VndApprovalProcessId == process.Id)
+            .ToListAsync();
+        foreach (var old in oldCommentAttachments)
+        {
+            try
+            {
+                await _fileService.DeleteAsync(old.FileAttachmentId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Не удалось удалить файл {FileId} предыдущего вложения комментария процесса {ProcessId}",
+                    old.FileAttachmentId, process.Id);
+            }
+        }
+        _db.Set<VndRepeatCommentAttachment>().RemoveRange(oldCommentAttachments);
+
+        foreach (var file in request.CommentAttachments ?? [])
+        {
+            if (file.Length == 0) continue;
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            process.RepeatInitiatorCommentAttachments.Add(new VndRepeatCommentAttachment
+            {
+                FileAttachmentId = saved.Id,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
 
         if (request.AgreesWithAllRemarks)
         {
@@ -1143,24 +1185,34 @@ public class VndApprovalService : IVndApprovalService
     }
 
     /// <summary>Удаляет все файлы, приложенные согласующими к резолюциям этого процесса
-    /// (по всем этапам и фазам), когда редакция становится согласованной — чтобы не копить
-    /// файлы в БД и в хранилище. Текст резолюций (Primary/Repeat/FinalHoldComment) не трогается.</summary>
+    /// (по всем этапам и фазам) и инициатором к комментарию о внесённых исправлениях, когда
+    /// редакция становится согласованной — чтобы не копить файлы в БД и в хранилище. Текст
+    /// резолюций и комментария (Primary/Repeat/FinalHoldComment, RepeatInitiatorComment)
+    /// не трогается.</summary>
     private async Task CleanupStageAttachmentsAsync(VndApprovalProcess process)
     {
         var stageIds = process.Stages.Select(s => s.Id).ToList();
-        if (stageIds.Count == 0) return;
 
-        var attachments = await _db.Set<VndApprovalStageAttachment>()
-            .Where(a => stageIds.Contains(a.VndApprovalStageId))
+        var attachments = stageIds.Count > 0
+            ? await _db.Set<VndApprovalStageAttachment>()
+                .Where(a => stageIds.Contains(a.VndApprovalStageId))
+                .ToListAsync()
+            : [];
+
+        var commentAttachments = await _db.Set<VndRepeatCommentAttachment>()
+            .Where(a => a.VndApprovalProcessId == process.Id)
             .ToListAsync();
 
-        if (attachments.Count == 0) return;
+        if (attachments.Count == 0 && commentAttachments.Count == 0) return;
 
-        foreach (var attachment in attachments)
+        foreach (var attachment in attachments.Cast<object>().Concat(commentAttachments))
         {
+            var fileId = attachment is VndApprovalStageAttachment stageAttachment
+                ? stageAttachment.FileAttachmentId
+                : ((VndRepeatCommentAttachment)attachment).FileAttachmentId;
             try
             {
-                await _fileService.DeleteAsync(attachment.FileAttachmentId);
+                await _fileService.DeleteAsync(fileId);
             }
             catch (Exception ex)
             {
@@ -1168,12 +1220,13 @@ public class VndApprovalService : IVndApprovalService
                 // запись о вложении всё равно будет убрана ниже, а "осиротевший" файл в бакете
                 // не критичен и может быть подчищен отдельно.
                 _logger.LogWarning(ex,
-                    "Не удалось удалить файл {FileId} вложения резолюции при завершении согласования процесса {ProcessId}",
-                    attachment.FileAttachmentId, process.Id);
+                    "Не удалось удалить файл {FileId} вложения при завершении согласования процесса {ProcessId}",
+                    fileId, process.Id);
             }
         }
 
         _db.Set<VndApprovalStageAttachment>().RemoveRange(attachments);
+        _db.Set<VndRepeatCommentAttachment>().RemoveRange(commentAttachments);
     }
 
     private async Task<List<VndApprovalStage>> BuildAndValidateStagesAsync(List<ApprovalStageRequest> requestStages)
@@ -1298,6 +1351,7 @@ public class VndApprovalService : IVndApprovalService
             .Include(x => x.Stages).ThenInclude(s => s.ApproverUser)
             .Include(x => x.Stages).ThenInclude(s => s.Attachments).ThenInclude(a => a.FileAttachment)
             .Include(x => x.DisagreementMatrixRows)
+            .Include(x => x.RepeatInitiatorCommentAttachments).ThenInclude(a => a.FileAttachment)
             .FirstAsync(x => x.Id == processId);
 
         var initiator = await _db.Users
@@ -1319,6 +1373,16 @@ public class VndApprovalService : IVndApprovalService
             PrimaryStartedAt = process.PrimaryStartedAt,
             PrimaryDeadlineAt = process.PrimaryDeadlineAt,
             RepeatInitiatorComment = process.RepeatInitiatorComment,
+            RepeatInitiatorCommentAttachments = process.RepeatInitiatorCommentAttachments
+                .OrderBy(a => a.CreatedAt)
+                .Select(a => new ApprovalStageAttachmentResponse
+                {
+                    Id = a.Id,
+                    FileId = a.FileAttachmentId,
+                    FileName = a.FileAttachment?.OriginalFileName ?? "",
+                    SizeBytes = a.FileAttachment?.SizeBytes ?? 0
+                })
+                .ToList(),
             RepeatStartedAt = process.RepeatStartedAt,
             RepeatDeadlineAt = process.RepeatDeadlineAt,
             FinalHoldStartedAt = process.FinalHoldStartedAt,
