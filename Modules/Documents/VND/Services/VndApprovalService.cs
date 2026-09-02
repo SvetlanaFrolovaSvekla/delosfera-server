@@ -1,4 +1,5 @@
-﻿using delosfera_server.Common.Services.Authorization;
+﻿using System.Text.Json;
+using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.ActivityLog.Models;
@@ -34,6 +35,14 @@ public class VndApprovalService : IVndApprovalService
     // клиенте (src/constants/coordinationParams.ts).
     private const int MaxResolutionAttachments = 5;
     private const long MaxResolutionAttachmentSizeBytes = 50L * 1024 * 1024;
+
+    // Цитаты из текста редакции, на которые согласующий сослался в резолюции (см.
+    // "+ Сослаться на текст редакции" на клиенте). Лимит по количеству — защита от абьюза
+    // API напрямую (в обычном UI-сценарии их будет единицы); MaxQuoteTextLength — с запасом
+    // больше клиентского MAX_QUOTE_SOURCE_LENGTH (600, см. VndApproverResolutionPanel.tsx),
+    // текст длиннее просто обрезаем, а не отклоняем весь запрос.
+    private const int MaxQuotesPerDecision = 50;
+    private const int MaxQuoteTextLength = 1000;
 
     private readonly DelosferaDbContext _db;
     private readonly IFileStorageService _fileService;
@@ -260,6 +269,8 @@ public class VndApprovalService : IVndApprovalService
                 $"Файл \"{oversizedFile.FileName}\" превышает максимальный размер " +
                 $"{MaxResolutionAttachmentSizeBytes / 1024 / 1024} МБ на один файл");
 
+        var quotes = ParseQuotes(request.QuotesJson);
+
         var decision = request.Decision switch
         {
             ApprovalDecisionType.Approve => ApprovalStageDecision.Approved,
@@ -281,6 +292,7 @@ public class VndApprovalService : IVndApprovalService
                     or ApprovalStageDecision.Rejected;
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Primary, request.Files, currentUserId);
+                AttachDecisionQuotes(stage, ApprovalStagePhase.Primary, quotes);
 
                 await _db.SaveChangesAsync();
 
@@ -308,6 +320,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.RepeatDecidedAt = DateTime.UtcNow;
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Repeat, request.Files, currentUserId);
+                AttachDecisionQuotes(stage, ApprovalStagePhase.Repeat, quotes);
 
                 await _db.SaveChangesAsync();
 
@@ -334,6 +347,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.FinalHoldDecidedAt = DateTime.UtcNow;
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.FinalHold, request.Files, currentUserId);
+                AttachDecisionQuotes(stage, ApprovalStagePhase.FinalHold, quotes);
 
                 await _db.SaveChangesAsync();
 
@@ -1219,6 +1233,49 @@ public class VndApprovalService : IVndApprovalService
         }
     }
 
+    /// <summary>Разбирает QuotesJson из ApprovalDecisionRequest. Невалидный JSON или отсутствие
+    /// поля — не ошибка запроса (цитаты необязательны), просто пустой список.</summary>
+    private static List<ApprovalQuoteItem> ParseQuotes(string? quotesJson)
+    {
+        if (string.IsNullOrWhiteSpace(quotesJson)) return [];
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<List<ApprovalQuoteItem>>(
+                quotesJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return parsed ?? [];
+        }
+        catch (JsonException)
+        {
+            // Не роняем всю резолюцию из-за кривого QuotesJson - просто игнорируем цитаты.
+            return [];
+        }
+    }
+
+    /// <summary>Сохраняет цитаты, на которые согласующий сослался в резолюции конкретной фазы
+    /// (см. ParseQuotes выше), и связывает их с этапом. Вызывается из DecideAsync до
+    /// SaveChangesAsync - см. AttachDecisionFilesAsync выше, тот же паттерн.</summary>
+    private void AttachDecisionQuotes(VndApprovalStage stage, ApprovalStagePhase phase, List<ApprovalQuoteItem> quotes)
+    {
+        if (quotes.Count == 0) return;
+
+        foreach (var quote in quotes.Take(MaxQuotesPerDecision))
+        {
+            var text = quote.Text.Trim();
+            if (text.Length == 0) continue;
+            if (text.Length > MaxQuoteTextLength) text = text[..MaxQuoteTextLength];
+
+            _db.Set<VndApprovalStageQuote>().Add(new VndApprovalStageQuote
+            {
+                VndApprovalStageId = stage.Id,
+                Phase = phase,
+                DocumentTarget = quote.DocumentTarget,
+                Text = text,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+    }
+
     private async Task<List<VndApprovalStage>> BuildAndValidateStagesAsync(List<ApprovalStageRequest> requestStages)
     {
         if (requestStages.Count < 3)
@@ -1310,6 +1367,7 @@ public class VndApprovalService : IVndApprovalService
         // получить старый уже завершённый процесс вместо актуального.
         return await _db.VndApprovalProcesses
                    .Include(x => x.Stages).ThenInclude(s => s.Attachments)
+                   .Include(x => x.Stages).ThenInclude(s => s.Quotes)
                    .Include(x => x.Redaction)
                    .Include(x => x.Vnd)
                    .Include(x => x.DisagreementMatrixRows)
@@ -1340,6 +1398,7 @@ public class VndApprovalService : IVndApprovalService
             .Include(x => x.Stages).ThenInclude(s => s.OrgUnit)
             .Include(x => x.Stages).ThenInclude(s => s.ApproverUser)
             .Include(x => x.Stages).ThenInclude(s => s.Attachments).ThenInclude(a => a.FileAttachment)
+            .Include(x => x.Stages).ThenInclude(s => s.Quotes)
             .Include(x => x.DisagreementMatrixRows)
             .Include(x => x.RepeatInitiatorCommentAttachments).ThenInclude(a => a.FileAttachment)
             .FirstAsync(x => x.Id == processId);
@@ -1397,15 +1456,18 @@ public class VndApprovalService : IVndApprovalService
                 PrimaryComment = s.PrimaryComment,
                 PrimaryDecidedAt = s.PrimaryDecidedAt,
                 PrimaryAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.Primary),
+                PrimaryQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.Primary),
                 ParticipatesInRepeat = s.ParticipatesInRepeat,
                 RepeatDecision = s.RepeatDecision.HasValue ? MapDecision(s.RepeatDecision.Value) : null,
                 RepeatComment = s.RepeatComment,
                 RepeatDecidedAt = s.RepeatDecidedAt,
                 RepeatAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.Repeat),
+                RepeatQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.Repeat),
                 FinalHoldDecision = s.FinalHoldDecision.HasValue ? MapDecision(s.FinalHoldDecision.Value) : null,
                 FinalHoldComment = s.FinalHoldComment,
                 FinalHoldDecidedAt = s.FinalHoldDecidedAt,
-                FinalHoldAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.FinalHold)
+                FinalHoldAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.FinalHold),
+                FinalHoldQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.FinalHold)
             }).ToList()
         };
     }
@@ -1434,6 +1496,21 @@ public class VndApprovalService : IVndApprovalService
                 FileId = a.FileAttachmentId,
                 FileName = a.FileAttachment?.OriginalFileName ?? "",
                 SizeBytes = a.FileAttachment?.SizeBytes ?? 0
+            })
+            .ToList();
+
+    /// <summary>Цитаты этапа для конкретной фазы решения — см. ToAttachmentResponses выше,
+    /// тот же паттерн.</summary>
+    private static List<ApprovalStageQuoteResponse> ToQuoteResponses(
+        IEnumerable<VndApprovalStageQuote> quotes, ApprovalStagePhase phase) =>
+        quotes
+            .Where(q => q.Phase == phase)
+            .OrderBy(q => q.CreatedAt)
+            .Select(q => new ApprovalStageQuoteResponse
+            {
+                Id = q.Id,
+                DocumentTarget = q.DocumentTarget,
+                Text = q.Text
             })
             .ToList();
 

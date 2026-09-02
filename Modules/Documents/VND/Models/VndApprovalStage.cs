@@ -48,4 +48,8 @@ public class VndApprovalStage : IAuditableEntity
     /// <summary>Файлы, приложенные согласующим к резолюции (по всем фазам). Очищаются, когда
     /// редакция становится согласованной — см. <see cref="VndApprovalStageAttachment"/>.</summary>
     public ICollection<VndApprovalStageAttachment> Attachments { get; set; } = new List<VndApprovalStageAttachment>();
+
+    /// <summary>Цитаты из текста редакции, на которые согласующий сослался в резолюции (по всем
+    /// фазам) — см. <see cref="VndApprovalStageQuote"/>.</summary>
+    public ICollection<VndApprovalStageQuote> Quotes { get; set; } = new List<VndApprovalStageQuote>();
 }

@@ -54,6 +54,7 @@ public class ApprovalStageResponse
     public string? PrimaryComment { get; set; }
     public DateTime? PrimaryDecidedAt { get; set; }
     public List<ApprovalStageAttachmentResponse> PrimaryAttachments { get; set; } = [];
+    public List<ApprovalStageQuoteResponse> PrimaryQuotes { get; set; } = [];
 
     public bool ParticipatesInRepeat { get; set; }
 
@@ -61,11 +62,13 @@ public class ApprovalStageResponse
     public string? RepeatComment { get; set; }
     public DateTime? RepeatDecidedAt { get; set; }
     public List<ApprovalStageAttachmentResponse> RepeatAttachments { get; set; } = [];
+    public List<ApprovalStageQuoteResponse> RepeatQuotes { get; set; } = [];
 
     public string? FinalHoldDecision { get; set; }
     public string? FinalHoldComment { get; set; }
     public DateTime? FinalHoldDecidedAt { get; set; }
     public List<ApprovalStageAttachmentResponse> FinalHoldAttachments { get; set; } = [];
+    public List<ApprovalStageQuoteResponse> FinalHoldQuotes { get; set; } = [];
 }
 
 /// <summary>Файл, приложенный согласующим к резолюции. Остаётся доступен и после того, как
@@ -76,4 +79,17 @@ public class ApprovalStageAttachmentResponse
     public int FileId { get; set; }
     public required string FileName { get; set; }
     public long SizeBytes { get; set; }
+}
+
+/// <summary>Цитата из текста редакции, на которую согласующий сослался в резолюции — см.
+/// VndApprovalStageQuote на бэке. Комментарий/замечание к этой цитате отдельно не приходит:
+/// это вся резолюция фазы (Primary/Repeat/FinalHoldComment), в которую эта цитата попадает.</summary>
+public class ApprovalStageQuoteResponse
+{
+    public int Id { get; set; }
+
+    /// <summary>"ru"/"kg"/"en"/"tid"/"approvalSheet"/"disagreementMatrix"</summary>
+    public required string DocumentTarget { get; set; }
+
+    public required string Text { get; set; }
 }
