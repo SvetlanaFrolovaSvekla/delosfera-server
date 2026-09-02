@@ -22,7 +22,12 @@ public record OrgTreeNode(
     bool FromPortal,
     List<OrgTreeNode> Children,
     /// <summary>Узел — не подразделение, а человек, которому подчинены нижние.</summary>
-    bool IsPerson = false);
+    bool IsPerson = false,
+    /// <summary>Кто числится в подразделении. У узла-человека пусто.</summary>
+    List<OrgTreeStaff>? Staff = null);
+
+/// <summary>Сотрудник подразделения: столько, сколько нужно строке списка.</summary>
+public record OrgTreeStaff(int Id, string FullName, string? Position, bool IsHead);
 
 public record OrgTreeResponse(
     List<OrgTreeNode> Roots,
@@ -58,14 +63,45 @@ public class OrgTreeController(DelosferaDbContext db) : ControllerBase
                 u.CuratorUserId,
                 Head = u.HeadUser == null ? null : u.HeadUser.FullName,
                 Curator = u.CuratorUser == null ? null : u.CuratorUser.FullName,
+                u.HeadUserId,
                 StaffCount = db.Users.Count(x => x.OrgUnitId == u.Id && x.IsActive),
             })
             .ToListAsync(ct);
 
+        // Сотрудников берём одним запросом на всё дерево, а не по запросу на
+        // раскрытие узла: подразделений полторы сотни, и сто пятьдесят обращений
+        // за списком из шести человек — это сто пятьдесят обращений.
+        var сотрудники = await db.Users
+            .AsNoTracking()
+            .Where(x => x.IsActive && x.OrgUnitId != null)
+            .OrderBy(x => x.FullName)
+            .Select(x => new
+            {
+                x.Id,
+                x.FullName,
+                Position = x.Position == null ? null : x.Position.TitleRu,
+                UnitId = x.OrgUnitId!.Value,
+            })
+            .ToListAsync(ct);
+
+        var поПодразделениям = сотрудники
+            .GroupBy(x => x.UnitId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
         var nodes = units.ToDictionary(
             u => u.Id,
             u => new OrgTreeNode(u.Id, u.TitleRu, ВидНазванием(u.Kind), u.ParentId, u.Head, u.Curator,
-                                 u.StaffCount, u.ExternalId is not null, []));
+                                 u.StaffCount, u.ExternalId is not null, [],
+                                 Staff: поПодразделениям.TryGetValue(u.Id, out var люди)
+                                     // Начальник первым: список читают, чтобы
+                                     // понять, к кому идти, а не по алфавиту.
+                                     ? люди
+                                         .OrderByDescending(x => x.Id == u.HeadUserId)
+                                         .ThenBy(x => x.FullName, StringComparer.CurrentCulture)
+                                         .Select(x => new OrgTreeStaff(
+                                             x.Id, x.FullName, x.Position, x.Id == u.HeadUserId))
+                                         .ToList()
+                                     : []));
 
         var roots = new List<OrgTreeNode>();
         var orphans = 0;
@@ -144,7 +180,7 @@ public class OrgTreeController(DelosferaDbContext db) : ControllerBase
             var узел = new OrgTreeNode(
                 -куратор.Id, куратор.FullName, куратор.Position, null,
                 Head: null, Curator: null, StaffCount: 0, FromPortal: false, Children: [],
-                IsPerson: true);
+                IsPerson: true, Staff: []);
 
             узлыЛюдей[куратор.Id] = узел;
 

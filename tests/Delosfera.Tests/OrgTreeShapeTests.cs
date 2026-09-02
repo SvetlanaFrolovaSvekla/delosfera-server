@@ -118,6 +118,60 @@ public class OrgTreeShapeTests
         Assert.Equal(вБазе.OrderBy(x => x), вДереве.Where(x => x > 0).OrderBy(x => x));
     }
 
+    [Fact]
+    public async Task Сотрудники_подразделения_видны_в_дереве()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+
+        var начальник = await ПользовательАsync(db, "Торгоев Исабек", стенд.БэкОфис);
+        await ПользовательАsync(db, "Абдыкадыров Азамат", стенд.БэкОфис);
+        await НазначитьНачальникомАsync(db, стенд.БэкОфис, начальник);
+
+        var дерево = await ДеревоАsync(db);
+        var бэкОфис = Найти(дерево, стенд.БэкОфис);
+
+        Assert.Equal(2, бэкОфис!.Staff!.Count);
+
+        // Начальник первым: список читают, чтобы понять, к кому идти.
+        Assert.Equal("Торгоев Исабек", бэкОфис.Staff[0].FullName);
+        Assert.True(бэкОфис.Staff[0].IsHead);
+        Assert.False(бэкОфис.Staff[1].IsHead);
+    }
+
+    [Fact]
+    public async Task Уволенные_в_списке_не_показываются()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+
+        await ПользовательАsync(db, "Работающий сотрудник", стенд.БэкОфис);
+        var уволенный = await ПользовательАsync(db, "Уволенный сотрудник", стенд.БэкОфис);
+
+        await db.Users.Where(u => u.Id == уволенный)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.IsActive, false));
+
+        var дерево = await ДеревоАsync(db);
+        var бэкОфис = Найти(дерево, стенд.БэкОфис);
+
+        // Тот же отбор, что и у счётчика рядом: иначе «6 чел.» и список из
+        // семи фамилий спорят друг с другом на одной строке.
+        Assert.Equal(бэкОфис!.StaffCount, бэкОфис.Staff!.Count);
+        Assert.DoesNotContain(бэкОфис.Staff, x => x.FullName == "Уволенный сотрудник");
+    }
+
+    [Fact]
+    public async Task У_узла_человека_своих_сотрудников_нет()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+
+        var дерево = await ДеревоАsync(db);
+        var зампред = Найти(дерево, -стенд.Зампред);
+
+        Assert.Empty(зампред!.Staff!);
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private sealed record Стенд(
@@ -197,13 +251,22 @@ public class OrgTreeShapeTests
         return new Стенд(правление.Id, бэкОфис.Id, сектор.Id, зампред, председатель);
     }
 
-    private static async Task<int> ПользовательАsync(DelosferaDbContext db, string fullName)
+    private static async Task НазначитьНачальникомАsync(DelosferaDbContext db, int unitId, int userId)
+    {
+        var unit = await db.OrganizationUnits.FindAsync(unitId);
+        unit!.HeadUserId = userId;
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task<int> ПользовательАsync(
+        DelosferaDbContext db, string fullName, int? unitId = null)
     {
         var user = new User
         {
             FullName = fullName,
             Email = $"tree-{Guid.NewGuid():N}@keremetbank.kg",
             PasswordHash = "x",
+            OrgUnitId = unitId,
         };
 
         db.Users.Add(user);
