@@ -9,7 +9,7 @@ namespace delosfera_server.Modules.Integrations.Controllers;
 public record OrgTreeNode(
     int Id,
     string Title,
-    /// <summary>Коллегиальный орган, управление или отдел. Пусто — вид не указан.</summary>
+    /// <summary>Коллегиальный орган, управление или отдел. У человека — должность.</summary>
     string? Kind,
     int? ParentId,
     /// <summary>Начальник подразделения.</summary>
@@ -20,7 +20,9 @@ public record OrgTreeNode(
     int StaffCount,
     /// <summary>Пришло из портала. Заведённые руками сюда не попадают.</summary>
     bool FromPortal,
-    List<OrgTreeNode> Children);
+    List<OrgTreeNode> Children,
+    /// <summary>Узел — не подразделение, а человек, которому подчинены нижние.</summary>
+    bool IsPerson = false);
 
 public record OrgTreeResponse(
     List<OrgTreeNode> Roots,
@@ -53,6 +55,7 @@ public class OrgTreeController(DelosferaDbContext db) : ControllerBase
                 u.ParentId,
                 u.Kind,
                 u.ExternalId,
+                u.CuratorUserId,
                 Head = u.HeadUser == null ? null : u.HeadUser.FullName,
                 Curator = u.CuratorUser == null ? null : u.CuratorUser.FullName,
                 StaffCount = db.Users.Count(x => x.OrgUnitId == u.Id && x.IsActive),
@@ -66,6 +69,7 @@ public class OrgTreeController(DelosferaDbContext db) : ControllerBase
 
         var roots = new List<OrgTreeNode>();
         var orphans = 0;
+        var подчинённыеКуратору = new List<(int CuratorId, OrgTreeNode Node)>();
 
         foreach (var unit in units)
         {
@@ -77,6 +81,15 @@ public class OrgTreeController(DelosferaDbContext db) : ControllerBase
                 continue;
             }
 
+            // Родителя-подразделения нет, но есть куратор — подразделение подчинено
+            // человеку. Портал так и присылает: у верхних узлов вместо вышестоящего
+            // подразделения стоит зампред. Место такому узлу — под этим человеком.
+            if (unit.ParentId is null && unit.CuratorUserId is int curatorId)
+            {
+                подчинённыеКуратору.Add((curatorId, node));
+                continue;
+            }
+
             // Родителя нет вовсе — узел верхнего уровня. Родитель указан, но не
             // найден — подразделение осталось без места: показываем там же,
             // но считаем отдельно, чтобы это было видно числом.
@@ -84,9 +97,104 @@ public class OrgTreeController(DelosferaDbContext db) : ControllerBase
             roots.Add(node);
         }
 
+        await РасставитьПоКураторамАsync(подчинённыеКуратору, nodes, roots, ct);
+
         Sort(roots);
 
         return Ok(new OrgTreeResponse(roots, units.Count, orphans, await LastSyncAsync(ct)));
+    }
+
+    /// <summary>
+    /// Вешает подразделения под их кураторов, а самих кураторов — под теми
+    /// подразделениями, где они числятся.
+    ///
+    /// Так устроен банк: часть управлений подчинена не вышестоящему управлению,
+    /// а заместителю Председателя. Портал это и присылает — вместо вышестоящего
+    /// подразделения приходит человек. Без этого шага дерево рассыпается на
+    /// десятки обрубков, где «Административный отдел» стоит вровень с «Правлением».
+    /// </summary>
+    private async Task РасставитьПоКураторамАsync(
+        List<(int CuratorId, OrgTreeNode Node)> подчинённые,
+        Dictionary<int, OrgTreeNode> nodes,
+        List<OrgTreeNode> roots,
+        CancellationToken ct)
+    {
+        if (подчинённые.Count == 0) return;
+
+        var ids = подчинённые.Select(x => x.CuratorId).Distinct().ToList();
+
+        var кураторы = await db.Users
+            .AsNoTracking()
+            .Where(u => ids.Contains(u.Id))
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName,
+                Position = u.Position == null ? null : u.Position.TitleRu,
+                u.OrgUnitId,
+            })
+            .ToListAsync(ct);
+
+        var узлыЛюдей = new Dictionary<int, OrgTreeNode>();
+
+        foreach (var куратор in кураторы)
+        {
+            // Идентификатор человека берём со знаком минус: клиент различает узлы
+            // по нему, а подразделение с таким же номером существует всегда.
+            var узел = new OrgTreeNode(
+                -куратор.Id, куратор.FullName, куратор.Position, null,
+                Head: null, Curator: null, StaffCount: 0, FromPortal: false, Children: [],
+                IsPerson: true);
+
+            узлыЛюдей[куратор.Id] = узел;
+
+            if (куратор.OrgUnitId is int unitId && nodes.TryGetValue(unitId, out var подразделение))
+                подразделение.Children.Add(узел);
+            else
+                roots.Add(узел);
+        }
+
+        foreach (var (curatorId, node) in подчинённые)
+        {
+            if (!узлыЛюдей.TryGetValue(curatorId, out var человек))
+            {
+                // Куратор указан, но такого пользователя нет — подразделение
+                // осталось бы невидимым, поэтому показываем его верхним уровнем.
+                roots.Add(node);
+                continue;
+            }
+
+            // Куратор числится в подразделении, которое сам же курирует, — его
+            // узел уже стоит под ним. Повесить это подразделение ещё и под
+            // человека значит замкнуть кольцо, на котором обход дерева не
+            // кончится. Проверяем не прямое совпадение, а достижимость: кольцо
+            // бывает и длиннее — через второго куратора. Такое подразделение и
+            // есть верхний уровень, им и остаётся.
+            if (Достижим(node, человек))
+            {
+                roots.Add(node);
+                continue;
+            }
+
+            человек.Children.Add(node);
+        }
+    }
+
+    /// <summary>Стоит ли искомый узел где-то ниже данного.</summary>
+    private static bool Достижим(OrgTreeNode from, OrgTreeNode target)
+    {
+        if (ReferenceEquals(from, target)) return true;
+
+        var очередь = new Queue<OrgTreeNode>([from]);
+
+        while (очередь.Count > 0)
+            foreach (var ребёнок in очередь.Dequeue().Children)
+            {
+                if (ReferenceEquals(ребёнок, target)) return true;
+                очередь.Enqueue(ребёнок);
+            }
+
+        return false;
     }
 
     /// <summary>
