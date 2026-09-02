@@ -39,6 +39,34 @@ public class VndRedactionResponse
     /// чтобы показывать и скачивать его под тем же именем, а не "Вложение #id".</summary>
     public List<VndRedactionAttachmentResponse> Attachments { get; set; } = [];
 
+    // --- Реквизиты ИМЕННО этой редакции (см. VndRedaction — переходный период миграции
+    // "реквизиты по редакции"). Используются, в частности, для вкладок Р1/Р2/Р3... на
+    // вкладке "Реквизиты" и для сравнения "что изменилось по сравнению с предыдущей редакцией".
+    public required string TitleRu { get; set; }
+    public string? TitleEn { get; set; }
+    public string? TitleKg { get; set; }
+    public int TypeId { get; set; }
+    public required string TypeName { get; set; }
+
+    public DateOnly? AdoptionDate { get; set; }
+    public string? AdoptionCode { get; set; }
+    public DateOnly? EffectiveDate { get; set; }
+    public required string Period { get; set; }
+
+    public int DeveloperId { get; set; }
+    public required string DeveloperName { get; set; }
+    public int? CuratorDeveloperId { get; set; }
+    public string? CuratorDeveloperName { get; set; }
+
+    public int OrganId { get; set; }
+    public required string OrganName { get; set; }
+
+    public int SecrecyLevelId { get; set; }
+
+    public List<int> ResponsibleExecutorIds { get; set; } = [];
+    public List<int> KeywordIds { get; set; } = [];
+    public List<int> RubricIds { get; set; } = [];
+
     public DateTime CreatedAt { get; set; }
 }
 

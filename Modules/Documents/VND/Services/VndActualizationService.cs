@@ -616,7 +616,16 @@ public class VndActualizationService : IVndActualizationService
 
         var latestRedaction = vnd.Redactions.OrderByDescending(r => r.Number).FirstOrDefault();
         if (latestRedaction is not null)
+        {
             vnd.CurrentRedactionId = latestRedaction.Id;
+
+            // Реквизиты по редакции (см. миграцию "реквизиты по редакции" в VndRedaction.cs):
+            // дата/номер утверждения и дата вступления в силу принадлежат ИМЕННО этой редакции,
+            // а не документу целиком — тут единственное место, где они реально выставляются.
+            latestRedaction.AdoptionCode = request.AdoptionCode;
+            latestRedaction.AdoptionDate = request.AdoptionDate;
+            latestRedaction.EffectiveDate = request.EffectiveDate;
+        }
 
         vnd.LastActualizationDate = today;
         vnd.LastActualizationHadChanges = request.HadChanges;

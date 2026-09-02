@@ -475,6 +475,67 @@ public class VndService : IVndService
         LinkedToMeRelations = linkedToMeRelations ?? []
     };
 
+    /// <summary>Довешивает Include-ы, необходимые для реквизитов редакции (см. ToRedactionResponse
+    /// ниже) — используется во всех местах, где грузится VndRedaction перед превращением в
+    /// VndRedactionResponse, чтобы не забыть какой-нибудь Include и не получить пустые имена.</summary>
+    private static IQueryable<VndRedaction> IncludeRequisites(IQueryable<VndRedaction> query) =>
+        query.Include(x => x.Type)
+            .Include(x => x.Developer)
+            .Include(x => x.CuratorDeveloper)
+            .Include(x => x.Organ)
+            .Include(x => x.ResponsibleExecutors)
+            .Include(x => x.Rubrics)
+            .Include(x => x.Keywords);
+
+    /// <summary>Копирует реквизиты в НОВУЮ редакцию (заголовок/вид, орган/разработчик/куратор,
+    /// гриф секретности, период, ответственные исполнители/рубрики/ключевые слова) — либо с
+    /// предыдущей редакции этого же ВНД (source), либо, если это первая редакция, с самого
+    /// документа (vnd). Используется в AddRedactionAsync. Дату/номер утверждения и дату
+    /// вступления в силу намеренно НЕ копирует — они всегда стартуют пустыми у новой редакции.</summary>
+    private static void CopyRequisitesFrom(VndRedaction target, VndRedaction? source, VndDocument vnd)
+    {
+        if (source is not null)
+        {
+            target.TitleRu = source.TitleRu;
+            target.TitleEn = source.TitleEn;
+            target.TitleKg = source.TitleKg;
+            target.TypeId = source.TypeId;
+            target.Type = source.Type;
+            target.DeveloperId = source.DeveloperId;
+            target.Developer = source.Developer;
+            target.CuratorDeveloperId = source.CuratorDeveloperId;
+            target.CuratorDeveloper = source.CuratorDeveloper;
+            target.OrganId = source.OrganId;
+            target.Organ = source.Organ;
+            target.SecrecyLevelId = source.SecrecyLevelId;
+            target.SecrecyLevel = source.SecrecyLevel;
+            target.Period = source.Period;
+            target.ResponsibleExecutors = source.ResponsibleExecutors.ToList();
+            target.Rubrics = source.Rubrics.ToList();
+            target.Keywords = source.Keywords.ToList();
+        }
+        else
+        {
+            target.TitleRu = vnd.TitleRu;
+            target.TitleEn = vnd.TitleEn;
+            target.TitleKg = vnd.TitleKg;
+            target.TypeId = vnd.TypeId;
+            target.Type = vnd.Type;
+            target.DeveloperId = vnd.DeveloperId;
+            target.Developer = vnd.Developer;
+            target.CuratorDeveloperId = vnd.CuratorDeveloperId;
+            target.CuratorDeveloper = vnd.CuratorDeveloper;
+            target.OrganId = vnd.OrganId;
+            target.Organ = vnd.Organ;
+            target.SecrecyLevelId = vnd.SecrecyLevelId;
+            target.SecrecyLevel = vnd.SecrecyLevel;
+            target.Period = vnd.Period;
+            target.ResponsibleExecutors = vnd.ResponsibleExecutors.ToList();
+            target.Rubrics = vnd.Rubrics.ToList();
+            target.Keywords = vnd.Keywords.ToList();
+        }
+    }
+
     private static VndRedactionResponse ToRedactionResponse(VndRedaction x, int? currentRedactionId) => new()
     {
         Id = x.Id,
@@ -499,6 +560,25 @@ public class VndService : IVndService
             FileName = a.FileAttachment?.OriginalFileName ?? $"Вложение_{a.FileAttachmentId}",
             SizeBytes = a.FileAttachment?.SizeBytes ?? 0
         }).ToList(),
+        TitleRu = x.TitleRu,
+        TitleEn = x.TitleEn,
+        TitleKg = x.TitleKg,
+        TypeId = x.TypeId,
+        TypeName = x.Type?.TitleRu ?? "",
+        AdoptionDate = x.AdoptionDate,
+        AdoptionCode = x.AdoptionCode,
+        EffectiveDate = x.EffectiveDate,
+        Period = x.Period.ToString(),
+        DeveloperId = x.DeveloperId,
+        DeveloperName = x.Developer?.TitleRu ?? "",
+        CuratorDeveloperId = x.CuratorDeveloperId,
+        CuratorDeveloperName = x.CuratorDeveloper?.FullName,
+        OrganId = x.OrganId,
+        OrganName = x.Organ?.TitleRu ?? "",
+        SecrecyLevelId = x.SecrecyLevelId,
+        ResponsibleExecutorIds = x.ResponsibleExecutors.Select(e => e.Id).ToList(),
+        KeywordIds = x.Keywords.Select(k => k.Id).ToList(),
+        RubricIds = x.Rubrics.Select(r => r.Id).ToList(),
         CreatedAt = x.CreatedAt
     };
 
@@ -671,7 +751,19 @@ public class VndService : IVndService
     public async Task<VndRedactionResponse> AddRedactionAsync(
         int vndId, CreateVndRedactionRequest request, int currentUserId)
     {
-        var vnd = await _db.VndDocuments.FindAsync(vndId)
+        // Include-ы ниже (Developer/CuratorDeveloper/Organ/SecrecyLevel/ResponsibleExecutors/
+        // Rubrics/Keywords) нужны только на случай, если это ПЕРВАЯ редакция документа — тогда
+        // реквизиты новой редакции наследуются с самого VndDocument (см. requisitesSource ниже).
+        var vnd = await _db.VndDocuments
+                      .Include(x => x.Type)
+                      .Include(x => x.Developer)
+                      .Include(x => x.CuratorDeveloper)
+                      .Include(x => x.Organ)
+                      .Include(x => x.SecrecyLevel)
+                      .Include(x => x.ResponsibleExecutors)
+                      .Include(x => x.Rubrics)
+                      .Include(x => x.Keywords)
+                      .FirstOrDefaultAsync(x => x.Id == vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
@@ -683,8 +775,7 @@ public class VndService : IVndService
         var actorName = actor?.FullName ?? "—";
 
         // Правило: последняя редакция не должна быть незавершённой (черновик или на согласовании)
-        var lastRedaction = await _db.VndRedactions
-            .Where(r => r.VndId == vndId)
+        var lastRedaction = await IncludeRequisites(_db.VndRedactions.Where(r => r.VndId == vndId))
             .OrderByDescending(r => r.Number)
             .FirstOrDefaultAsync();
 
@@ -754,6 +845,12 @@ public class VndService : IVndService
 
         var nextNumber = (lastRedaction?.Number ?? 0) + 1;
 
+        // Реквизиты новой редакции ("Реквизиты" → вкладка Р{N}) стартуют как копия реквизитов
+        // предыдущей редакции (а для самой первой редакции — реквизитов, заданных при создании
+        // ВНД, см. CreateAsync) — дальше их можно скорректировать через UpdateRequisitesAsync,
+        // указав RedactionId именно этой редакции. Дату/номер утверждения и дату вступления в
+        // силу НЕ наследуем — они всегда null для новой, ещё не утверждённой редакции: заполнятся
+        // при консолидации (см. VndActualizationService.PublishAsync).
         var redaction = new VndRedaction
         {
             VndId = vndId,
@@ -768,8 +865,10 @@ public class VndService : IVndService
             ApprovalStatus = effectiveRequiresApproval
                 ? RedactionApprovalStatus.Draft
                 : RedactionApprovalStatus.NotRequired,
-            Attachments = attachmentEntities
+            Attachments = attachmentEntities,
+            TitleRu = "" // временно, ниже сразу перезатирается CopyRequisitesFrom
         };
+        CopyRequisitesFrom(redaction, lastRedaction, vnd);
 
         _db.VndRedactions.Add(redaction);
         await _db.SaveChangesAsync();
@@ -885,8 +984,8 @@ public class VndService : IVndService
             throw new UnauthorizedAccessException(
                 "Отправить редакцию на согласование может только причастный к этому ВНД пользователь");
 
-        var redaction = await _db.VndRedactions
-                            .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment)
+        var redaction = await IncludeRequisites(_db.VndRedactions
+                                .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment))
                             .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
                         ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
 
@@ -916,8 +1015,8 @@ public class VndService : IVndService
             throw new UnauthorizedAccessException(
                 "Сделать редакцию действующей без согласования может только главный редактор");
 
-        var redaction = await _db.VndRedactions
-                            .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment)
+        var redaction = await IncludeRequisites(_db.VndRedactions
+                                .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment))
                             .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
                         ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
 
@@ -972,9 +1071,9 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var redactions = await _db.VndRedactions
-            .Where(x => x.VndId == vndId)
-            .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment)
+        var redactions = await IncludeRequisites(_db.VndRedactions
+                .Where(x => x.VndId == vndId)
+                .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment))
             .OrderBy(x => x.Number)
             .ToListAsync();
 
@@ -1051,17 +1150,21 @@ public class VndService : IVndService
         }
     }
 
+    /// <summary>Обновляет реквизиты ВНД. TitleRu/En/Kg, TypeId, утверждение/вступление в силу,
+    /// разработчик/куратор/орган, гриф секретности, ответственные исполнители, рубрики, ключевые
+    /// слова — всё это теперь принадлежит КОНКРЕТНОЙ редакции (см. миграцию "реквизиты по
+    /// редакции", включая заголовок/вид) — request.RedactionId указывает, какой именно (вкладки
+    /// Р1/Р2/.../Рn на вкладке "Реквизиты"); если не указано — берётся текущая/последняя
+    /// редакция. Общими на весь документ остаются только служебные даты цикла актуализации
+    /// (DueActualizationDate/LastActualizationDate), отмена/архивация и группы доступа.
+    /// Пока не убран старый дублирующий набор полей на VndDocument (переходный период —
+    /// см. пометку в VndDocument.cs), при редактировании ИМЕННО текущей редакции те же
+    /// значения зеркалируются и туда, чтобы не сломать существующий поиск/фильтры по документу.</summary>
     public async Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request,
         string languageCode)
     {
         var entity = await _db.VndDocuments
                          .Include(x => x.Type)
-                         .Include(x => x.Developer)
-                         .Include(x => x.CuratorDeveloper)
-                         .Include(x => x.Organ)
-                         .Include(x => x.ResponsibleExecutors)
-                         .Include(x => x.Rubrics)
-                         .Include(x => x.Keywords)
                          .Include(x => x.UserGroups)
                          .Include(x => x.Redactions)
                          .Include(x => x.CreatedByUser)
@@ -1069,11 +1172,22 @@ public class VndService : IVndService
                          .FirstOrDefaultAsync(x => x.Id == id)
                      ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 
+        var targetRedactionId = request.RedactionId ?? entity.CurrentRedactionId
+            ?? entity.Redactions.OrderByDescending(r => r.Number).Select(r => (int?)r.Id).FirstOrDefault();
+
+        var targetRedaction = targetRedactionId.HasValue
+            ? await IncludeRequisites(_db.VndRedactions)
+                  .FirstOrDefaultAsync(r => r.Id == targetRedactionId.Value && r.VndId == id)
+              ?? throw new KeyNotFoundException($"Редакция с id={targetRedactionId} не найдена")
+            : null;
+
         var typeExists = await _db.TypesVnd.AnyAsync(x => x.Id == request.TypeId);
         if (!typeExists) throw new KeyNotFoundException($"Вид ВНД с id={request.TypeId} не найден");
 
         var organExists = await _db.ApprovalBodies.AnyAsync(x => x.Id == request.OrganId);
         if (!organExists) throw new KeyNotFoundException($"Орган утверждения с id={request.OrganId} не найден");
+
+        var fallbackDeveloperId = targetRedaction?.DeveloperId ?? entity.DeveloperId;
 
         int developerId;
         if (request.DeveloperId.HasValue)
@@ -1085,7 +1199,7 @@ public class VndService : IVndService
         }
         else
         {
-            developerId = entity.DeveloperId; // не меняем, если не передали
+            developerId = fallbackDeveloperId; // не меняем, если не передали
         }
 
         if (request.CuratorDeveloperId.HasValue)
@@ -1116,24 +1230,7 @@ public class VndService : IVndService
                 throw new KeyNotFoundException($"Уровень секретности с id={request.SecrecyLevelId} не найден");
         }
 
-        // --- Применяем изменения ---
-        entity.TypeId = request.TypeId;
-        entity.OrganId = request.OrganId;
-        entity.DeveloperId = developerId;
-        entity.CuratorDeveloperId = request.CuratorDeveloperId;
-
-        entity.ResponsibleExecutors.Clear();
-        foreach (var executor in responsibleExecutors)
-            entity.ResponsibleExecutors.Add(executor);
-
-        entity.TitleRu = request.TitleRu;
-        entity.TitleEn = request.TitleEn;
-        entity.TitleKg = request.TitleKg;
-
-        entity.AdoptionDate = request.AdoptionDate;
-        entity.AdoptionCode = request.AdoptionCode;
-        entity.EffectiveDate = request.EffectiveDate;
-
+        // --- Общие на весь документ (не зависят от редакции) ---
         entity.DueActualizationDate = request.DueActualizationDate;
         entity.LastActualizationDate = request.LastActualizationDate;
         entity.LastActualizationHadChanges = request.LastActualizationHadChanges;
@@ -1143,32 +1240,114 @@ public class VndService : IVndService
         entity.CancelReason = request.CancelReason;
         entity.ArchivedDate = request.ArchivedDate;
 
-        entity.Keywords.Clear();
-        foreach (var keyword in keywords)
-            entity.Keywords.Add(keyword);
-
-        entity.Rubrics.Clear();
-        foreach (var rubric in rubrics)
-            entity.Rubrics.Add(rubric);
-
         entity.UserGroups.Clear();
         foreach (var group in userGroups)
             entity.UserGroups.Add(group);
 
-        entity.SecrecyLevelId = request.SecrecyLevelId ?? entity.SecrecyLevelId;
-
         if (entity.ArchivedDate.HasValue)
             entity.Status = VndStatus.Archived;
-        else if (entity.CancelDate.HasValue && entity.Status != VndStatus.Draft)
-            entity.Status = entity.Status;
+
+        // --- Реквизиты конкретной редакции (если она есть — у только что созданного ВНД без
+        // единой загруженной редакции target-а нет, тогда применяем к документу как раньше,
+        // для обратной совместимости с формой создания) ---
+        var isCurrentRedaction = targetRedaction is not null && targetRedaction.Id == entity.CurrentRedactionId;
+
+        void ApplyTo(VndDocument? doc, VndRedaction? redaction)
+        {
+            if (redaction is not null)
+            {
+                redaction.TitleRu = request.TitleRu;
+                redaction.TitleEn = request.TitleEn;
+                redaction.TitleKg = request.TitleKg;
+                redaction.TypeId = request.TypeId;
+                redaction.OrganId = request.OrganId;
+                redaction.DeveloperId = developerId;
+                redaction.CuratorDeveloperId = request.CuratorDeveloperId;
+                redaction.AdoptionDate = request.AdoptionDate;
+                redaction.AdoptionCode = request.AdoptionCode;
+                redaction.EffectiveDate = request.EffectiveDate;
+                redaction.SecrecyLevelId = request.SecrecyLevelId ?? redaction.SecrecyLevelId;
+                redaction.ResponsibleExecutors.Clear();
+                foreach (var executor in responsibleExecutors) redaction.ResponsibleExecutors.Add(executor);
+                redaction.Keywords.Clear();
+                foreach (var keyword in keywords) redaction.Keywords.Add(keyword);
+                redaction.Rubrics.Clear();
+                foreach (var rubric in rubrics) redaction.Rubrics.Add(rubric);
+            }
+
+            if (doc is not null)
+            {
+                doc.TitleRu = request.TitleRu;
+                doc.TitleEn = request.TitleEn;
+                doc.TitleKg = request.TitleKg;
+                doc.TypeId = request.TypeId;
+                doc.OrganId = request.OrganId;
+                doc.DeveloperId = developerId;
+                doc.CuratorDeveloperId = request.CuratorDeveloperId;
+                doc.AdoptionDate = request.AdoptionDate;
+                doc.AdoptionCode = request.AdoptionCode;
+                doc.EffectiveDate = request.EffectiveDate;
+                doc.SecrecyLevelId = request.SecrecyLevelId ?? doc.SecrecyLevelId;
+                doc.ResponsibleExecutors.Clear();
+                foreach (var executor in responsibleExecutors) doc.ResponsibleExecutors.Add(executor);
+                doc.Keywords.Clear();
+                foreach (var keyword in keywords) doc.Keywords.Add(keyword);
+                doc.Rubrics.Clear();
+                foreach (var rubric in rubrics) doc.Rubrics.Add(rubric);
+            }
+        }
+
+        if (targetRedaction is not null)
+        {
+            // Doc.ResponsibleExecutors/Keywords/Rubrics не загружены в этом запросе (Include не
+            // делали — они больше не источник правды) — если нужно зеркалировать в документ,
+            // подгружаем их отдельно только в этом случае.
+            VndDocument? docForMirror = null;
+            if (isCurrentRedaction)
+            {
+                docForMirror = await _db.VndDocuments
+                    .Include(x => x.ResponsibleExecutors)
+                    .Include(x => x.Keywords)
+                    .Include(x => x.Rubrics)
+                    .FirstAsync(x => x.Id == id);
+            }
+
+            ApplyTo(docForMirror, targetRedaction);
+        }
+        else
+        {
+            var docForMirror = await _db.VndDocuments
+                .Include(x => x.ResponsibleExecutors)
+                .Include(x => x.Keywords)
+                .Include(x => x.Rubrics)
+                .FirstAsync(x => x.Id == id);
+            ApplyTo(docForMirror, null);
+        }
 
         // "Изменение реквизитов" проставляется автоматически, руками эту дату задать нельзя
         entity.RequisitesChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
 
         await _db.SaveChangesAsync();
 
+        // Перечитываем документ с нужными Include-ами для ответа (заголовок/тип общие, остальное
+        // могло измениться либо на нём самом, либо только на редакции).
+        var reloaded = await _db.VndDocuments
+                           .Include(x => x.Type)
+                           .Include(x => x.Developer)
+                           .Include(x => x.CuratorDeveloper)
+                           .Include(x => x.Organ)
+                           .Include(x => x.ResponsibleExecutors)
+                           .Include(x => x.Rubrics)
+                           .Include(x => x.Keywords)
+                           .Include(x => x.UserGroups)
+                           .Include(x => x.Redactions)
+                           .Include(x => x.CreatedByUser)
+                           .Include(x => x.ActualizationResponsibleUser)
+                           .FirstOrDefaultAsync(x => x.Id == id)
+                       ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
+
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        return ToResponse(entity, languageCode, today);
+        return ToResponse(reloaded, languageCode, today);
     }
 
     public async Task<VndLinksResponse> GetLinksAsync(int vndId, string languageCode)
@@ -1246,11 +1425,11 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var lastRedaction = await _db.VndRedactions
+        var lastRedaction = await IncludeRequisites(_db.VndRedactions
                                 .Where(r => r.VndId == vndId)
-                                .OrderByDescending(r => r.Number)
-                                .Include(r => r.Attachments).ThenInclude(a => a.FileAttachment)
-                                .FirstOrDefaultAsync()
+                                .Include(r => r.Attachments).ThenInclude(a => a.FileAttachment))
+                            .OrderByDescending(r => r.Number)
+                            .FirstOrDefaultAsync()
                             ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
 
         // Редакция, отправленная на согласование, редактируется только через отзыв согласования
@@ -1355,11 +1534,11 @@ public class VndService : IVndService
                 "Приложить ТИД может только разработчик, куратор, ответственный исполнитель, " +
                 "инициатор, ответственный за актуализацию или главный редактор ВНД");
 
-        var lastRedaction = await _db.VndRedactions
+        var lastRedaction = await IncludeRequisites(_db.VndRedactions
                                 .Where(r => r.VndId == vndId)
-                                .OrderByDescending(r => r.Number)
-                                .Include(r => r.Attachments).ThenInclude(a => a.FileAttachment)
-                                .FirstOrDefaultAsync()
+                                .Include(r => r.Attachments).ThenInclude(a => a.FileAttachment))
+                            .OrderByDescending(r => r.Number)
+                            .FirstOrDefaultAsync()
                             ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
 
         if (lastRedaction.ApprovalStatus != RedactionApprovalStatus.Draft)

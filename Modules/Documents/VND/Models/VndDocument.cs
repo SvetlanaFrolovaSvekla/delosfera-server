@@ -18,6 +18,18 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
     public NpgsqlTypes.NpgsqlTsVector? SearchVector { get; set; }
 
     public required string Code { get; set; }
+
+    // ПЕРЕХОДНЫЙ ПЕРИОД (миграция "реквизиты по редакции"): TitleRu/TitleEn/TitleKg/TypeId и
+    // DeveloperId/CuratorDeveloperId/OrganId/ResponsibleExecutors/AdoptionDate/AdoptionCode/
+    // EffectiveDate/Period/SecrecyLevelId/Rubrics/Keywords ниже ПРОДОЛЖАЮТ существовать здесь
+    // только для обратной совместимости уже существующих мест чтения/поиска (в т.ч. SearchVector
+    // ниже строится по этому TitleRu). Источник правды по ним теперь — одноимённые поля на
+    // VndRedaction (см. CurrentRedaction для последней редакции): при сохранении текущей
+    // редакции значения зеркалируются и сюда (см. VndService.UpdateRequisitesAsync/
+    // AddRedactionAsync), поэтому здесь всегда актуальное значение ТЕКУЩЕЙ редакции. Эти поля на
+    // документе будут убраны отдельным финальным шагом миграции, когда все чтения переключатся
+    // на редакцию — до этого момента НЕ добавляйте новую логику, которая пишет/читает их именно
+    // отсюда.
     public required string TitleRu { get; set; }
     public string? TitleEn { get; set; }
     public string? TitleKg { get; set; }
@@ -25,7 +37,6 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
 
     public int TypeId { get; set; }
     public TypeVnd? Type { get; set; }
-
     public int DeveloperId { get; set; } // СП-разработчик
     public OrganizationUnit? Developer { get; set; }
 
@@ -54,7 +65,9 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
 
     /// <summary>Периодичность плановой актуализации — нужна, чтобы уметь
     /// автоматически сдвигать DueActualizationDate после публикации редакции
-    /// (см. VndActualizationService). Заполняется при создании ВНД.</summary>
+    /// (см. VndActualizationService). Заполняется при создании ВНД.
+    /// Переходный период — см. пометку у DeveloperId выше: актуальный источник правды теперь
+    /// VndRedaction.Period.</summary>
     public ActualizationPeriod Period { get; set; }
 
     // --- Текущий цикл актуализации: заполняется при переходе в OnActualization,
@@ -89,6 +102,10 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
     public bool ActualizationPerformed { get; set; }
 
     // --- Классификаторы
+    // Rubrics/SecrecyLevelId/Keywords — переходный период, см. пометку у DeveloperId выше:
+    // актуальный источник правды теперь одноимённые поля на VndRedaction. UserGroups сюда
+    // НЕ относится — это доступ на просмотр документа, а не реквизит содержания, поэтому
+    // остаётся на уровне документа (как и было).
     public ICollection<Rubric> Rubrics { get; set; } = new List<Rubric>();
 
     public int SecrecyLevelId { get; set; }

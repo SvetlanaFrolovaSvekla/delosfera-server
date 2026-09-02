@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260901075511_AddVndRedactionRequisites")]
+    partial class AddVndRedactionRequisites
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -4270,23 +4273,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("tid_file_id");
 
-                    b.Property<string>("TitleEn")
-                        .HasColumnType("text")
-                        .HasColumnName("title_en");
-
-                    b.Property<string>("TitleKg")
-                        .HasColumnType("text")
-                        .HasColumnName("title_kg");
-
-                    b.Property<string>("TitleRu")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("title_ru");
-
-                    b.Property<int>("TypeId")
-                        .HasColumnType("integer")
-                        .HasColumnName("type_id");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -4328,9 +4314,6 @@ namespace delosfera_server.Migrations
 
                     b.HasIndex("TidFileId")
                         .HasDatabaseName("ix_vnd_redaction_tid_file_id");
-
-                    b.HasIndex("TypeId")
-                        .HasDatabaseName("ix_vnd_redaction_type_id");
 
                     b.HasIndex("VndId", "Number")
                         .IsUnique()
@@ -11165,13 +11148,6 @@ namespace delosfera_server.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_vnd_redaction_file_attachments_tid_file_id");
 
-                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.TypeVnd", "Type")
-                        .WithMany()
-                        .HasForeignKey("TypeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_redaction_dictionary_type_vnd_type_id");
-
                     b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "Vnd")
                         .WithMany("Redactions")
                         .HasForeignKey("VndId")
@@ -11196,8 +11172,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("SecrecyLevel");
 
                     b.Navigation("TidFile");
-
-                    b.Navigation("Type");
 
                     b.Navigation("Vnd");
                 });
