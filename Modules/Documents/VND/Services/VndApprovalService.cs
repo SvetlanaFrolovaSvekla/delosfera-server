@@ -486,9 +486,10 @@ public class VndApprovalService : IVndApprovalService
         if (process.InitiatorUserId != currentUserId)
             throw new UnauthorizedAccessException("Отправить на повторное согласование может только инициатор");
 
-        if (!request.AgreesWithAllRemarks && process.DisagreementMatrixRows.Count == 0)
+        if (request.RemarksAgreement != RemarksAgreement.FullyAgree && request.DisagreementMatrix is null)
             throw new InvalidOperationException(
-                "Если вы не согласны со всеми замечаниями, заполните матрицу разногласий (хотя бы одна строка)");
+                "Если вы не согласны со всеми замечаниями (полностью или частично), приложите матрицу " +
+                "разногласий — сформируйте её в системе или загрузите готовый файл");
 
         if (request.Comment is { Length: > MaxResolutionCommentLength })
             throw new InvalidOperationException(
@@ -555,6 +556,12 @@ public class VndApprovalService : IVndApprovalService
             redaction.TidFileId = saved.Id;
         }
 
+        if (request.DisagreementMatrix is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.DisagreementMatrix, currentUserId);
+            redaction.DisagreementMatrixFileId = saved.Id;
+        }
+
         // Новые вложения к редакции - добавляем в уже отслеживаемую EF навигацию, FK на редакцию
         // проставится автоматически при SaveChangesAsync (не требует предварительной загрузки
         // коллекции, см. AddRedactionAsync в VndService для того же паттерна на создании).
@@ -607,7 +614,7 @@ public class VndApprovalService : IVndApprovalService
             });
         }
 
-        if (request.AgreesWithAllRemarks)
+        if (request.RemarksAgreement == RemarksAgreement.FullyAgree)
         {
             // Замечания исправлены - обычное повторное согласование (только с теми, кто участвует в repeat)
             foreach (var stage in process.Stages.Where(s => s.ParticipatesInRepeat))
@@ -645,9 +652,11 @@ public class VndApprovalService : IVndApprovalService
         }
         else
         {
-            // Составлена матрица разногласий - повторное согласование пропускаем,
-            // сразу идём на финальную выдержку (решение по-прежнему требуется только от тех,
-            // кто ещё не давал чистого согласования этой редакции - см. ResetFinalHoldDecisions)
+            // PartiallyAgree или FullyDisagree - в обоих случаях составлена матрица разногласий,
+            // повторное согласование пропускаем, сразу идём на финальную выдержку (решение
+            // по-прежнему требуется только от тех, кто ещё не давал чистого согласования этой
+            // редакции - см. ResetFinalHoldDecisions). При PartiallyAgree редакция при этом могла
+            // быть обновлена файлами выше - по маршруту согласования разницы с FullyDisagree нет.
             process.Status = ApprovalProcessStatus.FinalHold;
             ResetFinalHoldDecisions(process);
             process.FinalHoldStartedAt = DateTime.UtcNow;
@@ -722,6 +731,31 @@ public class VndApprovalService : IVndApprovalService
 
         _db.Set<VndDisagreementMatrixRow>().Remove(row);
         await _db.SaveChangesAsync();
+    }
+
+    public async Task<DisagreementMatrixRowResponse> UpdateDisagreementMatrixRowAsync(
+        int vndId, int rowId, UpdateDisagreementMatrixRowRequest request, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        if (process.InitiatorUserId != currentUserId)
+            throw new UnauthorizedAccessException("Изменять строки матрицы разногласий может только инициатор");
+
+        if (process.Status != ApprovalProcessStatus.RevisionNeeded)
+            throw new InvalidOperationException(
+                "Матрицу разногласий можно редактировать только в статусе \"требуются правки\"");
+
+        var row = await _db.Set<VndDisagreementMatrixRow>()
+                      .FirstOrDefaultAsync(x => x.Id == rowId && x.ApprovalProcessId == process.Id)
+                  ?? throw new KeyNotFoundException($"Строка матрицы разногласий с id={rowId} не найдена");
+
+        row.DeveloperPosition = request.DeveloperPosition;
+        row.OpponentPosition = request.OpponentPosition;
+        row.DeveloperJustification = request.DeveloperJustification;
+
+        await _db.SaveChangesAsync();
+
+        return ToDisagreementRowResponse(row);
     }
 
     public async Task ProcessTimeoutsAsync()
@@ -1382,7 +1416,8 @@ public class VndApprovalService : IVndApprovalService
         DeveloperPosition = row.DeveloperPosition,
         OpponentPosition = row.OpponentPosition,
         DeveloperJustification = row.DeveloperJustification,
-        CreatedAt = row.CreatedAt
+        CreatedAt = row.CreatedAt,
+        UpdatedAt = row.UpdatedAt
     };
 
     /// <summary>Вложения этапа для конкретной фазы решения (первичной/повторной/финальной).

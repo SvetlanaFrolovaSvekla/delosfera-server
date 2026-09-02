@@ -11,6 +11,7 @@ public interface IVndApprovalService
     Task<ApprovalProcessResponse> CancelAsync(int vndId, int currentUserId);
     Task<ApprovalProcessResponse> ResubmitAfterRevisionAsync(int vndId, ResubmitAfterRevisionRequest request, int currentUserId);
     Task<DisagreementMatrixRowResponse> AddDisagreementMatrixRowAsync(int vndId, AddDisagreementMatrixRowRequest request, int currentUserId);
+    Task<DisagreementMatrixRowResponse> UpdateDisagreementMatrixRowAsync(int vndId, int rowId, UpdateDisagreementMatrixRowRequest request, int currentUserId);
     Task DeleteDisagreementMatrixRowAsync(int vndId, int rowId, int currentUserId);
     Task ProcessTimeoutsAsync();
 }

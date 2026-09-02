@@ -551,6 +551,7 @@ public class VndService : IVndService
         DocEnUpdatedAt = x.DocEnUpdatedAt,
         TidFileId = x.TidFileId,
         ApprovalSheetFileId = x.ApprovalSheetFileId,
+        DisagreementMatrixFileId = x.DisagreementMatrixFileId,
         RequiresApproval = x.RequiresApproval,
         ApprovalStatus = x.ApprovalStatus.ToString(),
         AttachmentFileIds = x.Attachments.Select(a => a.FileAttachmentId).ToList(),

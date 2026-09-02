@@ -134,6 +134,21 @@ public class VndApprovalController : ControllerBase
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
+    /// <summary>Изменить строку матрицы разногласий (только инициатор, только на доработке)</summary>
+    [HttpPut("disagreement-matrix/rows/{rowId:int}")]
+    [ProducesResponseType(typeof(DisagreementMatrixRowResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<DisagreementMatrixRowResponse>> UpdateDisagreementRow(
+        int vndId, int rowId, [FromBody] UpdateDisagreementMatrixRowRequest request)
+    {
+        try
+        {
+            return Ok(await _service.UpdateDisagreementMatrixRowAsync(vndId, rowId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
     /// <summary>Удалить строку из матрицы разногласий</summary>
     [HttpDelete("disagreement-matrix/rows/{rowId:int}")]
     public async Task<IActionResult> DeleteDisagreementRow(int vndId, int rowId)

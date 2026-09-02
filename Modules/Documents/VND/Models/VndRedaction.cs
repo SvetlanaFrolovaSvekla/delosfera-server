@@ -63,6 +63,14 @@ public class VndRedaction : IAuditableEntity
     public int? ApprovalSheetFileId { get; set; }
     public FileAttachment? ApprovalSheetFile { get; set; }
 
+    /// <summary>Матрица разногласий — .docx-файл (сформированный в системе по введённым строкам
+    /// либо загруженный инициатором готовым файлом, см. ResubmitAfterRevisionRequest.DisagreementMatrix)
+    /// с позициями, по которым инициатор не согласен с замечаниями (RemarksAgreement.PartiallyAgree
+    /// или .FullyDisagree). Null, пока инициатор не отправил редакцию с несогласием. Как и ТИД/Лист
+    /// согласования — "специальное" вложение, не входит в Attachments.</summary>
+    public int? DisagreementMatrixFileId { get; set; }
+    public FileAttachment? DisagreementMatrixFile { get; set; }
+
     /// <summary>Заголовок и вид документа НА МОМЕНТ ЭТОЙ редакции (этап "заголовок/вид тоже по
     /// редакции", см. обсуждение) — переименование/смена вида документа не переписывают задним
     /// числом то, как назывались/классифицировались прошлые редакции.</summary>

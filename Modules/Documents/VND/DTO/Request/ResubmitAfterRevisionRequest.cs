@@ -37,7 +37,33 @@ public class ResubmitAfterRevisionRequest
     public List<IFormFile>? CommentAttachments { get; set; }
 
     /// <summary>Согласен ли инициатор со всеми замечаниями.
-    /// false → нужна заполненная матрица разногласий, повторное согласование
-    /// пропускается, процесс сразу переходит на финальную выдержку.</summary>
-    public required bool AgreesWithAllRemarks { get; set; }
+    /// FullyAgree → обычное повторное согласование.
+    /// PartiallyAgree/FullyDisagree → нужна заполненная матрица разногласий (см.
+    /// DisagreementMatrix), повторное согласование пропускается, процесс сразу переходит
+    /// на финальную выдержку (для PartiallyAgree — так же, как для FullyDisagree; разница
+    /// только в том, что при PartiallyAgree инициатор ещё и обновляет саму редакцию).</summary>
+    public required RemarksAgreement RemarksAgreement { get; set; }
+
+    /// <summary>Матрица разногласий — .docx-файл, обязателен, если RemarksAgreement != FullyAgree.
+    /// Либо сформирован на клиенте по строкам матрицы (см. AddDisagreementMatrixRowAsync),
+    /// либо загружен инициатором готовым файлом — с точки зрения бэка это просто файл,
+    /// который сохраняется как VndRedaction.DisagreementMatrixFileId.</summary>
+    public IFormFile? DisagreementMatrix { get; set; }
+}
+
+/// <summary>Согласен ли инициатор со всеми замечаниями, поднятыми на согласовании
+/// (см. ResubmitAfterRevisionRequest.RemarksAgreement).</summary>
+public enum RemarksAgreement
+{
+    /// <summary>Согласен со всеми — обычное повторное согласование.</summary>
+    FullyAgree = 0,
+
+    /// <summary>Согласен частично — редакция обновляется, но по несогласованным замечаниям
+    /// заполняется матрица разногласий. Маршрут — как при полном несогласии: сразу на
+    /// финальную выдержку, повторное согласование пропускается.</summary>
+    PartiallyAgree = 1,
+
+    /// <summary>Не согласен ни с одним замечанием — заполняется матрица разногласий,
+    /// сразу на финальную выдержку.</summary>
+    FullyDisagree = 2
 }

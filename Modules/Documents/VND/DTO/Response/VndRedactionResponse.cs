@@ -28,6 +28,10 @@ public class VndRedactionResponse
     /// окончательно завершается. Null, пока редакция не согласована.</summary>
     public int? ApprovalSheetFileId { get; set; }
 
+    /// <summary>Матрица разногласий — null, пока инициатор не отправил редакцию с несогласием
+    /// (частичным или полным) по замечаниям.</summary>
+    public int? DisagreementMatrixFileId { get; set; }
+
     public bool RequiresApproval { get; set; }
     public required string ApprovalStatus { get; set; }
 
