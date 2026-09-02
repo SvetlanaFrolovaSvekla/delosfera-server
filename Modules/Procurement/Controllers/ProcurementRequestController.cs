@@ -7,6 +7,9 @@ using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Modules.Procurement.Controllers;
 
+/// <summary>Обоснование отзыва: почему заявку забрали с согласования.</summary>
+public record WithdrawRequest(string Reason);
+
 /// <summary>
 /// Реестр заявок на закупку (PRC-01/03): поиск, счётчики, создание мастером,
 /// отправка на согласование.
@@ -77,6 +80,11 @@ public class ProcurementRequestController : ControllerBase
     [HttpPost("requests/{id:int}/submit")]
     public async Task<IActionResult> Submit(int id) =>
         await Run(() => _requests.SubmitAsync(id, _currentUser.UserId));
+
+    /// <summary>Отозвать заявку с согласования — право инициатора.</summary>
+    [HttpPost("requests/{id:int}/withdraw")]
+    public async Task<IActionResult> Withdraw(int id, [FromBody] WithdrawRequest request) =>
+        await Run(() => _requests.WithdrawAsync(id, request.Reason, _currentUser.UserId));
 
     private async Task<IActionResult> Run<T>(Func<Task<T>> action)
     {

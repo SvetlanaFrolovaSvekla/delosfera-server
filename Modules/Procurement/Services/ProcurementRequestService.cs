@@ -6,6 +6,7 @@ using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Procurement.DTO;
 using delosfera_server.Modules.Procurement.Models;
+using delosfera_server.Modules.Workflow.Services;
 
 namespace delosfera_server.Modules.Procurement.Services;
 
@@ -22,6 +23,9 @@ public interface IProcurementRequestService
     /// <summary>Удалить черновик заявки — только автору и только до отправки.</summary>
     Task DeleteAsync(int id, int actorUserId);
     Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId);
+
+    /// <summary>Отозвать заявку с согласования — право инициатора.</summary>
+    Task<ProcurementCardDto> WithdrawAsync(int id, string reason, int actorUserId);
 }
 
 /// <summary>
@@ -43,17 +47,20 @@ public class ProcurementRequestService : IProcurementRequestService
     private readonly IAuditService _audit;
     private readonly IAuthorityMatrixService _matrix;
     private readonly IProcurementRouteService _routes;
+    private readonly IRouteEngine _routeEngine;
     private readonly IBankClock _clock;
 
     public ProcurementRequestService(
         DelosferaDbContext db, IDocumentService documents, IAuditService audit,
-        IAuthorityMatrixService matrix, IProcurementRouteService routes, IBankClock clock)
+        IAuthorityMatrixService matrix, IProcurementRouteService routes,
+        IRouteEngine routeEngine, IBankClock clock)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
         _matrix = matrix;
         _routes = routes;
+        _routeEngine = routeEngine;
         _clock = clock;
     }
 
@@ -467,6 +474,51 @@ public class ProcurementRequestService : IProcurementRequestService
             entity.ApprovalChain,
             routeInstanceId = route.Id,
         });
+
+        return await BuildCardAsync(await LoadAsync(id));
+    }
+
+    /// <summary>
+    /// Отозвать заявку с согласования.
+    ///
+    /// Статус «Отозвана» был объявлен, а выставить его было нечем: заявку,
+    /// отправленную по ошибке, инициатор вернуть не мог — оставалось просить
+    /// согласующих отклонить её, и в реестре чужая ошибка выглядела как отказ
+    /// подразделения. Удаление тут не годится: у отправленной заявки есть номер
+    /// и история согласований, а номер не переиспользуется.
+    /// </summary>
+    public async Task<ProcurementCardDto> WithdrawAsync(int id, string reason, int actorUserId)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Укажите обоснование отзыва");
+
+        var entity = await LoadAsync(id);
+
+        // Отзыв — право инициатора: согласующий прерывать чужой процесс не может.
+        if (entity.Document!.AuthorId != actorUserId)
+            throw new UnauthorizedAccessException("Отозвать заявку может только её автор");
+
+        // После передачи в Сектор закупок отзывать поздно: процедура объявлена,
+        // поставщики приглашены. Тут закупку прекращают отменой самой процедуры.
+        if (entity.Document.StatusCode is not (ProcurementStatus.OnApproval
+                                               or ProcurementStatus.OnRevision
+                                               or ProcurementStatus.Approved))
+            throw new InvalidOperationException(
+                "Отозвать можно заявку на согласовании, доработке или согласованную до передачи в закупку");
+
+        if (entity.Document.CurrentRouteInstanceId is int instanceId)
+        {
+            // История согласований остаётся: движок гасит задачи участников и
+            // помечает маршрут прерванным, не удаляя вынесенные резолюции.
+            await _routeEngine.InterruptAsync(instanceId, actorUserId);
+            entity.Document.CurrentRouteInstanceId = null;
+        }
+
+        await _documents.ChangeStatusAsync(entity.DocumentId, ProcurementStatus.Cancelled, actorUserId);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("ProcurementRequest", entity.Id, "Withdrawn", actorUserId,
+            new {reason = reason.Trim()});
 
         return await BuildCardAsync(await LoadAsync(id));
     }

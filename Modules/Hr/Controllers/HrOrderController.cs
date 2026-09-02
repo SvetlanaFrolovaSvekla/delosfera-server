@@ -320,6 +320,24 @@ public class HrOrderController : ControllerBase
         order.SignedAt = DateTime.UtcNow;
         order.UpdatedAt = DateTime.UtcNow;
 
+        // Приказ об отмене гасит отменяемый: ссылка на него сохранялась, а сам
+        // отменённый приказ оставался «Подписан» — в реестре и в кадровой истории
+        // сотрудника отменённая командировка выглядела действующей. Статус
+        // «Отменён» был объявлен и не выставлялся нигде.
+        //
+        // Момент — подписание, а не создание: пока приказ черновик, он ничего не
+        // отменяет, и передумать ещё можно.
+        if (order.CancelsOrderId is int cancelledId)
+        {
+            var cancelled = await _db.HrOrders.FirstOrDefaultAsync(o => o.Id == cancelledId, ct);
+
+            if (cancelled is not null && cancelled.Status != HrOrderStatus.Cancelled)
+            {
+                cancelled.Status = HrOrderStatus.Cancelled;
+                cancelled.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _db.SaveChangesAsync(ct);
 
         return Ok(new { order.RegNumber, order.SignedAt });
