@@ -595,6 +595,19 @@ public class VndActualizationService : IVndActualizationService
         if (string.IsNullOrWhiteSpace(request.AdoptionCode))
             throw new InvalidOperationException("Укажите № принятия для консолидации редакции");
 
+        // Актуализационная редакция (Number > 1) не может быть консолидирована без ТИД —
+        // тот же принцип, что и в PublishRedactionWithoutApprovalAsync, только здесь это
+        // единственная реальная точка проверки для циклов БЕЗ согласования: раньше отсюда
+        // можно было проконсолидировать и без ТИД, если согласование не требовалось (в т.ч.
+        // при подтверждении "без изменений" — ConfirmNoChangesAsync).
+        var latestRedactionForTidCheck = vnd.Redactions.OrderByDescending(r => r.Number).FirstOrDefault();
+        if (latestRedactionForTidCheck is not null
+            && latestRedactionForTidCheck.Number > 1
+            && latestRedactionForTidCheck.TidFileId is null)
+            throw new InvalidOperationException(
+                "Прежде чем консолидировать редакцию, приложите файл ТИД " +
+                "(Таблица изменений и дополнений) — кнопка «Сформировать или загрузить ТИД»");
+
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
 

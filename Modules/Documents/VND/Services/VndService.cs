@@ -845,6 +845,16 @@ public class VndService : IVndService
 
         var nextNumber = (lastRedaction?.Number ?? 0) + 1;
 
+        // Актуализационная редакция (Number > 1) без ТИД не может стать текущей и утащить ВНД в
+        // консолидацию сразу, даже если согласование не требуется — иначе документ выглядел бы
+        // уже "актуальным"/"в консолидации", хотя обязательный ТИД ещё не приложен (а приложить
+        // его после такого мгновенного перехода было негде — см. UploadTidForLastRedactionAsync,
+        // которая работает только с редакцией в статусе "черновик"). Поэтому если ТИД не был
+        // передан прямо в этом запросе, редакция временно остаётся черновиком (ApprovalStatus.Draft)
+        // несмотря на RequiresApproval = false — сам переход "стать текущей/уйти в консолидацию"
+        // довыполнится в UploadTidForLastRedactionAsync, как только ТИД будет приложен.
+        var blockedByMissingTid = !effectiveRequiresApproval && nextNumber > 1 && tid is null;
+
         // Реквизиты новой редакции ("Реквизиты" → вкладка Р{N}) стартуют как копия реквизитов
         // предыдущей редакции (а для самой первой редакции — реквизитов, заданных при создании
         // ВНД, см. CreateAsync) — дальше их можно скорректировать через UpdateRequisitesAsync,
@@ -862,7 +872,7 @@ public class VndService : IVndService
             DocFileEnId = docEn?.Id,
             TidFileId = tid?.Id,
             RequiresApproval = effectiveRequiresApproval,
-            ApprovalStatus = effectiveRequiresApproval
+            ApprovalStatus = (effectiveRequiresApproval || blockedByMissingTid)
                 ? RedactionApprovalStatus.Draft
                 : RedactionApprovalStatus.NotRequired,
             Attachments = attachmentEntities,
@@ -883,7 +893,7 @@ public class VndService : IVndService
             $"/base-vnd/{vndId}");
         await _db.SaveChangesAsync();
 
-        if (!effectiveRequiresApproval)
+        if (!effectiveRequiresApproval && !blockedByMissingTid)
         {
             vnd.CurrentRedactionId = redaction.Id;
             vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -1547,6 +1557,24 @@ public class VndService : IVndService
 
         var saved = await _fileService.SaveAsync(request.Tid, currentUserId);
         lastRedaction.TidFileId = saved.Id;
+
+        // Если эта редакция изначально не требовала согласования (актуализация без
+        // согласования), но не стала текущей сразу при загрузке именно из-за отсутствующего
+        // ТИД (см. blockedByMissingTid в AddRedactionAsync) — теперь, когда ТИД приложен,
+        // нужно довыполнить тот же переход, что случился бы сразу при загрузке, будь ТИД уже
+        // на месте: сделать редакцию текущей и перевести ВНД в консолидацию/действующий.
+        if (!lastRedaction.RequiresApproval && vnd.CurrentRedactionId != lastRedaction.Id)
+        {
+            lastRedaction.ApprovalStatus = RedactionApprovalStatus.NotRequired;
+            vnd.CurrentRedactionId = lastRedaction.Id;
+            vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+
+            var enteringConsolidation = vnd.Status == VndStatus.OnActualization;
+            vnd.Status = enteringConsolidation ? VndStatus.Consolidation : VndStatus.Active;
+
+            if (enteringConsolidation)
+                await StampConsolidationStartedAsync(vndId);
+        }
 
         await _db.SaveChangesAsync();
 
