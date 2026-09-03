@@ -7,6 +7,13 @@ public class VndSearchRequest
     public string? RevisionText { get; set; }
 
     public List<string> Statuses { get; set; } = []; // "active","onact","review","consol","arch","draft"
+
+    /// <summary>Фильтр по "Статусу ВНД" (документ-уровня, см. VndResponse.DocumentStatus):
+    /// "active","notYetActive","arch". Независим от Statuses выше (тот — по "Статусу последней
+    /// редакции"): оба фильтра, если заданы одновременно, применяются через И. Пусто = без
+    /// фильтра.</summary>
+    public List<string> DocumentStatuses { get; set; } = [];
+
     public List<int> TypeIds { get; set; } = [];
     public List<int> OrganIds { get; set; } = [];
     public List<int> DeveloperIds { get; set; } = [];

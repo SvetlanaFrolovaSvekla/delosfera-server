@@ -32,6 +32,10 @@ public class VndService : IVndService
 
     public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
     {
+        // Вычисляется здесь (а не только перед ToListAsync, как раньше), т.к. теперь используется
+        // и для ограничения видимости "Статуса ВНД" (документ-уровня) ниже.
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+
         IQueryable<VndDocument> query = _db.VndDocuments
             .Include(x => x.Type)
             .Include(x => x.Developer)
@@ -58,6 +62,48 @@ public class VndService : IVndService
         {
             var statuses = request.Statuses.Select(MapStatus).ToList();
             query = query.Where(x => statuses.Contains(x.Status));
+        }
+
+        // "Статус ВНД" (документ-уровня): пользователям без ViewVndRegistryExtended документы
+        // "ещё не действующие" (notYetActive) не показываются вообще — ни в одном табе/scope, а
+        // не сворачиваются в "действующий", как было раньше. Это ограничение видимости
+        // применяется безусловно (не зависит от того, задан ли request.DocumentStatuses), потому
+        // что сервер для таких пользователей в принципе не должен отдавать эти документы —
+        // см. также CollapseDocumentStatus (используется только для GetById по прямой ссылке,
+        // не для реестра). Предикат — отрицание "notYetActive" из ComputeDocumentStatus ниже,
+        // продублированное в EF-транслируемом виде (см. тот же приём в фильтре
+        // DocumentStatuses ниже).
+        if (!canViewExtended)
+        {
+            query = query.Where(x =>
+                x.Status == VndStatus.Archived ||
+                x.Status == VndStatus.Active ||
+                x.ActualizationResponsibleUserId != null ||
+                x.Redactions.Count > 1);
+        }
+
+        if (request.DocumentStatuses.Count > 0)
+        {
+            // Фильтр по "Статусу ВНД" (документ-уровня) — независимая от Statuses выше ось.
+            // Доступен фактически только пользователям с ViewVndRegistryExtended (см. фильтр
+            // видимости выше — для остальных notYetActive уже вырезан безусловно, а "active"/
+            // "arch" эквивалентны обычной фильтрации). Используется как фильтром в VndFilters,
+            // так и новым табом "Ещё не действующие" (scope="notYetActive", см. useVndFilters).
+            // Логика продублирована в виде EF-транслируемого предиката (а не переиспользует
+            // ComputeDocumentStatus напрямую — тот рассчитан на уже загруженную в память
+            // сущность и не транслируется в SQL). См. ComputeDocumentStatus ниже — то же самое
+            // правило, применённое на чтении к уже загруженным документам.
+            var wantsActive = request.DocumentStatuses.Contains("active");
+            var wantsNotYetActive = request.DocumentStatuses.Contains("notYetActive");
+            var wantsArch = request.DocumentStatuses.Contains("arch");
+
+            query = query.Where(x =>
+                (wantsArch && x.Status == VndStatus.Archived) ||
+                (wantsNotYetActive && x.Status != VndStatus.Archived && x.Redactions.Count <= 1 &&
+                 x.Status != VndStatus.Active && x.ActualizationResponsibleUserId == null) ||
+                (wantsActive && x.Status != VndStatus.Archived &&
+                 !(x.Redactions.Count <= 1 && x.Status != VndStatus.Active &&
+                   x.ActualizationResponsibleUserId == null)));
         }
 
         if (request.TypeIds.Count > 0)
@@ -121,7 +167,7 @@ public class VndService : IVndService
             : null;
 
         return entities
-            .Select(x => ToResponse(x, languageCode, today, relationsByVndId?.GetValueOrDefault(x.Id)))
+            .Select(x => ToResponse(x, languageCode, today, canViewExtended, relationsByVndId?.GetValueOrDefault(x.Id)))
             .ToList();
     }
 
@@ -186,7 +232,8 @@ public class VndService : IVndService
                      ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        return ToResponse(entity, languageCode, today);
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        return ToResponse(entity, languageCode, today, canViewExtended);
     }
 
     /// <summary>Сводка по срокам актуализации для дашборда планирования.
@@ -423,8 +470,45 @@ public class VndService : IVndService
         _ => "onact"
     };
 
+    /// <summary>"Статус ВНД" (документ-уровня) — см. подробное описание в VndResponse.DocumentStatus.
+    /// Вычисляется на чтении, здесь работает с уже загруженной в память сущностью (x.Redactions
+    /// должна быть загружена — Include(x => x.Redactions) есть во всех местах, откуда вызывается
+    /// ToResponse). Та же логика в EF-транслируемом виде — см. фильтр по DocumentStatuses
+    /// в SearchAsync.</summary>
+    private static string ComputeDocumentStatus(VndDocument x)
+    {
+        if (x.Status == VndStatus.Archived) return "arch";
+
+        // "Был ли документ хоть раз действующим": сам статус Active, либо документ сейчас
+        // находится в цикле актуализации (ActualizationResponsibleUserId != null) — а цикл
+        // актуализации можно начать только для уже действующего документа (см.
+        // VndActualizationService.StartAsync: "Начать актуализацию можно только для
+        // действующего ВНД"), и это поле не сбрасывается в процессе цикла (сбрасывается
+        // только по завершении публикации, VndActualizationService.PublishAsync) — поэтому его
+        // непустое значение надёжно говорит "документ уже был Active", даже если сейчас
+        // документ, например, снова на согласовании (Review) в рамках того же цикла.
+        var everWasActive = x.Status == VndStatus.Active || x.ActualizationResponsibleUserId != null;
+
+        // "Есть максимум одна редакция за всю историю" (0 — только что создан ВНД, редакция ещё
+        // не загружена; 1 — загружена первая и единственная) — редакции никогда не удаляются,
+        // поэтому Count <= 1 эквивалентно "текущая/единственная редакция, если есть, имеет
+        // Number == 1".
+        if (x.Redactions.Count <= 1 && !everWasActive) return "notYetActive";
+
+        return "active";
+    }
+
+    /// <summary>Сворачивает "notYetActive" в "active" для пользователей без права
+    /// ViewVndRegistryExtended — такие пользователи всегда видели подобные документы как
+    /// "действующие" (детали жизненного цикла им и так недоступны) и не должны получать
+    /// 3-е значение статуса ВНД. Делается на сервере (не только на фронте), т.к. это дёшево —
+    /// у VndService уже есть ICurrentUserService.HasPermission под рукой.</summary>
+    private static string CollapseDocumentStatus(string raw, bool canViewExtended) =>
+        !canViewExtended && raw == "notYetActive" ? "active" : raw;
+
     private static VndResponse ToResponse(
-        VndDocument x, string languageCode, DateOnly today, List<string>? linkedToMeRelations = null) => new()
+        VndDocument x, string languageCode, DateOnly today, bool canViewExtended,
+        List<string>? linkedToMeRelations = null) => new()
     {
         Id = x.Id,
         Code = x.Code,
@@ -433,6 +517,7 @@ public class VndService : IVndService
         TitleEn = x.TitleEn,
         TitleKg = x.TitleKg,
         Status = MapStatusBack(x.Status),
+        DocumentStatus = CollapseDocumentStatus(ComputeDocumentStatus(x), canViewExtended),
         TypeId = x.TypeId,
         TypeName = x.Type?.TitleRu ?? "",
         DeveloperId = x.DeveloperId,
@@ -672,7 +757,8 @@ public class VndService : IVndService
             $"/base-vnd/{entity.Id}");
         await _db.SaveChangesAsync();
 
-        return ToResponse(entity, languageCode, today);
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        return ToResponse(entity, languageCode, today, canViewExtended);
     }
 
     private static DateOnly ResolveDueDate(ActualizationPeriod period, DateOnly? customDate, DateOnly today) =>
@@ -1358,7 +1444,8 @@ public class VndService : IVndService
                        ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        return ToResponse(reloaded, languageCode, today);
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        return ToResponse(reloaded, languageCode, today, canViewExtended);
     }
 
     public async Task<VndLinksResponse> GetLinksAsync(int vndId, string languageCode)
