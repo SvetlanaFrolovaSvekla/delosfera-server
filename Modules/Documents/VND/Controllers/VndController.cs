@@ -106,6 +106,29 @@ public class VndController : ControllerBase
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
+    /// <summary>Архивировать (отменить) ВНД — кнопка "Архивировать". Доступно на любом статусе,
+    /// кроме черновика (тот только удаляется, см. Delete выше) и уже архивированного. Если
+    /// документ на согласовании — согласование отзывается автоматически в рамках той же
+    /// операции.</summary>
+    /// <response code="200">ВНД архивирован</response>
+    /// <response code="409">Архивировать можно только не-черновик и не уже архивированный документ</response>
+    [HttpPost("{id:int}/cancel")]
+    [RequirePermission(PermissionCode.CancelVnd)]
+    [ProducesResponseType(typeof(VndResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<VndResponse>> Cancel(int id, [FromBody] CancelVndRequest request)
+    {
+        var language = _languageResolver.Resolve(Request);
+        try
+        {
+            return Ok(await _service.CancelAsync(id, request, _currentUser.UserId, language));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
     /// <summary>Добавление новой редакции ВНД</summary>
     [HttpPost("{vndId:int}/redactions")]
     [RequirePermission(PermissionCode.ViewVnd)]

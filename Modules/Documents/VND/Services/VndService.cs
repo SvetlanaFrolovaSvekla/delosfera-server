@@ -19,15 +19,18 @@ public class VndService : IVndService
     private readonly IFileStorageService _fileService;
     private readonly ICurrentUserService _currentUser;
     private readonly IActivityLogService _activityLog;
+    private readonly IVndApprovalService _approvalService;
 
     public VndService(
         DelosferaDbContext db, IFileStorageService fileService,
-        ICurrentUserService currentUser, IActivityLogService activityLog)
+        ICurrentUserService currentUser, IActivityLogService activityLog,
+        IVndApprovalService approvalService)
     {
         _db = db;
         _fileService = fileService;
         _currentUser = currentUser;
         _activityLog = activityLog;
+        _approvalService = approvalService;
     }
 
     public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
@@ -621,13 +624,17 @@ public class VndService : IVndService
         }
     }
 
-    private static VndRedactionResponse ToRedactionResponse(VndRedaction x, int? currentRedactionId) => new()
+    // vnd (а не просто currentRedactionId) — чтобы IsCurrent мог учитывать и Status: у
+    // архивированного ВНД ни одна редакция больше не "текущая/действующая", даже та, что была
+    // ею перед архивацией (CurrentRedactionId при этом не трогаем — он остаётся историческим
+    // указателем на то, какая редакция была последней действующей, см. VndService.CancelAsync).
+    private static VndRedactionResponse ToRedactionResponse(VndRedaction x, VndDocument vnd) => new()
     {
         Id = x.Id,
         Code = x.Code,
         Number = x.Number,
         Description = x.Description,
-        IsCurrent = x.Id == currentRedactionId,
+        IsCurrent = x.Id == vnd.CurrentRedactionId && vnd.Status != VndStatus.Archived,
         DocFileRuId = x.DocFileRuId,
         DocFileKgId = x.DocFileKgId,
         DocFileEnId = x.DocFileEnId,
@@ -998,7 +1005,7 @@ public class VndService : IVndService
             await _db.SaveChangesAsync();
         }
 
-        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+        return ToRedactionResponse(redaction, vnd);
     }
 
     /// <summary>
@@ -1093,7 +1100,7 @@ public class VndService : IVndService
         vnd.Status = VndStatus.Review;
         await _db.SaveChangesAsync();
 
-        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+        return ToRedactionResponse(redaction, vnd);
     }
 
     /// <summary>Только для главного редактора: делает черновик редакции действующим/текущим
@@ -1159,7 +1166,7 @@ public class VndService : IVndService
 
         await _db.SaveChangesAsync();
 
-        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+        return ToRedactionResponse(redaction, vnd);
     }
 
 
@@ -1174,7 +1181,7 @@ public class VndService : IVndService
             .OrderBy(x => x.Number)
             .ToListAsync();
 
-        return redactions.Select(r => ToRedactionResponse(r, vnd.CurrentRedactionId)).ToList();
+        return redactions.Select(r => ToRedactionResponse(r, vnd)).ToList();
     }
 
     /// <summary>
@@ -1245,6 +1252,83 @@ public class VndService : IVndService
             try { await _fileService.DeleteAsync(fileId); }
             catch { /* файл уже удалён или хранилище недоступно — не критично */ }
         }
+    }
+
+    /// <summary>
+    /// Архивировать (отменить) ВНД — кнопка "Архивировать" (см. PermissionCode.CancelVnd).
+    /// Доступно на любом статусе, кроме черновика (тот только удаляется, см. DeleteAsync) и
+    /// уже архивированного. № и дата отмены обязательны — отмена оформляется служебной запиской
+    /// и не согласуется.
+    ///
+    /// Если документ на момент архивации "На согласовании" — сначала отзываем согласование тем
+    /// же путём, что и обычный отзыв (VndApprovalService.WithdrawForCancelAsync), только без
+    /// требования к архивирующему быть инициатором или иметь отдельно CancelAnyVndApproval:
+    /// право CancelVnd на саму архивацию тут уже достаточное основание. Открытый цикл
+    /// актуализации (если он был — на OnActualization/Consolidation) закрываем так же, как при
+    /// обычной публикации (см. VndActualizationService.PublishAsync) — архивный документ не
+    /// может "ждать" ответственного за актуализацию.
+    /// </summary>
+    public async Task<VndResponse> CancelAsync(
+        int id, CancelVndRequest request, int currentUserId, string languageCode)
+    {
+        var vnd = await _db.VndDocuments
+                      .Include(x => x.Type)
+                      .Include(x => x.Developer)
+                      .Include(x => x.CuratorDeveloper)
+                      .Include(x => x.Organ)
+                      .Include(x => x.ResponsibleExecutors)
+                      .Include(x => x.Rubrics)
+                      .Include(x => x.Keywords)
+                      .Include(x => x.UserGroups)
+                      .Include(x => x.Redactions)
+                      .Include(x => x.CreatedByUser)
+                      .Include(x => x.ActualizationResponsibleUser)
+                      .FirstOrDefaultAsync(x => x.Id == id)
+                  ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
+
+        if (vnd.Status is VndStatus.Draft or VndStatus.Archived)
+            throw new InvalidOperationException(
+                "Архивировать нельзя черновик (его можно только удалить) или уже архивированный документ");
+
+        if (string.IsNullOrWhiteSpace(request.CancelCode))
+            throw new InvalidOperationException("Укажите № отмены");
+
+        // Согласование отзываем ДО того, как перезапишем Status на Archived - иначе
+        // WithdrawForCancelAsync (который сам определяет процесс по текущему статусу редакции)
+        // не найдёт, что отзывать.
+        if (vnd.Status == VndStatus.Review)
+            await _approvalService.WithdrawForCancelAsync(id, currentUserId);
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        vnd.Status = VndStatus.Archived;
+        vnd.CancelCode = request.CancelCode;
+        vnd.CancelDate = request.CancelDate;
+        vnd.CancelReason = request.CancelReason;
+        vnd.ArchivedDate = today;
+
+        // Закрываем открытый цикл актуализации, если он был - как и после обычной публикации
+        // (VndActualizationService.PublishAsync), только без публикации.
+        vnd.ActualizationResponsibleUserId = null;
+        vnd.ActualizationRequiresApproval = false;
+        vnd.ActualizationShiftNextPeriod = false;
+        vnd.ActualizationPlannedNoChanges = false;
+        vnd.ActualizationPerformed = false;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Other, id, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} архивировал(а) ВНД {vnd.Code} «{vnd.TitleRu}»",
+                $"{actorName} archived VND {vnd.Code} \"{vnd.TitleRu}\"",
+                $"{actorName} {vnd.Code} «{vnd.TitleRu}» ВНДисин архивдеди"),
+            $"/base-vnd/{id}");
+
+        await _db.SaveChangesAsync();
+
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        return ToResponse(vnd, languageCode, today, canViewExtended);
     }
 
     /// <summary>Обновляет реквизиты ВНД. TitleRu/En/Kg, TypeId, утверждение/вступление в силу,
@@ -1611,7 +1695,7 @@ public class VndService : IVndService
 
         await _db.SaveChangesAsync();
 
-        return ToRedactionResponse(lastRedaction, vnd.CurrentRedactionId);
+        return ToRedactionResponse(lastRedaction, vnd);
     }
 
     /// <summary>Кнопка "Сформировать или загрузить ТИД" — прикладывает файл ТИД (Таблица изменений
@@ -1666,7 +1750,7 @@ public class VndService : IVndService
 
         await _db.SaveChangesAsync();
 
-        return ToRedactionResponse(lastRedaction, vnd.CurrentRedactionId);
+        return ToRedactionResponse(lastRedaction, vnd);
     }
 
     public async Task<List<VndQuickSearchResponse>> QuickSearchAsync(string query, string languageCode, int limit)

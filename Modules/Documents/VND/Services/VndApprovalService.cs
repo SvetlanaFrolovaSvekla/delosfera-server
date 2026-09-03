@@ -444,6 +444,22 @@ public class VndApprovalService : IVndApprovalService
             throw new UnauthorizedAccessException(
                 "Отозвать согласование может только инициатор или главный редактор");
 
+        await CancelInternalAsync(process, currentUserId);
+        return await LoadResponseAsync(process.Id);
+    }
+
+    public async Task WithdrawForCancelAsync(int vndId, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+        await CancelInternalAsync(process, currentUserId);
+    }
+
+    /// <summary>Общая часть отзыва согласования — используется и обычным CancelAsync
+    /// (с проверкой прав инициатора/CancelAnyVndApproval), и WithdrawForCancelAsync
+    /// (вызывается изнутри архивации ВНД, где авторизация уже выполнена отдельным правом
+    /// CancelVnd, см. VndService.CancelAsync).</summary>
+    private async Task CancelInternalAsync(VndApprovalProcess process, int currentUserId)
+    {
         if (process.Status is ApprovalProcessStatus.Approved
             or ApprovalProcessStatus.Cancelled
             or ApprovalProcessStatus.Rejected)
@@ -457,12 +473,17 @@ public class VndApprovalService : IVndApprovalService
 
         var redaction = process.Redaction!;
         var vnd = process.Vnd!;
+        var vndId = vnd.Id;
 
         // Редакция снова становится черновиком (её можно править, переотправить или удалить).
         redaction.ApprovalStatus = RedactionApprovalStatus.Draft;
 
         // Документ: если это была первая редакция — возвращаем в черновик; если это цикл
         // актуализации существующего ВНД — возвращаем на актуализацию, а не в черновик.
+        // (Если это вызвано архивацией — VndService.CancelAsync сразу следом перезапишет
+        // Status на Archived; этот промежуточный переход нужен только затем, чтобы редакция
+        // и документ синхронно вышли из "На согласовании" тем же путём, что и при обычном
+        // отзыве согласования.)
         vnd.Status = redaction.Number <= 1 ? VndStatus.Draft : VndStatus.OnActualization;
 
         _activityLog.Log(
@@ -484,8 +505,6 @@ public class VndApprovalService : IVndApprovalService
         await NotifyAsync(
             VndApprovalNotificationMessages.Cancelled(redaction.Code, vnd.TitleRu),
             NotificationCategory.Approval, vndId, currentUserId, approverIds);
-
-        return await LoadResponseAsync(process.Id);
     }
 
     public async Task<ApprovalProcessResponse> ResubmitAfterRevisionAsync(
