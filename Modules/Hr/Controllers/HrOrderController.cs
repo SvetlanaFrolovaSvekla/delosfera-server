@@ -64,15 +64,18 @@ public class HrOrderController : ControllerBase
     private readonly ICurrentUserService _currentUser;
     private readonly IDocumentHtmlService _html;
     private readonly Documents.Services.IAcknowledgementService _acknowledgements;
+    private readonly Files.Services.IFileStorageService _storage;
 
     public HrOrderController(
         DelosferaDbContext db, ICurrentUserService currentUser, IDocumentHtmlService html,
-        Documents.Services.IAcknowledgementService acknowledgements)
+        Documents.Services.IAcknowledgementService acknowledgements,
+        Files.Services.IFileStorageService storage)
     {
         _db = db;
         _currentUser = currentUser;
         _html = html;
         _acknowledgements = acknowledgements;
+        _storage = storage;
     }
 
     /// <summary>
@@ -170,6 +173,7 @@ public class HrOrderController : ControllerBase
                 Signer = o.SignerUser == null ? null : o.SignerUser.FullName,
                 o.SignedAt,
                 o.AcknowledgementSheetId,
+                FileCount = o.Files.Count,
                 Employees = o.Employees.Select(e => new
                 {
                     e.UserId,
@@ -200,6 +204,7 @@ public class HrOrderController : ControllerBase
                 o.SignerUserId,
                 Signer = o.SignerUser == null ? null : o.SignerUser.FullName,
                 o.SignedAt, o.AcknowledgementSheetId,
+                FileCount = o.Files.Count,
                 Employees = o.Employees.Select(e => new
                 {
                     e.Id, e.UserId,
@@ -341,6 +346,90 @@ public class HrOrderController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         return Ok(new { order.RegNumber, order.SignedAt });
+    }
+
+    /// <summary>
+    /// Приложить скан подписанного приказа.
+    ///
+    /// Приказ по личному составу подписывают на бумаге и подшивают в личное дело;
+    /// без скана карточка оставалась записью о приказе, а не самим приказом — и на
+    /// просьбу «покажите подписанный» ответить было нечем.
+    /// </summary>
+    [HttpPost("{id:int}/files")]
+    [RequirePermission(PermissionCode.ManageHrOrders)]
+    public async Task<IActionResult> AddFile(int id, IFormFile file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "Файл не выбран." });
+
+        var order = await _db.HrOrders.FirstOrDefaultAsync(o => o.Id == id, ct);
+        if (order is null) return NotFound();
+
+        var stored = await _storage.SaveAsync(file, _currentUser.UserId, ct);
+
+        var link = new HrOrderFile
+        {
+            OrderId = order.Id,
+            FileId = stored.Id,
+            UploadedByUserId = _currentUser.UserId,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        _db.HrOrderFiles.Add(link);
+        order.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            link.Id,
+            fileId = stored.Id,
+            fileName = stored.OriginalFileName,
+            sizeBytes = stored.SizeBytes,
+            uploadedAt = link.CreatedAt,
+        });
+    }
+
+    /// <summary>Сканы, приложенные к приказу.</summary>
+    [HttpGet("{id:int}/files")]
+    [RequirePermission(PermissionCode.ViewHrOrders)]
+    public async Task<IActionResult> Files(int id, CancellationToken ct)
+    {
+        if (!await _db.HrOrders.AnyAsync(o => o.Id == id, ct)) return NotFound();
+
+        return Ok(await _db.HrOrderFiles.AsNoTracking()
+            .Where(f => f.OrderId == id)
+            .OrderBy(f => f.Id)
+            .Select(f => new
+            {
+                f.Id,
+                fileId = f.FileId,
+                fileName = f.File!.OriginalFileName,
+                sizeBytes = f.File.SizeBytes,
+                uploadedAt = f.CreatedAt,
+                uploadedBy = f.UploadedByUserId,
+            })
+            .ToListAsync(ct));
+    }
+
+    /// <summary>
+    /// Убрать скан из приказа.
+    ///
+    /// Сам файл в хранилище остаётся: он мог быть приложен и в другом месте, а
+    /// удаление привязки — исправление ошибки вложения, не уничтожение документа.
+    /// </summary>
+    [HttpDelete("{id:int}/files/{fileLinkId:int}")]
+    [RequirePermission(PermissionCode.ManageHrOrders)]
+    public async Task<IActionResult> RemoveFile(int id, int fileLinkId, CancellationToken ct)
+    {
+        var link = await _db.HrOrderFiles
+            .FirstOrDefaultAsync(f => f.Id == fileLinkId && f.OrderId == id, ct);
+
+        if (link is null) return NotFound();
+
+        _db.HrOrderFiles.Remove(link);
+        await _db.SaveChangesAsync(ct);
+
+        return NoContent();
     }
 
     /// <summary>Приказы по конкретному сотруднику — его кадровая история.</summary>

@@ -198,6 +198,9 @@ public class DelosferaDbContext : DbContext
     public DbSet<delosfera_server.Modules.Hr.Models.HrOrderEmployee> HrOrderEmployees =>
         Set<delosfera_server.Modules.Hr.Models.HrOrderEmployee>();
 
+    public DbSet<delosfera_server.Modules.Hr.Models.HrOrderFile> HrOrderFiles =>
+        Set<delosfera_server.Modules.Hr.Models.HrOrderFile>();
+
     /// <summary>Пожелания и замечания сотрудников с экранов системы — обкатка подразделениями.</summary>
     public DbSet<delosfera_server.Modules.Feedback.Models.FeedbackItem> FeedbackItems =>
         Set<delosfera_server.Modules.Feedback.Models.FeedbackItem>();

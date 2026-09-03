@@ -130,6 +130,9 @@ public class HrOrder : IAuditableEntity
     /// <summary>Сотрудники, которых приказ касается. Их может быть несколько.</summary>
     public ICollection<HrOrderEmployee> Employees { get; set; } = new List<HrOrderEmployee>();
 
+    /// <summary>Сканы подписанного приказа и приложений к нему.</summary>
+    public ICollection<HrOrderFile> Files { get; set; } = new List<HrOrderFile>();
+
     public int CreatedByUserId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -165,4 +168,25 @@ public class HrOrderEmployee
     /// задаётся видом, а не структурой таблицы.
     /// </summary>
     public string? FieldValues { get; set; }
+}
+
+/// <summary>
+/// Скан подписанного приказа.
+///
+/// Приказ по личному составу подписывают на бумаге и хранят в личном деле;
+/// без скана карточка в системе оставалась записью о приказе, а не самим
+/// приказом — и на вопрос «покажите подписанный» ответить было нечем.
+/// </summary>
+public class HrOrderFile
+{
+    public int Id { get; set; }
+
+    public int OrderId { get; set; }
+    public HrOrder? Order { get; set; }
+
+    public int FileId { get; set; }
+    public Files.Models.FileAttachment? File { get; set; }
+
+    public int UploadedByUserId { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
