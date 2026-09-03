@@ -17,6 +17,20 @@ public class VndApprovalStage : IAuditableEntity
 
     public ApprovalStageKind Kind { get; set; }
 
+    /// <summary>Снимок названия этапа на момент построения маршрута (из
+    /// CoordinationDefaultApprover.Title для фиксированных этапов, либо "Доп. этап" для
+    /// произвольных). Не меняется, даже если запись справочника потом переименуют/удалят -
+    /// история согласования должна показывать этап таким, каким он был при запуске.</summary>
+    public string? Title { get; set; }
+
+    /// <summary>Запись справочника обязательных этапов (dictionaries/coordination-users), из
+    /// которой был построен этот этап - null для произвольных (Custom) этапов, добавленных
+    /// инициатором вручную. При удалении записи справочника обнуляется (SetNull) - сам этап и
+    /// его данные (OrgUnitId/ApproverUserId/Title) при этом не теряются, это лишь ссылка для
+    /// прослеживаемости.</summary>
+    public int? CoordinationStageId { get; set; }
+    public CoordinationDefaultApprover? CoordinationStage { get; set; }
+
     public int OrgUnitId { get; set; }
     public OrganizationUnit? OrgUnit { get; set; }
 

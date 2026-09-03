@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
@@ -18,98 +18,167 @@ public class CoordinationDefaultApproverService : ICoordinationDefaultApproverSe
     public async Task<List<CoordinationDefaultApproverResponse>> GetAllAsync()
     {
         var entities = await _db.Set<CoordinationDefaultApprover>()
+            .Include(x => x.OrgUnit)
             .Include(x => x.ApproverUser)
-            .OrderBy(x => x.Id)
+            .OrderBy(x => x.Order)
             .ToListAsync();
 
-        var orgUnitIds = entities.Select(x => ExpectedOrgUnitId(x.Kind)).Distinct().ToList();
-        var orgUnits = await _db.OrganizationUnits
-            .Where(x => orgUnitIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, x => x.TitleRu);
+        return entities.Select(ToResponse).ToList();
+    }
 
-        return entities.Select(x => ToResponse(x, orgUnits)).ToList();
+    public async Task<CoordinationDefaultApproverResponse> CreateAsync(CreateCoordinationDefaultApproverRequest request)
+    {
+        var title = request.Title.Trim();
+        if (title.Length == 0)
+            throw new InvalidOperationException("Название этапа не может быть пустым");
+
+        var orgUnit = await _db.OrganizationUnits.FindAsync(request.OrgUnitId)
+            ?? throw new KeyNotFoundException($"Подразделение с id={request.OrgUnitId} не найдено");
+
+        if (request.ApproverUserId.HasValue)
+            await ValidateApproverAsync(request.ApproverUserId.Value, request.OrgUnitId);
+
+        var maxOrder = await _db.Set<CoordinationDefaultApprover>()
+            .Select(x => (int?)x.Order)
+            .MaxAsync() ?? 0;
+
+        var now = DateTime.UtcNow;
+        var entity = new CoordinationDefaultApprover
+        {
+            Title = title,
+            OrgUnitId = orgUnit.Id,
+            Order = maxOrder + 1,
+            ApproverUserId = request.ApproverUserId,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        _db.Set<CoordinationDefaultApprover>().Add(entity);
+        await _db.SaveChangesAsync();
+
+        return await LoadResponseAsync(entity.Id);
     }
 
     public async Task<CoordinationDefaultApproverResponse> UpdateAsync(
         int id, UpdateCoordinationDefaultApproverRequest request)
     {
         var entity = await _db.Set<CoordinationDefaultApprover>().FindAsync(id)
-            ?? throw new KeyNotFoundException($"Запись справочника обязательных участников с id={id} не найдена");
+            ?? throw new KeyNotFoundException($"Запись справочника обязательных этапов с id={id} не найдена");
+
+        var title = request.Title.Trim();
+        if (title.Length == 0)
+            throw new InvalidOperationException("Название этапа не может быть пустым");
+
+        var orgUnit = await _db.OrganizationUnits.FindAsync(request.OrgUnitId)
+            ?? throw new KeyNotFoundException($"Подразделение с id={request.OrgUnitId} не найдено");
 
         if (request.ApproverUserId.HasValue)
-        {
-            var approver = await _db.Users.FindAsync(request.ApproverUserId.Value)
-                ?? throw new KeyNotFoundException($"Пользователь с id={request.ApproverUserId} не найден");
+            await ValidateApproverAsync(request.ApproverUserId.Value, request.OrgUnitId);
 
-            var expectedOrgUnitId = ExpectedOrgUnitId(entity.Kind);
-            if (approver.OrgUnitId != expectedOrgUnitId)
-                throw new InvalidOperationException(
-                    $"Согласующий по умолчанию для этапа «{KindTitle(entity.Kind)}» должен относиться " +
-                    "к соответствующему подразделению");
-        }
-
+        entity.Title = title;
+        entity.OrgUnitId = orgUnit.Id;
         entity.ApproverUserId = request.ApproverUserId;
+        entity.UpdatedAt = DateTime.UtcNow;
+
         await _db.SaveChangesAsync();
 
-        var reloaded = await _db.Set<CoordinationDefaultApprover>()
+        return await LoadResponseAsync(id);
+    }
+
+    public async Task DeleteAsync(int id)
+    {
+        var entity = await _db.Set<CoordinationDefaultApprover>().FindAsync(id)
+            ?? throw new KeyNotFoundException($"Запись справочника обязательных этапов с id={id} не найдена");
+
+        _db.Set<CoordinationDefaultApprover>().Remove(entity);
+
+        // Уже запущенные маршруты не зависят от этой записи (см. VndApprovalStage.Title/
+        // OrgUnitId/ApproverUserId - снимок при построении, CoordinationStageId - SetNull),
+        // поэтому удаление ничего в истории согласования не ломает.
+        await _db.SaveChangesAsync();
+
+        await RenumberAsync();
+    }
+
+    public async Task<List<CoordinationDefaultApproverResponse>> ReorderAsync(
+        ReorderCoordinationDefaultApproverRequest request)
+    {
+        var entities = await _db.Set<CoordinationDefaultApprover>().ToListAsync();
+
+        var currentIds = entities.Select(x => x.Id).ToHashSet();
+        var requestedIds = request.OrderedIds;
+
+        if (requestedIds.Count != currentIds.Count || requestedIds.Distinct().Count() != requestedIds.Count
+            || !requestedIds.All(currentIds.Contains))
+            throw new InvalidOperationException(
+                "Новый порядок должен содержать все существующие записи справочника, каждую ровно один раз");
+
+        var byId = entities.ToDictionary(x => x.Id);
+        for (var i = 0; i < requestedIds.Count; i++)
+        {
+            byId[requestedIds[i]].Order = i + 1;
+            byId[requestedIds[i]].UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
+
+        return await GetAllAsync();
+    }
+
+    /// <summary>Согласующий по умолчанию должен реально существовать и относиться к указанному
+    /// подразделению - та же проверка, что и при построении маршрута
+    /// (VndApprovalService.BuildAndValidateStagesAsync).</summary>
+    private async Task ValidateApproverAsync(int approverUserId, int orgUnitId)
+    {
+        var approver = await _db.Users.FindAsync(approverUserId)
+            ?? throw new KeyNotFoundException($"Пользователь с id={approverUserId} не найден");
+
+        if (approver.OrgUnitId != orgUnitId)
+            throw new InvalidOperationException(
+                "Согласующий по умолчанию для этапа должен относиться к указанному подразделению");
+    }
+
+    /// <summary>Восстанавливает сплошную нумерацию Order (1..N без пропусков) после удаления
+    /// записи - Order уникален и на нём завязан порядок этапов в маршруте.</summary>
+    private async Task RenumberAsync()
+    {
+        var remaining = await _db.Set<CoordinationDefaultApprover>()
+            .OrderBy(x => x.Order)
+            .ToListAsync();
+
+        var changed = false;
+        for (var i = 0; i < remaining.Count; i++)
+        {
+            var expectedOrder = i + 1;
+            if (remaining[i].Order == expectedOrder) continue;
+            remaining[i].Order = expectedOrder;
+            remaining[i].UpdatedAt = DateTime.UtcNow;
+            changed = true;
+        }
+
+        if (changed) await _db.SaveChangesAsync();
+    }
+
+    private async Task<CoordinationDefaultApproverResponse> LoadResponseAsync(int id)
+    {
+        var entity = await _db.Set<CoordinationDefaultApprover>()
+            .Include(x => x.OrgUnit)
             .Include(x => x.ApproverUser)
             .FirstAsync(x => x.Id == id);
 
-        var orgUnitId = ExpectedOrgUnitId(reloaded.Kind);
-        var orgUnitTitle = await _db.OrganizationUnits
-            .Where(x => x.Id == orgUnitId)
-            .Select(x => x.TitleRu)
-            .FirstOrDefaultAsync() ?? "";
-
-        return ToResponse(reloaded, new Dictionary<int, string> { [orgUnitId] = orgUnitTitle });
+        return ToResponse(entity);
     }
 
-    /// <summary>Подразделение, обязательное для согласующего данного фиксированного этапа —
-    /// та же логика, что и в VndApprovalService.BuildAndValidateStagesAsync</summary>
-    private static int ExpectedOrgUnitId(ApprovalStageKind kind) => kind switch
+    private static CoordinationDefaultApproverResponse ToResponse(CoordinationDefaultApprover entity) => new()
     {
-        ApprovalStageKind.Legal => FixedApprovalOrgUnits.LegalOrgUnitId,
-        ApprovalStageKind.RiskManagement => FixedApprovalOrgUnits.RiskManagementOrgUnitId,
-        ApprovalStageKind.Compliance => FixedApprovalOrgUnits.ComplianceOrgUnitId,
-        ApprovalStageKind.Methodology => FixedApprovalOrgUnits.MethodologyOrgUnitId,
-        _ => throw new InvalidOperationException(
-            $"Этап {kind} не является фиксированным и не может иметь дефолтного согласующего")
+        Id = entity.Id,
+        Title = entity.Title,
+        Order = entity.Order,
+        OrgUnitId = entity.OrgUnitId,
+        OrgUnitName = entity.OrgUnit?.TitleRu ?? "",
+        ApproverUserId = entity.ApproverUserId,
+        ApproverName = entity.ApproverUser?.FullName,
+        CreatedAt = entity.CreatedAt,
+        UpdatedAt = entity.UpdatedAt
     };
-
-    private static string KindTitle(ApprovalStageKind kind) => kind switch
-    {
-        ApprovalStageKind.Legal => "Юридическое управление",
-        ApprovalStageKind.RiskManagement => "Риск-менеджмент",
-        ApprovalStageKind.Compliance => "Комплаенс-контроль",
-        ApprovalStageKind.Methodology => "Методология",
-        _ => kind.ToString()
-    };
-
-    private static string MapKind(ApprovalStageKind kind) => kind switch
-    {
-        ApprovalStageKind.Legal => "legal",
-        ApprovalStageKind.RiskManagement => "risk_management",
-        ApprovalStageKind.Compliance => "compliance",
-        ApprovalStageKind.Methodology => "methodology",
-        _ => "custom"
-    };
-
-    private static CoordinationDefaultApproverResponse ToResponse(
-        CoordinationDefaultApprover entity, Dictionary<int, string> orgUnitTitles)
-    {
-        var orgUnitId = ExpectedOrgUnitId(entity.Kind);
-
-        return new CoordinationDefaultApproverResponse
-        {
-            Id = entity.Id,
-            Kind = MapKind(entity.Kind),
-            KindTitle = KindTitle(entity.Kind),
-            OrgUnitId = orgUnitId,
-            OrgUnitName = orgUnitTitles.GetValueOrDefault(orgUnitId, ""),
-            ApproverUserId = entity.ApproverUserId,
-            ApproverName = entity.ApproverUser?.FullName,
-            CreatedAt = entity.CreatedAt,
-            UpdatedAt = entity.UpdatedAt
-        };
-    }
 }

@@ -138,11 +138,11 @@ public class VndApprovalService : IVndApprovalService
             throw new InvalidOperationException(
                 $"Норматив срока не может превышать {MaxDeadlineMinutes / 60 / 24} дней");
 
-        // Себя можно указать согласующим только на фиксированном этапе (Legal/RiskManagement/
-        // Compliance/Methodology) - принадлежность инициатора нужному подразделению всё равно
-        // проверяется ниже в BuildAndValidateStagesAsync. На дополнительных (Custom) этапах,
-        // которые инициатор сам добавил, себя указывать нельзя.
-        if (request.Stages.Any(s => s.Kind == ApprovalStageKind.Custom && s.ApproverUserId == currentUserId))
+        // Себя можно указать согласующим только на обязательном (фиксированном) этапе из
+        // справочника - принадлежность инициатора нужному подразделению всё равно проверяется
+        // ниже в BuildAndValidateStagesAsync. На дополнительных (Custom) этапах, которые
+        // инициатор сам добавил вручную (CoordinationStageId == null), себя указывать нельзя.
+        if (request.Stages.Any(s => s.CoordinationStageId is null && s.ApproverUserId == currentUserId))
             throw new InvalidOperationException(
                 "Вы не можете быть согласующим на дополнительном этапе, который сами добавили");
 
@@ -1276,26 +1276,34 @@ public class VndApprovalService : IVndApprovalService
         }
     }
 
+    /// <summary>Обязательные этапы маршрута больше не завязаны на фиксированный enum/позиции -
+    /// они определяются динамическим справочником CoordinationDefaultApprover (dictionaries/
+    /// coordination-users), в порядке его поля Order. Ведущие N этапов запроса (N = число
+    /// активных записей справочника) обязаны 1-в-1 соответствовать этим записям в том же
+    /// порядке; всё, что идёт после - произвольные (Custom) этапы, добавленные инициатором.</summary>
     private async Task<List<VndApprovalStage>> BuildAndValidateStagesAsync(List<ApprovalStageRequest> requestStages)
     {
-        if (requestStages.Count < 3)
+        var fixedCatalog = await _db.Set<CoordinationDefaultApprover>()
+            .OrderBy(x => x.Order)
+            .ToListAsync();
+
+        if (requestStages.Count < fixedCatalog.Count)
             throw new InvalidOperationException(
-                "Маршрут должен содержать минимум 3 этапа: Юр. управление, Риск-менеджмент и Комплаенс");
+                "Маршрут должен содержать все обязательные этапы: " +
+                string.Join(", ", fixedCatalog.Select(x => x.Title)));
 
-        if (requestStages[0].Kind != ApprovalStageKind.Legal)
-            throw new InvalidOperationException("Первый этап маршрута всегда — Юридическое управление");
-        if (requestStages[1].Kind != ApprovalStageKind.RiskManagement)
-            throw new InvalidOperationException("Второй этап маршрута всегда — Управление риск-менеджмента");
-        if (requestStages[2].Kind != ApprovalStageKind.Compliance)
-            throw new InvalidOperationException("Третий этап маршрута всегда — Управление комплаенс-контроля");
-
-        for (var i = 3; i < requestStages.Count; i++)
+        for (var i = 0; i < fixedCatalog.Count; i++)
         {
-            if (requestStages[i].Kind != ApprovalStageKind.Custom
-                && requestStages[i].Kind != ApprovalStageKind.Methodology)
+            if (requestStages[i].CoordinationStageId != fixedCatalog[i].Id)
                 throw new InvalidOperationException(
-                    "Этапы после фиксированных (Юр. управление, Риск-менеджмент, Комплаенс) " +
-                    "должны иметь тип Custom или Методология");
+                    $"Этап {i + 1} маршрута всегда — «{fixedCatalog[i].Title}»");
+        }
+
+        for (var i = fixedCatalog.Count; i < requestStages.Count; i++)
+        {
+            if (requestStages[i].CoordinationStageId is not null)
+                throw new InvalidOperationException(
+                    "Этапы после обязательных должны быть произвольными (без ссылки на справочник)");
         }
 
         var approverIds = requestStages.Select(s => s.ApproverUserId).ToList();
@@ -1319,6 +1327,7 @@ public class VndApprovalService : IVndApprovalService
                 $"У пользователей нет права выступать в роли согласующего: {string.Join(", ", noApproverRight)}");
 
         var usersById = users.ToDictionary(u => u.Id);
+        var catalogById = fixedCatalog.ToDictionary(x => x.Id);
 
         var stages = new List<VndApprovalStage>();
         for (var i = 0; i < requestStages.Count; i++)
@@ -1326,23 +1335,21 @@ public class VndApprovalService : IVndApprovalService
             var reqStage = requestStages[i];
             var approver = usersById[reqStage.ApproverUserId];
 
-            var expectedOrgUnitId = reqStage.Kind switch
-            {
-                ApprovalStageKind.Legal => FixedApprovalOrgUnits.LegalOrgUnitId,
-                ApprovalStageKind.RiskManagement => FixedApprovalOrgUnits.RiskManagementOrgUnitId,
-                ApprovalStageKind.Compliance => FixedApprovalOrgUnits.ComplianceOrgUnitId,
-                ApprovalStageKind.Methodology => FixedApprovalOrgUnits.MethodologyOrgUnitId,
-                _ => (int?)null
-            };
+            var catalogEntry = reqStage.CoordinationStageId.HasValue
+                ? catalogById[reqStage.CoordinationStageId.Value]
+                : null;
+            var expectedOrgUnitId = catalogEntry?.OrgUnitId;
 
             if (expectedOrgUnitId.HasValue && approver.OrgUnitId != expectedOrgUnitId)
                 throw new InvalidOperationException(
-                    $"Согласующий на этапе {i + 1} ({reqStage.Kind}) должен относиться к соответствующему подразделению");
+                    $"Согласующий на этапе {i + 1} ({catalogEntry!.Title}) должен относиться к соответствующему подразделению");
 
             stages.Add(new VndApprovalStage
             {
                 Order = i + 1,
-                Kind = reqStage.Kind,
+                Kind = catalogEntry is not null ? ApprovalStageKind.Fixed : ApprovalStageKind.Custom,
+                Title = catalogEntry?.Title ?? "Доп. согласующий",
+                CoordinationStageId = catalogEntry?.Id,
                 OrgUnitId = approver.OrgUnitId ?? expectedOrgUnitId
                     ?? throw new InvalidOperationException("У согласующего не указано подразделение"),
                 ApproverUserId = approver.Id
@@ -1448,6 +1455,7 @@ public class VndApprovalService : IVndApprovalService
                 Id = s.Id,
                 Order = s.Order,
                 Kind = MapKind(s.Kind),
+                Title = s.Title ?? LegacyKindTitle(s.Kind),
                 OrgUnitId = s.OrgUnitId,
                 OrgUnitName = s.OrgUnit?.TitleRu ?? "",
                 ApproverUserId = s.ApproverUserId,
@@ -1570,7 +1578,20 @@ public class VndApprovalService : IVndApprovalService
         ApprovalStageKind.Compliance => "compliance",
         ApprovalStageKind.Custom => "custom",
         ApprovalStageKind.Methodology => "methodology",
+        ApprovalStageKind.Fixed => "fixed",
         _ => "custom"
+    };
+
+    /// <summary>Название этапа для маршрутов, построенных ДО перехода на динамический
+    /// справочник (VndApprovalStage.Title тогда ещё не заполнялся) - только для отображения
+    /// старой истории согласования, в новой логике не используется.</summary>
+    private static string LegacyKindTitle(ApprovalStageKind kind) => kind switch
+    {
+        ApprovalStageKind.Legal => "Юридическое управление",
+        ApprovalStageKind.RiskManagement => "Риск-менеджмент",
+        ApprovalStageKind.Compliance => "Комплаенс-контроль",
+        ApprovalStageKind.Methodology => "Методология",
+        _ => "Доп. согласующий"
     };
 
     private static string MapDecision(ApprovalStageDecision decision) => decision switch

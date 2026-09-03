@@ -1,10 +1,14 @@
-﻿namespace delosfera_server.Modules.Documents.VND.Models;
+namespace delosfera_server.Modules.Documents.VND.Models;
 
 /// <summary>
-/// Id подразделений для фиксированных этапов маршрута согласования.
-/// Пока что СП в dictionary_organization_unit
-/// TODO: сделать функцию для главного редактора - добавление фиксированных пользователей/СП во все маршруты
+/// УСТАРЕЛО и больше не используется. Раньше здесь хранились id 4 захардкоженных подразделений
+/// для фиксированных этапов - теперь СП каждого обязательного этапа хранится прямо в записи
+/// справочника CoordinationDefaultApprover.OrgUnitId (dictionaries/coordination-users) и
+/// редактируется через CRUD. Класс оставлен только чтобы не ломать возможные внешние ссылки/
+/// историю git - можно безопасно удалить отдельным коммитом после проверки, что нигде больше
+/// не используется.
 /// </summary>
+[Obsolete("Заменено динамическим справочником CoordinationDefaultApprover.OrgUnitId")]
 public static class FixedApprovalOrgUnits
 {
     public const int LegalOrgUnitId = 34;          // Юридическое управление

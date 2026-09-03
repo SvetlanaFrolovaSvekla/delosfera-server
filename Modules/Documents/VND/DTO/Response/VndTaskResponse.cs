@@ -26,9 +26,14 @@ public class VndTaskResponse
     /// (на каком круге сейчас редакция инициатора) — используется для фильтра "Этап
     /// согласования" на странице "Мои задачи".</summary>
     public string? StagePhase { get; set; }
-    /// <summary>Профиль этапа: "legal" | "risk_management" | "compliance" | "custom" | "methodology" —
-    /// подразделение, отвечающее за этап (только для coordination).</summary>
+    /// <summary>Профиль этапа: "legal" | "risk_management" | "compliance" | "custom" |
+    /// "methodology" | "fixed" — подразделение, отвечающее за этап (только для coordination).</summary>
     public string? StageKind { get; set; }
+    /// <summary>Название этапа для отображения ("Юридическое управление", "Доп. этап" и т.п.) —
+    /// см. VndApprovalStage.Title. Используй вместо StageKind для показа пользователю: с
+    /// динамическим справочником обязательных этапов кол-во возможных названий не ограничено
+    /// пятью значениями enum.</summary>
+    public string? StageTitle { get; set; }
     public DateTime? DeadlineAt { get; set; }
 
     /// <summary>Инициатор редакции (кто отправил на согласование)</summary>

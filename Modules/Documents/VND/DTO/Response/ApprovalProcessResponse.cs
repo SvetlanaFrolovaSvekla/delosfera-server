@@ -42,7 +42,12 @@ public class ApprovalStageResponse
 {
     public int Id { get; set; }
     public int Order { get; set; }
-    public required string Kind { get; set; } 
+    public required string Kind { get; set; }
+
+    /// <summary>Название этапа - снимок на момент запуска согласования (см.
+    /// VndApprovalStage.Title). Для маршрутов, построенных до перехода на динамический
+    /// справочник, выводится из Kind.</summary>
+    public required string Title { get; set; }
 
     public int OrgUnitId { get; set; }
     public required string OrgUnitName { get; set; }
