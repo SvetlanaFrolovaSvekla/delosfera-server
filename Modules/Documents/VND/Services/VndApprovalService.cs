@@ -41,6 +41,7 @@ public class VndApprovalService : IVndApprovalService
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<VndApprovalService> _logger;
     private readonly IActivityLogService _activityLog;
+    private readonly IFixedApprovalUnitResolver _fixedUnits;
 
     public VndApprovalService(
         DelosferaDbContext db,
@@ -48,7 +49,8 @@ public class VndApprovalService : IVndApprovalService
         INotificationService notifications,
         ICurrentUserService currentUser,
         ILogger<VndApprovalService> logger,
-        IActivityLogService activityLog)
+        IActivityLogService activityLog,
+        IFixedApprovalUnitResolver fixedUnits)
     {
         _db = db;
         _fileService = fileService;
@@ -56,6 +58,7 @@ public class VndApprovalService : IVndApprovalService
         _currentUser = currentUser;
         _logger = logger;
         _activityLog = activityLog;
+        _fixedUnits = fixedUnits;
     }
 
     private bool IsChiefEditor() =>
@@ -1101,14 +1104,10 @@ public class VndApprovalService : IVndApprovalService
             var reqStage = requestStages[i];
             var approver = usersById[reqStage.ApproverUserId];
 
-            var expectedOrgUnitId = reqStage.Kind switch
-            {
-                ApprovalStageKind.Legal => FixedApprovalOrgUnits.LegalOrgUnitId,
-                ApprovalStageKind.RiskManagement => FixedApprovalOrgUnits.RiskManagementOrgUnitId,
-                ApprovalStageKind.Compliance => FixedApprovalOrgUnits.ComplianceOrgUnitId,
-                ApprovalStageKind.Methodology => FixedApprovalOrgUnits.MethodologyOrgUnitId,
-                _ => (int?)null
-            };
+            // Подразделение этапа берётся из справочника по номеру портала, а не
+            // из номера, прописанного в коде: справочник переживает слияния и
+            // переносы, наш номер — нет.
+            var expectedOrgUnitId = await _fixedUnits.ResolveAsync(reqStage.Kind);
 
             if (expectedOrgUnitId.HasValue && approver.OrgUnitId != expectedOrgUnitId)
                 throw new InvalidOperationException(

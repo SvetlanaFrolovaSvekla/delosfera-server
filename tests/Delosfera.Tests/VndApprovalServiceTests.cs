@@ -22,7 +22,7 @@ public class VndApprovalServiceTests
     private static VndApprovalService NewService(DelosferaDbContext db) =>
         new(db, new NoopFileStorage(), new NoopNotificationService(),
             new FakeCurrentUser(Approver1), NullLogger<VndApprovalService>.Instance,
-            new FakeActivityLog());
+            new FakeActivityLog(), new FixedApprovalUnitResolver(db));
 
     // Двухэтапный процесс на первичной фазе: решение по одному этапу не завершает фазу,
     // поэтому изолируем логику DecideAsync без тяжёлого перехода фаз.

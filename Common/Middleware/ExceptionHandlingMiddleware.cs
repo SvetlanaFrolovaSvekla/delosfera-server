@@ -29,7 +29,13 @@ public class ExceptionHandlingMiddleware
         {
             var status = ex switch
             {
-                UnauthorizedAccessException => StatusCodes.Status401Unauthorized,
+                // Вошедшему отказывают в праве — это 403, а не 401. По 401 клиент
+                // идёт обновлять токен и, не сумев, выходит из системы: попытка
+                // отозвать чужую заявку выглядела бы концом сессии. 401 остаётся
+                // за тем, кто действительно не аутентифицирован.
+                UnauthorizedAccessException => context.User.Identity?.IsAuthenticated == true
+                    ? StatusCodes.Status403Forbidden
+                    : StatusCodes.Status401Unauthorized,
                 KeyNotFoundException => StatusCodes.Status404NotFound,
                 InvalidOperationException => StatusCodes.Status400BadRequest,
                 ArgumentException => StatusCodes.Status400BadRequest,

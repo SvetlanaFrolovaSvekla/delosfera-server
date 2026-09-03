@@ -85,6 +85,7 @@ builder.Services.Configure<delosfera_server.Common.Security.PasswordPolicyOption
 builder.Services.AddSingleton<delosfera_server.Common.Security.IPasswordPolicy,
     delosfera_server.Common.Security.PasswordPolicy>();
 builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
+builder.Services.AddScoped<IFixedApprovalUnitResolver, FixedApprovalUnitResolver>();
 builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();
 

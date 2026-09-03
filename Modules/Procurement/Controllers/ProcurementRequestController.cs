@@ -96,6 +96,13 @@ public class ProcurementRequestController : ControllerBase
         {
             return NotFound(new {message = ex.Message});
         }
+        // Отказ в праве — это 403, а не 401: пользователь вошёл, просто действие
+        // не его. По 401 клиент идёт обновлять токен и, не сумев, выкидывает из
+        // системы — попытка отозвать чужую заявку выглядела бы концом сессии.
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new {message = ex.Message});
+        }
         catch (ArgumentException ex)
         {
             return BadRequest(new {message = ex.Message});
