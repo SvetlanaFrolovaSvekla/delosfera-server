@@ -16,7 +16,22 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
 
         var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        var allPermissions = Enum.GetValues<PermissionCode>().Select(p => (int)p).ToArray();
+        // Членство в коллегиальном органе — не право доступа, а состав органа:
+        // человек либо входит в Правление, либо нет, и администратор системы в
+        // него не входит. Пока эти признаки лежали в общем перечне, «все права»
+        // делали членами Правления айтишников и редакторов ВНД — в поле «Кому»
+        // служебной записки предлагались они, а настоящих членов там не было.
+        var membershipFlags = new[]
+        {
+            PermissionCode.MemberOfBoard,
+            PermissionCode.MemberOfKpa,
+            PermissionCode.MemberOfCreditCommittee,
+        };
+
+        var allPermissions = Enum.GetValues<PermissionCode>()
+            .Where(p => !membershipFlags.Contains(p))
+            .Select(p => (int)p)
+            .ToArray();
 
         var ordinaryUserPermissions = new[]
         {

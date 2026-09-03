@@ -50,6 +50,11 @@ public static class RolePermissionDefaults
         // председатель, поэтому здесь одно право, а не два.
         ("Правлени", [
             PermissionCode.ViewAllSz,
+
+            // Признак состава органа: по нему собирается поле «Кому» у записки на
+            // Правление и полная повестка заседания. Раньше он попадал в «все
+            // права» и доставался администраторам, а членам Правления — нет.
+            PermissionCode.MemberOfBoard,
         ]),
 
         // Председатель и исполняющий его обязанности: вынести подписанную записку
@@ -58,6 +63,7 @@ public static class RolePermissionDefaults
         ("Председател", [
             PermissionCode.ViewAllSz,
             PermissionCode.SubmitSzToBody,
+            PermissionCode.MemberOfBoard,
         ]),
 
         // Секретарь органа отбирает вопросы и видит переписку по своим темам.
