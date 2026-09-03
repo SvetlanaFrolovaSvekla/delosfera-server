@@ -10,9 +10,13 @@ public class CoordinationDefaultApproverService : ICoordinationDefaultApproverSe
 {
     private readonly DelosferaDbContext _db;
 
-    public CoordinationDefaultApproverService(DelosferaDbContext db)
+    private readonly IFixedApprovalUnitResolver _fixedUnits;
+
+    public CoordinationDefaultApproverService(
+        DelosferaDbContext db, IFixedApprovalUnitResolver fixedUnits)
     {
         _db = db;
+        _fixedUnits = fixedUnits;
     }
 
     public async Task<List<CoordinationDefaultApproverResponse>> GetAllAsync()

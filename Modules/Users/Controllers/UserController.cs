@@ -99,18 +99,23 @@ public class UserController : ControllerBase
     /// <param name="isBlocked">Фильтр по статусу блокировки</param>
     /// <response code="200">Список пользователей получен успешно</response>
     [HttpGet]
-    [ProducesResponseType(typeof(List<UserResponse>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<UserResponse>>> GetAll(
+    [ProducesResponseType(typeof(UserPageResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<UserPageResponse>> GetPage(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
         [FromQuery] UserSortBy sortBy = UserSortBy.CreatedAtAsc,
         [FromQuery] string? search = null,
         [FromQuery] List<int>? orgUnitIds = null,
         [FromQuery] List<int>? positionIds = null,
         [FromQuery] List<int>? roleIds = null,
-        [FromQuery] UserSource? source = null,
+        [FromQuery] List<UserSource>? sources = null,
         [FromQuery] bool? isBlocked = null)
     {
         var language = _languageResolver.Resolve(Request);
-        var result = await _service.GetAllAsync(sortBy, search, orgUnitIds, positionIds, roleIds, source, isBlocked, language);
+
+        var result = await _service.GetPageAsync(
+            page, pageSize, sortBy, search, orgUnitIds, positionIds, roleIds, sources, isBlocked, language);
+
         return Ok(result);
     }
 

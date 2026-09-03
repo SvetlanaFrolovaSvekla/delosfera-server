@@ -6,13 +6,22 @@ namespace delosfera_server.Modules.Users.Services;
 
 public interface IUserService
 {
-    Task<List<UserResponse>> GetAllAsync(
+    /// <summary>
+    /// Страница списка сотрудников со счётчиками по состояниям.
+    ///
+    /// Страница, а не весь список: полный ответ на пятистах сотрудниках — семьсот
+    /// килобайт, и он рос вместе со штатом. Для выбора человека в форме есть
+    /// отдельный лёгкий список — четыре поля вместо всей учётной записи.
+    /// </summary>
+    Task<UserPageResponse> GetPageAsync(
+        int page,
+        int pageSize,
         UserSortBy sortBy,
         string? search,
         List<int>? orgUnitIds,
         List<int>? positionIds,
         List<int>? roleIds,
-        UserSource? source,
+        List<UserSource>? sources,
         bool? isBlocked,
         string languageCode);
 

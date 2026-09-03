@@ -98,6 +98,18 @@ public class TenderDto
     public DateOnly? SubmissionDeadline { get; set; }
     public DateOnly? OpenedOn { get; set; }
 
+    /// <summary>
+    /// До какой даты комиссия обязана изучить заявки и оформить протокол:
+    /// вскрытие плюс десять рабочих дней (п. 11.2/11.3 Положения).
+    /// </summary>
+    public DateOnly? StudyDeadline { get; set; }
+
+    /// <summary>
+    /// Сколько рабочих дней осталось на изучение. Отрицательное — срок прошёл:
+    /// видно не только то, что просрочено, но и насколько.
+    /// </summary>
+    public int? StudyDaysLeft { get; set; }
+
     public string? CommissionOrderNumber { get; set; }
     public DateOnly? CommissionOrderDate { get; set; }
 

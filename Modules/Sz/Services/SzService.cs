@@ -32,11 +32,8 @@ public interface ISzService
     /// <summary>Решение адресата по существу вопроса — доступно только ему.</summary>
     Task<SzDetails> DecideAsAddresseeAsync(int id, string decision, int actorUserId);
 
-    /// <summary>
-    /// Решение подписанта о дальнейшем ходе записки: на коллегиальный орган,
-    /// в Сектор закупок либо на исполнение.
-    /// </summary>
-    Task<SzDetails> DecideAsSignerAsync(int id, SzSignerDecisionRequest request, int actorUserId);
+    /// <summary>Вынести вопрос по записке на коллегиальный орган.</summary>
+    Task<SzDetails> SubmitToBodyAsync(int id, SzToBodyRequest request, int actorUserId);
 
     /// <summary>
     /// Зарегистрировать: присвоить номер, дату и срок исполнения, запустить маршрут
@@ -169,83 +166,28 @@ public class SzService : ISzService
     /// означал, что это читает кто угодно.
     ///
     /// Три круга:
-    ///   • сотрудник — свои записки, пришедшие к нему на согласование и те, по
-    ///     которым у него есть поручение;
-    ///   • руководитель подразделения — всё по своему подразделению и вложенным
-    ///     в него: управление отвечает за свои отделы;
-    ///   • Председатель, заместители и делопроизводство — весь реестр.
-    ///
-    /// Чужой черновик не показывается никому, включая последний круг: черновик —
-    /// ещё не документ, и автор вправе передумать, ни перед кем не объясняясь.
+    ///   • автор — свои записки, пришедшие к нему на согласование, где он адресат
+    ///     или подписант, и те, по которым у него есть поручение;
+    ///   • начальник отдела — записки своего отдела;
+    ///   • начальник управления — своего управления и вложенных в него отделов:
+    ///     управление отвечает за свои отделы;
+    ///   • Председатель, заместители и Сектор делопроизводства — весь реестр,
+    ///     кроме чужих черновиков;
+    ///   • администратор системы — всё, включая чужие черновики: он разбирает
+    ///     то, что застряло, и слепых зон у него быть не должно.
     /// </summary>
-    private async Task<IQueryable<SzDocument>> ApplyVisibilityAsync(
-        IQueryable<SzDocument> query, int currentUserId)
-    {
-        // Чужие черновики отсекаются всегда и первым делом.
-        query = query.Where(x => x.Document!.StatusCode != SzStatus.Draft
-                                 || x.Document!.AuthorId == currentUserId);
-
-        if (_currentUser.HasPermission(PermissionCode.ViewAllSz))
-            return query;
-
-        var units = await VisibleUnitIdsAsync(currentUserId);
-
-        return query.Where(x =>
-            // свои
-            x.Document!.AuthorId == currentUserId
-            // подразделение, которым руководит
-            || (x.AuthorUnitId != null && units.Contains(x.AuthorUnitId.Value))
-            // пришло на согласование — на любом круге, не только на текущем
-            || x.Approvers.Any(a => a.UserId == currentUserId)
-            || _db.RouteParticipants.Any(p => p.UserId == currentUserId
-                                              && p.RouteStep!.RouteInstance!.DocumentId == x.DocumentId)
-            // назначен адресатом или подписантом
-            || x.AddresseeUserId == currentUserId
-            || x.SignerUserId == currentUserId
-            // есть поручение по записке
-            || x.Assignments.Any(a => a.AssigneeUserId == currentUserId));
-    }
-
     /// <summary>
-    /// Подразделения, записки которых видит руководитель: его собственное и все
-    /// вложенные. Управление отвечает за свои отделы, значит и видеть должно их.
-    ///
-    /// Пусто, если человек ничем не руководит.
+    /// Сузить выборку до записок, доступных пользователю. Само правило вынесено
+    /// в <see cref="SzVisibility"/>: им пользуется и реестр, и поиск, а
+    /// ограничение, действующее в одном месте и не действующее в другом,
+    /// ничего не ограничивает.
     /// </summary>
-    private async Task<List<int>> VisibleUnitIdsAsync(int currentUserId)
-    {
-        var headed = await _db.OrganizationUnits
-            .Where(u => u.HeadUserId == currentUserId)
-            .Select(u => u.Id)
-            .ToListAsync();
-
-        if (headed.Count == 0) return headed;
-
-        // Дерево читаем целиком один раз: подразделений пара сотен, а спуск по
-        // родителям запросом на каждый уровень — это запрос на каждый уровень.
-        var all = await _db.OrganizationUnits
-            .Select(u => new {u.Id, u.ParentId})
-            .ToListAsync();
-
-        var byParent = all
-            .Where(u => u.ParentId != null)
-            .GroupBy(u => u.ParentId!.Value)
-            .ToDictionary(g => g.Key, g => g.Select(u => u.Id).ToList());
-
-        var result = new HashSet<int>(headed);
-        var queue = new Queue<int>(headed);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            if (!byParent.TryGetValue(current, out var children)) continue;
-
-            foreach (var child in children)
-                if (result.Add(child)) queue.Enqueue(child);
-        }
-
-        return result.ToList();
-    }
+    private Task<IQueryable<SzDocument>> ApplyVisibilityAsync(
+        IQueryable<SzDocument> query, int currentUserId) =>
+        SzVisibility.ApplyAsync(
+            query, _db, currentUserId,
+            canSeeAll: _currentUser.HasPermission(PermissionCode.ViewAllSz),
+            canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
 
     public async Task<SzDetails?> GetAsync(int id)
     {
@@ -286,6 +228,7 @@ public class SzService : ISzService
         await _db.SaveChangesAsync();
 
         await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
+        await ReplaceProposedAssigneesAsync(sz.Id, request.ProposedAssigneeUserIds);
         await ReplaceEmployeesAsync(sz.Id, request.Employees);
 
         await _audit.LogAsync("Sz", sz.Id, "Created", authorId, new { kind = kind.TitleRu });
@@ -322,6 +265,7 @@ public class SzService : ISzService
         ApplyFields(sz, request);
         await ApplyRubricsAsync(sz, request.RubricIds);
         await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
+        await ReplaceProposedAssigneesAsync(sz.Id, request.ProposedAssigneeUserIds);
         await ReplaceEmployeesAsync(sz.Id, request.Employees);
 
         await _db.SaveChangesAsync();
@@ -459,9 +403,23 @@ public class SzService : ISzService
         if (sz.AddresseeUserId != actorUserId)
             throw new UnauthorizedAccessException("Решение по записке выносит только её адресат");
 
-        if (sz.Document!.StatusCode != SzStatus.OnAddresseeDecision)
+        // Записка доходит до адресата двумя путями. Без подписания она попадает
+        // к нему прямо с согласования. А когда адресат её же и подписывает,
+        // после подписи она сразу на исполнении — резолюция здесь следующее
+        // действие того же человека, а не отдельный этап. Требовать для неё
+        // «ожидание решения» значило закрыть отписку исполнителям всем, кто
+        // записку подписал, — то есть тем, ради кого она и делалась.
+        var дошлаДоАдресата =
+            sz.Document!.StatusCode == SzStatus.OnAddresseeDecision
+            || sz.Document.StatusCode == SzStatus.OnExecution;
+
+        if (!дошлаДоАдресата)
             throw new InvalidOperationException(
                 "Решение выносится после согласования: записка ещё не дошла до адресата");
+
+        if (sz.AddresseeDecision is not null)
+            throw new InvalidOperationException(
+                "Решение по записке уже вынесено; поручения выдаются отдельно");
 
         if (string.IsNullOrWhiteSpace(decision))
             throw new InvalidOperationException("Напишите решение по записке");
@@ -487,88 +445,41 @@ public class SzService : ISzService
     }
 
     /// <summary>
-    /// Решение подписанта о дальнейшем ходе записки.
+    /// Вынести вопрос по записке на коллегиальный орган.
     ///
-    /// Подпись говорит «с текстом согласен», но не говорит, что делать дальше.
-    /// Дальше записка расходится по трём путям, и выбирает подписант — он
-    /// последний, кто видел её целиком, и выше него по ней никого нет.
+    /// Записка не попадает в повестку сама: она появляется у секретаря органа в
+    /// «Вопросах на рассмотрение», и на какое заседание её вынести — решает он.
     ///
-    /// На орган записка уходит не сразу в повестку: секретарь берёт её из
-    /// «Вопросов на рассмотрение» в повестку конкретного заседания. На какое
-    /// именно — система решить не может, это дело секретаря.
+    /// Выносит тот, кому записка адресована: он прочитал её по существу. Право
+    /// на это проверяется отдельно — начальник управления отписывает записку
+    /// исполнителям, но вопрос на Правление не выносит.
     /// </summary>
-    public async Task<SzDetails> DecideAsSignerAsync(
-        int id, SzSignerDecisionRequest request, int actorUserId)
+    public async Task<SzDetails> SubmitToBodyAsync(int id, SzToBodyRequest request, int actorUserId)
     {
         var sz = await _db.SzDocuments.Include(x => x.Document)
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
-        if (sz.Document!.StatusCode != SzStatus.OnSignerDecision)
-            throw new InvalidOperationException(
-                "Решение о дальнейшем ходе выносится после подписания записки");
-
-        if (sz.SignerUserId != actorUserId)
+        if (sz.AddresseeUserId != actorUserId)
             throw new UnauthorizedAccessException(
-                "Решение о дальнейшем ходе записки выносит её подписант");
+                "Вопрос выносит тот, кому записка адресована");
 
-        var subject = request.Subject?.Trim();
+        // До подписания выносить нечего: вопрос ставится по записке, с которой
+        // адресат уже согласился, подписав её.
+        if (sz.Document!.StatusCode is not (SzStatus.OnExecution or SzStatus.OnAddresseeDecision))
+            throw new InvalidOperationException(
+                "Вопрос выносится по подписанной записке, переданной на исполнение");
 
-        switch (request.Route)
-        {
-            case SzSignerRoute.Board:
-            {
-                var body = request.Body
-                    ?? throw new ArgumentException("Укажите орган, на который выносится вопрос");
+        sz.SubmitToBody = request.Body;
+        sz.SubmitToBodyQuestion = request.Question?.Trim();
+        sz.SubmitToBodyRequestedAt = DateTime.UtcNow;
+        sz.SubmitToBodyRequestedByUserId = actorUserId;
 
-                sz.SubmitToBody = body;
-                sz.SubmitToBodyQuestion = subject;
-                sz.SubmitToBodyRequestedAt = DateTime.UtcNow;
-                sz.SubmitToBodyRequestedByUserId = actorUserId;
-
-                await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnBoardReview, actorUserId);
-                break;
-            }
-
-            case SzSignerRoute.Procurement:
-            {
-                // Сначала перевод, потом заявка: закупочный контур принимает
-                // записку, переданную на исполнение, — по ней он и заводит заявку.
-                // Обратный порядок означал бы заявку по записке, которая ещё
-                // никуда не передана.
-                await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, actorUserId);
-                await _db.SaveChangesAsync();
-
-                // Проверки вида записки, суммы и бюджета остаются за закупочным
-                // контуром: дублировать их здесь значит однажды разойтись.
-                await _procurement.HandOverAsync(
-                    sz.Id, new SzProcurementHandoffRequest {Subject = subject, Note = request.Note}, actorUserId);
-                break;
-            }
-
-            default:
-                // Ни орган, ни закупка: записка идёт обычным путём. Если у неё
-                // назван адресат, решение по существу выносит он.
-                await MoveAfterSigningAsync(sz, actorUserId);
-                break;
-        }
-
-        var task = await _db.WorkflowTasks.FirstOrDefaultAsync(t =>
-            t.DocumentId == sz.DocumentId
-            && t.Type == SzRouteCompletionHandler.SignerDecisionTask
-            && t.State == WorkflowTaskState.Open);
-
-        if (task is not null) task.State = WorkflowTaskState.Done;
-
+        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnBoardReview, actorUserId);
         await _db.SaveChangesAsync();
 
-        await _audit.LogAsync("Sz", sz.Id, "SignerDecided", actorUserId, new
-        {
-            route = request.Route.ToString(),
-            body = request.Body?.ToString(),
-            subject,
-            note = request.Note,
-        });
+        await _audit.LogAsync("Sz", sz.Id, "SubmittedToBody", actorUserId,
+            new {body = request.Body.ToString(), question = sz.SubmitToBodyQuestion});
 
         return (await GetAsync(sz.Id))!;
     }
@@ -598,7 +509,10 @@ public class SzService : ISzService
 
         // Подписант получает записку после регистрации: он подписывает то, что уже
         // согласовано и внесено в книгу регистрации, и менять там больше нечего.
-        if (sz.SignerUserId is { } signer)
+        // Раньше подписантом был отдельный человек; теперь записку подписывает
+        // адресат. У записок, заведённых до объединения, подписант свой — их
+        // маршрут строится по нему.
+        if ((sz.AddresseeUserId ?? sz.SignerUserId) is { } signer)
         {
             var instance = await _routeEngine.InstantiateForSignerAsync(sz.DocumentId, signer);
 
@@ -789,6 +703,7 @@ public class SzService : ISzService
             .Include(x => x.SignerUser)
             .Include(x => x.AddresseeUser)
             .Include(x => x.Approvers).ThenInclude(a => a.User)
+            .Include(x => x.ProposedAssignees).ThenInclude(a => a.User).ThenInclude(u => u!.Position)
             .Include(x => x.Employees).ThenInclude(e => e.OrgUnit)
             .Include(x => x.Rubrics);
 
@@ -874,6 +789,29 @@ public class SzService : ISzService
     /// Полная замена состава согласующих: порядок в списке и есть очерёдность
     /// прохождения маршрута.
     /// </summary>
+    /// <summary>
+    /// Кого автор предлагает в исполнители. Поручения из этого списка не
+    /// возникают — их выдаёт адресат резолюцией; это подсказка ему.
+    /// </summary>
+    private async Task ReplaceProposedAssigneesAsync(int szId, List<int> userIds)
+    {
+        var existing = await _db.SzProposedAssignees.Where(a => a.SzDocumentId == szId).ToListAsync();
+        _db.SzProposedAssignees.RemoveRange(existing);
+
+        var distinct = userIds.Distinct().ToList();
+        for (var i = 0; i < distinct.Count; i++)
+        {
+            _db.SzProposedAssignees.Add(new SzProposedAssignee
+            {
+                SzDocumentId = szId,
+                UserId = distinct[i],
+                Order = i + 1,
+            });
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
     private async Task ReplaceApproversAsync(int szId, List<int> userIds)
     {
         var existing = await _db.SzApprovers.Where(a => a.SzDocumentId == szId).ToListAsync();
@@ -920,6 +858,16 @@ public class SzService : ISzService
         d.AddresseeDecision = x.AddresseeDecision;
         d.AddresseeDecisionAt = x.AddresseeDecisionAt;
         d.Approvers = x.Approvers
+            .OrderBy(a => a.Order)
+            .Select(a => new SzApproverDto
+            {
+                UserId = a.UserId,
+                FullName = a.User?.FullName ?? string.Empty,
+                Position = a.User?.Position?.TitleRu,
+                Order = a.Order,
+            })
+            .ToList();
+        d.ProposedAssignees = x.ProposedAssignees
             .OrderBy(a => a.Order)
             .Select(a => new SzApproverDto
             {

@@ -13,6 +13,12 @@ namespace delosfera_server.Modules.Procurement.Services;
 public interface IProtocolService
 {
     Task<ProtocolDto?> GetAsync(int requestId);
+
+    /// <summary>
+    /// Все протоколы по заявке — по одному на заседание комиссии.
+    /// Свежие сверху: обычно нужен последний, а прежние читают ради хода дела.
+    /// </summary>
+    Task<List<ProtocolDto>> ListAsync(int requestId);
     Task<ProtocolDto> GenerateAsync(int requestId, int actorUserId);
     Task<ProtocolDto> UpdateAsync(int requestId, ProtocolUpdateRequest request, int actorUserId);
     Task<ProtocolDto> SignAsync(int requestId, ProtocolSignRequest request, int actorUserId);
@@ -50,6 +56,33 @@ public class ProtocolService : IProtocolService
         return protocol is null ? null : await BuildAsync(protocol);
     }
 
+    public async Task<List<ProtocolDto>> ListAsync(int requestId)
+    {
+        var protocols = await ProtocolQuery()
+            .Where(p => p.RequestId == requestId)
+            .OrderByDescending(p => p.MeetingDate ?? p.ProtocolDate)
+            .ThenByDescending(p => p.Id)
+            .ToListAsync();
+
+        var result = new List<ProtocolDto>(protocols.Count);
+        foreach (var p in protocols) result.Add(await BuildAsync(p));
+
+        return result;
+    }
+
+    /// <summary>
+    /// Дата заседания, итоги которого оформляются. Берётся у действующего
+    /// конкурса; у простой закупки комиссии нет, и протокол остаётся один.
+    /// </summary>
+    private async Task<DateOnly?> ДатаЗаседанияАsync(int requestId) =>
+        await _db.Tenders
+            .Where(t => t.RequestId == requestId
+                        && t.Status != TenderStatus.Cancelled
+                        && t.Status != TenderStatus.Failed)
+            .OrderByDescending(t => t.Id)
+            .Select(t => t.MeetingDate)
+            .FirstOrDefaultAsync();
+
     public async Task<ProtocolDto> GenerateAsync(int requestId, int actorUserId)
     {
         var request = await _db.ProcurementRequests
@@ -62,29 +95,16 @@ public class ProtocolService : IProtocolService
             throw new InvalidOperationException(
                 "Протокол закупки не требуется: сумма не превышает установленный порог (PRC-10)");
 
-        // Источник строк зависит от способа закупки. У конкурса отбор идёт по
-        // конкурсным заявкам, и коммерческих предложений там нет вовсе: протокол,
-        // построенный по ним, отказывался оформляться со словами «победитель не
-        // определён» — при том что победитель конкурса был определён комиссией.
-        var tender = await _db.Tenders
-            .Include(t => t.Bids).ThenInclude(b => b.Supplier)
-            .Include(t => t.Bids).ThenInclude(b => b.Votes).ThenInclude(v => v.Member).ThenInclude(m => m!.User)
-            .Include(t => t.Commission).ThenInclude(m => m.User)
-            .Where(t => t.RequestId == requestId
-                        && t.Status != TenderStatus.Cancelled
-                        && t.Status != TenderStatus.Failed)
-            .OrderByDescending(t => t.Id)
-            .FirstOrDefaultAsync();
-
-        var варианты = tender is not null
-            ? TenderProtocolRows.Build(tender)
-            : TenderProtocolRows.Build(await _proposals.GetComparisonAsync(requestId));
-
+        var варианты = await ВариантыОтбораАsync(requestId);
         var winner = варианты.FirstOrDefault(v => v.IsWinner)
                      ?? throw new InvalidOperationException(
                          "Протокол формируется после определения победителя закупки");
 
-        var protocol = await LoadAsync(requestId);
+        // Протокол оформляется на заседание: у конкурса — на то, что назначено,
+        // у простой закупки заседаний нет и протокол один.
+        var датаЗаседания = await ДатаЗаседанияАsync(requestId);
+
+        var protocol = await LoadForMeetingAsync(requestId, датаЗаседания);
         var isNew = protocol is null;
 
         if (protocol is { Status: ProtocolStatus.Approved })
@@ -94,6 +114,7 @@ public class ProtocolService : IProtocolService
         {
             RequestId = requestId,
             ProtocolDate = _clock.Today,
+            MeetingDate = датаЗаседания,
             MethodTitle = request.Method!.TitleRu,
             Subject = request.Subject,
             ContentHash = string.Empty,
@@ -243,13 +264,30 @@ public class ProtocolService : IProtocolService
         return await BuildAsync((await LoadAsync(requestId))!);
     }
 
+    /// <summary>
+    /// Последний протокол заявки. Протоколов теперь несколько — по одному на
+    /// заседание комиссии, — и «протокол закупки» без уточнения означает
+    /// последний: именно его подписывают и по нему заключают договор.
+    /// </summary>
     private async Task<ProcurementProtocol?> LoadAsync(int requestId) =>
-        await _db.ProcurementProtocols
+        await ProtocolQuery()
+            .Where(p => p.RequestId == requestId)
+            .OrderByDescending(p => p.MeetingDate ?? p.ProtocolDate)
+            .ThenByDescending(p => p.Id)
+            .FirstOrDefaultAsync();
+
+    /// <summary>Протокол конкретного заседания — по нему решается, создавать новый или пересобрать.</summary>
+    private async Task<ProcurementProtocol?> LoadForMeetingAsync(int requestId, DateOnly? meetingDate) =>
+        await ProtocolQuery()
+            .Where(p => p.RequestId == requestId && p.MeetingDate == meetingDate)
+            .FirstOrDefaultAsync();
+
+    private IQueryable<ProcurementProtocol> ProtocolQuery() =>
+        _db.ProcurementProtocols
             .Include(p => p.Rows)
             .Include(p => p.Signatures).ThenInclude(s => s.User)
             .Include(p => p.MainSupplier)
-            .Include(p => p.ReserveSupplier)
-            .FirstOrDefaultAsync(p => p.RequestId == requestId);
+            .Include(p => p.ReserveSupplier);
 
     private async Task RevokeSignaturesAsync(int protocolId, string reason)
     {
@@ -279,12 +317,39 @@ public class ProtocolService : IProtocolService
         return $"{prefix}{seq:D4}";
     }
 
+    /// <summary>
+    /// Варианты отбора по заявке — то, между чем выбирала комиссия.
+    ///
+    /// Источник зависит от способа закупки: у конкурса это конкурсные заявки, а
+    /// коммерческих предложений там нет вовсе. Метод один на всех, кому нужен
+    /// этот список: строки протокола и сверка его с текущим отбором обязаны
+    /// смотреть в одно место, иначе протокол сравнивается с пустотой и вечно
+    /// считается устаревшим.
+    /// </summary>
+    private async Task<List<ProtocolOption>> ВариантыОтбораАsync(int requestId)
+    {
+        var tender = await _db.Tenders
+            .Include(t => t.Bids).ThenInclude(b => b.Supplier)
+            .Include(t => t.Bids).ThenInclude(b => b.Votes).ThenInclude(v => v.Member).ThenInclude(m => m!.User)
+            .Include(t => t.Commission).ThenInclude(m => m.User)
+            .Where(t => t.RequestId == requestId
+                        && t.Status != TenderStatus.Cancelled
+                        && t.Status != TenderStatus.Failed)
+            .OrderByDescending(t => t.Id)
+            .FirstOrDefaultAsync();
+
+        return tender is not null
+            ? TenderProtocolRows.Build(tender)
+            : TenderProtocolRows.Build(await _proposals.GetComparisonAsync(requestId));
+    }
+
     private async Task<ProtocolDto> BuildAsync(ProcurementProtocol p)
     {
-        // Протокол сверяется с текущим отбором: если предложения или победитель
-        // изменились после формирования, документ помечается устаревшим.
-        var comparison = await _proposals.GetComparisonAsync(p.RequestId);
-        var currentWinner = comparison.Proposals.FirstOrDefault(x => x.IsWinner);
+        // Протокол сверяется с текущим отбором: если состав вариантов или
+        // победитель изменились после формирования, документ помечается устаревшим.
+        var варианты = await ВариантыОтбораАsync(p.RequestId);
+        var currentWinner = варианты.FirstOrDefault(x => x.IsWinner);
+        var lowestPrice = варианты.Where(v => v.Eligible).Select(v => (decimal?)v.Price).Min();
 
         var dto = new ProtocolDto
         {
@@ -292,6 +357,7 @@ public class ProtocolService : IProtocolService
             RequestId = p.RequestId,
             RegNumber = p.RegNumber,
             ProtocolDate = p.ProtocolDate,
+            MeetingDate = p.MeetingDate,
             Status = p.Status,
             StatusTitle = StatusTitle(p.Status),
             MethodTitle = p.MethodTitle,
@@ -334,10 +400,10 @@ public class ProtocolService : IProtocolService
             currentWinner is null ||
             currentWinner.SupplierId != p.MainSupplierId ||
             currentWinner.Price != p.MainAmount ||
-            comparison.Proposals.Count != p.Rows.Count;
+            варианты.Count != p.Rows.Count;
 
         dto.RequiresSelectionBasis =
-            comparison.LowestPrice is { } lowest && p.MainAmount is { } main && main > lowest;
+            lowestPrice is { } lowest && p.MainAmount is { } main && main > lowest;
 
         if (dto.RequiresSelectionBasis && string.IsNullOrWhiteSpace(p.SelectionBasis))
             dto.Blockers.Add("Победитель не с наименьшей ценой — заполните основание выбора (PRC-12)");

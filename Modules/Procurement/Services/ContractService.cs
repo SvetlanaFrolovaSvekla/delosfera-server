@@ -17,6 +17,12 @@ public interface IContractService
     Task<ContractDto> AddActAsync(int id, DeliveryActRequest request, int actorUserId);
     Task<ContractDto> ApproveActAsync(int actId, bool asCurator, int actorUserId);
     Task<ContractDto> TerminateAsync(int id, ContractTerminateRequest request, int actorUserId);
+
+    /// <summary>
+    /// Приобрести у поставщика дополнительное количество — в пределах четверти
+    /// стоимости договора и по согласованной служебной записке.
+    /// </summary>
+    Task<ContractDto> TopUpAsync(int id, ContractTopUpRequest request, int actorUserId);
 }
 
 /// <summary>
@@ -33,6 +39,12 @@ public class ContractService : IContractService
     /// <summary>Порог, свыше которого акт дополнительно утверждает куратор Правления (PRC-19).</summary>
     private const string CuratorActThresholdCode = "CuratorActApprovalThreshold";
     private const decimal DefaultCuratorActThreshold = 1_000_000m;
+
+    /// <summary>
+    /// Предел дополнительного количества — четверть стоимости договора,
+    /// заключённого по результатам конкурса (п. 6 и 7 раздела VIII Положения).
+    /// </summary>
+    private const decimal TopUpShare = 0.25m;
 
     private readonly DelosferaDbContext _db;
     private readonly IDocumentService _documents;
@@ -131,6 +143,10 @@ public class ContractService : IContractService
             TenderId = tender?.Id,
             SupplierId = supplier.Id,
             Amount = amount,
+
+            // Стоимость при заключении запоминается отдельно: от неё считается
+            // право на дополнительное количество, и она не меняется допоставками.
+            InitialAmount = amount,
             SignedOn = request.SignedOn,
             DeliveryDeadline = request.DeliveryDeadline,
             PaymentDeadline = request.PaymentDeadline,
@@ -221,12 +237,78 @@ public class ContractService : IContractService
         return await GetAsync(id);
     }
 
+    /// <summary>
+    /// Сколько ещё можно докупить. У договора не по конкурсу права нет вовсе,
+    /// поэтому ноль — это отсутствие права, а не исчерпанный предел.
+    /// </summary>
+    private static decimal ДоступнаяДопоставка(ProcurementContract c)
+    {
+        if (c.TenderId is null) return 0m;
+
+        var основание = c.InitialAmount > 0 ? c.InitialAmount : c.Amount;
+        var предел = Math.Round(основание * TopUpShare, 2, MidpointRounding.AwayFromZero);
+        var использовано = c.Amount - основание;
+
+        return Math.Max(0m, предел - использовано);
+    }
+
+    public async Task<ContractDto> TopUpAsync(int id, ContractTopUpRequest request, int actorUserId)
+    {
+        var contract = await Query().FirstOrDefaultAsync(c => c.Id == id)
+                       ?? throw new KeyNotFoundException("Договор не найден");
+
+        if (contract.Status == ContractStatus.Terminated)
+            throw new InvalidOperationException("Договор расторгнут — дополнительное количество не приобретается");
+
+        if (request.Amount <= 0)
+            throw new ArgumentException("Укажите сумму дополнительного количества");
+
+        // Право дано для договоров по итогам конкурса: у прямого заключения и
+        // простой закупки такой оговорки в Положении нет.
+        if (contract.TenderId is null)
+            throw new InvalidOperationException(
+                "Дополнительное количество приобретается по договору, заключённому по результатам конкурса (п. 6/7 раздела VIII)");
+
+        if (request.SzId is null)
+            throw new ArgumentException(
+                "Укажите служебную записку, согласованную с куратором инициатора, организатором и куратором организатора");
+
+        // Основание — стоимость при заключении, а не текущая: иначе каждая
+        // допоставка расширяла бы право на следующую, и четверть превращалась бы
+        // в бесконечный ряд.
+        var основание = contract.InitialAmount > 0 ? contract.InitialAmount : contract.Amount;
+        var предел = Math.Round(основание * TopUpShare, 2, MidpointRounding.AwayFromZero);
+        var использовано = contract.Amount - основание;
+
+        if (использовано + request.Amount > предел)
+            throw new InvalidOperationException(
+                $"Дополнительное количество не может превышать {TopUpShare * 100:0}% стоимости договора: " +
+                $"предел {предел:N2} сом, уже приобретено {использовано:N2} сом");
+
+        if (contract.InitialAmount <= 0) contract.InitialAmount = основание;
+
+        contract.Amount += request.Amount;
+        contract.TopUpSzId = request.SzId;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("ProcurementContract", contract.Id, "ToppedUp", actorUserId, new
+        {
+            request.Amount,
+            request.SzId,
+            total = contract.Amount,
+        });
+
+        return (await GetAsync(contract.Id))!;
+    }
+
     public async Task<ContractDto> ApproveActAsync(int actId, bool asCurator, int actorUserId)
     {
         var act = await _db.DeliveryActs.FirstOrDefaultAsync(a => a.Id == actId)
                   ?? throw new KeyNotFoundException("Акт не найден");
 
         var threshold = await CuratorThresholdAsync();
+
+        await ПроверитьПравоНаПриёмкуАsync(act.ContractId, asCurator, actorUserId);
 
         if (asCurator)
         {
@@ -268,6 +350,23 @@ public class ContractService : IContractService
         {
             contract.Status = ContractStatus.Completed;
             await _documents.ChangeStatusAsync(contract.DocumentId, "Completed", actorUserId);
+
+            // Закрывается не только договор, но и закупка: обязательство исполнено,
+            // и заявка, с которой всё началось, больше не «в закупке». Без этого она
+            // оставалась в работе навсегда, а счётчик завершённых стоял на нуле.
+            var заявка = await _db.ProcurementRequests
+                .Include(r => r.Document)
+                .FirstOrDefaultAsync(r => r.Id == contract.RequestId);
+
+            if (заявка?.Document is {StatusCode: not ProcurementStatus.Completed})
+            {
+                await _documents.ChangeStatusAsync(
+                    заявка.DocumentId, ProcurementStatus.Completed, actorUserId);
+
+                await _audit.LogAsync("ProcurementRequest", заявка.Id, "Completed", actorUserId,
+                    new {contract = contract.Id});
+            }
+
             await _db.SaveChangesAsync();
             await _audit.LogAsync("ProcurementContract", contract.Id, "Completed", actorUserId, null);
         }
@@ -310,6 +409,46 @@ public class ContractService : IContractService
     private async Task<ProcurementContract> LoadAsync(int id) =>
         await Query().FirstOrDefaultAsync(c => c.Id == id)
         ?? throw new KeyNotFoundException($"Договор {id} не найден");
+
+    /// <summary>
+    /// Кто подтверждает приёмку.
+    ///
+    /// Акт утверждает начальник инициирующего подразделения, а свыше порога — ещё
+    /// и курирующий член Правления. Раньше действие было закрыто правом ведения
+    /// договоров, то есть правом Сектора закупок: приёмку подтверждал не тот, кто
+    /// принимал, а тот, кто закупал. Ради этого разделения визы и заведены.
+    /// </summary>
+    private async Task ПроверитьПравоНаПриёмкуАsync(int contractId, bool asCurator, int actorUserId)
+    {
+        var роли = await _db.ProcurementContracts
+            .Where(c => c.Id == contractId)
+            .Select(c => new
+            {
+                Head = c.Request!.InitiatorUnit!.HeadUserId,
+                UnitCurator = c.Request.InitiatorUnit.CuratorUserId,
+                RequestCurator = c.Request.CuratorUserId,
+            })
+            .FirstOrDefaultAsync();
+
+        if (роли is null) return;
+
+        if (asCurator)
+        {
+            // Куратор закупки записан в самой заявке решением матрицы; если его
+            // там нет, действует куратор подразделения.
+            var куратор = роли.RequestCurator ?? роли.UnitCurator;
+
+            if (куратор is not null && куратор != actorUserId)
+                throw new UnauthorizedAccessException(
+                    "Визу ставит курирующий член Правления, закреплённый за этой закупкой");
+
+            return;
+        }
+
+        if (роли.Head is not null && роли.Head != actorUserId)
+            throw new UnauthorizedAccessException(
+                "Акт утверждает начальник инициирующего подразделения");
+    }
 
     private async Task<decimal> CuratorThresholdAsync()
     {
@@ -370,6 +509,8 @@ public class ContractService : IContractService
             Status = c.Status,
             StatusTitle = StatusTitle(c.Status),
             Amount = c.Amount,
+            InitialAmount = c.InitialAmount > 0 ? c.InitialAmount : c.Amount,
+            TopUpAvailable = ДоступнаяДопоставка(c),
             SignedOn = c.SignedOn,
             DeliveryDeadline = c.DeliveryDeadline,
             PaymentDeadline = c.PaymentDeadline,

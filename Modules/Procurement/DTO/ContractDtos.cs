@@ -47,6 +47,13 @@ public class ContractDto
     public required string StatusTitle { get; set; }
 
     public decimal Amount { get; set; }
+
+    /// <summary>Стоимость при заключении — от неё считается право на допоставку.</summary>
+    public decimal InitialAmount { get; set; }
+
+    /// <summary>Сколько ещё можно приобрести в пределах четверти стоимости договора.</summary>
+    public decimal TopUpAvailable { get; set; }
+
     public DateOnly? SignedOn { get; set; }
     public DateOnly? DeliveryDeadline { get; set; }
     public DateOnly? PaymentDeadline { get; set; }
@@ -95,6 +102,19 @@ public class DeliveryActRequest
     public DateOnly? ActDate { get; set; }
     public decimal Amount { get; set; }
     public string? Subject { get; set; }
+}
+
+/// <summary>Приобретение дополнительного количества по договору (п. 6/7 раздела VIII).</summary>
+public class ContractTopUpRequest
+{
+    public decimal Amount { get; set; }
+
+    /// <summary>
+    /// Служебная записка, которой допоставка согласована. Обязательна: Положение
+    /// требует согласовать её с куратором инициатора, организатором и куратором
+    /// организатора закупки.
+    /// </summary>
+    public int? SzId { get; set; }
 }
 
 public class ContractTerminateRequest

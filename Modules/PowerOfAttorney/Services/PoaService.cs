@@ -17,6 +17,11 @@ public interface IPoaService
 
     Task<List<PoaDto>> ValidForUserAsync(int userId, DateOnly onDay, CancellationToken ct = default);
     Task<List<PoaDto>> ExpiringAsync(int days, CancellationToken ct = default);
+
+    /// <summary>Приложить скан доверенности.</summary>
+    Task<PoaFileDto> AddFileAsync(int poaId, IFormFile file, int actorUserId, CancellationToken ct = default);
+
+    Task<List<PoaFileDto>> FilesAsync(int poaId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -29,7 +34,64 @@ public class PoaService : IPoaService
 {
     private readonly DelosferaDbContext _db;
 
-    public PoaService(DelosferaDbContext db) => _db = db;
+    private readonly Files.Services.IFileStorageService _storage;
+
+    public PoaService(DelosferaDbContext db, Files.Services.IFileStorageService storage)
+    {
+        _db = db;
+        _storage = storage;
+    }
+
+    /// <summary>
+    /// Приложить скан доверенности.
+    ///
+    /// Доверенность действует бумажным подлинником, и реестр без скана отвечает
+    /// на вопрос «вправе ли он подписать» одними реквизитами. Модель файла
+    /// существовала, но приложить его было нечем: ни одной точки загрузки.
+    /// </summary>
+    public async Task<PoaFileDto> AddFileAsync(
+        int poaId, IFormFile file, int actorUserId, CancellationToken ct = default)
+    {
+        var poa = await _db.PowersOfAttorney.FirstOrDefaultAsync(p => p.Id == poaId, ct)
+                  ?? throw new KeyNotFoundException("Доверенность не найдена");
+
+        var stored = await _storage.SaveAsync(file, actorUserId, ct);
+
+        var link = new Models.PoaFile
+        {
+            PowerOfAttorneyId = poa.Id,
+            FileId = stored.Id,
+            UploadedByUserId = actorUserId,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        _db.PoaFiles.Add(link);
+        await _db.SaveChangesAsync(ct);
+
+        return new PoaFileDto
+        {
+            Id = link.Id,
+            FileId = stored.Id,
+            FileName = stored.OriginalFileName,
+            SizeBytes = stored.SizeBytes,
+            UploadedAt = link.CreatedAt,
+        };
+    }
+
+    public async Task<List<PoaFileDto>> FilesAsync(int poaId, CancellationToken ct = default) =>
+        await _db.PoaFiles
+            .AsNoTracking()
+            .Where(f => f.PowerOfAttorneyId == poaId)
+            .OrderBy(f => f.Id)
+            .Select(f => new PoaFileDto
+            {
+                Id = f.Id,
+                FileId = f.FileId,
+                FileName = f.File!.OriginalFileName,
+                SizeBytes = f.File.SizeBytes,
+                UploadedAt = f.CreatedAt,
+            })
+            .ToListAsync(ct);
 
     public async Task<PoaDto> CreateAsync(PoaSaveRequest request, int currentUserId, CancellationToken ct = default)
     {

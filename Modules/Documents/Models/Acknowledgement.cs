@@ -36,8 +36,23 @@ public class AcknowledgementSheet
 {
     public int Id { get; set; }
 
-    public int DocumentId { get; set; }
+    /// <summary>
+    /// Документ, с которым знакомят. Пусто у листа по кадровому приказу: приказ
+    /// ведётся своей книгой и на единой карточке документа не лежит.
+    /// </summary>
+    public int? DocumentId { get; set; }
     public Document? Document { get; set; }
+
+    /// <summary>
+    /// Приказ по личному составу, с которым знакомят.
+    ///
+    /// Приказ подписывают и регистрируют, и с ним знакомят сотрудника под
+    /// роспись — иначе взыскание, перевод или изменение оклада не имеют силы.
+    /// Поле для листа у приказа было заведено, а завести сам лист было нечем:
+    /// лист умел ссылаться только на документ единой карточки.
+    /// </summary>
+    public int? HrOrderId { get; set; }
+    public Hr.Models.HrOrder? HrOrder { get; set; }
 
     /// <summary>Что именно требуется от сотрудника — показывается ему в задаче.</summary>
     public string? Instruction { get; set; }

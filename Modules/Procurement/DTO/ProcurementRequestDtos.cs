@@ -75,6 +75,9 @@ public class ProcurementCreateRequest
 
     public bool HasSpecification { get; set; }
 
+    /// <summary>Вложение с техническим заданием — из вложений этой же заявки.</summary>
+    public int? SpecificationAttachmentId { get; set; }
+
     /// <summary>Желаемое окно объявления закупки: «с» и «по».</summary>
     public DateOnly? AnnouncementFrom { get; set; }
     public DateOnly? AnnouncementTo { get; set; }
@@ -112,6 +115,17 @@ public class ProcurementCardDto
     public bool IsAffiliated { get; set; }
     public bool HasBudget { get; set; }
 
+    /// <summary>
+    /// Идентификаторы для правки: экран правки заполняет ими форму, а показывает
+    /// человеку названия — они рядом.
+    /// </summary>
+    public int? InitiatorUnitId { get; set; }
+    public int? CuratorUserId { get; set; }
+
+    /// <summary>Приложенное техническое задание.</summary>
+    public int? SpecificationAttachmentId { get; set; }
+    public string? SpecificationFileName { get; set; }
+
     /// <summary>Позиция Плана: ссылка и её код с предметом для показа.</summary>
     public int? PlanItemId { get; set; }
     public string? PlanItem { get; set; }
@@ -133,6 +147,16 @@ public class ProcurementCardDto
     public required string ApprovalAuthorityTitle { get; set; }
     public bool ProtocolRequired { get; set; }
     public int MinProposals { get; set; }
+
+    /// <summary>
+    /// Нужен ли по этой закупке договор (раздел VII Положения) и почему.
+    ///
+    /// Решение показывается на карточке: закупка на сорок тысяч сом договора не
+    /// требует, и сотрудник не должен выяснять это по памяти — как и обратное,
+    /// когда договор нужен несмотря на малую сумму.
+    /// </summary>
+    public bool ContractRequired { get; set; }
+    public string? ContractRequirementReason { get; set; }
 
     public string? SourceSzRegNumber { get; set; }
     public int? SourceSzId { get; set; }

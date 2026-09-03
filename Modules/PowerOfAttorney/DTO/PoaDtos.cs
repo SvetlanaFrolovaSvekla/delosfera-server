@@ -48,6 +48,16 @@ public class PoaFilterRequest
     public int PageSize { get; set; } = 50;
 }
 
+/// <summary>Скан доверенности.</summary>
+public class PoaFileDto
+{
+    public int Id { get; set; }
+    public int FileId { get; set; }
+    public string? FileName { get; set; }
+    public long SizeBytes { get; set; }
+    public DateTime UploadedAt { get; set; }
+}
+
 public class PoaDto
 {
     public int Id { get; set; }

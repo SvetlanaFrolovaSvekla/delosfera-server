@@ -45,13 +45,19 @@ public static class RolePermissionDefaults
         ]),
 
         // Правление видит реестр записок целиком: до них доходит то, что не решилось
-        // на уровне подразделений, и знать об этом заранее — часть работы.
+        // на уровне подразделений, и знать об этом заранее — часть работы. Выносить
+        // вопрос на коллегиальный орган зампред при этом не вправе — только
+        // председатель, поэтому здесь одно право, а не два.
         ("Правлени", [
             PermissionCode.ViewAllSz,
         ]),
 
+        // Председатель и исполняющий его обязанности: вынести подписанную записку
+        // на коллегиальный орган может только он. Правило срабатывает и на роли
+        // «Председатель Правления», которая по названию попадает и в правило выше.
         ("Председател", [
             PermissionCode.ViewAllSz,
+            PermissionCode.SubmitSzToBody,
         ]),
 
         // Секретарь органа отбирает вопросы и видит переписку по своим темам.
@@ -90,6 +96,7 @@ public static class RolePermissionDefaults
         ("Администратор", [
             PermissionCode.ViewAllSz,
             PermissionCode.RegisterSz,
+            PermissionCode.SubmitSzToBody,
             PermissionCode.ViewAllProcurements,
             PermissionCode.ConductProcurement,
             PermissionCode.RecordCommissionDecisions,

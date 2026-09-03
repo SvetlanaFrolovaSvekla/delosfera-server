@@ -51,6 +51,7 @@ public class VndApprovalService : IVndApprovalService
     private readonly ILogger<VndApprovalService> _logger;
     private readonly IActivityLogService _activityLog;
     private readonly IApprovalSheetGenerator _approvalSheetGenerator;
+    private readonly IFixedApprovalUnitResolver _fixedUnits;
 
     public VndApprovalService(
         DelosferaDbContext db,
@@ -59,7 +60,8 @@ public class VndApprovalService : IVndApprovalService
         ICurrentUserService currentUser,
         ILogger<VndApprovalService> logger,
         IActivityLogService activityLog,
-        IApprovalSheetGenerator approvalSheetGenerator)
+        IApprovalSheetGenerator approvalSheetGenerator,
+        IFixedApprovalUnitResolver fixedUnits)
     {
         _db = db;
         _fileService = fileService;
@@ -68,6 +70,7 @@ public class VndApprovalService : IVndApprovalService
         _logger = logger;
         _activityLog = activityLog;
         _approvalSheetGenerator = approvalSheetGenerator;
+        _fixedUnits = fixedUnits;
     }
 
     private bool IsChiefEditor() =>

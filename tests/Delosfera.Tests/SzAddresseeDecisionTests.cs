@@ -94,7 +94,10 @@ public class SzAddresseeDecisionTests
         // Уведомления мало: по списку задач должно быть видно, что человек кому-то
         // должен ответ, иначе записка ждёт молча.
         var inbox = await NewInbox(db).GetAsync(addresseeId);
-        var task = Assert.Single(inbox.Tasks);
+
+        // Записка доведена до «у адресата» напрямую, поэтому её маршрут ещё не
+        // закрыт и своя задача у него тоже висит. Ищем именно задачу на решение.
+        var task = Assert.Single(inbox.Tasks.Where(t => t.TaskType == "Решение по записке"));
 
         Assert.Equal("Решение по записке", task.TaskType);
         Assert.Null(task.ParticipantId);
@@ -103,7 +106,7 @@ public class SzAddresseeDecisionTests
         await service.DecideAsAddresseeAsync(szId, "Согласен", addresseeId);
 
         var afterDecision = await NewInbox(db).GetAsync(addresseeId);
-        Assert.Empty(afterDecision.Tasks);
+        Assert.DoesNotContain(afterDecision.Tasks, t => t.TaskType == "Решение по записке");
     }
 
     [Fact]
@@ -190,8 +193,7 @@ public class SzAddresseeDecisionTests
             KindId = kind.Id,
             Body = "Текст записки",
             CorrespondentUnitId = null,
-            AddresseeUserId = author.Id,
-            SignerUserId = signer.Id,
+            AddresseeUserId = signer.Id,
             ApproverUserIds = [approver.Id],
         }, author.Id);
 
@@ -212,6 +214,8 @@ public class SzAddresseeDecisionTests
         // маршрута и не проскочила подписание.
         Assert.NotNull(registered.RegNumber);
         Assert.Equal(SzStatus.OnSigning, registered.StatusCode);
+
+        // Подписывает тот, кому записка адресована: подписант и адресат — одно лицо.
 
         var signingParticipant = await db.RouteParticipants
             .Include(p => p.RouteStep)
@@ -272,14 +276,23 @@ public class SzAddresseeDecisionTests
 
         await service.RegisterAsync(szId, approverId);
 
-        // Подписанта у этой записки нет, поэтому после регистрации она идёт
-        // прямо к адресату за решением по существу.
-        var afterRegistration = await db.SzDocuments.AsNoTracking()
+        var afterRegistration = await db.SzDocuments
             .Include(x => x.Document)
             .SingleAsync(x => x.Id == szId);
 
-        Assert.Equal(SzStatus.OnAddresseeDecision, afterRegistration.Document!.StatusCode);
-        Assert.NotNull(afterRegistration.Document.RegNumber);
+        Assert.NotNull(afterRegistration.Document!.RegNumber);
+
+        // Записки прежнего порядка стоят в «у адресата»: тогда подписант и адресат
+        // были разными людьми, и решение по существу выносилось отдельным шагом.
+        // Метод остаётся ради них — доводим записку до этого состояния напрямую.
+        afterRegistration.Document.StatusCode = SzStatus.OnAddresseeDecision;
+        await db.SaveChangesAsync();
+
+        var handler = new SzRouteCompletionHandler(
+            db, new DocumentService(db, new AuditService(db), new NumeratorService(db)),
+            new AuditService(db), new SilentNotifications());
+
+        await handler.CreateAddresseeTaskAsync(afterRegistration);
 
         return (szId, addresseeId, approverId);
     }

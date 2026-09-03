@@ -10,6 +10,16 @@ using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Hr.Controllers;
 
+/// <summary>Заведение листа ознакомления по кадровому приказу.</summary>
+public class HrAcknowledgementRequest
+{
+    public string? Instruction { get; set; }
+    public DateOnly? DueDate { get; set; }
+
+    /// <summary>Кого знакомить. Пусто — те, кого приказ касается.</summary>
+    public Documents.Services.AcknowledgementTargets? Targets { get; set; }
+}
+
 public class HrOrderEmployeeRequest
 {
     public int UserId { get; set; }
@@ -53,13 +63,16 @@ public class HrOrderController : ControllerBase
     private readonly DelosferaDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly IDocumentHtmlService _html;
+    private readonly Documents.Services.IAcknowledgementService _acknowledgements;
 
     public HrOrderController(
-        DelosferaDbContext db, ICurrentUserService currentUser, IDocumentHtmlService html)
+        DelosferaDbContext db, ICurrentUserService currentUser, IDocumentHtmlService html,
+        Documents.Services.IAcknowledgementService acknowledgements)
     {
         _db = db;
         _currentUser = currentUser;
         _html = html;
+        _acknowledgements = acknowledgements;
     }
 
     /// <summary>
@@ -307,12 +320,81 @@ public class HrOrderController : ControllerBase
         order.SignedAt = DateTime.UtcNow;
         order.UpdatedAt = DateTime.UtcNow;
 
+        // Приказ об отмене гасит отменяемый: ссылка на него сохранялась, а сам
+        // отменённый приказ оставался «Подписан» — в реестре и в кадровой истории
+        // сотрудника отменённая командировка выглядела действующей. Статус
+        // «Отменён» был объявлен и не выставлялся нигде.
+        //
+        // Момент — подписание, а не создание: пока приказ черновик, он ничего не
+        // отменяет, и передумать ещё можно.
+        if (order.CancelsOrderId is int cancelledId)
+        {
+            var cancelled = await _db.HrOrders.FirstOrDefaultAsync(o => o.Id == cancelledId, ct);
+
+            if (cancelled is not null && cancelled.Status != HrOrderStatus.Cancelled)
+            {
+                cancelled.Status = HrOrderStatus.Cancelled;
+                cancelled.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _db.SaveChangesAsync(ct);
 
         return Ok(new { order.RegNumber, order.SignedAt });
     }
 
     /// <summary>Приказы по конкретному сотруднику — его кадровая история.</summary>
+    /// <summary>
+    /// Завести лист ознакомления по приказу.
+    ///
+    /// Приказ по личному составу знакомят под роспись — без этого перевод,
+    /// взыскание или изменение оклада остаются на бумаге. Поле листа у приказа
+    /// было, а завести сам лист было нечем: он умел ссылаться только на документ
+    /// единой карточки, на которой приказ не лежит.
+    ///
+    /// Участники по умолчанию — те, кого приказ касается.
+    /// </summary>
+    [HttpPost("{id:int}/acknowledgement")]
+    [RequirePermission(PermissionCode.ManageHrOrders)]
+    public async Task<IActionResult> CreateAcknowledgement(
+        int id, [FromBody] HrAcknowledgementRequest request, CancellationToken ct)
+    {
+        var order = await _db.Set<Models.HrOrder>()
+            .Include(o => o.Employees)
+            .FirstOrDefaultAsync(o => o.Id == id, ct);
+
+        if (order is null) return NotFound(new {message = "Приказ не найден"});
+
+        if (order.Status != Models.HrOrderStatus.Signed)
+            return Conflict(new {message = "Знакомят с подписанным приказом"});
+
+        var targets = request.Targets ?? new Documents.Services.AcknowledgementTargets();
+
+        if (targets.UserIds.Count == 0 && targets.OrgUnitIds.Count == 0 && targets.UserGroupIds.Count == 0)
+            targets.UserIds = order.Employees.Select(e => e.UserId).Distinct().ToList();
+
+        try
+        {
+            var sheet = await _acknowledgements.CreateAsync(new Documents.Services.CreateSheetRequest
+            {
+                HrOrderId = order.Id,
+                Instruction = request.Instruction ?? $"Ознакомьтесь с приказом № {order.RegNumber}",
+                DueDate = request.DueDate,
+
+                // Подписывать нечего: приказ вне единой карточки, и ознакомление
+                // фиксируется отметкой — кто и когда её поставил.
+                RequireSignature = false,
+                Targets = targets,
+            }, _currentUser.UserId, ct);
+
+            order.AcknowledgementSheetId = sheet.Id;
+            await _db.SaveChangesAsync(ct);
+
+            return Ok(new {sheetId = sheet.Id});
+        }
+        catch (InvalidOperationException ex) { return Conflict(new {message = ex.Message}); }
+    }
+
     [HttpGet("by-employee/{userId:int}")]
     public async Task<IActionResult> ByEmployee(int userId, CancellationToken ct)
     {

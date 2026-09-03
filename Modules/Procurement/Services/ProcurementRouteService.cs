@@ -30,6 +30,16 @@ public class ProcurementRouteService : IProcurementRouteService
     private const string AdministrativeUnit = "Административный отдел";
     private const string BudgetUnit = "Управление стратегического планирования и бюджетирования";
 
+    /// <summary>
+    /// Подразделение, которое ведёт процедуру закупки.
+    ///
+    /// Раньше два последних этапа брали людей из Административного отдела, хотя
+    /// назывались «Сектор закупок»: заявка уходила не туда, а сам сектор её не
+    /// видел. Названия этапов при этом читались правильно, и по карточке подмена
+    /// не замечалась.
+    /// </summary>
+    private const string ProcurementUnit = "Сектор закупок";
+
     private readonly DelosferaDbContext _db;
     private readonly IRouteEngine _engine;
 
@@ -50,6 +60,7 @@ public class ProcurementRouteService : IProcurementRouteService
 
         var adminUnit = await FindUnitAsync(AdministrativeUnit);
         var budgetUnit = await FindUnitAsync(BudgetUnit);
+        var procurementUnit = await FindUnitAsync(ProcurementUnit);
 
         var steps = new List<(string Title, int? UserId, StepKind Kind)>();
 
@@ -65,8 +76,8 @@ public class ProcurementRouteService : IProcurementRouteService
         steps.Add(("УПиА — бюджетный контроль", budgetUnit?.HeadUserId, StepKind.Approval));
 
         // Куратор Сектора закупок и сам сектор, который проводит процедуру.
-        steps.Add(("Куратор Сектора закупок", adminUnit?.CuratorUserId, StepKind.Approval));
-        steps.Add(("Сектор закупок — проведение процедуры", adminUnit?.HeadUserId, StepKind.Approval));
+        steps.Add(("Куратор Сектора закупок", procurementUnit?.CuratorUserId, StepKind.Approval));
+        steps.Add(("Сектор закупок — проведение процедуры", procurementUnit?.HeadUserId, StepKind.Approval));
 
         // Если расход утверждает коллегиальный орган — отдельный этап с загрузкой
         // выписки из протокола (PRC-06). Решение принимает не один человек, поэтому

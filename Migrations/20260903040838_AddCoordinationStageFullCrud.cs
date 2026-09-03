@@ -72,7 +72,7 @@ namespace delosfera_server.Migrations
                 keyColumn: "id",
                 keyValue: 4,
                 columns: new[] { "order", "org_unit_id", "title" },
-                values: new object[] { 4, 33, "Методология" });
+                values: new object[] { 4, 52, "Методология" });
 
             migrationBuilder.CreateIndex(
                 name: "ix_vnd_coordination_default_approver_order",

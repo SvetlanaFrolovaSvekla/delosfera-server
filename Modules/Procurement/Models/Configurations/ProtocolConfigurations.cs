@@ -11,7 +11,10 @@ public class ProcurementProtocolConfiguration : IEntityTypeConfiguration<Procure
 
         // Один протокол на закупку: пересборка обновляет существующий,
         // иначе в деле окажется два документа с разным решением.
-        b.HasIndex(x => x.RequestId).IsUnique();
+        // Один протокол на заседание, а не на закупку: комиссия собирается
+        // несколько раз, и Положение требует протокол на каждое заседание.
+        // Прежний индекс по одной заявке не давал завести второй протокол вовсе.
+        b.HasIndex(x => new {x.RequestId, x.MeetingDate}).IsUnique();
 
         b.Property(x => x.Status).HasConversion<int>();
         b.Property(x => x.MainAmount).HasPrecision(18, 2);

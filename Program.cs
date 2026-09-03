@@ -85,6 +85,7 @@ builder.Services.Configure<delosfera_server.Common.Security.PasswordPolicyOption
 builder.Services.AddSingleton<delosfera_server.Common.Security.IPasswordPolicy,
     delosfera_server.Common.Security.PasswordPolicy>();
 builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
+builder.Services.AddScoped<IFixedApprovalUnitResolver, FixedApprovalUnitResolver>();
 builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 builder.Services.AddSingleton<IApprovalSheetGenerator, ApprovalSheetGenerator>();
 builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();
@@ -112,6 +113,10 @@ builder.AddProcurementServices();
 builder.AddMeetingServices();
 builder.AddIntegrationServices();
 builder.AddSearchServices();
+
+// Разовую работу при первом обращении к данным делаем заранее и вхолостую:
+// иначе она достаётся тому, кто первым открыл раздел после выкладки.
+builder.Services.AddHostedService<delosfera_server.Common.Services.WarmupWorker>();
 
 // Обкатка подразделениями: пожелания с экранов и учёт посещаемости. Журнал заходов
 // растёт быстрее всех таблиц, поэтому вместе со сбором сразу заводим и чистку.
@@ -256,6 +261,12 @@ using (var scope = app.Services.CreateScope())
             app.Configuration["Demo:Password"] ?? "",
             app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Demo"));
     }
+
+    // Роли органов банка. Строго до раздачи прав: право, у которого нет
+    // роли-держателя, закрывает действие для всех и выглядит при этом исправным.
+    await delosfera_server.Modules.Users.Services.CoreRolesSeeder.ApplyAsync(
+        db,
+        app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("CoreRoles"));
 
     // Права на новые разделы существующим ролям. Без этого раздел после выкладки
     // не видит никто: право заведено, но ни одной роли не принадлежит.

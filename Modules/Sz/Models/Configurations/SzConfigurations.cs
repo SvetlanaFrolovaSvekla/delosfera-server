@@ -143,3 +143,28 @@ public class SzEmployeeConfiguration : IEntityTypeConfiguration<SzEmployee>
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+/// <summary>
+/// Кого автор предложил в исполнители. Имя таблицы задано явно: без него EF
+/// назвал её во множественном числе, а остальные таблицы контура — в единственном.
+/// </summary>
+public class SzProposedAssigneeConfiguration : IEntityTypeConfiguration<SzProposedAssignee>
+{
+    public void Configure(EntityTypeBuilder<SzProposedAssignee> b)
+    {
+        b.ToTable("sz_proposed_assignee");
+
+        // Одного человека дважды в список не добавить: поручение ему всё равно одно.
+        b.HasIndex(x => new {x.SzDocumentId, x.UserId}).IsUnique();
+
+        b.HasOne(x => x.SzDocument)
+            .WithMany(x => x.ProposedAssignees)
+            .HasForeignKey(x => x.SzDocumentId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}

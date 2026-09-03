@@ -22,7 +22,11 @@ public class AcknowledgementTargets
 
 public class CreateSheetRequest
 {
-    public int DocumentId { get; set; }
+    /// <summary>Документ единой карточки. Для кадрового приказа не заполняется.</summary>
+    public int? DocumentId { get; set; }
+
+    /// <summary>Кадровый приказ — он ведётся своей книгой, вне единой карточки.</summary>
+    public int? HrOrderId { get; set; }
     public string? Instruction { get; set; }
     public DateOnly? DueDate { get; set; }
     public bool RequireSignature { get; set; } = true;
@@ -85,9 +89,19 @@ public class AcknowledgementService : IAcknowledgementService
     public async Task<AcknowledgementSheet> CreateAsync(
         CreateSheetRequest request, int authorUserId, CancellationToken ct = default)
     {
-        var document = await _db.Documents
-            .FirstOrDefaultAsync(d => d.Id == request.DocumentId, ct)
-            ?? throw new KeyNotFoundException("Документ не найден");
+        // Лист заводится либо по документу, либо по приказу — и ровно по одному
+        // из них: иначе непонятно, с чем именно знакомят.
+        if (request.DocumentId is null == request.HrOrderId is null)
+            throw new InvalidOperationException(
+                "Укажите, с чем знакомят: документ или кадровый приказ");
+
+        if (request.DocumentId is { } docId
+            && !await _db.Documents.AnyAsync(d => d.Id == docId, ct))
+            throw new KeyNotFoundException("Документ не найден");
+
+        if (request.HrOrderId is { } orderId
+            && !await _db.Set<Hr.Models.HrOrder>().AnyAsync(o => o.Id == orderId, ct))
+            throw new KeyNotFoundException("Кадровый приказ не найден");
 
         var userIds = await ResolveAsync(request.Targets, ct);
 
@@ -97,7 +111,8 @@ public class AcknowledgementService : IAcknowledgementService
 
         var sheet = new AcknowledgementSheet
         {
-            DocumentId = document.Id,
+            DocumentId = request.DocumentId,
+            HrOrderId = request.HrOrderId,
             Instruction = Trim(request.Instruction),
             DueDate = request.DueDate,
             RequireSignature = request.RequireSignature,
@@ -112,15 +127,17 @@ public class AcknowledgementService : IAcknowledgementService
 
         await _audit.LogAsync("AcknowledgementSheet", sheet.Id, "Created", authorUserId, new
         {
-            documentId = document.Id,
-            document.Title,
+            documentId = request.DocumentId,
+            hrOrderId = request.HrOrderId,
             участников = userIds.Count,
             срок = request.DueDate,
         });
 
         _logger.LogInformation(
-            "Лист ознакомления {SheetId} по документу {DocumentId}: {Count} участников",
-            sheet.Id, document.Id, userIds.Count);
+            "Лист ознакомления {SheetId} ({Source}): {Count} участников",
+            sheet.Id,
+            request.DocumentId is { } d ? $"документ {d}" : $"приказ {request.HrOrderId}",
+            userIds.Count);
 
         return sheet;
     }
@@ -152,10 +169,13 @@ public class AcknowledgementService : IAcknowledgementService
         // Подпись ставится до отметки: если подписать не удалось — не принят
         // регламент, отозван сертификат, — ознакомление не должно считаться
         // состоявшимся, иначе в листе будет роспись, которой нет.
-        if (sheet.RequireSignature)
+        // Лист по кадровому приказу подписи не несёт: приказ ведётся своей книгой
+        // и на единой карточке документа не лежит, а подписывать нечего — значит
+        // ознакомление фиксируется отметкой, кто и когда её поставил.
+        if (sheet.RequireSignature && sheet.DocumentId is { } documentId)
         {
             var signature = await _signatures.SignDocumentAsync(
-                sheet.DocumentId, SignatureLevel.Simple, userId);
+                documentId, SignatureLevel.Simple, userId);
             entry.SignatureId = signature.Id;
         }
 

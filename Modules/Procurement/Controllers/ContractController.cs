@@ -52,9 +52,14 @@ public class ContractController : ControllerBase
     public async Task<IActionResult> AddAct(int id, [FromBody] DeliveryActRequest request) =>
         await Run(() => _contracts.AddActAsync(id, request, _currentUser.UserId));
 
-    /// <summary>Утвердить акт: начальником СП либо курирующим членом Правления.</summary>
+    /// <summary>
+    /// Утвердить акт: начальником СП либо курирующим членом Правления.
+    ///
+    /// Права контура закупок здесь нет намеренно: приёмку подтверждает
+    /// подразделение, которое принимало, а не то, которое закупало. Кто именно
+    /// вправе поставить визу, проверяется по оргструктуре.
+    /// </summary>
     [HttpPost("acts/{actId:int}/approve")]
-    [RequirePermission(PermissionCode.ManageProcurementContracts)]
     public async Task<IActionResult> ApproveAct(int actId, [FromQuery] bool asCurator = false) =>
         await Run(() => _contracts.ApproveActAsync(actId, asCurator, _currentUser.UserId));
 
@@ -63,6 +68,15 @@ public class ContractController : ControllerBase
     [RequirePermission(PermissionCode.ManageProcurementContracts)]
     public async Task<IActionResult> Terminate(int id, [FromBody] ContractTerminateRequest request) =>
         await Run(() => _contracts.TerminateAsync(id, request, _currentUser.UserId));
+
+    /// <summary>
+    /// Приобрести дополнительное количество — до четверти стоимости договора,
+    /// по согласованной служебной записке (п. 6/7 раздела VIII Положения).
+    /// </summary>
+    [HttpPost("contracts/{id:int}/top-up")]
+    [RequirePermission(PermissionCode.ManageProcurementContracts)]
+    public async Task<IActionResult> TopUp(int id, [FromBody] ContractTopUpRequest request) =>
+        await Run(() => _contracts.TopUpAsync(id, request, _currentUser.UserId));
 
     private async Task<IActionResult> Run<T>(Func<Task<T>> action)
     {
