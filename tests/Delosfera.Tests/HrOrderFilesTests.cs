@@ -153,6 +153,16 @@ public class HrOrderFilesTests
             int fileId, CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task DeleteAsync(int fileId, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<FileAttachment> SaveGeneratedAsync(
+            byte[] content, string fileName, string contentType, int userId,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<string> ComputeHashAsync(IFormFile file, CancellationToken ct = default) =>
+            Task.FromResult(Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(file.FileName))).ToLowerInvariant());
     }
 
     private static async Task<Стенд> SeedAsync(DelosferaDbContext db)

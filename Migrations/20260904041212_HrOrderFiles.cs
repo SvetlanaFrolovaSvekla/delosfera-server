@@ -40,6 +40,33 @@ namespace delosfera_server.Migrations
                         onDelete: ReferentialAction.Cascade);
                 });
 
+            // Членство в коллегиальном органе — состав органа, а не право доступа.
+            // Роли администратора и главного редактора ВНД заводились с полным
+            // перечнем прав, и признаки членства доставались им: в поле «Кому»
+            // записки на Правление предлагались айтишники и методологи, а
+            // председателя и зампредов там не было.
+            //
+            // Снимаем признаки по одной роли, не переписывая наборы прав целиком:
+            // права на стенде правились руками, и возвращать их к сидовым незачем.
+            migrationBuilder.Sql(@"
+                UPDATE role
+                SET permission_codes = ARRAY(
+                        SELECT code FROM unnest(permission_codes) AS code
+                        WHERE code <> ALL (ARRAY[32, 33, 34])
+                    )
+                WHERE permission_codes && ARRAY[32, 33, 34]
+                  AND title_ru !~* 'Правлени|КПА|Кредитный комитет';
+            ");
+
+            // Роли самих органов признак получают: у заведённых отдельно от сида
+            // его не было вовсе.
+            migrationBuilder.Sql(@"
+                UPDATE role
+                SET permission_codes = permission_codes || 32
+                WHERE title_ru ~* 'Правлени'
+                  AND NOT (32 = ANY(permission_codes));
+            ");
+
             migrationBuilder.CreateIndex(
                 name: "ix_hr_order_file_file_id",
                 table: "hr_order_file",
@@ -62,6 +89,13 @@ namespace delosfera_server.Migrations
         {
             migrationBuilder.DropTable(
                 name: "hr_order_file");
+
+            // Возврат признаков ролям, заведённым полным перечнем прав.
+            migrationBuilder.Sql(@"
+                UPDATE role
+                SET permission_codes = permission_codes || ARRAY[32, 33, 34]
+                WHERE id IN (1, 4) AND NOT (permission_codes && ARRAY[32, 33, 34]);
+            ");
         }
     }
 }

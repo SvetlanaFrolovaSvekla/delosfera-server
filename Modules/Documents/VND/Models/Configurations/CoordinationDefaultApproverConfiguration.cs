@@ -53,6 +53,11 @@ public class CoordinationDefaultApproverConfiguration : IEntityTypeConfiguration
             },
             new
             {
+                // Здесь стоит подразделение из сида: на чистой базе портальных
+                // записей ещё нет, и ссылаться на них нельзя. Когда синхронизация
+                // приведёт «Отдел методологии», подразделение этапа найдёт
+                // FixedApprovalUnitResolver по номеру портала, а администратор
+                // поправит эту строку через справочник.
                 Id = 4, Title = "Методология", Order = 4, OrgUnitId = 33,
                 ApproverUserId = (int?)3, CreatedAt = seedDate, UpdatedAt = seedDate
             }

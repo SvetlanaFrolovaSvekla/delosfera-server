@@ -41,6 +41,11 @@ public class ConsolidationTaskVisibilityTests(PostgresFixture postgres)
             VndId = vnd.Id,
             Number = 1,
             Code = $"Р-{Guid.NewGuid():N}"[..8],
+            TitleRu = "Редакция для проверки консолидации",
+            OrganId = db.ApprovalBodies.OrderBy(x => x.Id).First().Id,
+            DeveloperId = db.OrganizationUnits.OrderBy(x => x.Id).First().Id,
+            SecrecyLevelId = db.SecurityLevels.OrderBy(x => x.Id).First().Id,
+            TypeId = db.TypesVnd.OrderBy(x => x.Id).First().Id,
             DocFileRuId = file.Id,
         };
         db.VndRedactions.Add(redaction);

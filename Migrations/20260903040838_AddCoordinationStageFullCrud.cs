@@ -72,7 +72,11 @@ namespace delosfera_server.Migrations
                 keyColumn: "id",
                 keyValue: 4,
                 columns: new[] { "order", "org_unit_id", "title" },
-                values: new object[] { 4, 52, "Методология" });
+                values: new object[] { 4, 33, "Методология" });
+            // 33, а не 52: «Отдел методологии» приходит из портала, и на
+            // чистой базе его ещё нет — внешний ключ падал. Когда портал
+            // синхронизируется, подразделение этапа находит
+            // FixedApprovalUnitResolver по номеру портала.
 
             migrationBuilder.CreateIndex(
                 name: "ix_vnd_coordination_default_approver_order",

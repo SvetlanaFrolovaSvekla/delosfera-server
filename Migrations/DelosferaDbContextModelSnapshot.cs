@@ -3377,7 +3377,7 @@ namespace delosfera_server.Migrations
                             ApproverUserId = 3,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Order = 4,
-                            OrgUnitId = 52,
+                            OrgUnitId = 33,
                             Title = "Методология",
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
@@ -4970,6 +4970,47 @@ namespace delosfera_server.Migrations
                         .HasDatabaseName("ix_hr_order_employee_order_id_user_id");
 
                     b.ToTable("hr_order_employee", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Hr.Models.HrOrderFile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("FileId")
+                        .HasColumnType("integer")
+                        .HasColumnName("file_id");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("integer")
+                        .HasColumnName("order_id");
+
+                    b.Property<int>("UploadedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("uploaded_by_user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_hr_order_file");
+
+                    b.HasIndex("FileId")
+                        .HasDatabaseName("ix_hr_order_file_file_id");
+
+                    b.HasIndex("OrderId")
+                        .HasDatabaseName("ix_hr_order_file_order_id");
+
+                    b.HasIndex("OrderId", "FileId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_hr_order_file_order_id_file_id");
+
+                    b.ToTable("hr_order_file", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Integrations.Directory.DirectorySettings", b =>
@@ -9229,7 +9270,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 1,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56 },
                             TitleEn = "Administrator",
                             TitleKg = "Администратор",
                             TitleRu = "Администратор",
@@ -9259,7 +9300,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 4,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56 },
                             TitleEn = "Chief VND Editor",
                             TitleKg = "ВНД башкы редактору",
                             TitleRu = "Главный редактор ВНД",
@@ -11541,6 +11582,27 @@ namespace delosfera_server.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Hr.Models.HrOrderFile", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "File")
+                        .WithMany()
+                        .HasForeignKey("FileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_order_file_file_attachments_file_id");
+
+                    b.HasOne("delosfera_server.Modules.Hr.Models.HrOrder", "Order")
+                        .WithMany("Files")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_order_file_hr_order_order_id");
+
+                    b.Navigation("File");
+
+                    b.Navigation("Order");
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.AgendaAssignment", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Meetings.Models.AgendaItem", "AgendaItem")
@@ -12883,6 +12945,8 @@ namespace delosfera_server.Migrations
             modelBuilder.Entity("delosfera_server.Modules.Hr.Models.HrOrder", b =>
                 {
                     b.Navigation("Employees");
+
+                    b.Navigation("Files");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.AgendaItem", b =>

@@ -50,6 +50,13 @@ internal sealed class NoopFileStorage : IFileStorageService
     public Task<FileAttachment> SaveAsync(IFormFile file, int userId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<(Stream Stream, string ContentType, string FileName)> DownloadAsync(int fileId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task DeleteAsync(int fileId, CancellationToken ct = default) => Task.CompletedTask;
+
+    public Task<FileAttachment> SaveGeneratedAsync(
+        byte[] content, string fileName, string contentType, int userId,
+        CancellationToken ct = default) => throw new NotImplementedException();
+
+    public Task<string> ComputeHashAsync(IFormFile file, CancellationToken ct = default) =>
+        Task.FromResult(string.Empty);
 }
 
 /// <summary>
