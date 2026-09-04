@@ -223,3 +223,31 @@ public class MeetingFilterRequest
     /// <summary>Только заседания с просроченными поручениями.</summary>
     public bool OverdueOnly { get; set; }
 }
+
+/// <summary>
+/// Куда документ ушёл на коллегиальный орган: заседание, номер вопроса, решение.
+///
+/// Связь в данных была всегда, а в карточке её не показывали — человек видел
+/// документ и не знал, дошёл ли он до Правления и чем там кончилось.
+/// </summary>
+public class BoardReviewDto
+{
+    public int MeetingId { get; set; }
+    public string BodyTitle { get; set; } = "";
+    public DateOnly MeetingDate { get; set; }
+
+    public int AgendaItemId { get; set; }
+
+    /// <summary>Номер вопроса в повестке — по нему человек ищет себя в заседании.</summary>
+    public int Order { get; set; }
+    public string Topic { get; set; } = "";
+
+    /// <summary>Проект постановления — готовится к заседанию.</summary>
+    public string? DraftResolution { get; set; }
+
+    /// <summary>Принятое решение; пусто — заседание ещё не прошло.</summary>
+    public string? Decision { get; set; }
+
+    public string? ProtocolNumber { get; set; }
+    public DateOnly? ProtocolDate { get; set; }
+}

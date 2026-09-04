@@ -161,6 +161,12 @@ public class ProcurementCardDto
     public string? SourceSzRegNumber { get; set; }
     public int? SourceSzId { get; set; }
 
+    /// <summary>
+    /// Рассмотрение на коллегиальном органе: заседание, номер вопроса, решение.
+    /// Пусто — заявка на орган не выносилась.
+    /// </summary>
+    public Meetings.DTO.BoardReviewDto? BoardReview { get; set; }
+
     /// <summary>Запущенный маршрут согласования (PRC-08), если заявка отправлена.</summary>
     public int? RouteInstanceId { get; set; }
 

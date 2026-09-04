@@ -158,6 +158,18 @@ public class SzDetails : SzListItem
     /// <summary>Включена ли записка в повестку — тогда отметку менять поздно.</summary>
     public bool InAgenda { get; set; }
 
+    /// <summary>
+    /// Рассмотрение на коллегиальном органе: заседание, номер вопроса, решение.
+    /// Пусто — вопрос в повестку ещё не включён.
+    /// </summary>
+    public Meetings.DTO.BoardReviewDto? BoardReview { get; set; }
+
+    /// <summary>Заявка на закупку, выросшая из записки; пусто — закупки по ней нет.</summary>
+    public int? ProcurementRequestId { get; set; }
+    public string? ProcurementRegNumber { get; set; }
+    /// <summary>Код статуса заявки; человеческое название подставляет клиент.</summary>
+    public string? ProcurementStatusCode { get; set; }
+
     public int? RegisteredByUserId { get; set; }
     public string? RegisteredBy { get; set; }
     public List<int> RubricIds { get; set; } = [];

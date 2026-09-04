@@ -201,6 +201,34 @@ public class SzService : ISzService
         // затем, чтобы не предлагать менять отметку, когда вопрос уже заведён.
         details.InAgenda = await _db.AgendaItems.AnyAsync(a => a.SourceSzId == id);
 
+        // Чем записка обернулась: заявкой на закупку и вопросом коллегиального
+        // органа. Связи существовали, но в карточке их не показывали — автор
+        // видел свою записку и не знал, дошла ли она до Правления.
+        details.BoardReview = await Meetings.Services.BoardReviewLookup.ForSzAsync(_db, id);
+
+        // Связь записки с закупкой хранится в document_link, а не полем заявки:
+        // одна записка может породить не одну закупку.
+        var procurement = await _db.DocumentLinks.AsNoTracking()
+            .Where(l => l.FromDocumentId == sz.DocumentId
+                        && l.LinkType == SzProcurementService.LinkType)
+            .Join(_db.ProcurementRequests.AsNoTracking(),
+                l => l.ToDocumentId, r => r.DocumentId, (l, r) => r)
+            .OrderByDescending(r => r.Id)
+            .Select(r => new
+            {
+                r.Id,
+                r.Document!.RegNumber,
+                r.Document.StatusCode,
+            })
+            .FirstOrDefaultAsync();
+
+        if (procurement is not null)
+        {
+            details.ProcurementRequestId = procurement.Id;
+            details.ProcurementRegNumber = procurement.RegNumber;
+            details.ProcurementStatusCode = procurement.StatusCode;
+        }
+
         return details;
     }
 
