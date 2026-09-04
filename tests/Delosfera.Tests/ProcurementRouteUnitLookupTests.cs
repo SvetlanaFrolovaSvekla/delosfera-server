@@ -114,7 +114,7 @@ public class ProcurementRouteUnitLookupTests
 
         var audit = new AuditService(db);
         var engine = new RouteEngine(
-            db, audit, [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
+            db, audit, [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
 
         var instance = await new ProcurementRouteService(db, engine).StartAsync(request, автор);
 

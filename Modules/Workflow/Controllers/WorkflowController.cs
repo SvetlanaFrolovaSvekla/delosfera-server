@@ -103,6 +103,21 @@ public class WorkflowController : ControllerBase
                 .ThenInclude(s => s.Participants)
             .FirstOrDefaultAsync(t => t.Id == id, ct);
 
+        // Имена людей и подразделений подставляем одним запросом: иначе экран
+        // показывал бы номера, а маршрут настраивают по фамилиям.
+        var userIds = tpl?.Steps.SelectMany(s => s.Participants)
+            .Where(p => p.UserId != null).Select(p => p.UserId!.Value).Distinct().ToList() ?? [];
+        var unitIds = tpl?.Steps.SelectMany(s => s.Participants)
+            .Where(p => p.UnitId != null).Select(p => p.UnitId!.Value).Distinct().ToList() ?? [];
+
+        var userNames = await _db.Users.AsNoTracking()
+            .Where(u => userIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName, ct);
+
+        var unitTitles = await _db.OrganizationUnits.AsNoTracking()
+            .Where(u => unitIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.TitleRu, ct);
+
         if (tpl is null) return NotFound(new {message = "Шаблон маршрута не найден"});
 
         return Ok(new RouteTemplateResponse
@@ -120,6 +135,16 @@ public class WorkflowController : ControllerBase
                 IsFinalMethodology = s.IsFinalMethodology,
                 TimeNormHours = s.TimeNormHours,
                 ParticipantCount = s.Participants.Count,
+                Participants = s.Participants.Select(p => new TemplateParticipantResponse
+                {
+                    Id = p.Id,
+                    UserId = p.UserId,
+                    UserName = p.UserId is { } uid && userNames.TryGetValue(uid, out var name) ? name : null,
+                    UnitId = p.UnitId,
+                    UnitTitle = p.UnitId is { } unit && unitTitles.TryGetValue(unit, out var title) ? title : null,
+                    RoleRef = p.RoleRef,
+                    Required = p.Required,
+                }).ToList(),
                 RequiredSignatureLevel = s.RequiredSignatureLevel,
             }).ToList(),
         });

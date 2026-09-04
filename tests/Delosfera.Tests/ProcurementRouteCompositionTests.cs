@@ -91,7 +91,7 @@ public class ProcurementRouteCompositionTests
     private static async Task<List<int?>> МаршрутАsync(DelosferaDbContext db, Стенд стенд)
     {
         var audit = new AuditService(db);
-        var engine = new RouteEngine(db, audit, [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
+        var engine = new RouteEngine(db, audit, [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
         var service = new ProcurementRouteService(db, engine);
 
         var request = await db.ProcurementRequests.FirstAsync(r => r.Id == стенд.RequestId);

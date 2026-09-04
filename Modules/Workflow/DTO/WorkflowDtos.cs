@@ -170,8 +170,38 @@ public class RouteTemplateStepResponse
     public int? TimeNormHours { get; set; }
     public int ParticipantCount { get; set; }
 
+    /// <summary>
+    /// Кто согласует на этапе. Раньше отдавалось только их число — по нему видно,
+    /// что участники есть, но не видно, кто именно, и настроить маршрут было
+    /// нельзя: экран не знал, что показывать.
+    /// </summary>
+    public List<TemplateParticipantResponse> Participants { get; set; } = [];
+
     /// <summary>Null — подпись не требуется; Simple — ПЭП; Qualified — ЭЦП.</summary>
     public Signing.Models.SignatureLevel? RequiredSignatureLevel { get; set; }
+}
+
+/// <summary>
+/// Участник этапа шаблона: конкретный человек, подразделение или роль.
+///
+/// Подразделение и роль разрешаются в человека в момент запуска маршрута — так
+/// шаблон переживает смену людей в должностях.
+/// </summary>
+public class TemplateParticipantResponse
+{
+    public int Id { get; set; }
+
+    public int? UserId { get; set; }
+    public string? UserName { get; set; }
+
+    public int? UnitId { get; set; }
+    public string? UnitTitle { get; set; }
+
+    /// <summary>Ролевая ссылка: «руководитель подразделения автора» и подобные.</summary>
+    public string? RoleRef { get; set; }
+
+    /// <summary>Обязателен: без его решения этап не закрывается.</summary>
+    public bool Required { get; set; }
 }
 
 public class StepSignatureLevelRequest

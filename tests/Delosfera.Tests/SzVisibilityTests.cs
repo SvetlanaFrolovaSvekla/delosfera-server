@@ -131,7 +131,7 @@ public class SzVisibilityTests
         var audit = new AuditService(db);
         var documents = new DocumentService(db, audit, new NumeratorService(db));
         var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
-        var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
+        var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
 
         return new SzService(db, documents, audit, engine, new PassthroughHtml(),
             new FakeCurrentUser(userId, permissions), handler,

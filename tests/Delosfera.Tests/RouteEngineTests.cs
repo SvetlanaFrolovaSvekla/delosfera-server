@@ -273,7 +273,8 @@ public class RouteEngineTests
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private static RouteEngine NewEngine(DelosferaDbContext db) =>
-        new(db, new AuditService(db), [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
+        new(db, new AuditService(db), [], new NoSubstitutions(), new SilentNotifier(),
+            new FakeSignatures(), new RouteRoleResolver(db));
 
     /// <summary>
     /// Маршрут из одного этапа с одним активным согласующим. Срок ставится в прошлое
