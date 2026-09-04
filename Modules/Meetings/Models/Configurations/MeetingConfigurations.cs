@@ -126,3 +126,28 @@ public class AgendaFileConfiguration : IEntityTypeConfiguration<AgendaFile>
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+/// <summary>Состав коллегиального органа.</summary>
+public class BodyMemberConfiguration : IEntityTypeConfiguration<BodyMember>
+{
+    public void Configure(EntityTypeBuilder<BodyMember> builder)
+    {
+        builder.ToTable("meeting_body_member");
+
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Basis).HasMaxLength(500);
+
+        builder.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // «Кто входит в Правление» — главный вопрос к этой таблице.
+        builder.HasIndex(x => new { x.Body, x.Role });
+
+        // Один человек числится в органе один раз: две записи означали бы два
+        // голоса и два уведомления.
+        builder.HasIndex(x => new { x.Body, x.UserId }).IsUnique();
+    }
+}

@@ -250,6 +250,10 @@ public class DelosferaDbContext : DbContext
     // --- Заседания Правления, КПА и комитетов (ТЗ «Исполнение решений КПА, Правления и Комитетов») ---
     public DbSet<Meeting> Meetings => Set<Meeting>();
     public DbSet<AgendaItem> AgendaItems => Set<AgendaItem>();
+
+    /// <summary>Состав коллегиальных органов: кто входит в Правление, КПА, Кредитный комитет.</summary>
+    public DbSet<delosfera_server.Modules.Meetings.Models.BodyMember> BodyMembers =>
+        Set<delosfera_server.Modules.Meetings.Models.BodyMember>();
     public DbSet<AgendaGuest> AgendaGuests => Set<AgendaGuest>();
     public DbSet<AgendaAssignment> AgendaAssignments => Set<AgendaAssignment>();
     public DbSet<AgendaFile> AgendaFiles => Set<AgendaFile>();

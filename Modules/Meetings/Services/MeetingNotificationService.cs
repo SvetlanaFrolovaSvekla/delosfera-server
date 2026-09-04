@@ -31,13 +31,17 @@ public class MeetingNotificationService : IMeetingNotificationService
     private readonly INotificationService _notifications;
     private readonly ILogger<MeetingNotificationService> _logger;
 
+    private readonly IBodyMemberService _bodyMembers;
+
     public MeetingNotificationService(
         DelosferaDbContext db,
         INotificationService notifications,
+        IBodyMemberService bodyMembers,
         ILogger<MeetingNotificationService> logger)
     {
         _db = db;
         _notifications = notifications;
+        _bodyMembers = bodyMembers;
         _logger = logger;
     }
 
@@ -219,8 +223,18 @@ public class MeetingNotificationService : IMeetingNotificationService
     /// Члены органа определяются правом роли, а не отдельным списком: состав меняется
     /// приказом, и вести его вторым справочником — гарантированно получить расхождение.
     /// </summary>
+    /// <summary>
+    /// Состав органа берётся из справочника состава, а не из прав роли: роли с
+    /// полным набором прав делали членами Правления администраторов, и письма о
+    /// заседании уходили им, а не тем, кто в органе состоит.
+    /// </summary>
     private async Task<List<int>> MembersOfAsync(MeetingBody body)
     {
+        var members = await _bodyMembers.CurrentMemberIdsAsync(body);
+        if (members.Count > 0) return members;
+
+        // Состав ещё не заведён — пока держимся прежнего признака, чтобы
+        // уведомления не пропали на базе, где справочник не заполнен.
         var code = (int)MeetingAccessService.MembershipFor(body);
 
         return await _db.Users

@@ -139,10 +139,16 @@ public class UserController : ControllerBase
             // внутри каждой ступени по алфавиту. Один алфавит на всех ставил
             // председателя между рядовыми сотрудниками, и в списке «Кому» его
             // приходилось искать глазами.
-            .OrderByDescending(u => u.Roles.Any(r =>
-                r.PermissionCodes.Contains((int)PermissionCode.SubmitSzToBody)))
-            .ThenByDescending(u => u.Roles.Any(r =>
-                r.PermissionCodes.Contains((int)PermissionCode.MemberOfBoard)))
+            //
+            // Старшинство берётся из состава органа, а не из прав: право
+            // «выносить вопрос на орган» по работе есть и у администратора
+            // системы, и он оказывался первым в списке впереди председателя.
+            .OrderByDescending(u => _db.BodyMembers.Any(m =>
+                m.UserId == u.Id
+                && m.Body == Meetings.Models.MeetingBody.Board
+                && m.Role == Meetings.Models.BodyRole.Chairman))
+            .ThenByDescending(u => _db.BodyMembers.Any(m =>
+                m.UserId == u.Id && m.Body == Meetings.Models.MeetingBody.Board))
             .ThenByDescending(u => _db.OrganizationUnits.Any(o => o.HeadUserId == u.Id))
             .ThenBy(u => u.FullName)
             .Select(u => new
@@ -155,9 +161,13 @@ public class UserController : ControllerBase
                 // подразделение, а для этого нужен идентификатор, а не строка.
                 orgUnitId = u.OrgUnitId,
                 // Председатель Правления — первый в любом подборе.
-                isChairman = u.Roles.Any(r => r.PermissionCodes.Contains((int)PermissionCode.SubmitSzToBody)),
+                isChairman = _db.BodyMembers.Any(m =>
+                    m.UserId == u.Id
+                    && m.Body == Meetings.Models.MeetingBody.Board
+                    && m.Role == Meetings.Models.BodyRole.Chairman),
                 // Член Правления — такие идут следом.
-                isBoardMember = u.Roles.Any(r => r.PermissionCodes.Contains((int)PermissionCode.MemberOfBoard)),
+                isBoardMember = _db.BodyMembers.Any(m =>
+                    m.UserId == u.Id && m.Body == Meetings.Models.MeetingBody.Board),
                 // Руководит подразделением — третий по старшинству в том же подборе.
                 isUnitHead = _db.OrganizationUnits.Any(o => o.HeadUserId == u.Id),
             })
