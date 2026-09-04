@@ -1,4 +1,5 @@
-﻿using delosfera_server.Data;
+﻿using System.Security.Cryptography;
+using delosfera_server.Data;
 using delosfera_server.Modules.Files.Models;
 using Minio;
 using Minio.DataModel.Args;
@@ -22,6 +23,7 @@ public class MinioFileStorageService : IFileStorageService
     {
         var ext = ValidateFile(file);
         await ValidateContentSignatureAsync(file, ext, ct);
+        var hash = await ComputeHashAsync(file, ct);
 
         var objectName = $"{Guid.NewGuid()}/{file.FileName}";
 
@@ -40,6 +42,39 @@ public class MinioFileStorageService : IFileStorageService
             SizeBytes = file.Length,
             StorageKey = objectName,
             Bucket = _bucket,
+            Hash = hash,
+            UploadedByUserId = userId
+        };
+
+        _db.FileAttachments.Add(entity);
+        await _db.SaveChangesAsync(ct);
+        return entity;
+    }
+
+    public async Task<FileAttachment> SaveGeneratedAsync(
+        byte[] content, string fileName, string contentType, int userId, CancellationToken ct = default)
+    {
+        var hash = Convert.ToHexStringLower(SHA256.HashData(content));
+        var objectName = $"{Guid.NewGuid()}/{fileName}";
+
+        await using (var stream = new MemoryStream(content))
+        {
+            await _minio.PutObjectAsync(new PutObjectArgs()
+                .WithBucket(_bucket)
+                .WithObject(objectName)
+                .WithStreamData(stream)
+                .WithObjectSize(content.LongLength)
+                .WithContentType(contentType), ct);
+        }
+
+        var entity = new FileAttachment
+        {
+            OriginalFileName = fileName,
+            ContentType = contentType,
+            SizeBytes = content.LongLength,
+            StorageKey = objectName,
+            Bucket = _bucket,
+            Hash = hash,
             UploadedByUserId = userId
         };
 
@@ -76,11 +111,18 @@ public class MinioFileStorageService : IFileStorageService
         await _db.SaveChangesAsync(ct);
     }
 
+    public async Task<string> ComputeHashAsync(IFormFile file, CancellationToken ct = default)
+    {
+        await using var stream = file.OpenReadStream();
+        var bytes = await SHA256.HashDataAsync(stream, ct);
+        return Convert.ToHexStringLower(bytes);
+    }
+
     // Изображения нужны наравне с документами: к записке и заявке чаще всего
     // прикладывают снимок экрана — счёта, ошибки, переписки, — и запрет на них
     // означал бы, что вставка из буфера не работает вовсе.
     private static readonly string[] AllowedExtensions =
-        [".doc", ".docx", ".pdf", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg"];
+        [".doc", ".docx", ".pdf", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".txt"];
 
     // Сигнатуры содержимого (magic bytes) — расширение можно подделать, поэтому проверяем и начало файла.
     private static readonly byte[] PdfSignature = "%PDF"u8.ToArray();                        // .pdf
@@ -108,6 +150,33 @@ public class MinioFileStorageService : IFileStorageService
     /// </summary>
     private static async Task ValidateContentSignatureAsync(IFormFile file, string ext, CancellationToken ct)
     {
+        // .txt — единственное расширение без фиксированной сигнатуры (это просто текст, а не
+        // бинарный формат с "magic bytes"). Точное совпадение здесь не проверяем, вместо этого
+        // убеждаемся, что под видом .txt не загружен один из БИНАРНЫХ форматов выше (тот же
+        // приём подмены расширения, от которого защищают сигнатуры остальных типов).
+        if (ext == ".txt")
+        {
+            if (file.Length == 0) return;
+
+            var buffer = new byte[Math.Min(8, file.Length)];
+            await using (var stream = file.OpenReadStream())
+            {
+                await stream.ReadAsync(buffer, ct);
+            }
+
+            var looksBinary =
+                StartsWith(buffer, PdfSignature) ||
+                StartsWith(buffer, ZipSignature) ||
+                StartsWith(buffer, OleSignature) ||
+                StartsWith(buffer, PngSignature) ||
+                StartsWith(buffer, JpegSignature);
+
+            if (looksBinary)
+                throw new InvalidOperationException("Содержимое файла не соответствует его расширению");
+
+            return;
+        }
+
         var expected = ext switch
         {
             ".pdf" => PdfSignature,
@@ -126,4 +195,7 @@ public class MinioFileStorageService : IFileStorageService
                 throw new InvalidOperationException("Содержимое файла не соответствует его расширению");
         }
     }
+
+    private static bool StartsWith(byte[] buffer, byte[] signature) =>
+        buffer.Length >= signature.Length && buffer.AsSpan(0, signature.Length).SequenceEqual(signature);
 }

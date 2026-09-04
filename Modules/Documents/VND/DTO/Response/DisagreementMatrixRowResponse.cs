@@ -7,4 +7,5 @@ public class DisagreementMatrixRowResponse
     public required string OpponentPosition { get; set; }
     public string? DeveloperJustification { get; set; }
     public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }

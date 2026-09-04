@@ -216,6 +216,61 @@ public class VndActualizationService : IVndActualizationService
         return await BuildStateResponseAsync(vnd);
     }
 
+    /// <summary>Изменить уже зафиксированные на шаге "Выполнить актуализацию" настройки (сдвиг
+    /// срока/"без изменений") — пока цикл ещё не ушёл дальше OnActualization (то есть редакция ещё
+    /// не отправлена на согласование и не опубликована напрямую). Доступно назначенному
+    /// ответственному или главному редактору — как и сам шаг PerformAsync. В отличие от PerformAsync
+    /// требует, чтобы шаг уже был выполнен (ActualizationPerformed == true), и не трогает этот флаг.</summary>
+    public async Task<VndActualizationStateResponse> UpdatePerformedSettingsAsync(
+        int vndId, PerformActualizationRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        if (vnd.Status != VndStatus.OnActualization)
+            throw new InvalidOperationException(
+                "Изменить настройки актуализации можно только в процессе актуализации");
+
+        if (!vnd.ActualizationPerformed)
+            throw new InvalidOperationException("Шаг «Выполнить актуализацию» ещё не пройден");
+
+        if (vnd.ActualizationResponsibleUserId != currentUserId && !IsChiefEditor())
+            throw new UnauthorizedAccessException(
+                "Изменить настройки актуализации может только назначенный ответственный или главный редактор ВНД");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+
+        vnd.ActualizationShiftNextPeriod = request.ShiftNextPeriod;
+        vnd.ActualizationPlannedNoChanges = request.PlannedNoChanges;
+
+        var openRecord = await _db.Set<VndActualizationRecord>()
+            .Where(r => r.VndId == vndId && r.PublishedAt == null)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync();
+
+        if (openRecord is not null)
+        {
+            openRecord.ShiftNextPeriod = request.ShiftNextPeriod;
+            openRecord.PlannedNoChanges = request.PlannedNoChanges;
+        }
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ProcessStarted, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} изменил(а) настройки актуализации ВНД «{vnd.TitleRu}»" +
+                (request.PlannedNoChanges ? " (заявлено без изменений)" : ""),
+                $"{actorName} changed actualization settings for VND \"{vnd.TitleRu}\"" +
+                (request.PlannedNoChanges ? " (declared as no changes)" : ""),
+                $"{actorName} «{vnd.TitleRu}» ВНДисинин актуализация жөндөөлөрүн өзгөрттү" +
+                (request.PlannedNoChanges ? " (өзгөртүүсүз деп жарыяланды)" : "")),
+            $"/base-vnd/{vndId}");
+
+        await _db.SaveChangesAsync();
+
+        return await BuildStateResponseAsync(vnd);
+    }
+
     public async Task<VndActualizationRequestResponse> RequestAccessAsync(
         int vndId, RequestActualizationAccessRequest request, int currentUserId)
     {
@@ -500,17 +555,25 @@ public class VndActualizationService : IVndActualizationService
         if (vnd.Status != VndStatus.Consolidation)
             throw new InvalidOperationException("Опубликовать можно только ВНД в статусе консолидации");
 
-        var isChiefEditor = IsChiefEditor();
+        // Узкое право консолидации ("главный методолог") - НЕ то же самое, что широкий
+        // IsChiefEditor() (CreateVndWith(out)Approval / ActualizeAnyVndWith(out)Approval),
+        // который используется для остальных шагов актуализации и пускал сюда практически
+        // любого автора ВНД. Консолидировать чужую редакцию может только тот, кто реально
+        // отвечает за неё (ответственный за актуализацию/инициатор согласования), либо
+        // отдельно назначенный главный методолог (см. PermissionCode.ConsolidateAnyVnd).
+        var canConsolidateAnyVnd = _currentUser.HasPermission(PermissionCode.ConsolidateAnyVnd);
 
         bool isAuthorized;
         if (vnd.ActualizationResponsibleUserId.HasValue)
         {
-            // Публикация в рамках цикла актуализации — только назначенный ответственный или главред
-            isAuthorized = vnd.ActualizationResponsibleUserId == currentUserId || isChiefEditor;
+            // Публикация в рамках цикла актуализации — только назначенный ответственный
+            // или главный методолог
+            isAuthorized = vnd.ActualizationResponsibleUserId == currentUserId || canConsolidateAnyVnd;
         }
         else
         {
-            // Обычное согласование (вне актуализации) — публикует инициатор согласования или главред
+            // Обычное согласование (вне актуализации) — публикует инициатор согласования
+            // или главный методолог
             var lastRedaction = vnd.Redactions.OrderByDescending(r => r.Number).FirstOrDefault();
             var initiatorUserId = lastRedaction is null
                 ? (int?)null
@@ -519,17 +582,40 @@ public class VndActualizationService : IVndActualizationService
                     .Select(p => (int?)p.InitiatorUserId)
                     .FirstOrDefaultAsync();
 
-            isAuthorized = (initiatorUserId.HasValue && initiatorUserId == currentUserId) || isChiefEditor;
+            isAuthorized = (initiatorUserId.HasValue && initiatorUserId == currentUserId) || canConsolidateAnyVnd;
         }
 
         if (!isAuthorized)
             throw new UnauthorizedAccessException(
-                "Опубликовать редакцию может только ответственный за актуализацию, инициатор согласования или главный редактор ВНД");
+                "Опубликовать редакцию может только ответственный за актуализацию, инициатор согласования или главный методолог");
+
+        // Реквизиты обязательны к обновлению прямо в этой же операции - см. комментарий в
+        // PublishVndActualizationRequest. Пустой AdoptionCode - явный признак незаполненной
+        // формы (required в DTO гарантирует только присутствие поля в JSON, не его содержимое).
+        if (string.IsNullOrWhiteSpace(request.AdoptionCode))
+            throw new InvalidOperationException("Укажите № принятия для консолидации редакции");
+
+        // Актуализационная редакция (Number > 1) не может быть консолидирована без ТИД —
+        // тот же принцип, что и в PublishRedactionWithoutApprovalAsync, только здесь это
+        // единственная реальная точка проверки для циклов БЕЗ согласования: раньше отсюда
+        // можно было проконсолидировать и без ТИД, если согласование не требовалось (в т.ч.
+        // при подтверждении "без изменений" — ConfirmNoChangesAsync).
+        var latestRedactionForTidCheck = vnd.Redactions.OrderByDescending(r => r.Number).FirstOrDefault();
+        if (latestRedactionForTidCheck is not null
+            && latestRedactionForTidCheck.Number > 1
+            && latestRedactionForTidCheck.TidFileId is null)
+            throw new InvalidOperationException(
+                "Прежде чем консолидировать редакцию, приложите файл ТИД " +
+                "(Таблица изменений и дополнений) — кнопка «Сформировать или загрузить ТИД»");
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        vnd.AdoptionCode = request.AdoptionCode;
+        vnd.AdoptionDate = request.AdoptionDate;
+        vnd.EffectiveDate = request.EffectiveDate;
 
         if (vnd.ActualizationShiftNextPeriod)
         {
@@ -543,7 +629,16 @@ public class VndActualizationService : IVndActualizationService
 
         var latestRedaction = vnd.Redactions.OrderByDescending(r => r.Number).FirstOrDefault();
         if (latestRedaction is not null)
+        {
             vnd.CurrentRedactionId = latestRedaction.Id;
+
+            // Реквизиты по редакции (см. миграцию "реквизиты по редакции" в VndRedaction.cs):
+            // дата/номер утверждения и дата вступления в силу принадлежат ИМЕННО этой редакции,
+            // а не документу целиком — тут единственное место, где они реально выставляются.
+            latestRedaction.AdoptionCode = request.AdoptionCode;
+            latestRedaction.AdoptionDate = request.AdoptionDate;
+            latestRedaction.EffectiveDate = request.EffectiveDate;
+        }
 
         vnd.LastActualizationDate = today;
         vnd.LastActualizationHadChanges = request.HadChanges;

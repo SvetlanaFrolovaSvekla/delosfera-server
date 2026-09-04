@@ -1,4 +1,5 @@
-﻿using delosfera_server.Common.Services.Authorization;
+﻿using System.Text.Json;
+using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.ActivityLog.Models;
@@ -35,12 +36,21 @@ public class VndApprovalService : IVndApprovalService
     private const int MaxResolutionAttachments = 5;
     private const long MaxResolutionAttachmentSizeBytes = 50L * 1024 * 1024;
 
+    // Цитаты из текста редакции, на которые согласующий сослался в резолюции (см.
+    // "+ Сослаться на текст редакции" на клиенте). Лимит по количеству — защита от абьюза
+    // API напрямую (в обычном UI-сценарии их будет единицы); MaxQuoteTextLength — с запасом
+    // больше клиентского MAX_QUOTE_SOURCE_LENGTH (600, см. VndApproverResolutionPanel.tsx),
+    // текст длиннее просто обрезаем, а не отклоняем весь запрос.
+    private const int MaxQuotesPerDecision = 50;
+    private const int MaxQuoteTextLength = 1000;
+
     private readonly DelosferaDbContext _db;
     private readonly IFileStorageService _fileService;
     private readonly INotificationService _notifications;
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<VndApprovalService> _logger;
     private readonly IActivityLogService _activityLog;
+    private readonly IApprovalSheetGenerator _approvalSheetGenerator;
     private readonly IFixedApprovalUnitResolver _fixedUnits;
 
     public VndApprovalService(
@@ -50,6 +60,7 @@ public class VndApprovalService : IVndApprovalService
         ICurrentUserService currentUser,
         ILogger<VndApprovalService> logger,
         IActivityLogService activityLog,
+        IApprovalSheetGenerator approvalSheetGenerator,
         IFixedApprovalUnitResolver fixedUnits)
     {
         _db = db;
@@ -58,6 +69,7 @@ public class VndApprovalService : IVndApprovalService
         _currentUser = currentUser;
         _logger = logger;
         _activityLog = activityLog;
+        _approvalSheetGenerator = approvalSheetGenerator;
         _fixedUnits = fixedUnits;
     }
 
@@ -98,6 +110,16 @@ public class VndApprovalService : IVndApprovalService
             throw new InvalidOperationException(
                 "На согласование можно отправить только редакцию в статусе черновика (ещё не отправленную)");
 
+        // Актуализационная редакция (Number > 1) не может уйти на согласование без ТИД — раньше это
+        // проверялось при самой загрузке (AddRedactionAsync), теперь ТИД прикладывается отдельным
+        // шагом позже (кнопка "Сформировать или загрузить ТИД"), поэтому проверка переехала сюда и в
+        // VndService.PublishRedactionWithoutApprovalAsync. В цикле "без изменений" (isNoChangesReviewRound)
+        // ТИД уже должен быть проставлен с прошлого цикла, так что проверка там безопасный no-op.
+        if (lastRedaction.Number > 1 && lastRedaction.TidFileId is null)
+            throw new InvalidOperationException(
+                "Прежде чем отправить редакцию на согласование, приложите файл ТИД " +
+                "(Таблица изменений и дополнений) — кнопка «Сформировать или загрузить ТИД»");
+
         var alreadyRunning = await _db.VndApprovalProcesses
             .AnyAsync(x => x.RedactionId == lastRedaction.Id && x.Status != ApprovalProcessStatus.Approved
                                                              && x.Status != ApprovalProcessStatus.Cancelled
@@ -119,11 +141,11 @@ public class VndApprovalService : IVndApprovalService
             throw new InvalidOperationException(
                 $"Норматив срока не может превышать {MaxDeadlineMinutes / 60 / 24} дней");
 
-        // Себя можно указать согласующим только на фиксированном этапе (Legal/RiskManagement/
-        // Compliance/Methodology) - принадлежность инициатора нужному подразделению всё равно
-        // проверяется ниже в BuildAndValidateStagesAsync. На дополнительных (Custom) этапах,
-        // которые инициатор сам добавил, себя указывать нельзя.
-        if (request.Stages.Any(s => s.Kind == ApprovalStageKind.Custom && s.ApproverUserId == currentUserId))
+        // Себя можно указать согласующим только на обязательном (фиксированном) этапе из
+        // справочника - принадлежность инициатора нужному подразделению всё равно проверяется
+        // ниже в BuildAndValidateStagesAsync. На дополнительных (Custom) этапах, которые
+        // инициатор сам добавил вручную (CoordinationStageId == null), себя указывать нельзя.
+        if (request.Stages.Any(s => s.CoordinationStageId is null && s.ApproverUserId == currentUserId))
             throw new InvalidOperationException(
                 "Вы не можете быть согласующим на дополнительном этапе, который сами добавили");
 
@@ -250,6 +272,8 @@ public class VndApprovalService : IVndApprovalService
                 $"Файл \"{oversizedFile.FileName}\" превышает максимальный размер " +
                 $"{MaxResolutionAttachmentSizeBytes / 1024 / 1024} МБ на один файл");
 
+        var quotes = ParseQuotes(request.QuotesJson);
+
         var decision = request.Decision switch
         {
             ApprovalDecisionType.Approve => ApprovalStageDecision.Approved,
@@ -271,6 +295,7 @@ public class VndApprovalService : IVndApprovalService
                     or ApprovalStageDecision.Rejected;
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Primary, request.Files, currentUserId);
+                AttachDecisionQuotes(stage, ApprovalStagePhase.Primary, quotes);
 
                 await _db.SaveChangesAsync();
 
@@ -298,6 +323,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.RepeatDecidedAt = DateTime.UtcNow;
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Repeat, request.Files, currentUserId);
+                AttachDecisionQuotes(stage, ApprovalStagePhase.Repeat, quotes);
 
                 await _db.SaveChangesAsync();
 
@@ -324,6 +350,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.FinalHoldDecidedAt = DateTime.UtcNow;
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.FinalHold, request.Files, currentUserId);
+                AttachDecisionQuotes(stage, ApprovalStagePhase.FinalHold, quotes);
 
                 await _db.SaveChangesAsync();
 
@@ -420,6 +447,22 @@ public class VndApprovalService : IVndApprovalService
             throw new UnauthorizedAccessException(
                 "Отозвать согласование может только инициатор или главный редактор");
 
+        await CancelInternalAsync(process, currentUserId);
+        return await LoadResponseAsync(process.Id);
+    }
+
+    public async Task WithdrawForCancelAsync(int vndId, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+        await CancelInternalAsync(process, currentUserId);
+    }
+
+    /// <summary>Общая часть отзыва согласования — используется и обычным CancelAsync
+    /// (с проверкой прав инициатора/CancelAnyVndApproval), и WithdrawForCancelAsync
+    /// (вызывается изнутри архивации ВНД, где авторизация уже выполнена отдельным правом
+    /// CancelVnd, см. VndService.CancelAsync).</summary>
+    private async Task CancelInternalAsync(VndApprovalProcess process, int currentUserId)
+    {
         if (process.Status is ApprovalProcessStatus.Approved
             or ApprovalProcessStatus.Cancelled
             or ApprovalProcessStatus.Rejected)
@@ -433,12 +476,17 @@ public class VndApprovalService : IVndApprovalService
 
         var redaction = process.Redaction!;
         var vnd = process.Vnd!;
+        var vndId = vnd.Id;
 
         // Редакция снова становится черновиком (её можно править, переотправить или удалить).
         redaction.ApprovalStatus = RedactionApprovalStatus.Draft;
 
         // Документ: если это была первая редакция — возвращаем в черновик; если это цикл
         // актуализации существующего ВНД — возвращаем на актуализацию, а не в черновик.
+        // (Если это вызвано архивацией — VndService.CancelAsync сразу следом перезапишет
+        // Status на Archived; этот промежуточный переход нужен только затем, чтобы редакция
+        // и документ синхронно вышли из "На согласовании" тем же путём, что и при обычном
+        // отзыве согласования.)
         vnd.Status = redaction.Number <= 1 ? VndStatus.Draft : VndStatus.OnActualization;
 
         _activityLog.Log(
@@ -460,8 +508,6 @@ public class VndApprovalService : IVndApprovalService
         await NotifyAsync(
             VndApprovalNotificationMessages.Cancelled(redaction.Code, vnd.TitleRu),
             NotificationCategory.Approval, vndId, currentUserId, approverIds);
-
-        return await LoadResponseAsync(process.Id);
     }
 
     public async Task<ApprovalProcessResponse> ResubmitAfterRevisionAsync(
@@ -476,13 +522,24 @@ public class VndApprovalService : IVndApprovalService
         if (process.InitiatorUserId != currentUserId)
             throw new UnauthorizedAccessException("Отправить на повторное согласование может только инициатор");
 
-        if (!request.AgreesWithAllRemarks && process.DisagreementMatrixRows.Count == 0)
+        if (request.RemarksAgreement != RemarksAgreement.FullyAgree && request.DisagreementMatrix is null)
             throw new InvalidOperationException(
-                "Если вы не согласны со всеми замечаниями, заполните матрицу разногласий (хотя бы одна строка)");
+                "Если вы не согласны со всеми замечаниями (полностью или частично), приложите матрицу " +
+                "разногласий — сформируйте её в системе или загрузите готовый файл");
 
         if (request.Comment is { Length: > MaxResolutionCommentLength })
             throw new InvalidOperationException(
                 $"Комментарий не может превышать {MaxResolutionCommentLength} символов");
+
+        if (request.CommentAttachments is { Count: > MaxResolutionAttachments })
+            throw new InvalidOperationException(
+                $"К комментарию нельзя приложить больше {MaxResolutionAttachments} файлов");
+
+        var oversizedCommentFile = request.CommentAttachments?.FirstOrDefault(f => f.Length > MaxResolutionAttachmentSizeBytes);
+        if (oversizedCommentFile is not null)
+            throw new InvalidOperationException(
+                $"Файл «{oversizedCommentFile.FileName}» превышает максимальный размер " +
+                $"{MaxResolutionAttachmentSizeBytes / 1024 / 1024} МБ на один файл");
 
         var redaction = process.Redaction!;
 
@@ -493,22 +550,40 @@ public class VndApprovalService : IVndApprovalService
             throw new InvalidOperationException(
                 "При актуализации ВНД необходимо приложить обновлённый файл ТИД вместе с исправленной редакцией");
 
+        // Момент замены — общий для всех документов, заменённых в рамках одной отправки,
+        // чтобы метки "Обновлено, дата" на фронте показывали одно и то же время.
+        var resubmittedAt = DateTime.UtcNow;
+
         if (request.DocRu is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocRu, currentUserId);
             redaction.DocFileRuId = saved.Id;
+            redaction.DocRuUpdatedAt = resubmittedAt;
         }
 
         if (request.DocKg is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocKg, currentUserId);
             redaction.DocFileKgId = saved.Id;
+            redaction.DocKgUpdatedAt = resubmittedAt;
+        }
+        else if (request.RemoveDocKg)
+        {
+            // Явное удаление документа на кыргызском без замены (см. ResubmitAfterRevisionRequest.RemoveDocKg).
+            redaction.DocFileKgId = null;
+            redaction.DocKgUpdatedAt = null;
         }
 
         if (request.DocEn is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocEn, currentUserId);
             redaction.DocFileEnId = saved.Id;
+            redaction.DocEnUpdatedAt = resubmittedAt;
+        }
+        else if (request.RemoveDocEn)
+        {
+            redaction.DocFileEnId = null;
+            redaction.DocEnUpdatedAt = null;
         }
 
         if (request.Tid is not null)
@@ -517,9 +592,65 @@ public class VndApprovalService : IVndApprovalService
             redaction.TidFileId = saved.Id;
         }
 
+        if (request.DisagreementMatrix is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.DisagreementMatrix, currentUserId);
+            redaction.DisagreementMatrixFileId = saved.Id;
+        }
+
+        // Новые вложения к редакции - добавляем в уже отслеживаемую EF навигацию, FK на редакцию
+        // проставится автоматически при SaveChangesAsync (не требует предварительной загрузки
+        // коллекции, см. AddRedactionAsync в VndService для того же паттерна на создании).
+        foreach (var file in request.NewAttachments ?? [])
+        {
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            redaction.Attachments.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
+        }
+
+        if (request.RemovedAttachmentFileIds is { Count: > 0 })
+        {
+            var toRemove = await _db.Set<VndRedactionAttachment>()
+                .Where(a => a.VndRedactionId == redaction.Id &&
+                            request.RemovedAttachmentFileIds.Contains(a.FileAttachmentId))
+                .ToListAsync();
+            _db.Set<VndRedactionAttachment>().RemoveRange(toRemove);
+        }
+
         process.RepeatInitiatorComment = request.Comment;
 
-        if (request.AgreesWithAllRemarks)
+        // Комментарий полностью перезаписывается на каждый круг доработки - вложения к
+        // предыдущему комментарию больше не актуальны, удаляем вместе с файлами в хранилище
+        // и заменяем набором, пришедшим с этой отправкой (см. VndRepeatCommentAttachment).
+        var oldCommentAttachments = await _db.Set<VndRepeatCommentAttachment>()
+            .Where(a => a.VndApprovalProcessId == process.Id)
+            .ToListAsync();
+        foreach (var old in oldCommentAttachments)
+        {
+            try
+            {
+                await _fileService.DeleteAsync(old.FileAttachmentId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Не удалось удалить файл {FileId} предыдущего вложения комментария процесса {ProcessId}",
+                    old.FileAttachmentId, process.Id);
+            }
+        }
+        _db.Set<VndRepeatCommentAttachment>().RemoveRange(oldCommentAttachments);
+
+        foreach (var file in request.CommentAttachments ?? [])
+        {
+            if (file.Length == 0) continue;
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            process.RepeatInitiatorCommentAttachments.Add(new VndRepeatCommentAttachment
+            {
+                FileAttachmentId = saved.Id,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
+        if (request.RemarksAgreement == RemarksAgreement.FullyAgree)
         {
             // Замечания исправлены - обычное повторное согласование (только с теми, кто участвует в repeat)
             foreach (var stage in process.Stages.Where(s => s.ParticipatesInRepeat))
@@ -557,9 +688,11 @@ public class VndApprovalService : IVndApprovalService
         }
         else
         {
-            // Составлена матрица разногласий - повторное согласование пропускаем,
-            // сразу идём на финальную выдержку (решение по-прежнему требуется только от тех,
-            // кто ещё не давал чистого согласования этой редакции - см. ResetFinalHoldDecisions)
+            // PartiallyAgree или FullyDisagree - в обоих случаях составлена матрица разногласий,
+            // повторное согласование пропускаем, сразу идём на финальную выдержку (решение
+            // по-прежнему требуется только от тех, кто ещё не давал чистого согласования этой
+            // редакции - см. ResetFinalHoldDecisions). При PartiallyAgree редакция при этом могла
+            // быть обновлена файлами выше - по маршруту согласования разницы с FullyDisagree нет.
             process.Status = ApprovalProcessStatus.FinalHold;
             ResetFinalHoldDecisions(process);
             process.FinalHoldStartedAt = DateTime.UtcNow;
@@ -634,6 +767,31 @@ public class VndApprovalService : IVndApprovalService
 
         _db.Set<VndDisagreementMatrixRow>().Remove(row);
         await _db.SaveChangesAsync();
+    }
+
+    public async Task<DisagreementMatrixRowResponse> UpdateDisagreementMatrixRowAsync(
+        int vndId, int rowId, UpdateDisagreementMatrixRowRequest request, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        if (process.InitiatorUserId != currentUserId)
+            throw new UnauthorizedAccessException("Изменять строки матрицы разногласий может только инициатор");
+
+        if (process.Status != ApprovalProcessStatus.RevisionNeeded)
+            throw new InvalidOperationException(
+                "Матрицу разногласий можно редактировать только в статусе \"требуются правки\"");
+
+        var row = await _db.Set<VndDisagreementMatrixRow>()
+                      .FirstOrDefaultAsync(x => x.Id == rowId && x.ApprovalProcessId == process.Id)
+                  ?? throw new KeyNotFoundException($"Строка матрицы разногласий с id={rowId} не найдена");
+
+        row.DeveloperPosition = request.DeveloperPosition;
+        row.OpponentPosition = request.OpponentPosition;
+        row.DeveloperJustification = request.DeveloperJustification;
+
+        await _db.SaveChangesAsync();
+
+        return ToDisagreementRowResponse(row);
     }
 
     public async Task ProcessTimeoutsAsync()
@@ -758,6 +916,27 @@ public class VndApprovalService : IVndApprovalService
 
     private async Task CompleteRepeatPhaseAsync(VndApprovalProcess process, bool save = true)
     {
+        // Зеркалит проверку в CompletePrimaryPhaseAsync: если на повторном согласовании кто-то
+        // СНОВА оставил замечания (Rejected до сюда не доходит - обрабатывается отдельно и сразу
+        // прекращает весь процесс, см. RejectApprovalAsync) - это ещё один круг доработки, а не
+        // переход на финальную выдержку. На финальную выдержку процесс должен попадать только
+        // тогда, когда очередной круг повторного согласования прошёл вообще без замечаний.
+        var hasRemarks = process.Stages
+            .Where(s => s.ParticipatesInRepeat)
+            .Any(s => s.RepeatDecision is ApprovalStageDecision.ApprovedWithComment);
+
+        if (hasRemarks)
+        {
+            process.Status = ApprovalProcessStatus.RevisionNeeded;
+
+            await NotifyAsync(
+                VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
+                NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+
+            if (save) await _db.SaveChangesAsync();
+            return;
+        }
+
         process.Status = ApprovalProcessStatus.FinalHold;
         process.FinalHoldStartedAt = DateTime.UtcNow;
 
@@ -868,10 +1047,17 @@ public class VndApprovalService : IVndApprovalService
 
         redaction.ApprovalStatus = RedactionApprovalStatus.Approved;
 
-        // Редакция стала согласованной - файлы, приложенные согласующими к своим резолюциям,
-        // больше не нужны и удаляются, чтобы не копить их в БД/хранилище. Текст самих резолюций
-        // (PrimaryComment/RepeatComment/FinalHoldComment) остаётся как есть.
-        await CleanupStageAttachmentsAsync(process);
+        // Вложения к резолюциям (VndApprovalStageAttachment) и к комментарию инициатора о
+        // внесённых исправлениях (VndRepeatCommentAttachment) намеренно НЕ удаляются, когда
+        // редакция становится согласованной - они остаются частью истории согласования наравне
+        // с текстом самих резолюций/комментария (PrimaryComment/RepeatComment/FinalHoldComment/
+        // RepeatInitiatorComment).
+
+        // Формируем Лист согласования по шаблону: название ВНД, ФИО и должность каждого
+        // согласующего, единая дата (момент окончательного согласования) и результат
+        // "Согласовано" для всех строк. Достижимо и из фонового таймаут-джоба
+        // (ProcessTimeoutsAsync) - без HTTP-запроса, поэтому генерация полностью на сервере.
+        await GenerateApprovalSheetAsync(process, redaction);
 
         // Согласование завершено, но документ ещё не публикуется автоматически -
         // CurrentRedactionId и RevisionChangedDate выставит VndActualizationService.PublishAsync
@@ -912,6 +1098,55 @@ public class VndApprovalService : IVndApprovalService
 
         await NotifyAsync(
             notice, NotificationCategory.Approval, process.VndId, null, consolidationRecipients.ToArray());
+    }
+
+    /// <summary>Формирует и сохраняет Лист согласования редакции (см. ApprovalSheetGenerator),
+    /// заполняя его ФИО/должностью всех согласующих этого процесса (process.Stages - по одной
+    /// строке на согласующего, порядок как в маршрутном листе) и датой этого момента - она общая
+    /// для всех строк, т.к. фиксирует не решение конкретного согласующего, а момент, когда
+    /// редакция в целом стала согласованной.</summary>
+    private async Task GenerateApprovalSheetAsync(VndApprovalProcess process, VndRedaction redaction)
+    {
+        var approverIds = process.Stages
+            .OrderBy(s => s.Order)
+            .Select(s => s.ApproverUserId)
+            .ToList();
+
+        var usersById = await _db.Users
+            .Include(u => u.Position)
+            .Where(u => approverIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id);
+
+        var approvers = approverIds
+            .Select(id => usersById.TryGetValue(id, out var u)
+                ? new ApprovalSheetApproverInfo(u.FullName, u.Position?.TitleRu)
+                : new ApprovalSheetApproverInfo("", null))
+            .ToList();
+
+        var approvedAt = process.CompletedAt ?? DateTime.UtcNow;
+
+        byte[] content;
+        try
+        {
+            content = _approvalSheetGenerator.Generate(process.Vnd!.TitleRu, approvedAt, approvers);
+        }
+        catch (Exception ex)
+        {
+            // Лист согласования - вспомогательный документ; сбой его генерации не должен срывать
+            // само согласование редакции (уже зафиксированное выше).
+            _logger.LogError(ex, "Не удалось сформировать Лист согласования для редакции {RedactionId}",
+                redaction.Id);
+            return;
+        }
+
+        var fileName = $"{redaction.Code}_Лист_согласования.docx";
+        const string wordContentType =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+        var saved = await _fileService.SaveGeneratedAsync(
+            content, fileName, wordContentType, process.InitiatorUserId);
+
+        redaction.ApprovalSheetFileId = saved.Id;
     }
 
     /// <summary>Если инициатор согласования сам числится согласующим на одном из этапов, его
@@ -996,9 +1231,9 @@ public class VndApprovalService : IVndApprovalService
     }
 
     /// <summary>Сохраняет файлы, приложенные согласующим к резолюции конкретной фазы, и
-    /// связывает их с этапом. Вызывается из DecideAsync до SaveChangesAsync — сами
-    /// вложения переживают до тех пор, пока редакция не станет согласованной
-    /// (см. <see cref="CleanupStageAttachmentsAsync"/>).</summary>
+    /// связывает их с этапом. Вызывается из DecideAsync до SaveChangesAsync — вложения
+    /// остаются в истории согласования бессрочно, даже после того как редакция станет
+    /// согласованной.</summary>
     private async Task AttachDecisionFilesAsync(
         VndApprovalStage stage, ApprovalStagePhase phase, List<IFormFile>? files, int userId)
     {
@@ -1020,60 +1255,77 @@ public class VndApprovalService : IVndApprovalService
         }
     }
 
-    /// <summary>Удаляет все файлы, приложенные согласующими к резолюциям этого процесса
-    /// (по всем этапам и фазам), когда редакция становится согласованной — чтобы не копить
-    /// файлы в БД и в хранилище. Текст резолюций (Primary/Repeat/FinalHoldComment) не трогается.</summary>
-    private async Task CleanupStageAttachmentsAsync(VndApprovalProcess process)
+    /// <summary>Разбирает QuotesJson из ApprovalDecisionRequest. Невалидный JSON или отсутствие
+    /// поля — не ошибка запроса (цитаты необязательны), просто пустой список.</summary>
+    private static List<ApprovalQuoteItem> ParseQuotes(string? quotesJson)
     {
-        var stageIds = process.Stages.Select(s => s.Id).ToList();
-        if (stageIds.Count == 0) return;
+        if (string.IsNullOrWhiteSpace(quotesJson)) return [];
 
-        var attachments = await _db.Set<VndApprovalStageAttachment>()
-            .Where(a => stageIds.Contains(a.VndApprovalStageId))
-            .ToListAsync();
-
-        if (attachments.Count == 0) return;
-
-        foreach (var attachment in attachments)
+        try
         {
-            try
-            {
-                await _fileService.DeleteAsync(attachment.FileAttachmentId);
-            }
-            catch (Exception ex)
-            {
-                // Сбой удаления файла из хранилища не должен срывать завершение согласования -
-                // запись о вложении всё равно будет убрана ниже, а "осиротевший" файл в бакете
-                // не критичен и может быть подчищен отдельно.
-                _logger.LogWarning(ex,
-                    "Не удалось удалить файл {FileId} вложения резолюции при завершении согласования процесса {ProcessId}",
-                    attachment.FileAttachmentId, process.Id);
-            }
+            var parsed = JsonSerializer.Deserialize<List<ApprovalQuoteItem>>(
+                quotesJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return parsed ?? [];
         }
-
-        _db.Set<VndApprovalStageAttachment>().RemoveRange(attachments);
+        catch (JsonException)
+        {
+            // Не роняем всю резолюцию из-за кривого QuotesJson - просто игнорируем цитаты.
+            return [];
+        }
     }
 
+    /// <summary>Сохраняет цитаты, на которые согласующий сослался в резолюции конкретной фазы
+    /// (см. ParseQuotes выше), и связывает их с этапом. Вызывается из DecideAsync до
+    /// SaveChangesAsync - см. AttachDecisionFilesAsync выше, тот же паттерн.</summary>
+    private void AttachDecisionQuotes(VndApprovalStage stage, ApprovalStagePhase phase, List<ApprovalQuoteItem> quotes)
+    {
+        if (quotes.Count == 0) return;
+
+        foreach (var quote in quotes.Take(MaxQuotesPerDecision))
+        {
+            var text = quote.Text.Trim();
+            if (text.Length == 0) continue;
+            if (text.Length > MaxQuoteTextLength) text = text[..MaxQuoteTextLength];
+
+            _db.Set<VndApprovalStageQuote>().Add(new VndApprovalStageQuote
+            {
+                VndApprovalStageId = stage.Id,
+                Phase = phase,
+                DocumentTarget = quote.DocumentTarget,
+                Text = text,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+    }
+
+    /// <summary>Обязательные этапы маршрута больше не завязаны на фиксированный enum/позиции -
+    /// они определяются динамическим справочником CoordinationDefaultApprover (dictionaries/
+    /// coordination-users), в порядке его поля Order. Ведущие N этапов запроса (N = число
+    /// активных записей справочника) обязаны 1-в-1 соответствовать этим записям в том же
+    /// порядке; всё, что идёт после - произвольные (Custom) этапы, добавленные инициатором.</summary>
     private async Task<List<VndApprovalStage>> BuildAndValidateStagesAsync(List<ApprovalStageRequest> requestStages)
     {
-        if (requestStages.Count < 3)
+        var fixedCatalog = await _db.Set<CoordinationDefaultApprover>()
+            .OrderBy(x => x.Order)
+            .ToListAsync();
+
+        if (requestStages.Count < fixedCatalog.Count)
             throw new InvalidOperationException(
-                "Маршрут должен содержать минимум 3 этапа: Юр. управление, Риск-менеджмент и Комплаенс");
+                "Маршрут должен содержать все обязательные этапы: " +
+                string.Join(", ", fixedCatalog.Select(x => x.Title)));
 
-        if (requestStages[0].Kind != ApprovalStageKind.Legal)
-            throw new InvalidOperationException("Первый этап маршрута всегда — Юридическое управление");
-        if (requestStages[1].Kind != ApprovalStageKind.RiskManagement)
-            throw new InvalidOperationException("Второй этап маршрута всегда — Управление риск-менеджмента");
-        if (requestStages[2].Kind != ApprovalStageKind.Compliance)
-            throw new InvalidOperationException("Третий этап маршрута всегда — Управление комплаенс-контроля");
-
-        for (var i = 3; i < requestStages.Count; i++)
+        for (var i = 0; i < fixedCatalog.Count; i++)
         {
-            if (requestStages[i].Kind != ApprovalStageKind.Custom
-                && requestStages[i].Kind != ApprovalStageKind.Methodology)
+            if (requestStages[i].CoordinationStageId != fixedCatalog[i].Id)
                 throw new InvalidOperationException(
-                    "Этапы после фиксированных (Юр. управление, Риск-менеджмент, Комплаенс) " +
-                    "должны иметь тип Custom или Методология");
+                    $"Этап {i + 1} маршрута всегда — «{fixedCatalog[i].Title}»");
+        }
+
+        for (var i = fixedCatalog.Count; i < requestStages.Count; i++)
+        {
+            if (requestStages[i].CoordinationStageId is not null)
+                throw new InvalidOperationException(
+                    "Этапы после обязательных должны быть произвольными (без ссылки на справочник)");
         }
 
         var approverIds = requestStages.Select(s => s.ApproverUserId).ToList();
@@ -1097,6 +1349,7 @@ public class VndApprovalService : IVndApprovalService
                 $"У пользователей нет права выступать в роли согласующего: {string.Join(", ", noApproverRight)}");
 
         var usersById = users.ToDictionary(u => u.Id);
+        var catalogById = fixedCatalog.ToDictionary(x => x.Id);
 
         var stages = new List<VndApprovalStage>();
         for (var i = 0; i < requestStages.Count; i++)
@@ -1104,19 +1357,21 @@ public class VndApprovalService : IVndApprovalService
             var reqStage = requestStages[i];
             var approver = usersById[reqStage.ApproverUserId];
 
-            // Подразделение этапа берётся из справочника по номеру портала, а не
-            // из номера, прописанного в коде: справочник переживает слияния и
-            // переносы, наш номер — нет.
-            var expectedOrgUnitId = await _fixedUnits.ResolveAsync(reqStage.Kind);
+            var catalogEntry = reqStage.CoordinationStageId.HasValue
+                ? catalogById[reqStage.CoordinationStageId.Value]
+                : null;
+            var expectedOrgUnitId = catalogEntry?.OrgUnitId;
 
             if (expectedOrgUnitId.HasValue && approver.OrgUnitId != expectedOrgUnitId)
                 throw new InvalidOperationException(
-                    $"Согласующий на этапе {i + 1} ({reqStage.Kind}) должен относиться к соответствующему подразделению");
+                    $"Согласующий на этапе {i + 1} ({catalogEntry!.Title}) должен относиться к соответствующему подразделению");
 
             stages.Add(new VndApprovalStage
             {
                 Order = i + 1,
-                Kind = reqStage.Kind,
+                Kind = catalogEntry is not null ? ApprovalStageKind.Fixed : ApprovalStageKind.Custom,
+                Title = catalogEntry?.Title ?? "Доп. согласующий",
+                CoordinationStageId = catalogEntry?.Id,
                 OrgUnitId = approver.OrgUnitId ?? expectedOrgUnitId
                     ?? throw new InvalidOperationException("У согласующего не указано подразделение"),
                 ApproverUserId = approver.Id
@@ -1141,6 +1396,7 @@ public class VndApprovalService : IVndApprovalService
         // получить старый уже завершённый процесс вместо актуального.
         return await _db.VndApprovalProcesses
                    .Include(x => x.Stages).ThenInclude(s => s.Attachments)
+                   .Include(x => x.Stages).ThenInclude(s => s.Quotes)
                    .Include(x => x.Redaction)
                    .Include(x => x.Vnd)
                    .Include(x => x.DisagreementMatrixRows)
@@ -1171,7 +1427,9 @@ public class VndApprovalService : IVndApprovalService
             .Include(x => x.Stages).ThenInclude(s => s.OrgUnit)
             .Include(x => x.Stages).ThenInclude(s => s.ApproverUser)
             .Include(x => x.Stages).ThenInclude(s => s.Attachments).ThenInclude(a => a.FileAttachment)
+            .Include(x => x.Stages).ThenInclude(s => s.Quotes)
             .Include(x => x.DisagreementMatrixRows)
+            .Include(x => x.RepeatInitiatorCommentAttachments).ThenInclude(a => a.FileAttachment)
             .FirstAsync(x => x.Id == processId);
 
         var initiator = await _db.Users
@@ -1193,6 +1451,16 @@ public class VndApprovalService : IVndApprovalService
             PrimaryStartedAt = process.PrimaryStartedAt,
             PrimaryDeadlineAt = process.PrimaryDeadlineAt,
             RepeatInitiatorComment = process.RepeatInitiatorComment,
+            RepeatInitiatorCommentAttachments = process.RepeatInitiatorCommentAttachments
+                .OrderBy(a => a.CreatedAt)
+                .Select(a => new ApprovalStageAttachmentResponse
+                {
+                    Id = a.Id,
+                    FileId = a.FileAttachmentId,
+                    FileName = a.FileAttachment?.OriginalFileName ?? "",
+                    SizeBytes = a.FileAttachment?.SizeBytes ?? 0
+                })
+                .ToList(),
             RepeatStartedAt = process.RepeatStartedAt,
             RepeatDeadlineAt = process.RepeatDeadlineAt,
             FinalHoldStartedAt = process.FinalHoldStartedAt,
@@ -1209,6 +1477,7 @@ public class VndApprovalService : IVndApprovalService
                 Id = s.Id,
                 Order = s.Order,
                 Kind = MapKind(s.Kind),
+                Title = s.Title ?? LegacyKindTitle(s.Kind),
                 OrgUnitId = s.OrgUnitId,
                 OrgUnitName = s.OrgUnit?.TitleRu ?? "",
                 ApproverUserId = s.ApproverUserId,
@@ -1217,15 +1486,18 @@ public class VndApprovalService : IVndApprovalService
                 PrimaryComment = s.PrimaryComment,
                 PrimaryDecidedAt = s.PrimaryDecidedAt,
                 PrimaryAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.Primary),
+                PrimaryQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.Primary),
                 ParticipatesInRepeat = s.ParticipatesInRepeat,
                 RepeatDecision = s.RepeatDecision.HasValue ? MapDecision(s.RepeatDecision.Value) : null,
                 RepeatComment = s.RepeatComment,
                 RepeatDecidedAt = s.RepeatDecidedAt,
                 RepeatAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.Repeat),
+                RepeatQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.Repeat),
                 FinalHoldDecision = s.FinalHoldDecision.HasValue ? MapDecision(s.FinalHoldDecision.Value) : null,
                 FinalHoldComment = s.FinalHoldComment,
                 FinalHoldDecidedAt = s.FinalHoldDecidedAt,
-                FinalHoldAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.FinalHold)
+                FinalHoldAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.FinalHold),
+                FinalHoldQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.FinalHold)
             }).ToList()
         };
     }
@@ -1236,12 +1508,13 @@ public class VndApprovalService : IVndApprovalService
         DeveloperPosition = row.DeveloperPosition,
         OpponentPosition = row.OpponentPosition,
         DeveloperJustification = row.DeveloperJustification,
-        CreatedAt = row.CreatedAt
+        CreatedAt = row.CreatedAt,
+        UpdatedAt = row.UpdatedAt
     };
 
     /// <summary>Вложения этапа для конкретной фазы решения (первичной/повторной/финальной).
-    /// Пусто, если согласование уже завершилось согласованием редакции — вложения к этому моменту
-    /// уже удалены, остаётся только текст резолюции.</summary>
+    /// Остаются доступны и после согласования редакции — часть истории согласования наравне
+    /// с текстом резолюции.</summary>
     private static List<ApprovalStageAttachmentResponse> ToAttachmentResponses(
         IEnumerable<VndApprovalStageAttachment> attachments, ApprovalStagePhase phase) =>
         attachments
@@ -1253,6 +1526,21 @@ public class VndApprovalService : IVndApprovalService
                 FileId = a.FileAttachmentId,
                 FileName = a.FileAttachment?.OriginalFileName ?? "",
                 SizeBytes = a.FileAttachment?.SizeBytes ?? 0
+            })
+            .ToList();
+
+    /// <summary>Цитаты этапа для конкретной фазы решения — см. ToAttachmentResponses выше,
+    /// тот же паттерн.</summary>
+    private static List<ApprovalStageQuoteResponse> ToQuoteResponses(
+        IEnumerable<VndApprovalStageQuote> quotes, ApprovalStagePhase phase) =>
+        quotes
+            .Where(q => q.Phase == phase)
+            .OrderBy(q => q.CreatedAt)
+            .Select(q => new ApprovalStageQuoteResponse
+            {
+                Id = q.Id,
+                DocumentTarget = q.DocumentTarget,
+                Text = q.Text
             })
             .ToList();
 
@@ -1312,7 +1600,20 @@ public class VndApprovalService : IVndApprovalService
         ApprovalStageKind.Compliance => "compliance",
         ApprovalStageKind.Custom => "custom",
         ApprovalStageKind.Methodology => "methodology",
+        ApprovalStageKind.Fixed => "fixed",
         _ => "custom"
+    };
+
+    /// <summary>Название этапа для маршрутов, построенных ДО перехода на динамический
+    /// справочник (VndApprovalStage.Title тогда ещё не заполнялся) - только для отображения
+    /// старой истории согласования, в новой логике не используется.</summary>
+    private static string LegacyKindTitle(ApprovalStageKind kind) => kind switch
+    {
+        ApprovalStageKind.Legal => "Юридическое управление",
+        ApprovalStageKind.RiskManagement => "Риск-менеджмент",
+        ApprovalStageKind.Compliance => "Комплаенс-контроль",
+        ApprovalStageKind.Methodology => "Методология",
+        _ => "Доп. согласующий"
     };
 
     private static string MapDecision(ApprovalStageDecision decision) => decision switch

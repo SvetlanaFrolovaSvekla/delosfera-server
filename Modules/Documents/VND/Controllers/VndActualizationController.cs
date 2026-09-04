@@ -74,6 +74,23 @@ public class VndActualizationController : ControllerBase
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
+    /// <summary>Изменить уже зафиксированные на шаге "Выполнить актуализацию" настройки (сдвиг
+    /// срока/"без изменений") — пока цикл ещё не ушёл дальше OnActualization. Доступно ответственному
+    /// за актуализацию или главному редактору ВНД</summary>
+    [HttpPut("performed-settings")]
+    [ProducesResponseType(typeof(VndActualizationStateResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndActualizationStateResponse>> UpdatePerformedSettings(
+        int vndId, [FromBody] PerformActualizationRequest request)
+    {
+        try
+        {
+            return Ok(await _service.UpdatePerformedSettingsAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
     /// <summary>Подтвердить старт актуализации после одобренной заявки — совмещает старт цикла
     /// и шаг "Выполнить актуализацию" (для пути "по заявке")</summary>
     [HttpPost("confirm-start")]

@@ -101,6 +101,15 @@ public class VndApprovalController : ControllerBase
     public async Task<ActionResult<ApprovalProcessResponse>> Resubmit(
         int vndId, [FromForm] ResubmitAfterRevisionRequest request)
     {
+        // См. комментарий в Decide() выше — биндинг List<IFormFile> через комплексный
+        // [FromForm]-объект ненадёжен, забираем файлы напрямую из Request.Form.Files.
+        request.NewAttachments = Request.Form.Files
+            .Where(f => f.Name == nameof(ResubmitAfterRevisionRequest.NewAttachments))
+            .ToList();
+        request.CommentAttachments = Request.Form.Files
+            .Where(f => f.Name == nameof(ResubmitAfterRevisionRequest.CommentAttachments))
+            .ToList();
+
         try
         {
             return Ok(await _service.ResubmitAfterRevisionAsync(vndId, request, _currentUser.UserId));
@@ -119,6 +128,21 @@ public class VndApprovalController : ControllerBase
         try
         {
             return Ok(await _service.AddDisagreementMatrixRowAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
+    /// <summary>Изменить строку матрицы разногласий (только инициатор, только на доработке)</summary>
+    [HttpPut("disagreement-matrix/rows/{rowId:int}")]
+    [ProducesResponseType(typeof(DisagreementMatrixRowResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<DisagreementMatrixRowResponse>> UpdateDisagreementRow(
+        int vndId, int rowId, [FromBody] UpdateDisagreementMatrixRowRequest request)
+    {
+        try
+        {
+            return Ok(await _service.UpdateDisagreementMatrixRowAsync(vndId, rowId, request, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }

@@ -19,6 +19,14 @@ public class VndApprovalStageConfiguration : IEntityTypeConfiguration<VndApprova
             .HasForeignKey(x => x.ApproverUserId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Запись справочника, из которой построен этот этап - чисто информационная ссылка
+        // (Title/OrgUnitId/ApproverUserId уже сохранены в самом этапе), поэтому при удалении
+        // записи справочника просто обнуляем ссылку, не трогая историю согласования.
+        builder.HasOne(x => x.CoordinationStage)
+            .WithMany()
+            .HasForeignKey(x => x.CoordinationStageId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.HasIndex(x => new { x.ApprovalProcessId, x.Order }).IsUnique();
     }
 }

@@ -87,6 +87,7 @@ builder.Services.AddSingleton<delosfera_server.Common.Security.IPasswordPolicy,
 builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
 builder.Services.AddScoped<IFixedApprovalUnitResolver, FixedApprovalUnitResolver>();
 builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
+builder.Services.AddSingleton<IApprovalSheetGenerator, ApprovalSheetGenerator>();
 builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();
 
 // Отзыв сертификата происходит между подписаниями: узнать о нём система должна

@@ -1,15 +1,14 @@
-﻿namespace delosfera_server.Modules.Documents.VND.DTO.Response;
+namespace delosfera_server.Modules.Documents.VND.DTO.Response;
 
-/// <summary>Дефолтный согласующий для одного из фиксированных этапов маршрута</summary>
+/// <summary>Одна запись справочника обязательных (фиксированных) этапов маршрута согласования</summary>
 public class CoordinationDefaultApproverResponse
 {
     public int Id { get; set; }
 
-    /// <summary>"legal" | "risk_management" | "compliance" | "methodology"</summary>
-    public required string Kind { get; set; }
+    public required string Title { get; set; }
 
-    /// <summary>Человекочитаемое название этапа для отображения в справочнике</summary>
-    public required string KindTitle { get; set; }
+    /// <summary>Порядковый номер этапа в маршруте (1,2,3...)</summary>
+    public int Order { get; set; }
 
     /// <summary>Подразделение, к которому обязательно должен относиться согласующий этого этапа</summary>
     public int OrgUnitId { get; set; }

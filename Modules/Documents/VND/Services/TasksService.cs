@@ -56,6 +56,7 @@ public class TasksService : ITasksService
                 StageId = s.Id,
                 StagePhase = phase,
                 StageKind = MapStageKind(s.Kind),
+                StageTitle = s.Title ?? MapLegacyStageTitle(s.Kind),
                 DeadlineAt = phase switch
                 {
                     "primary" => process.PrimaryDeadlineAt,
@@ -365,7 +366,20 @@ public class TasksService : ITasksService
         ApprovalStageKind.Compliance => "compliance",
         ApprovalStageKind.Custom => "custom",
         ApprovalStageKind.Methodology => "methodology",
+        ApprovalStageKind.Fixed => "fixed",
         _ => "custom"
+    };
+
+    /// <summary>Название этапа для маршрутов, построенных ДО перехода на динамический
+    /// справочник (VndApprovalStage.Title тогда ещё не заполнялся) - см. аналогичный метод
+    /// в VndApprovalService.</summary>
+    private static string MapLegacyStageTitle(ApprovalStageKind kind) => kind switch
+    {
+        ApprovalStageKind.Legal => "Юридическое управление",
+        ApprovalStageKind.RiskManagement => "Риск-менеджмент",
+        ApprovalStageKind.Compliance => "Комплаенс-контроль",
+        ApprovalStageKind.Methodology => "Методология",
+        _ => "Доп. согласующий"
     };
 
     private static string MapVndStatus(VndStatus status) => status switch

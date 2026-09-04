@@ -17,8 +17,12 @@ public class StartApprovalRequest
 
 public class ApprovalStageRequest
 {
-    // Обязательный этап согласования (юр. отдел, методологи и др.)
-    public required ApprovalStageKind Kind { get; set; } 
+    /// <summary>Id записи справочника обязательных этапов (dictionaries/coordination-users),
+    /// если этот этап - один из обязательных фиксированных. null - произвольный (Custom) этап,
+    /// добавленный инициатором вручную. Ведущие этапы маршрута (в начале списка Stages) должны
+    /// 1-в-1, в том же порядке, соответствовать активным записям справочника - см.
+    /// VndApprovalService.BuildAndValidateStagesAsync.</summary>
+    public int? CoordinationStageId { get; set; }
     // id пользователя, который должен согласовывать на данном этапе
     public required int ApproverUserId { get; set; }
 }

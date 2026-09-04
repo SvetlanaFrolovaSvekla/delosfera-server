@@ -2,6 +2,11 @@
 
 public class UpdateVndRequisitesRequest
 {
+    /// <summary>Какую редакцию редактируем (см. вкладки Р1/Р2/.../Рn на вкладке "Реквизиты") —
+    /// если не указано, берётся текущая (действующая либо последняя) редакция ВНД. TitleRu/En/Kg
+    /// и TypeId остаются общими на весь документ и от этого поля не зависят — см. VndDocument.</summary>
+    public int? RedactionId { get; set; }
+
     public required int TypeId { get; set; }
     public required int OrganId { get; set; }
 

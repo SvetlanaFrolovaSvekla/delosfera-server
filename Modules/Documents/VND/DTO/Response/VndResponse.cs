@@ -10,6 +10,18 @@ public class VndResponse
     public string? TitleKg { get; set; }
     public required string Status { get; set; }
 
+    /// <summary>"Статус ВНД" (документ-уровня) — НЕ путать со Status выше ("Статус последней
+    /// редакции ВНД": active/onact/review/consol/arch/draft). Ровно 3 значения: "active"
+    /// (действующий), "notYetActive" (ещё не действующий — у документа была создана только
+    /// ОДНА редакция за всю историю, и он ни разу не был "Active", т.е. это первый заход:
+    /// Draft/Review/Consolidation/OnActualization на самой первой редакции), "arch"
+    /// (архивированный). Вычисляется на чтении (не хранится в БД) — см.
+    /// VndService.ComputeDocumentStatus. Пользователям без права ViewVndRegistryExtended
+    /// сервер уже сворачивает "notYetActive" в "active" (см. VndService.CollapseDocumentStatus) —
+    /// такие пользователи всегда видели подобные документы как "действующие" и не должны
+    /// получать 3-е значение статуса ВНД.</summary>
+    public required string DocumentStatus { get; set; }
+
     public int TypeId { get; set; }
     public required string TypeName { get; set; }
 
@@ -40,6 +52,11 @@ public class VndResponse
 
     /// <summary>Заявлено ли, что текущий цикл актуализации пройдёт без изменений документа.</summary>
     public bool ActualizationPlannedNoChanges { get; set; }
+
+    /// <summary>Сдвигать ли DueActualizationDate после публикации текущего цикла — зафиксировано
+    /// на шаге "Выполнить актуализацию" (см. ActualizationPerformed). Пока этот шаг не пройден,
+    /// значение ещё не окончательное.</summary>
+    public bool ActualizationShiftNextPeriod { get; set; }
 
     /// <summary>Пройден ли шаг "Выполнить актуализацию" в текущем открытом цикле — пока false,
     /// значения ActualizationPlannedNoChanges/сдвига срока ещё не окончательные, и загрузка новой

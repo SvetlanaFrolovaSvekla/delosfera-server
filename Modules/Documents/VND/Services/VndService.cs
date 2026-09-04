@@ -19,19 +19,26 @@ public class VndService : IVndService
     private readonly IFileStorageService _fileService;
     private readonly ICurrentUserService _currentUser;
     private readonly IActivityLogService _activityLog;
+    private readonly IVndApprovalService _approvalService;
 
     public VndService(
         DelosferaDbContext db, IFileStorageService fileService,
-        ICurrentUserService currentUser, IActivityLogService activityLog)
+        ICurrentUserService currentUser, IActivityLogService activityLog,
+        IVndApprovalService approvalService)
     {
         _db = db;
         _fileService = fileService;
         _currentUser = currentUser;
         _activityLog = activityLog;
+        _approvalService = approvalService;
     }
 
     public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
     {
+        // Вычисляется здесь (а не только перед ToListAsync, как раньше), т.к. теперь используется
+        // и для ограничения видимости "Статуса ВНД" (документ-уровня) ниже.
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+
         IQueryable<VndDocument> query = _db.VndDocuments
             .Include(x => x.Type)
             .Include(x => x.Developer)
@@ -58,6 +65,48 @@ public class VndService : IVndService
         {
             var statuses = request.Statuses.Select(MapStatus).ToList();
             query = query.Where(x => statuses.Contains(x.Status));
+        }
+
+        // "Статус ВНД" (документ-уровня): пользователям без ViewVndRegistryExtended документы
+        // "ещё не действующие" (notYetActive) не показываются вообще — ни в одном табе/scope, а
+        // не сворачиваются в "действующий", как было раньше. Это ограничение видимости
+        // применяется безусловно (не зависит от того, задан ли request.DocumentStatuses), потому
+        // что сервер для таких пользователей в принципе не должен отдавать эти документы —
+        // см. также CollapseDocumentStatus (используется только для GetById по прямой ссылке,
+        // не для реестра). Предикат — отрицание "notYetActive" из ComputeDocumentStatus ниже,
+        // продублированное в EF-транслируемом виде (см. тот же приём в фильтре
+        // DocumentStatuses ниже).
+        if (!canViewExtended)
+        {
+            query = query.Where(x =>
+                x.Status == VndStatus.Archived ||
+                x.Status == VndStatus.Active ||
+                x.ActualizationResponsibleUserId != null ||
+                x.Redactions.Count > 1);
+        }
+
+        if (request.DocumentStatuses.Count > 0)
+        {
+            // Фильтр по "Статусу ВНД" (документ-уровня) — независимая от Statuses выше ось.
+            // Доступен фактически только пользователям с ViewVndRegistryExtended (см. фильтр
+            // видимости выше — для остальных notYetActive уже вырезан безусловно, а "active"/
+            // "arch" эквивалентны обычной фильтрации). Используется как фильтром в VndFilters,
+            // так и новым табом "Ещё не действующие" (scope="notYetActive", см. useVndFilters).
+            // Логика продублирована в виде EF-транслируемого предиката (а не переиспользует
+            // ComputeDocumentStatus напрямую — тот рассчитан на уже загруженную в память
+            // сущность и не транслируется в SQL). См. ComputeDocumentStatus ниже — то же самое
+            // правило, применённое на чтении к уже загруженным документам.
+            var wantsActive = request.DocumentStatuses.Contains("active");
+            var wantsNotYetActive = request.DocumentStatuses.Contains("notYetActive");
+            var wantsArch = request.DocumentStatuses.Contains("arch");
+
+            query = query.Where(x =>
+                (wantsArch && x.Status == VndStatus.Archived) ||
+                (wantsNotYetActive && x.Status != VndStatus.Archived && x.Redactions.Count <= 1 &&
+                 x.Status != VndStatus.Active && x.ActualizationResponsibleUserId == null) ||
+                (wantsActive && x.Status != VndStatus.Archived &&
+                 !(x.Redactions.Count <= 1 && x.Status != VndStatus.Active &&
+                   x.ActualizationResponsibleUserId == null)));
         }
 
         if (request.TypeIds.Count > 0)
@@ -121,7 +170,7 @@ public class VndService : IVndService
             : null;
 
         return entities
-            .Select(x => ToResponse(x, languageCode, today, relationsByVndId?.GetValueOrDefault(x.Id)))
+            .Select(x => ToResponse(x, languageCode, today, canViewExtended, relationsByVndId?.GetValueOrDefault(x.Id)))
             .ToList();
     }
 
@@ -186,7 +235,8 @@ public class VndService : IVndService
                      ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        return ToResponse(entity, languageCode, today);
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        return ToResponse(entity, languageCode, today, canViewExtended);
     }
 
     /// <summary>Сводка по срокам актуализации для дашборда планирования.
@@ -336,6 +386,16 @@ public class VndService : IVndService
         || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
         || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
 
+    /// <summary>Право реально обойти согласование - строже, чем IsChiefEditor(). Права
+    /// CreateVndWithApproval/ActualizeAnyVndWithApproval дают возможность создавать/актуализировать
+    /// ВНД, но результат всё равно уходит на согласование - наличие только одного из них (например,
+    /// у роли "Редактор ВНД") не должно позволять пропустить согласование целиком (см.
+    /// PublishRedactionWithoutApprovalAsync ниже). IsChiefEditor() шире и используется отдельно -
+    /// для доступа к документам, к которым пользователь явно не привязан.</summary>
+    private bool CanPublishWithoutApproval() =>
+        _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
+
     private static ActualizationBucket MapActualizationBucketKey(string key) => key.ToLowerInvariant() switch
     {
         "normal" => ActualizationBucket.Normal,
@@ -413,8 +473,45 @@ public class VndService : IVndService
         _ => "onact"
     };
 
+    /// <summary>"Статус ВНД" (документ-уровня) — см. подробное описание в VndResponse.DocumentStatus.
+    /// Вычисляется на чтении, здесь работает с уже загруженной в память сущностью (x.Redactions
+    /// должна быть загружена — Include(x => x.Redactions) есть во всех местах, откуда вызывается
+    /// ToResponse). Та же логика в EF-транслируемом виде — см. фильтр по DocumentStatuses
+    /// в SearchAsync.</summary>
+    private static string ComputeDocumentStatus(VndDocument x)
+    {
+        if (x.Status == VndStatus.Archived) return "arch";
+
+        // "Был ли документ хоть раз действующим": сам статус Active, либо документ сейчас
+        // находится в цикле актуализации (ActualizationResponsibleUserId != null) — а цикл
+        // актуализации можно начать только для уже действующего документа (см.
+        // VndActualizationService.StartAsync: "Начать актуализацию можно только для
+        // действующего ВНД"), и это поле не сбрасывается в процессе цикла (сбрасывается
+        // только по завершении публикации, VndActualizationService.PublishAsync) — поэтому его
+        // непустое значение надёжно говорит "документ уже был Active", даже если сейчас
+        // документ, например, снова на согласовании (Review) в рамках того же цикла.
+        var everWasActive = x.Status == VndStatus.Active || x.ActualizationResponsibleUserId != null;
+
+        // "Есть максимум одна редакция за всю историю" (0 — только что создан ВНД, редакция ещё
+        // не загружена; 1 — загружена первая и единственная) — редакции никогда не удаляются,
+        // поэтому Count <= 1 эквивалентно "текущая/единственная редакция, если есть, имеет
+        // Number == 1".
+        if (x.Redactions.Count <= 1 && !everWasActive) return "notYetActive";
+
+        return "active";
+    }
+
+    /// <summary>Сворачивает "notYetActive" в "active" для пользователей без права
+    /// ViewVndRegistryExtended — такие пользователи всегда видели подобные документы как
+    /// "действующие" (детали жизненного цикла им и так недоступны) и не должны получать
+    /// 3-е значение статуса ВНД. Делается на сервере (не только на фронте), т.к. это дёшево —
+    /// у VndService уже есть ICurrentUserService.HasPermission под рукой.</summary>
+    private static string CollapseDocumentStatus(string raw, bool canViewExtended) =>
+        !canViewExtended && raw == "notYetActive" ? "active" : raw;
+
     private static VndResponse ToResponse(
-        VndDocument x, string languageCode, DateOnly today, List<string>? linkedToMeRelations = null) => new()
+        VndDocument x, string languageCode, DateOnly today, bool canViewExtended,
+        List<string>? linkedToMeRelations = null) => new()
     {
         Id = x.Id,
         Code = x.Code,
@@ -423,6 +520,7 @@ public class VndService : IVndService
         TitleEn = x.TitleEn,
         TitleKg = x.TitleKg,
         Status = MapStatusBack(x.Status),
+        DocumentStatus = CollapseDocumentStatus(ComputeDocumentStatus(x), canViewExtended),
         TypeId = x.TypeId,
         TypeName = x.Type?.TitleRu ?? "",
         DeveloperId = x.DeveloperId,
@@ -438,6 +536,7 @@ public class VndService : IVndService
         ActualizationResponsibleUserName = x.ActualizationResponsibleUser?.FullName,
         ActualizationRequiresApproval = x.ActualizationRequiresApproval,
         ActualizationPlannedNoChanges = x.ActualizationPlannedNoChanges,
+        ActualizationShiftNextPeriod = x.ActualizationShiftNextPeriod,
         ActualizationPerformed = x.ActualizationPerformed,
         AdoptionDate = x.AdoptionDate,
         AdoptionCode = x.AdoptionCode,
@@ -464,20 +563,115 @@ public class VndService : IVndService
         LinkedToMeRelations = linkedToMeRelations ?? []
     };
 
-    private static VndRedactionResponse ToRedactionResponse(VndRedaction x, int? currentRedactionId) => new()
+    /// <summary>Довешивает Include-ы, необходимые для реквизитов редакции (см. ToRedactionResponse
+    /// ниже) — используется во всех местах, где грузится VndRedaction перед превращением в
+    /// VndRedactionResponse, чтобы не забыть какой-нибудь Include и не получить пустые имена.</summary>
+    private static IQueryable<VndRedaction> IncludeRequisites(IQueryable<VndRedaction> query) =>
+        query.Include(x => x.Type)
+            .Include(x => x.Developer)
+            .Include(x => x.CuratorDeveloper)
+            .Include(x => x.Organ)
+            .Include(x => x.ResponsibleExecutors)
+            .Include(x => x.Rubrics)
+            .Include(x => x.Keywords);
+
+    /// <summary>Копирует реквизиты в НОВУЮ редакцию (заголовок/вид, орган/разработчик/куратор,
+    /// гриф секретности, период, ответственные исполнители/рубрики/ключевые слова) — либо с
+    /// предыдущей редакции этого же ВНД (source), либо, если это первая редакция, с самого
+    /// документа (vnd). Используется в AddRedactionAsync. Дату/номер утверждения и дату
+    /// вступления в силу намеренно НЕ копирует — они всегда стартуют пустыми у новой редакции.</summary>
+    private static void CopyRequisitesFrom(VndRedaction target, VndRedaction? source, VndDocument vnd)
+    {
+        if (source is not null)
+        {
+            target.TitleRu = source.TitleRu;
+            target.TitleEn = source.TitleEn;
+            target.TitleKg = source.TitleKg;
+            target.TypeId = source.TypeId;
+            target.Type = source.Type;
+            target.DeveloperId = source.DeveloperId;
+            target.Developer = source.Developer;
+            target.CuratorDeveloperId = source.CuratorDeveloperId;
+            target.CuratorDeveloper = source.CuratorDeveloper;
+            target.OrganId = source.OrganId;
+            target.Organ = source.Organ;
+            target.SecrecyLevelId = source.SecrecyLevelId;
+            target.SecrecyLevel = source.SecrecyLevel;
+            target.Period = source.Period;
+            target.ResponsibleExecutors = source.ResponsibleExecutors.ToList();
+            target.Rubrics = source.Rubrics.ToList();
+            target.Keywords = source.Keywords.ToList();
+        }
+        else
+        {
+            target.TitleRu = vnd.TitleRu;
+            target.TitleEn = vnd.TitleEn;
+            target.TitleKg = vnd.TitleKg;
+            target.TypeId = vnd.TypeId;
+            target.Type = vnd.Type;
+            target.DeveloperId = vnd.DeveloperId;
+            target.Developer = vnd.Developer;
+            target.CuratorDeveloperId = vnd.CuratorDeveloperId;
+            target.CuratorDeveloper = vnd.CuratorDeveloper;
+            target.OrganId = vnd.OrganId;
+            target.Organ = vnd.Organ;
+            target.SecrecyLevelId = vnd.SecrecyLevelId;
+            target.SecrecyLevel = vnd.SecrecyLevel;
+            target.Period = vnd.Period;
+            target.ResponsibleExecutors = vnd.ResponsibleExecutors.ToList();
+            target.Rubrics = vnd.Rubrics.ToList();
+            target.Keywords = vnd.Keywords.ToList();
+        }
+    }
+
+    // vnd (а не просто currentRedactionId) — чтобы IsCurrent мог учитывать и Status: у
+    // архивированного ВНД ни одна редакция больше не "текущая/действующая", даже та, что была
+    // ею перед архивацией (CurrentRedactionId при этом не трогаем — он остаётся историческим
+    // указателем на то, какая редакция была последней действующей, см. VndService.CancelAsync).
+    private static VndRedactionResponse ToRedactionResponse(VndRedaction x, VndDocument vnd) => new()
     {
         Id = x.Id,
         Code = x.Code,
         Number = x.Number,
         Description = x.Description,
-        IsCurrent = x.Id == currentRedactionId,
+        IsCurrent = x.Id == vnd.CurrentRedactionId && vnd.Status != VndStatus.Archived,
         DocFileRuId = x.DocFileRuId,
         DocFileKgId = x.DocFileKgId,
         DocFileEnId = x.DocFileEnId,
+        DocRuUpdatedAt = x.DocRuUpdatedAt,
+        DocKgUpdatedAt = x.DocKgUpdatedAt,
+        DocEnUpdatedAt = x.DocEnUpdatedAt,
         TidFileId = x.TidFileId,
+        ApprovalSheetFileId = x.ApprovalSheetFileId,
+        DisagreementMatrixFileId = x.DisagreementMatrixFileId,
         RequiresApproval = x.RequiresApproval,
         ApprovalStatus = x.ApprovalStatus.ToString(),
         AttachmentFileIds = x.Attachments.Select(a => a.FileAttachmentId).ToList(),
+        Attachments = x.Attachments.Select(a => new VndRedactionAttachmentResponse
+        {
+            FileId = a.FileAttachmentId,
+            FileName = a.FileAttachment?.OriginalFileName ?? $"Вложение_{a.FileAttachmentId}",
+            SizeBytes = a.FileAttachment?.SizeBytes ?? 0
+        }).ToList(),
+        TitleRu = x.TitleRu,
+        TitleEn = x.TitleEn,
+        TitleKg = x.TitleKg,
+        TypeId = x.TypeId,
+        TypeName = x.Type?.TitleRu ?? "",
+        AdoptionDate = x.AdoptionDate,
+        AdoptionCode = x.AdoptionCode,
+        EffectiveDate = x.EffectiveDate,
+        Period = x.Period.ToString(),
+        DeveloperId = x.DeveloperId,
+        DeveloperName = x.Developer?.TitleRu ?? "",
+        CuratorDeveloperId = x.CuratorDeveloperId,
+        CuratorDeveloperName = x.CuratorDeveloper?.FullName,
+        OrganId = x.OrganId,
+        OrganName = x.Organ?.TitleRu ?? "",
+        SecrecyLevelId = x.SecrecyLevelId,
+        ResponsibleExecutorIds = x.ResponsibleExecutors.Select(e => e.Id).ToList(),
+        KeywordIds = x.Keywords.Select(k => k.Id).ToList(),
+        RubricIds = x.Rubrics.Select(r => r.Id).ToList(),
         CreatedAt = x.CreatedAt
     };
 
@@ -570,7 +764,8 @@ public class VndService : IVndService
             $"/base-vnd/{entity.Id}");
         await _db.SaveChangesAsync();
 
-        return ToResponse(entity, languageCode, today);
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        return ToResponse(entity, languageCode, today, canViewExtended);
     }
 
     private static DateOnly ResolveDueDate(ActualizationPeriod period, DateOnly? customDate, DateOnly today) =>
@@ -650,7 +845,19 @@ public class VndService : IVndService
     public async Task<VndRedactionResponse> AddRedactionAsync(
         int vndId, CreateVndRedactionRequest request, int currentUserId)
     {
-        var vnd = await _db.VndDocuments.FindAsync(vndId)
+        // Include-ы ниже (Developer/CuratorDeveloper/Organ/SecrecyLevel/ResponsibleExecutors/
+        // Rubrics/Keywords) нужны только на случай, если это ПЕРВАЯ редакция документа — тогда
+        // реквизиты новой редакции наследуются с самого VndDocument (см. requisitesSource ниже).
+        var vnd = await _db.VndDocuments
+                      .Include(x => x.Type)
+                      .Include(x => x.Developer)
+                      .Include(x => x.CuratorDeveloper)
+                      .Include(x => x.Organ)
+                      .Include(x => x.SecrecyLevel)
+                      .Include(x => x.ResponsibleExecutors)
+                      .Include(x => x.Rubrics)
+                      .Include(x => x.Keywords)
+                      .FirstOrDefaultAsync(x => x.Id == vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
@@ -662,8 +869,7 @@ public class VndService : IVndService
         var actorName = actor?.FullName ?? "—";
 
         // Правило: последняя редакция не должна быть незавершённой (черновик или на согласовании)
-        var lastRedaction = await _db.VndRedactions
-            .Where(r => r.VndId == vndId)
+        var lastRedaction = await IncludeRequisites(_db.VndRedactions.Where(r => r.VndId == vndId))
             .OrderByDescending(r => r.Number)
             .FirstOrDefaultAsync();
 
@@ -678,12 +884,11 @@ public class VndService : IVndService
                 $"Редакция {lastRedaction.Code} {reason}. Завершите работу с ней, прежде чем загружать новую.");
         }
 
-        // Если у ВНД уже есть предыдущая редакция — это актуализация документа, и ТИД обязателен.
-        // Для самой первой редакции нового ВНД (lastRedaction == null) ТИД не нужен.
-        var requiresTid = lastRedaction is not null;
-        if (requiresTid && request.Tid is null)
-            throw new InvalidOperationException(
-                "При актуализации ВНД необходимо приложить файл ТИД (Таблица изменений и дополнений)");
+        // ТИД больше не требуется прямо при загрузке редакции (даже при актуализации) — его можно
+        // приложить отдельным шагом позже, кнопкой "Сформировать или загрузить ТИД" на странице
+        // ВНД (см. UploadTidForLastRedactionAsync ниже). Но отправить такую редакцию на
+        // согласование или опубликовать без согласования без ТИД всё ещё нельзя — это
+        // проверяется в VndApprovalService.StartAsync и PublishRedactionWithoutApprovalAsync.
 
         // Вторую и последующие редакции можно добавлять только в рамках открытого цикла
         // актуализации (см. VndActualizationService.StartAsync/ConfirmStartAfterRequestAsync) —
@@ -708,11 +913,17 @@ public class VndService : IVndService
         // при старте цикла (StartAsync/ConfirmStartAfterRequestAsync) — не доверяем тому, что
         // прислал клиент в request.RequiresApproval, иначе обычный редактор без прав на
         // актуализацию без согласования мог бы обойти это ограничение, отредактировав запрос
-        // напрямую. Вне цикла актуализации (первая редакция нового ВНД) решение остаётся за
-        // тем, кто загружает, как и раньше.
+        // напрямую.
+        // Вне цикла актуализации (первая редакция нового ВНД) решение в обычном случае остаётся
+        // за тем, кто загружает — но опубликовать её сразу действующей, без согласования
+        // (RequiresApproval = false), может только тот, у кого есть право
+        // CreateVndWithoutApproval (сейчас — главный редактор и администратор); иначе, даже если
+        // клиент прислал RequiresApproval = false (напрямую отредактировав запрос, минуя
+        // скрытый на фронте чекбокс — см. canSkipApproval в VndUploadRedactionModal), редакция
+        // всё равно уходит на согласование.
         var effectiveRequiresApproval = vnd.Status == VndStatus.OnActualization
             ? vnd.ActualizationRequiresApproval
-            : request.RequiresApproval;
+            : request.RequiresApproval || !CanPublishWithoutApproval();
 
         // Раз загружается настоящая новая редакция — план "актуализация без изменений" (если он
         // был) больше не в силе: изменения всё-таки есть.
@@ -724,15 +935,26 @@ public class VndService : IVndService
         var docEn = request.DocEn is not null ? await _fileService.SaveAsync(request.DocEn, currentUserId) : null;
         var tid = request.Tid is not null ? await _fileService.SaveAsync(request.Tid, currentUserId) : null;
 
-        var attachmentEntities = new List<VndRedactionAttachment>();
-        foreach (var file in request.Attachments ?? [])
-        {
-            var saved = await _fileService.SaveAsync(file, currentUserId);
-            attachmentEntities.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
-        }
+        var attachmentEntities = await BuildAttachmentEntitiesAsync(vndId, request, currentUserId);
 
         var nextNumber = (lastRedaction?.Number ?? 0) + 1;
 
+        // Актуализационная редакция (Number > 1) без ТИД не может стать текущей и утащить ВНД в
+        // консолидацию сразу, даже если согласование не требуется — иначе документ выглядел бы
+        // уже "актуальным"/"в консолидации", хотя обязательный ТИД ещё не приложен (а приложить
+        // его после такого мгновенного перехода было негде — см. UploadTidForLastRedactionAsync,
+        // которая работает только с редакцией в статусе "черновик"). Поэтому если ТИД не был
+        // передан прямо в этом запросе, редакция временно остаётся черновиком (ApprovalStatus.Draft)
+        // несмотря на RequiresApproval = false — сам переход "стать текущей/уйти в консолидацию"
+        // довыполнится в UploadTidForLastRedactionAsync, как только ТИД будет приложен.
+        var blockedByMissingTid = !effectiveRequiresApproval && nextNumber > 1 && tid is null;
+
+        // Реквизиты новой редакции ("Реквизиты" → вкладка Р{N}) стартуют как копия реквизитов
+        // предыдущей редакции (а для самой первой редакции — реквизитов, заданных при создании
+        // ВНД, см. CreateAsync) — дальше их можно скорректировать через UpdateRequisitesAsync,
+        // указав RedactionId именно этой редакции. Дату/номер утверждения и дату вступления в
+        // силу НЕ наследуем — они всегда null для новой, ещё не утверждённой редакции: заполнятся
+        // при консолидации (см. VndActualizationService.PublishAsync).
         var redaction = new VndRedaction
         {
             VndId = vndId,
@@ -744,11 +966,13 @@ public class VndService : IVndService
             DocFileEnId = docEn?.Id,
             TidFileId = tid?.Id,
             RequiresApproval = effectiveRequiresApproval,
-            ApprovalStatus = effectiveRequiresApproval
+            ApprovalStatus = (effectiveRequiresApproval || blockedByMissingTid)
                 ? RedactionApprovalStatus.Draft
                 : RedactionApprovalStatus.NotRequired,
-            Attachments = attachmentEntities
+            Attachments = attachmentEntities,
+            TitleRu = "" // временно, ниже сразу перезатирается CopyRequisitesFrom
         };
+        CopyRequisitesFrom(redaction, lastRedaction, vnd);
 
         _db.VndRedactions.Add(redaction);
         await _db.SaveChangesAsync();
@@ -763,7 +987,7 @@ public class VndService : IVndService
             $"/base-vnd/{vndId}");
         await _db.SaveChangesAsync();
 
-        if (!effectiveRequiresApproval)
+        if (!effectiveRequiresApproval && !blockedByMissingTid)
         {
             vnd.CurrentRedactionId = redaction.Id;
             vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -781,7 +1005,102 @@ public class VndService : IVndService
             await _db.SaveChangesAsync();
         }
 
-        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+        return ToRedactionResponse(redaction, vnd);
+    }
+
+    /// <summary>
+    /// Собирает вложения новой редакции из двух источников:
+    /// - request.ExistingAttachmentFileIds — файлы, перенесённые "как есть" из предыдущих редакций
+    ///   этого же ВНД (см. блок "Вложения" в VndUploadRedactionModal, предзаполненный вложениями
+    ///   последней редакции) - без повторной загрузки, просто новая привязка к тому же FileAttachmentId;
+    /// - request.Attachments — новые файлы, которые пользователь выбрал через проводник. Каждый
+    ///   такой файл ПЕРЕД загрузкой в MinIO сверяется по SHA-256 с файлами, уже приложенными к
+    ///   какой-либо редакции ЭТОГО ВНД (включая только что перенесённые/загруженные в этом же
+    ///   запросе) — если содержимое совпадает, файл не грузится повторно, переиспользуется
+    ///   существующий FileAttachmentId. Сверка нарочно ограничена этим ВНД (не всей системой) —
+    ///   вложение может использоваться в другом, не связанном ВНД, и должно спокойно исчезать при
+    ///   удалении текущего документа (см. DeleteAsync ниже), не задевая чужие ссылки.
+    /// </summary>
+    private async Task<List<VndRedactionAttachment>> BuildAttachmentEntitiesAsync(
+        int vndId, CreateVndRedactionRequest request, int currentUserId)
+    {
+        // Пул "кандидатов на переиспользование" — все файлы вложений, когда-либо приложенные
+        // к редакциям этого ВНД. FileAttachment подгружаем сразу (Include), он нужен и для
+        // сверки по хешу, и для навигации в новых VndRedactionAttachment (см. комментарий ниже).
+        var candidateAttachments = await _db.Set<VndRedactionAttachment>()
+            .Where(a => a.VndRedaction!.VndId == vndId)
+            .Include(a => a.FileAttachment)
+            .Select(a => a.FileAttachment!)
+            .ToListAsync();
+        // Один и тот же файл может встречаться у нескольких редакций этого ВНД - дедуп по id
+        // делаем на стороне .NET (после выборки), чтобы не полагаться на трансляцию Distinct()
+        // по entity-типу в SQL.
+        var candidatesById = candidateAttachments
+            .GroupBy(f => f.Id)
+            .ToDictionary(g => g.Key, g => g.First());
+        var candidates = candidatesById.Values.ToList();
+
+        var attachmentEntities = new List<VndRedactionAttachment>();
+
+        // Перенесённые без изменений вложения предыдущей редакции - только те id, что
+        // действительно принадлежат этому ВНД (см. XML-комментарий у ExistingAttachmentFileIds).
+        // Один и тот же id мог быть прислан дважды (например, повторный клик) - Distinct на входе.
+        foreach (var fileId in (request.ExistingAttachmentFileIds ?? []).Distinct())
+        {
+            if (candidatesById.TryGetValue(fileId, out var existing))
+                attachmentEntities.Add(new VndRedactionAttachment {FileAttachmentId = existing.Id, FileAttachment = existing});
+        }
+
+        foreach (var file in request.Attachments ?? [])
+        {
+            var hash = await _fileService.ComputeHashAsync(file);
+            // Ищем среди кандидатов ЭТОГО ВНД (включая уже перенесённые/только что загруженные
+            // выше в этом же цикле - candidates пополняется ниже при реальной загрузке) файл
+            // с тем же содержимым - совпадение по хешу и размеру.
+            var duplicate = candidates.FirstOrDefault(f => f.Hash == hash && f.SizeBytes == file.Length);
+
+            if (duplicate is not null)
+            {
+                attachmentEntities.Add(new VndRedactionAttachment {FileAttachmentId = duplicate.Id, FileAttachment = duplicate});
+                continue;
+            }
+
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            // FileAttachment = saved заполняет навигацию сразу в памяти (без лишнего запроса к
+            // БД) — нужно, чтобы ToRedactionResponse ниже сразу получил оригинальное имя файла.
+            attachmentEntities.Add(new VndRedactionAttachment {FileAttachmentId = saved.Id, FileAttachment = saved});
+            // Пополняем пул кандидатов - если следующий файл в этом же запросе побайтово
+            // совпадёт с только что загруженным, он тоже переиспользует его вместо повторной загрузки.
+            candidates.Add(saved);
+        }
+
+        return attachmentEntities;
+    }
+
+    // Отправка редакции на согласование: переводит черновик редакции в Pending и ВНД в Review.
+    public async Task<VndRedactionResponse> SubmitRedactionForApprovalAsync(
+        int vndId, int redactionId, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
+            throw new UnauthorizedAccessException(
+                "Отправить редакцию на согласование может только причастный к этому ВНД пользователь");
+
+        var redaction = await IncludeRequisites(_db.VndRedactions
+                                .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment))
+                            .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
+                        ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
+
+        if (redaction.ApprovalStatus != RedactionApprovalStatus.Draft)
+            throw new InvalidOperationException("Отправить на согласование можно только черновик редакции");
+
+        redaction.ApprovalStatus = RedactionApprovalStatus.Pending;
+        vnd.Status = VndStatus.Review;
+        await _db.SaveChangesAsync();
+
+        return ToRedactionResponse(redaction, vnd);
     }
 
     /// <summary>Только для главного редактора: делает черновик редакции действующим/текущим
@@ -796,17 +1115,26 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        if (!IsChiefEditor())
+        if (!CanPublishWithoutApproval())
             throw new UnauthorizedAccessException(
                 "Сделать редакцию действующей без согласования может только главный редактор");
 
-        var redaction = await _db.VndRedactions
+        var redaction = await IncludeRequisites(_db.VndRedactions
+                                .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment))
                             .FirstOrDefaultAsync(x => x.Id == redactionId && x.VndId == vndId)
                         ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
 
         if (redaction.ApprovalStatus != RedactionApprovalStatus.Draft)
             throw new InvalidOperationException(
                 "Сделать действующей без согласования можно только черновик редакции");
+
+        // Актуализационная редакция (Number > 1) не может миновать согласование без ТИД —
+        // раньше это проверялось при самой загрузке (AddRedactionAsync), теперь ТИД
+        // прикладывается отдельным шагом, поэтому проверка переехала сюда и в StartAsync.
+        if (redaction.Number > 1 && redaction.TidFileId is null)
+            throw new InvalidOperationException(
+                "Прежде чем сделать редакцию действующей без согласования, приложите файл ТИД " +
+                "(Таблица изменений и дополнений) — кнопка «Сформировать или загрузить ТИД»");
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
@@ -838,7 +1166,7 @@ public class VndService : IVndService
 
         await _db.SaveChangesAsync();
 
-        return ToRedactionResponse(redaction, vnd.CurrentRedactionId);
+        return ToRedactionResponse(redaction, vnd);
     }
 
 
@@ -847,13 +1175,13 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var redactions = await _db.VndRedactions
-            .Where(x => x.VndId == vndId)
-            .Include(x => x.Attachments)
+        var redactions = await IncludeRequisites(_db.VndRedactions
+                .Where(x => x.VndId == vndId)
+                .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment))
             .OrderBy(x => x.Number)
             .ToListAsync();
 
-        return redactions.Select(r => ToRedactionResponse(r, vnd.CurrentRedactionId)).ToList();
+        return redactions.Select(r => ToRedactionResponse(r, vnd)).ToList();
     }
 
     /// <summary>
@@ -926,17 +1254,98 @@ public class VndService : IVndService
         }
     }
 
+    /// <summary>
+    /// Архивировать (отменить) ВНД — кнопка "Архивировать" (см. PermissionCode.CancelVnd).
+    /// Доступно на любом статусе, кроме черновика (тот только удаляется, см. DeleteAsync) и
+    /// уже архивированного. № и дата отмены обязательны — отмена оформляется служебной запиской
+    /// и не согласуется.
+    ///
+    /// Если документ на момент архивации "На согласовании" — сначала отзываем согласование тем
+    /// же путём, что и обычный отзыв (VndApprovalService.WithdrawForCancelAsync), только без
+    /// требования к архивирующему быть инициатором или иметь отдельно CancelAnyVndApproval:
+    /// право CancelVnd на саму архивацию тут уже достаточное основание. Открытый цикл
+    /// актуализации (если он был — на OnActualization/Consolidation) закрываем так же, как при
+    /// обычной публикации (см. VndActualizationService.PublishAsync) — архивный документ не
+    /// может "ждать" ответственного за актуализацию.
+    /// </summary>
+    public async Task<VndResponse> CancelAsync(
+        int id, CancelVndRequest request, int currentUserId, string languageCode)
+    {
+        var vnd = await _db.VndDocuments
+                      .Include(x => x.Type)
+                      .Include(x => x.Developer)
+                      .Include(x => x.CuratorDeveloper)
+                      .Include(x => x.Organ)
+                      .Include(x => x.ResponsibleExecutors)
+                      .Include(x => x.Rubrics)
+                      .Include(x => x.Keywords)
+                      .Include(x => x.UserGroups)
+                      .Include(x => x.Redactions)
+                      .Include(x => x.CreatedByUser)
+                      .Include(x => x.ActualizationResponsibleUser)
+                      .FirstOrDefaultAsync(x => x.Id == id)
+                  ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
+
+        if (vnd.Status is VndStatus.Draft or VndStatus.Archived)
+            throw new InvalidOperationException(
+                "Архивировать нельзя черновик (его можно только удалить) или уже архивированный документ");
+
+        if (string.IsNullOrWhiteSpace(request.CancelCode))
+            throw new InvalidOperationException("Укажите № отмены");
+
+        // Согласование отзываем ДО того, как перезапишем Status на Archived - иначе
+        // WithdrawForCancelAsync (который сам определяет процесс по текущему статусу редакции)
+        // не найдёт, что отзывать.
+        if (vnd.Status == VndStatus.Review)
+            await _approvalService.WithdrawForCancelAsync(id, currentUserId);
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        vnd.Status = VndStatus.Archived;
+        vnd.CancelCode = request.CancelCode;
+        vnd.CancelDate = request.CancelDate;
+        vnd.CancelReason = request.CancelReason;
+        vnd.ArchivedDate = today;
+
+        // Закрываем открытый цикл актуализации, если он был - как и после обычной публикации
+        // (VndActualizationService.PublishAsync), только без публикации.
+        vnd.ActualizationResponsibleUserId = null;
+        vnd.ActualizationRequiresApproval = false;
+        vnd.ActualizationShiftNextPeriod = false;
+        vnd.ActualizationPlannedNoChanges = false;
+        vnd.ActualizationPerformed = false;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Other, id, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} архивировал(а) ВНД {vnd.Code} «{vnd.TitleRu}»",
+                $"{actorName} archived VND {vnd.Code} \"{vnd.TitleRu}\"",
+                $"{actorName} {vnd.Code} «{vnd.TitleRu}» ВНДисин архивдеди"),
+            $"/base-vnd/{id}");
+
+        await _db.SaveChangesAsync();
+
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        return ToResponse(vnd, languageCode, today, canViewExtended);
+    }
+
+    /// <summary>Обновляет реквизиты ВНД. TitleRu/En/Kg, TypeId, утверждение/вступление в силу,
+    /// разработчик/куратор/орган, гриф секретности, ответственные исполнители, рубрики, ключевые
+    /// слова — всё это теперь принадлежит КОНКРЕТНОЙ редакции (см. миграцию "реквизиты по
+    /// редакции", включая заголовок/вид) — request.RedactionId указывает, какой именно (вкладки
+    /// Р1/Р2/.../Рn на вкладке "Реквизиты"); если не указано — берётся текущая/последняя
+    /// редакция. Общими на весь документ остаются только служебные даты цикла актуализации
+    /// (DueActualizationDate/LastActualizationDate), отмена/архивация и группы доступа.
+    /// Пока не убран старый дублирующий набор полей на VndDocument (переходный период —
+    /// см. пометку в VndDocument.cs), при редактировании ИМЕННО текущей редакции те же
+    /// значения зеркалируются и туда, чтобы не сломать существующий поиск/фильтры по документу.</summary>
     public async Task<VndResponse> UpdateRequisitesAsync(int id, UpdateVndRequisitesRequest request,
         string languageCode)
     {
         var entity = await _db.VndDocuments
                          .Include(x => x.Type)
-                         .Include(x => x.Developer)
-                         .Include(x => x.CuratorDeveloper)
-                         .Include(x => x.Organ)
-                         .Include(x => x.ResponsibleExecutors)
-                         .Include(x => x.Rubrics)
-                         .Include(x => x.Keywords)
                          .Include(x => x.UserGroups)
                          .Include(x => x.Redactions)
                          .Include(x => x.CreatedByUser)
@@ -944,11 +1353,22 @@ public class VndService : IVndService
                          .FirstOrDefaultAsync(x => x.Id == id)
                      ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 
+        var targetRedactionId = request.RedactionId ?? entity.CurrentRedactionId
+            ?? entity.Redactions.OrderByDescending(r => r.Number).Select(r => (int?)r.Id).FirstOrDefault();
+
+        var targetRedaction = targetRedactionId.HasValue
+            ? await IncludeRequisites(_db.VndRedactions)
+                  .FirstOrDefaultAsync(r => r.Id == targetRedactionId.Value && r.VndId == id)
+              ?? throw new KeyNotFoundException($"Редакция с id={targetRedactionId} не найдена")
+            : null;
+
         var typeExists = await _db.TypesVnd.AnyAsync(x => x.Id == request.TypeId);
         if (!typeExists) throw new KeyNotFoundException($"Вид ВНД с id={request.TypeId} не найден");
 
         var organExists = await _db.ApprovalBodies.AnyAsync(x => x.Id == request.OrganId);
         if (!organExists) throw new KeyNotFoundException($"Орган утверждения с id={request.OrganId} не найден");
+
+        var fallbackDeveloperId = targetRedaction?.DeveloperId ?? entity.DeveloperId;
 
         int developerId;
         if (request.DeveloperId.HasValue)
@@ -960,7 +1380,7 @@ public class VndService : IVndService
         }
         else
         {
-            developerId = entity.DeveloperId; // не меняем, если не передали
+            developerId = fallbackDeveloperId; // не меняем, если не передали
         }
 
         if (request.CuratorDeveloperId.HasValue)
@@ -991,24 +1411,7 @@ public class VndService : IVndService
                 throw new KeyNotFoundException($"Уровень секретности с id={request.SecrecyLevelId} не найден");
         }
 
-        // --- Применяем изменения ---
-        entity.TypeId = request.TypeId;
-        entity.OrganId = request.OrganId;
-        entity.DeveloperId = developerId;
-        entity.CuratorDeveloperId = request.CuratorDeveloperId;
-
-        entity.ResponsibleExecutors.Clear();
-        foreach (var executor in responsibleExecutors)
-            entity.ResponsibleExecutors.Add(executor);
-
-        entity.TitleRu = request.TitleRu;
-        entity.TitleEn = request.TitleEn;
-        entity.TitleKg = request.TitleKg;
-
-        entity.AdoptionDate = request.AdoptionDate;
-        entity.AdoptionCode = request.AdoptionCode;
-        entity.EffectiveDate = request.EffectiveDate;
-
+        // --- Общие на весь документ (не зависят от редакции) ---
         entity.DueActualizationDate = request.DueActualizationDate;
         entity.LastActualizationDate = request.LastActualizationDate;
         entity.LastActualizationHadChanges = request.LastActualizationHadChanges;
@@ -1018,32 +1421,115 @@ public class VndService : IVndService
         entity.CancelReason = request.CancelReason;
         entity.ArchivedDate = request.ArchivedDate;
 
-        entity.Keywords.Clear();
-        foreach (var keyword in keywords)
-            entity.Keywords.Add(keyword);
-
-        entity.Rubrics.Clear();
-        foreach (var rubric in rubrics)
-            entity.Rubrics.Add(rubric);
-
         entity.UserGroups.Clear();
         foreach (var group in userGroups)
             entity.UserGroups.Add(group);
 
-        entity.SecrecyLevelId = request.SecrecyLevelId ?? entity.SecrecyLevelId;
-
         if (entity.ArchivedDate.HasValue)
             entity.Status = VndStatus.Archived;
-        else if (entity.CancelDate.HasValue && entity.Status != VndStatus.Draft)
-            entity.Status = entity.Status;
+
+        // --- Реквизиты конкретной редакции (если она есть — у только что созданного ВНД без
+        // единой загруженной редакции target-а нет, тогда применяем к документу как раньше,
+        // для обратной совместимости с формой создания) ---
+        var isCurrentRedaction = targetRedaction is not null && targetRedaction.Id == entity.CurrentRedactionId;
+
+        void ApplyTo(VndDocument? doc, VndRedaction? redaction)
+        {
+            if (redaction is not null)
+            {
+                redaction.TitleRu = request.TitleRu;
+                redaction.TitleEn = request.TitleEn;
+                redaction.TitleKg = request.TitleKg;
+                redaction.TypeId = request.TypeId;
+                redaction.OrganId = request.OrganId;
+                redaction.DeveloperId = developerId;
+                redaction.CuratorDeveloperId = request.CuratorDeveloperId;
+                redaction.AdoptionDate = request.AdoptionDate;
+                redaction.AdoptionCode = request.AdoptionCode;
+                redaction.EffectiveDate = request.EffectiveDate;
+                redaction.SecrecyLevelId = request.SecrecyLevelId ?? redaction.SecrecyLevelId;
+                redaction.ResponsibleExecutors.Clear();
+                foreach (var executor in responsibleExecutors) redaction.ResponsibleExecutors.Add(executor);
+                redaction.Keywords.Clear();
+                foreach (var keyword in keywords) redaction.Keywords.Add(keyword);
+                redaction.Rubrics.Clear();
+                foreach (var rubric in rubrics) redaction.Rubrics.Add(rubric);
+            }
+
+            if (doc is not null)
+            {
+                doc.TitleRu = request.TitleRu;
+                doc.TitleEn = request.TitleEn;
+                doc.TitleKg = request.TitleKg;
+                doc.TypeId = request.TypeId;
+                doc.OrganId = request.OrganId;
+                doc.DeveloperId = developerId;
+                doc.CuratorDeveloperId = request.CuratorDeveloperId;
+                doc.AdoptionDate = request.AdoptionDate;
+                doc.AdoptionCode = request.AdoptionCode;
+                doc.EffectiveDate = request.EffectiveDate;
+                doc.SecrecyLevelId = request.SecrecyLevelId ?? doc.SecrecyLevelId;
+                doc.ResponsibleExecutors.Clear();
+                foreach (var executor in responsibleExecutors) doc.ResponsibleExecutors.Add(executor);
+                doc.Keywords.Clear();
+                foreach (var keyword in keywords) doc.Keywords.Add(keyword);
+                doc.Rubrics.Clear();
+                foreach (var rubric in rubrics) doc.Rubrics.Add(rubric);
+            }
+        }
+
+        if (targetRedaction is not null)
+        {
+            // Doc.ResponsibleExecutors/Keywords/Rubrics не загружены в этом запросе (Include не
+            // делали — они больше не источник правды) — если нужно зеркалировать в документ,
+            // подгружаем их отдельно только в этом случае.
+            VndDocument? docForMirror = null;
+            if (isCurrentRedaction)
+            {
+                docForMirror = await _db.VndDocuments
+                    .Include(x => x.ResponsibleExecutors)
+                    .Include(x => x.Keywords)
+                    .Include(x => x.Rubrics)
+                    .FirstAsync(x => x.Id == id);
+            }
+
+            ApplyTo(docForMirror, targetRedaction);
+        }
+        else
+        {
+            var docForMirror = await _db.VndDocuments
+                .Include(x => x.ResponsibleExecutors)
+                .Include(x => x.Keywords)
+                .Include(x => x.Rubrics)
+                .FirstAsync(x => x.Id == id);
+            ApplyTo(docForMirror, null);
+        }
 
         // "Изменение реквизитов" проставляется автоматически, руками эту дату задать нельзя
         entity.RequisitesChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
 
         await _db.SaveChangesAsync();
 
+        // Перечитываем документ с нужными Include-ами для ответа (заголовок/тип общие, остальное
+        // могло измениться либо на нём самом, либо только на редакции).
+        var reloaded = await _db.VndDocuments
+                           .Include(x => x.Type)
+                           .Include(x => x.Developer)
+                           .Include(x => x.CuratorDeveloper)
+                           .Include(x => x.Organ)
+                           .Include(x => x.ResponsibleExecutors)
+                           .Include(x => x.Rubrics)
+                           .Include(x => x.Keywords)
+                           .Include(x => x.UserGroups)
+                           .Include(x => x.Redactions)
+                           .Include(x => x.CreatedByUser)
+                           .Include(x => x.ActualizationResponsibleUser)
+                           .FirstOrDefaultAsync(x => x.Id == id)
+                       ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
+
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        return ToResponse(entity, languageCode, today);
+        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        return ToResponse(reloaded, languageCode, today, canViewExtended);
     }
 
     public async Task<VndLinksResponse> GetLinksAsync(int vndId, string languageCode)
@@ -1121,11 +1607,11 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var lastRedaction = await _db.VndRedactions
+        var lastRedaction = await IncludeRequisites(_db.VndRedactions
                                 .Where(r => r.VndId == vndId)
-                                .OrderByDescending(r => r.Number)
-                                .Include(r => r.Attachments)
-                                .FirstOrDefaultAsync()
+                                .Include(r => r.Attachments).ThenInclude(a => a.FileAttachment))
+                            .OrderByDescending(r => r.Number)
+                            .FirstOrDefaultAsync()
                             ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
 
         // Редакция, отправленная на согласование, редактируется только через отзыв согласования
@@ -1153,6 +1639,13 @@ public class VndService : IVndService
             lastRedaction.DocFileKgId = saved.Id;
             hasChanges = true;
         }
+        else if (request.RemoveDocKg && lastRedaction.DocFileKgId is not null)
+        {
+            // Явное удаление документа на кыргызском без замены (тот же паттерн, что и в
+            // VndApprovalService.ResubmitAfterRevisionAsync).
+            lastRedaction.DocFileKgId = null;
+            hasChanges = true;
+        }
 
         if (request.DocEn is not null)
         {
@@ -1160,11 +1653,37 @@ public class VndService : IVndService
             lastRedaction.DocFileEnId = saved.Id;
             hasChanges = true;
         }
+        else if (request.RemoveDocEn && lastRedaction.DocFileEnId is not null)
+        {
+            lastRedaction.DocFileEnId = null;
+            hasChanges = true;
+        }
 
         if (request.Description is not null && request.Description != lastRedaction.Description)
         {
             lastRedaction.Description = request.Description;
             hasChanges = true;
+        }
+
+        // Новые вложения - добавляем в уже отслеживаемую EF навигацию (тот же паттерн, что и в
+        // VndApprovalService.ResubmitAfterRevisionAsync).
+        foreach (var file in request.NewAttachments ?? [])
+        {
+            var saved = await _fileService.SaveAsync(file, currentUserId);
+            lastRedaction.Attachments.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
+            hasChanges = true;
+        }
+
+        if (request.RemovedAttachmentFileIds is { Count: > 0 })
+        {
+            var toRemove = lastRedaction.Attachments
+                .Where(a => request.RemovedAttachmentFileIds.Contains(a.FileAttachmentId))
+                .ToList();
+            if (toRemove.Count > 0)
+            {
+                _db.Set<VndRedactionAttachment>().RemoveRange(toRemove);
+                hasChanges = true;
+            }
         }
 
         // RevisionChangedDate фиксирует факт правки содержимого редакции — обновляем,
@@ -1176,7 +1695,62 @@ public class VndService : IVndService
 
         await _db.SaveChangesAsync();
 
-        return ToRedactionResponse(lastRedaction, vnd.CurrentRedactionId);
+        return ToRedactionResponse(lastRedaction, vnd);
+    }
+
+    /// <summary>Кнопка "Сформировать или загрузить ТИД" — прикладывает файл ТИД (Таблица изменений
+    /// и дополнений) к уже загруженному черновику последней редакции отдельным шагом, после того
+    /// как поле ТИД убрали из самой формы загрузки редакции (см. AddRedactionAsync выше). Пока
+    /// редакция остаётся черновиком (не отправлена на согласование), ТИД можно приложить или
+    /// заменить сколько угодно раз; отправить на согласование или опубликовать без согласования
+    /// такую редакцию без ТИД нельзя — см. VndApprovalService.StartAsync и
+    /// PublishRedactionWithoutApprovalAsync.</summary>
+    public async Task<VndRedactionResponse> UploadTidForLastRedactionAsync(
+        int vndId, UploadRedactionTidRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
+            throw new UnauthorizedAccessException(
+                "Приложить ТИД может только разработчик, куратор, ответственный исполнитель, " +
+                "инициатор, ответственный за актуализацию или главный редактор ВНД");
+
+        var lastRedaction = await IncludeRequisites(_db.VndRedactions
+                                .Where(r => r.VndId == vndId)
+                                .Include(r => r.Attachments).ThenInclude(a => a.FileAttachment))
+                            .OrderByDescending(r => r.Number)
+                            .FirstOrDefaultAsync()
+                            ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
+
+        if (lastRedaction.ApprovalStatus != RedactionApprovalStatus.Draft)
+            throw new InvalidOperationException(
+                "Приложить ТИД можно только к редакции в статусе черновика (ещё не отправленной на согласование)");
+
+        var saved = await _fileService.SaveAsync(request.Tid, currentUserId);
+        lastRedaction.TidFileId = saved.Id;
+
+        // Если эта редакция изначально не требовала согласования (актуализация без
+        // согласования), но не стала текущей сразу при загрузке именно из-за отсутствующего
+        // ТИД (см. blockedByMissingTid в AddRedactionAsync) — теперь, когда ТИД приложен,
+        // нужно довыполнить тот же переход, что случился бы сразу при загрузке, будь ТИД уже
+        // на месте: сделать редакцию текущей и перевести ВНД в консолидацию/действующий.
+        if (!lastRedaction.RequiresApproval && vnd.CurrentRedactionId != lastRedaction.Id)
+        {
+            lastRedaction.ApprovalStatus = RedactionApprovalStatus.NotRequired;
+            vnd.CurrentRedactionId = lastRedaction.Id;
+            vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+
+            var enteringConsolidation = vnd.Status == VndStatus.OnActualization;
+            vnd.Status = enteringConsolidation ? VndStatus.Consolidation : VndStatus.Active;
+
+            if (enteringConsolidation)
+                await StampConsolidationStartedAsync(vndId);
+        }
+
+        await _db.SaveChangesAsync();
+
+        return ToRedactionResponse(lastRedaction, vnd);
     }
 
     public async Task<List<VndQuickSearchResponse>> QuickSearchAsync(string query, string languageCode, int limit)

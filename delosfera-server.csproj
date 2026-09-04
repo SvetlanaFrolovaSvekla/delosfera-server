@@ -11,6 +11,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="DocumentFormat.OpenXml" Version="3.3.0" />
         <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
         <PackageReference Include="HtmlSanitizer" Version="9.2.995" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
@@ -31,6 +32,16 @@
     <ItemGroup>
       <Folder Include="Modules\Documents\SZ\" />
       <Folder Include="Modules\Documents\Procurement\" />
+    </ItemGroup>
+
+    <!--
+      Шаблон "Лист согласования" (см. Modules\Documents\VND\Services\ApprovalSheetGenerator.cs) —
+      встраивается в сборку, чтобы генерация не зависела от файлов на диске сервера в проде.
+    -->
+    <ItemGroup>
+      <EmbeddedResource Include="Modules\Documents\VND\Resources\ApprovalSheetTemplate.docx">
+        <LogicalName>ApprovalSheetTemplate.docx</LogicalName>
+      </EmbeddedResource>
     </ItemGroup>
 
     <!-- Тест-проект лежит внутри дерева веб-проекта — исключаем его из компиляции веба -->

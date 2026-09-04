@@ -13,7 +13,11 @@ public class ApprovalProcessResponse
     public required string Status { get; set; } // primary/revision_needed/repeated/final_hold/approved/cancelled
 
     public string? RepeatInitiatorComment { get; set; }
-    
+
+    /// <summary>Файлы, приложенные инициатором к RepeatInitiatorComment. Остаются доступны и
+    /// после согласования редакции — часть истории согласования.</summary>
+    public List<ApprovalStageAttachmentResponse> RepeatInitiatorCommentAttachments { get; set; } = [];
+
     public int PrimaryDeadlineMinutes { get; set; }
     public int RepeatDeadlineMinutes { get; set; }
     public int FinalHoldDeadlineMinutes { get; set; }
@@ -38,7 +42,12 @@ public class ApprovalStageResponse
 {
     public int Id { get; set; }
     public int Order { get; set; }
-    public required string Kind { get; set; } 
+    public required string Kind { get; set; }
+
+    /// <summary>Название этапа - снимок на момент запуска согласования (см.
+    /// VndApprovalStage.Title). Для маршрутов, построенных до перехода на динамический
+    /// справочник, выводится из Kind.</summary>
+    public required string Title { get; set; }
 
     public int OrgUnitId { get; set; }
     public required string OrgUnitName { get; set; }
@@ -50,6 +59,7 @@ public class ApprovalStageResponse
     public string? PrimaryComment { get; set; }
     public DateTime? PrimaryDecidedAt { get; set; }
     public List<ApprovalStageAttachmentResponse> PrimaryAttachments { get; set; } = [];
+    public List<ApprovalStageQuoteResponse> PrimaryQuotes { get; set; } = [];
 
     public bool ParticipatesInRepeat { get; set; }
 
@@ -57,19 +67,34 @@ public class ApprovalStageResponse
     public string? RepeatComment { get; set; }
     public DateTime? RepeatDecidedAt { get; set; }
     public List<ApprovalStageAttachmentResponse> RepeatAttachments { get; set; } = [];
+    public List<ApprovalStageQuoteResponse> RepeatQuotes { get; set; } = [];
 
     public string? FinalHoldDecision { get; set; }
     public string? FinalHoldComment { get; set; }
     public DateTime? FinalHoldDecidedAt { get; set; }
     public List<ApprovalStageAttachmentResponse> FinalHoldAttachments { get; set; } = [];
+    public List<ApprovalStageQuoteResponse> FinalHoldQuotes { get; set; } = [];
 }
 
-/// <summary>Файл, приложенный согласующим к резолюции. Список пуст, если редакция уже
-/// согласована — вложения к этому моменту физически удалены, остаётся только текст комментария.</summary>
+/// <summary>Файл, приложенный согласующим к резолюции. Остаётся доступен и после того, как
+/// редакция станет согласованной — часть истории согласования наравне с текстом резолюции.</summary>
 public class ApprovalStageAttachmentResponse
 {
     public int Id { get; set; }
     public int FileId { get; set; }
     public required string FileName { get; set; }
     public long SizeBytes { get; set; }
+}
+
+/// <summary>Цитата из текста редакции, на которую согласующий сослался в резолюции — см.
+/// VndApprovalStageQuote на бэке. Комментарий/замечание к этой цитате отдельно не приходит:
+/// это вся резолюция фазы (Primary/Repeat/FinalHoldComment), в которую эта цитата попадает.</summary>
+public class ApprovalStageQuoteResponse
+{
+    public int Id { get; set; }
+
+    /// <summary>"ru"/"kg"/"en"/"tid"/"approvalSheet"/"disagreementMatrix"</summary>
+    public required string DocumentTarget { get; set; }
+
+    public required string Text { get; set; }
 }
