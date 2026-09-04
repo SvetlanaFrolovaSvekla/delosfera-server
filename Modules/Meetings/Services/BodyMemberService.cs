@@ -28,6 +28,28 @@ public class BodyMemberDto
     public bool IsCurrent { get; set; }
 }
 
+/// <summary>Строка явки: член органа и была ли отметка об отсутствии.</summary>
+public class MeetingAttendanceDto
+{
+    public int UserId { get; set; }
+    public string UserName { get; set; } = "";
+    public string? Position { get; set; }
+    public BodyRole Role { get; set; }
+    public string RoleTitle { get; set; } = "";
+
+    /// <summary>Присутствовал. По умолчанию да — отмечают только отсутствие.</summary>
+    public bool Present { get; set; } = true;
+
+    public string? Note { get; set; }
+}
+
+public class AttendanceMarkRequest
+{
+    public int UserId { get; set; }
+    public bool Present { get; set; } = true;
+    public string? Note { get; set; }
+}
+
 public class BodyMemberRequest
 {
     public MeetingBody Body { get; set; }
@@ -50,6 +72,13 @@ public interface IBodyMemberService
 
     /// <summary>Председатель органа; null — не назначен.</summary>
     Task<int?> ChairmanIdAsync(MeetingBody body, CancellationToken ct = default);
+
+    /// <summary>Состав органа на заседании с отметками явки.</summary>
+    Task<List<MeetingAttendanceDto>> AttendanceAsync(int meetingId, CancellationToken ct = default);
+
+    /// <summary>Отметить явку или отсутствие члена органа.</summary>
+    Task<List<MeetingAttendanceDto>> MarkAttendanceAsync(
+        int meetingId, AttendanceMarkRequest request, int actorUserId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -170,6 +199,79 @@ public class BodyMemberService : IBodyMemberService
                         && (m.To == null || m.To >= today))
             .Select(m => (int?) m.UserId)
             .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>
+    /// Состав органа на заседании с отметками явки.
+    ///
+    /// Список берётся из состава органа на дату заседания, а не на сегодня: через
+    /// год после заседания состав другой, а протокол должен читаться так же.
+    /// Присутствие по умолчанию — отмечают только тех, кто не пришёл.
+    /// </summary>
+    public async Task<List<MeetingAttendanceDto>> AttendanceAsync(
+        int meetingId, CancellationToken ct = default)
+    {
+        var meeting = await _db.Meetings.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == meetingId, ct)
+            ?? throw new KeyNotFoundException("Заседание не найдено");
+
+        var members = await _db.BodyMembers.AsNoTracking()
+            .Include(m => m.User).ThenInclude(u => u!.Position)
+            .Where(m => m.Body == meeting.Body
+                        && (m.From == null || m.From <= meeting.Date)
+                        && (m.To == null || m.To >= meeting.Date))
+            .ToListAsync(ct);
+
+        var marks = await _db.MeetingAttendances.AsNoTracking()
+            .Where(a => a.MeetingId == meetingId)
+            .ToDictionaryAsync(a => a.UserId, ct);
+
+        return members
+            .OrderBy(m => m.Role == BodyRole.Chairman ? 0 : m.Role == BodyRole.Secretary ? 2 : 1)
+            .ThenBy(m => m.User!.FullName, StringComparer.CurrentCulture)
+            .Select(m => new MeetingAttendanceDto
+            {
+                UserId = m.UserId,
+                UserName = m.User?.FullName ?? "",
+                Position = m.User?.Position?.TitleRu,
+                Role = m.Role,
+                RoleTitle = RoleTitle(m.Role),
+                Present = !marks.TryGetValue(m.UserId, out var mark) || mark.Present,
+                Note = marks.TryGetValue(m.UserId, out var n) ? n.Note : null,
+            })
+            .ToList();
+    }
+
+    public async Task<List<MeetingAttendanceDto>> MarkAttendanceAsync(
+        int meetingId, AttendanceMarkRequest request, int actorUserId, CancellationToken ct = default)
+    {
+        var meeting = await _db.Meetings.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == meetingId, ct)
+            ?? throw new KeyNotFoundException("Заседание не найдено");
+
+        var inBody = await _db.BodyMembers
+            .AnyAsync(m => m.Body == meeting.Body && m.UserId == request.UserId, ct);
+
+        if (!inBody)
+            throw new InvalidOperationException("Этот человек не состоит в органе — явку отмечать не по чему");
+
+        var mark = await _db.MeetingAttendances
+            .FirstOrDefaultAsync(a => a.MeetingId == meetingId && a.UserId == request.UserId, ct);
+
+        if (mark is null)
+        {
+            mark = new MeetingAttendance {MeetingId = meetingId, UserId = request.UserId};
+            _db.MeetingAttendances.Add(mark);
+        }
+
+        mark.Present = request.Present;
+        mark.Note = request.Present ? null : request.Note?.Trim();
+        mark.MarkedByUserId = actorUserId;
+        mark.MarkedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+
+        return await AttendanceAsync(meetingId, ct);
     }
 
     // ── вспомогательное ──────────────────────────────────────────────────────

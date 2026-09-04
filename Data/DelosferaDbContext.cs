@@ -254,6 +254,10 @@ public class DelosferaDbContext : DbContext
     /// <summary>Состав коллегиальных органов: кто входит в Правление, КПА, Кредитный комитет.</summary>
     public DbSet<delosfera_server.Modules.Meetings.Models.BodyMember> BodyMembers =>
         Set<delosfera_server.Modules.Meetings.Models.BodyMember>();
+
+    /// <summary>Явка членов органа на заседание: по ней считается кворум.</summary>
+    public DbSet<delosfera_server.Modules.Meetings.Models.MeetingAttendance> MeetingAttendances =>
+        Set<delosfera_server.Modules.Meetings.Models.MeetingAttendance>();
     public DbSet<AgendaGuest> AgendaGuests => Set<AgendaGuest>();
     public DbSet<AgendaAssignment> AgendaAssignments => Set<AgendaAssignment>();
     public DbSet<AgendaFile> AgendaFiles => Set<AgendaFile>();

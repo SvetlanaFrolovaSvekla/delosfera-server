@@ -55,3 +55,31 @@ public class BodyMember
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
+
+/// <summary>
+/// Явка члена органа на заседание.
+///
+/// Кворум считается по присутствовавшим, и протокол начинается со списка: кто
+/// был, кто отсутствовал и почему. Отметка заводится только для тех, кто не
+/// пришёл: по умолчанию член органа на заседании присутствует, и отмечать
+/// каждого пришедшего значило бы заставлять секретаря щёлкать по всему составу.
+/// </summary>
+public class MeetingAttendance
+{
+    public int Id { get; set; }
+
+    public int MeetingId { get; set; }
+    public Meeting? Meeting { get; set; }
+
+    public int UserId { get; set; }
+    public delosfera_server.Modules.Users.Models.User? User { get; set; }
+
+    /// <summary>Присутствовал ли. Записи нет — значит присутствовал.</summary>
+    public bool Present { get; set; } = true;
+
+    /// <summary>Причина отсутствия: отпуск, командировка, болезнь.</summary>
+    public string? Note { get; set; }
+
+    public int MarkedByUserId { get; set; }
+    public DateTime MarkedAt { get; set; }
+}
