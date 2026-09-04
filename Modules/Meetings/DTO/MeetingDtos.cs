@@ -79,6 +79,11 @@ public class AgendaItemRequest
     public string Topic { get; set; } = string.Empty;
     public string? ProtocolNumber { get; set; }
     public DateOnly? ProtocolDate { get; set; }
+
+    /// <summary>Проект постановления — готовится к заседанию.</summary>
+    public string? DraftResolution { get; set; }
+
+    /// <summary>Принятое решение — записывается после заседания.</summary>
     public string? Decision { get; set; }
 
     public int? SpeakerUserId { get; set; }
@@ -99,6 +104,7 @@ public class AgendaItemDto
     public string Topic { get; set; } = string.Empty;
     public string? ProtocolNumber { get; set; }
     public DateOnly? ProtocolDate { get; set; }
+    public string? DraftResolution { get; set; }
     public string? Decision { get; set; }
 
     public int? SpeakerUserId { get; set; }

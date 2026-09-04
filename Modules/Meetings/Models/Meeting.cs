@@ -104,6 +104,13 @@ public class AgendaItem : IAuditableEntity
     /// <summary>Дата протокола — подставляется в тексты напоминаний об исполнении.</summary>
     public DateOnly? ProtocolDate { get; set; }
 
+    /// <summary>
+    /// Проект постановления — то, что секретарь готовит к заседанию и рассылает
+    /// вместе с материалами. Отличается от решения: проект существует до
+    /// заседания и может быть не принят, решение появляется после.
+    /// </summary>
+    public string? DraftResolution { get; set; }
+
     /// <summary>Принятые решения.</summary>
     public string? Decision { get; set; }
 

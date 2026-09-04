@@ -41,10 +41,28 @@ public class MeetingNotificationService : IMeetingNotificationService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Повестка строкой: номер вопроса и тема.
+    ///
+    /// Человеку нужно знать не только дату заседания, но и каким по счёту слушают
+    /// его вопрос — иначе он приходит к началу и ждёт всё заседание.
+    /// </summary>
+    private static string Questions(Meeting meeting)
+    {
+        if (meeting.Items.Count == 0) return "";
+
+        var lines = meeting.Items
+            .OrderBy(i => i.Order)
+            .Select(i => $"{i.Order}. {i.Topic}");
+
+        return $"Вопросы повестки: {string.Join("; ", lines)}. ";
+    }
+
     public async Task<MeetingNotifyResultDto> NotifyAboutMeetingAsync(int meetingId, int currentUserId)
     {
         var meeting = await _db.Meetings
             .Include(m => m.Items).ThenInclude(i => i.Guests)
+            .Include(m => m.Items).ThenInclude(i => i.SourceSz).ThenInclude(s => s!.Document)
             .FirstOrDefaultAsync(m => m.Id == meetingId)
             ?? throw new KeyNotFoundException("Заседание не найдено");
 
@@ -56,6 +74,11 @@ public class MeetingNotificationService : IMeetingNotificationService
             if (item.SpeakerHeadUserId is { } head) recipients.Add(head);
             if (item.DeputySecretaryUserId is { } deputy) recipients.Add(deputy);
             foreach (var guest in item.Guests) recipients.Add(guest.UserId);
+
+            // Автор записки, из которой вырос вопрос. Он просил вынести вопрос на
+            // орган и до сих пор узнавал о заседании последним — или не узнавал:
+            // докладчиком по своей записке автор бывает не всегда.
+            if (item.SourceSz?.Document?.AuthorId is { } author) recipients.Add(author);
         }
 
         foreach (var member in await MembersOfAsync(meeting.Body)) recipients.Add(member);
@@ -64,6 +87,7 @@ public class MeetingNotificationService : IMeetingNotificationService
         var body =
             $"Добрый день, уважаемые коллеги! {meeting.Date:dd.MM.yyyy} в {meeting.Time:HH\\:mm} " +
             $"состоится заседание {MeetingTitles.BodyGenitive(meeting.Body)}. " +
+            Questions(meeting) +
             $"Материалы размещены по ссылке{Link(meeting.MaterialsUrl)}";
 
         await _notifications.CreateAsync(new CreateNotificationRequest
