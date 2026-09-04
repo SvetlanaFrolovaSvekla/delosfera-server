@@ -130,6 +130,15 @@ public class HrOrder : IAuditableEntity
     /// <summary>Сотрудники, которых приказ касается. Их может быть несколько.</summary>
     public ICollection<HrOrderEmployee> Employees { get; set; } = new List<HrOrderEmployee>();
 
+    /// <summary>
+    /// Поисковый образ приказа: заголовок, текст, основание, номер.
+    ///
+    /// Приказ по личному составу содержит оклады и взыскания, поэтому в поиске он
+    /// закрыт тем же правилом, что и книга приказов: кадровая служба видит всё,
+    /// остальные — только приказы о себе.
+    /// </summary>
+    public NpgsqlTypes.NpgsqlTsVector? SearchVector { get; set; }
+
     /// <summary>Сканы подписанного приказа и приложений к нему.</summary>
     public ICollection<HrOrderFile> Files { get; set; } = new List<HrOrderFile>();
 

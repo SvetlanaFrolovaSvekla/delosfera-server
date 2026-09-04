@@ -73,6 +73,7 @@ public class SearchService : ISearchService
                 SearchScope.Vnd => await SearchVndAsync(request, tsQuery, take),
                 SearchScope.Correspondence => await SearchCorrespondenceAsync(request, tsQuery, take),
                 SearchScope.PowerOfAttorney => await SearchPoaAsync(request, tsQuery, take),
+                SearchScope.HrOrder => await SearchHrOrdersAsync(request, tsQuery, take),
                 _ => ([], 0),
             };
 
@@ -483,6 +484,76 @@ public class SearchService : ISearchService
     /// Доверенности. Ищут по фамилии представителя и по фразе из полномочий —
     /// «вправе ли он подписывать договоры аренды».
     /// </summary>
+    /// <summary>
+    /// Приказы по личному составу.
+    ///
+    /// Правило доступа входит вместе с контуром, а не следом за ним: приказ несёт
+    /// оклад, взыскание, причину увольнения. Кадровая служба видит книгу целиком,
+    /// остальные — только приказы о себе, и одно слово из текста чужого приказа
+    /// не открывает его.
+    /// </summary>
+    private async Task<(List<SearchHitDto>, int)> SearchHrOrdersAsync(
+        SearchRequest request, string? tsQuery, int take)
+    {
+        var query = _db.HrOrders.AsNoTracking().AsQueryable();
+
+        if (!_currentUser.HasPermission(Users.Models.PermissionCode.ViewHrOrders))
+        {
+            var me = _currentUser.UserId;
+            query = query.Where(o => o.Employees.Any(e => e.UserId == me));
+        }
+
+        // Проект приказа не показываем никому, кроме кадровой службы: пока приказ
+        // не подписан, решения ещё нет.
+        if (!_currentUser.HasPermission(Users.Models.PermissionCode.ViewHrOrders))
+            query = query.Where(o => o.Status != Hr.Models.HrOrderStatus.Draft);
+
+        if (request.From is { } from)
+            query = query.Where(o => o.OrderDate >= from);
+
+        if (request.To is { } to)
+            query = query.Where(o => o.OrderDate <= to);
+
+        if (tsQuery is not null)
+            query = query.Where(o => o.SearchVector!.Matches(EF.Functions.ToTsQuery("russian", tsQuery)));
+
+        var total = await query.CountAsync();
+
+        var rows = await query
+            .OrderByDescending(o => o.OrderDate).ThenByDescending(o => o.Id)
+            .Take(take)
+            .Select(o => new
+            {
+                o.Id, o.RegNumber, o.Title, o.Body, o.Status, o.Kind, o.CreatedAt,
+                Employees = o.Employees.Count,
+            })
+            .ToListAsync();
+
+        var hits = rows.Select(r => new SearchHitDto
+        {
+            Scope = SearchScope.HrOrder,
+            ScopeTitle = SearchScopeMap.Title(SearchScope.HrOrder),
+            Id = r.Id,
+            RegNumber = r.RegNumber,
+            Title = r.Title,
+            Snippet = Snippet(r.Body, request.Query),
+            StatusTitle = HrOrderStatusTitle(r.Status),
+            CreatedAt = r.CreatedAt,
+            Url = $"/hr/orders/{r.Id}",
+        }).ToList();
+
+        return (hits, total);
+    }
+
+    private static string HrOrderStatusTitle(Hr.Models.HrOrderStatus status) => status switch
+    {
+        Hr.Models.HrOrderStatus.Draft => "Проект",
+        Hr.Models.HrOrderStatus.OnSigning => "На подписании",
+        Hr.Models.HrOrderStatus.Signed => "Подписан",
+        Hr.Models.HrOrderStatus.Cancelled => "Отменён",
+        _ => status.ToString(),
+    };
+
     private async Task<(List<SearchHitDto>, int)> SearchPoaAsync(
         SearchRequest request, string? tsQuery, int take)
     {

@@ -16,6 +16,15 @@ public class HrOrderConfiguration : IEntityTypeConfiguration<HrOrder>
         builder.Property(x => x.Body).HasMaxLength(20000);
         builder.Property(x => x.Basis).HasMaxLength(1000);
 
+        // Поисковый образ считает база: заголовок, текст, основание и номер.
+        builder.Property(x => x.SearchVector)
+            .HasComputedColumnSql(
+                "to_tsvector('russian', coalesce(title, '') || ' ' || coalesce(body, '') || ' ' " +
+                "|| coalesce(basis, '') || ' ' || coalesce(reg_number, ''))",
+                stored: true);
+
+        builder.HasIndex(x => x.SearchVector).HasMethod("GIN");
+
         builder.HasOne(x => x.SignerUser)
             .WithMany()
             .HasForeignKey(x => x.SignerUserId)
