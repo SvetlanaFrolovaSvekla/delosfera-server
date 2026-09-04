@@ -28,7 +28,18 @@ public class ProcurementRouteService : IProcurementRouteService
     private const int StepTimeNormHours = 24;
 
     private const string AdministrativeUnit = "Административный отдел";
+
+    /// <summary>Номер Административного отдела в портале банка.</summary>
+    private const int AdministrativeUnitPortalId = 55;
+
     private const string BudgetUnit = "Управление стратегического планирования и бюджетирования";
+
+    /// <summary>
+    /// Номер бюджетного управления в портале. В портале оно называется
+    /// «Управление планирования и анализа», у нас в сиде — иначе, и по названию
+    /// находилась пустая запись вместо управления с четырьмя сотрудниками.
+    /// </summary>
+    private const int BudgetUnitPortalId = 59;
 
     /// <summary>
     /// Подразделение, которое ведёт процедуру закупки.
@@ -39,6 +50,9 @@ public class ProcurementRouteService : IProcurementRouteService
     /// не замечалась.
     /// </summary>
     private const string ProcurementUnit = "Сектор закупок";
+
+    /// <summary>Номер Сектора закупок в портале банка.</summary>
+    private const int ProcurementUnitPortalId = 49;
 
     private readonly DelosferaDbContext _db;
     private readonly IRouteEngine _engine;
@@ -58,9 +72,9 @@ public class ProcurementRouteService : IProcurementRouteService
         if (initiatorUnit is null)
             throw new InvalidOperationException("Не указано инициирующее подразделение — маршрут не построить");
 
-        var adminUnit = await FindUnitAsync(AdministrativeUnit);
-        var budgetUnit = await FindUnitAsync(BudgetUnit);
-        var procurementUnit = await FindUnitAsync(ProcurementUnit);
+        var adminUnit = await FindUnitAsync(AdministrativeUnit, AdministrativeUnitPortalId);
+        var budgetUnit = await FindUnitAsync(BudgetUnit, BudgetUnitPortalId);
+        var procurementUnit = await FindUnitAsync(ProcurementUnit, ProcurementUnitPortalId);
 
         var steps = new List<(string Title, int? UserId, StepKind Kind)>();
 
@@ -129,8 +143,30 @@ public class ProcurementRouteService : IProcurementRouteService
         return instance;
     }
 
-    private async Task<OrganizationUnit?> FindUnitAsync(string titleRu) =>
-        await _db.OrganizationUnits.FirstOrDefaultAsync(u => u.TitleRu == titleRu);
+    /// <summary>
+    /// Подразделение маршрута: сначала по номеру портала, потом по названию.
+    ///
+    /// Названия расходятся, и это уже подвело: бюджетный контроль искался как
+    /// «Управление стратегического планирования и бюджетирования» — так называется
+    /// наша пустая запись из сида, а настоящее управление приходит из портала под
+    /// именем «Управление планирования и анализа». Этап уходил в подразделение без
+    /// единого сотрудника, и заявка вставала.
+    ///
+    /// Номер портала у записи не меняется, куда бы её ни перенесли внутри нашего
+    /// справочника, поэтому ищем сперва по нему.
+    /// </summary>
+    private async Task<OrganizationUnit?> FindUnitAsync(string titleRu, int? portalId = null)
+    {
+        if (portalId is { } id)
+        {
+            var byPortal = await _db.OrganizationUnits
+                .FirstOrDefaultAsync(u => u.ExternalId == id);
+
+            if (byPortal is not null) return byPortal;
+        }
+
+        return await _db.OrganizationUnits.FirstOrDefaultAsync(u => u.TitleRu == titleRu);
+    }
 
     private static string AuthorityTitle(ApprovalAuthority authority) => authority switch
     {
