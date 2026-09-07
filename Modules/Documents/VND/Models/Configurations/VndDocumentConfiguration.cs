@@ -55,14 +55,11 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 j =>
                 {
                     j.ToTable("vnd_responsible_executor");
-                    j.HasData(
-                        new { VndId = 1, OrganizationUnitId = 26 }, // ВНД-062 — Управление рисками
-                        new { VndId = 2, OrganizationUnitId = 26 }, // ВНД-084 — Управление рисками
-                        new { VndId = 2, OrganizationUnitId = 8 }, // ВНД-084 — Управление кредитования
-                        new { VndId = 3, OrganizationUnitId = 38 }, // ВНД-011 — УБУиО
-                        new { VndId = 4, OrganizationUnitId = 32 }, // ВНД-201 — Управление ЧР
-                        new { VndId = 5, OrganizationUnitId = 4 } // ВНД-037 — Управление казначейских операций
-                    );
+                    // ⚠ 07.09.2026: сид-данные для demo VndId 1-5 убраны совсем — эти demo-документы
+                    // (ВНД-062/084/011/201/037) уже физически не существуют в БД (удалены при
+                    // тестировании пилота), а раз документов нет — сохранять для них "мёртвые"
+                    // привязки к подразделениям бессмысленно и при следующем изменении этой таблицы
+                    // привело бы к нарушению FK vnd_responsible_executor.vnd_id -> vnd_document.id.
                 });
 
         // ─── Ключевые слова (many-to-many с Keyword) ───
@@ -75,13 +72,12 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 j =>
                 {
                     j.ToTable("vnd_keyword");
-                    j.HasData(
-                        new { VndId = 1, KeywordId = 6 }, // ВНД-062 — Ответственность
-                        new { VndId = 1, KeywordId = 12 }, // ВНД-062 — Матрица
-                        new { VndId = 2, KeywordId = 11 }, // ВНД-084 — Безопасность
-                        new { VndId = 3, KeywordId = 8 }, // ВНД-011 — Расход
-                        new { VndId = 4, KeywordId = 6 } // ВНД-201 — Ответственность
-                    );
+                    // ⚠ 07.09.2026: сид-данные для demo VndId 1-5 убраны совсем — эти demo-документы
+                    // (ВНД-062/084/011/201/037) уже физически не существуют в БД (удалены при
+                    // тестировании пилота, вместе с ними каскадно ушли и их vnd_keyword/vnd_rubric
+                    // строки), а раз документов нет — сохранять для них "мёртвые" привязки к новому
+                    // (isrib-based) справочнику ключевых слов бессмысленно и приводило к нарушению
+                    // FK vnd_keyword.vnd_id -> vnd_document.id при попытке INSERT.
                 });
 
         // ─── Рубрики (many-to-many с Rubric) ───
@@ -94,14 +90,12 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 j =>
                 {
                     j.ToTable("vnd_rubric");
-                    j.HasData(
-                        new { VndId = 1, RubricId = 5 },
-                        new { VndId = 2, RubricId = 5 },
-                        new { VndId = 3, RubricId = 15 },
-                        new { VndId = 4, RubricId = 7 },
-                        new { VndId = 5, RubricId = 11 },
-                        new { VndId = 3, RubricId = 11 }
-                    );
+                    // ⚠ 07.09.2026: сид-данные для demo VndId 1-5 убраны совсем — эти demo-документы
+                    // (ВНД-062/084/011/201/037) уже физически не существуют в БД (удалены при
+                    // тестировании пилота, вместе с ними каскадно ушли и их vnd_keyword/vnd_rubric
+                    // строки), а раз документов нет — сохранять для них "мёртвые" привязки к новому
+                    // (isrib-based) справочнику рубрик бессмысленно и приводило к нарушению
+                    // FK vnd_rubric.vnd_id -> vnd_document.id при попытке INSERT.
                 });
 
         // ─── Группы доступа (many-to-many с UserGroup) ───
@@ -115,12 +109,21 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
 
         var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
+        // DeveloperId ниже пересчитаны под реальную оргструктуру банка (см.
+        // OrganizationUnitConfiguration.cs, полная выгрузка 149 подразделений с AD/портала):
+        // старые id временного isrib-сида заменены на настоящие id того же подразделения на
+        // сервере (10→28 Управление риск-менеджмента, 7→46 Операционное управление, 9→34
+        // Юридическое управление, 11→52 Управление методологии → Отдел методологии, 4→22
+        // Управление продаж малого и среднего бизнеса → Управление продаж - точных
+        // совпадений по названию для этих двух нет, взят ближайший реальный аналог; поле
+        // обязательное, null недопустим). OrganId (Орган утверждения) ссылается на
+        // dictionary_approval_body, а не на подразделения, - его не трогаем.
         builder.HasData(
             new
             {
                 Id = 1, Code = "10062", TitleRu = "Порядок работы с обеспечением (залогами)",
                 Status = VndStatus.Consolidation,
-                TypeId = 13, DeveloperId = 26, CuratorDeveloperId = (int?)1, OrganId = 3,
+                TypeId = 13, DeveloperId = 28, CuratorDeveloperId = (int?)1, OrganId = 3,
                 AdoptionDate = new DateOnly(2023, 2, 9), AdoptionCode = "пр. №4(2)",
                 EffectiveDate = (DateOnly?)new DateOnly(2023, 2, 16),
                 RequisitesChangedDate = (DateOnly?)new DateOnly(2026, 1, 12),
@@ -144,7 +147,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
             {
                 Id = 2, Code = "10084", TitleRu = "Политика управления кредитными рисками",
                 Status = VndStatus.Active,
-                TypeId = 11, DeveloperId = 26, CuratorDeveloperId = (int?)1, OrganId = 7,
+                TypeId = 11, DeveloperId = 28, CuratorDeveloperId = (int?)1, OrganId = 7,
                 AdoptionDate = new DateOnly(2021, 3, 14), AdoptionCode = "пр. №9(1)",
                 EffectiveDate = (DateOnly?)new DateOnly(2021, 4, 1),
                 RequisitesChangedDate = (DateOnly?)new DateOnly(2025, 5, 5),
@@ -168,7 +171,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
             {
                 Id = 3, Code = "10011", TitleRu = "Регламент кассовых операций",
                 Status = VndStatus.OnActualization,
-                TypeId = 17, DeveloperId = 38, CuratorDeveloperId = (int?)11, OrganId = 3,
+                TypeId = 17, DeveloperId = 46, CuratorDeveloperId = (int?)11, OrganId = 3,
                 AdoptionDate = new DateOnly(2020, 1, 20), AdoptionCode = "пр. №2(5)",
                 EffectiveDate = (DateOnly?)new DateOnly(2020, 2, 1),
                 RequisitesChangedDate = (DateOnly?)new DateOnly(2024, 10, 10),
@@ -192,7 +195,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
             {
                 Id = 4, Code = "10201", TitleRu = "Кодекс корпоративной этики",
                 Status = VndStatus.Active,
-                TypeId = 5, DeveloperId = 32, CuratorDeveloperId = (int?)9, OrganId = 2,
+                TypeId = 5, DeveloperId = 34, CuratorDeveloperId = (int?)9, OrganId = 2,
                 AdoptionDate = new DateOnly(2019, 5, 5), AdoptionCode = "пр. ОСА-1",
                 EffectiveDate = (DateOnly?)new DateOnly(2019, 6, 1),
                 RequisitesChangedDate = (DateOnly?)new DateOnly(2024, 3, 1),
@@ -216,7 +219,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
             {
                 Id = 5, Code = "10037", TitleRu = "Регламент управления ликвидностью (ред. 2019)",
                 Status = VndStatus.Archived,
-                TypeId = 17, DeveloperId = 4, CuratorDeveloperId = (int?)12, OrganId = 3,
+                TypeId = 17, DeveloperId = 22, CuratorDeveloperId = (int?)12, OrganId = 3,
                 AdoptionDate = new DateOnly(2019, 1, 10), AdoptionCode = "пр. №1(4)",
                 EffectiveDate = (DateOnly?)new DateOnly(2019, 2, 1),
                 RequisitesChangedDate = (DateOnly?)new DateOnly(2019, 2, 1),
@@ -241,7 +244,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
             {
                 Id = 6, Code = "10210", TitleRu = "Тест",
                 Status = VndStatus.Draft,
-                TypeId = 1, DeveloperId = 33, CuratorDeveloperId = (int?)null, OrganId = 2,
+                TypeId = 1, DeveloperId = 52, CuratorDeveloperId = (int?)null, OrganId = 2,
                 AdoptionDate = (DateOnly?)null, AdoptionCode = (string?)null,
                 EffectiveDate = (DateOnly?)null,
                 RequisitesChangedDate = (DateOnly?)null,

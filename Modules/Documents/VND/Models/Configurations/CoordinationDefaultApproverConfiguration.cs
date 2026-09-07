@@ -31,10 +31,12 @@ public class CoordinationDefaultApproverConfiguration : IEntityTypeConfiguration
 
         // Данные существовавших 4 фиксированных этапов переносятся как обычные (редактируемые)
         // строки справочника - Title/OrgUnitId соответствуют прежним ApprovalStageKind/
-        // FixedApprovalOrgUnits. OrgUnitId для Методологии здесь исправлен на корректный (34
-        // было занято Юр. управлением, поэтому раньше могла подтягиваться пустая/чужая запись
-        // OrganizationUnits при рассинхроне сидов на конкретной БД) - при необходимости
-        // администратор поправит СП/название/согласующего через справочник после миграции.
+        // FixedApprovalOrgUnits. OrgUnitId ниже указывают на реальные id подразделений на
+        // сервере (см. OrganizationUnitConfiguration.cs, полная выгрузка с AD/портала):
+        // 34 - Юридическое управление, 28 - Управление риск-менеджмента, 5 - Управление
+        // комплаенс контроля, 52 - Отдел методологии (ближайший реальный аналог "Управления
+        // методологии" - точного совпадения нет) - при необходимости администратор поправит
+        // СП/название/согласующего через справочник после миграции.
         builder.HasData(
             new
             {
@@ -53,7 +55,7 @@ public class CoordinationDefaultApproverConfiguration : IEntityTypeConfiguration
             },
             new
             {
-                Id = 4, Title = "Методология", Order = 4, OrgUnitId = 33,
+                Id = 4, Title = "Методология", Order = 4, OrgUnitId = 52,
                 ApproverUserId = (int?)3, CreatedAt = seedDate, UpdatedAt = seedDate
             }
         );

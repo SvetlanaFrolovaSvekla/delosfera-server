@@ -64,12 +64,22 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         // и захардкожены как константы - HasData требует детерминированных значений,
         // а PasswordHasher.HashPassword() каждый раз генерирует новую случайную соль,
         // из-за чего модель считалась бы "меняющейся" при каждой сборке.
+        //
+        // OrgUnitId ниже пересчитаны под реальную оргструктуру банка (см.
+        // OrganizationUnitConfiguration.cs, полная выгрузка 149 подразделений с AD/портала):
+        // старые id временного 11-строчного isrib-сида заменены на настоящие id того же
+        // подразделения на сервере (10→28 Управление риск-менеджмента, 9→34 Юридическое
+        // управление, 11→52 Управление методологии → Отдел методологии (ближайший реальный
+        // аналог, точного совпадения "управление" нет), 2→36 Правление, 8→3 Управление
+        // информационных технологий, 3→5 Управление комплаенс контроля). Для пользователей,
+        // у которых и раньше стоял null, ничего не менялось - это тестовые пользователи, не
+        // завязанные на перенос конкретных 5 ВНД.
         builder.HasData(
             new
             {
                 Id = 1, FullName = "Азамат Осмонов", Email = "aosmonov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAELaBsuyKeMFxAB+MULrtZ9MjkT9t5fx0pas/Ozvz63EziFaKREY6cggdvLgNVCY6ag==",
-                PositionId = (int?)1, OrgUnitId = (int?)26, IsActive = true, LastLoginAt = (DateTime?)null,
+                PositionId = (int?)1, OrgUnitId = (int?)28, IsActive = true, LastLoginAt = (DateTime?)null,
                 Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
@@ -83,14 +93,14 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             {
                 Id = 3, FullName = "Бермет Токтосунова", Email = "btoktosunova@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAENcTGN+pr9GDKyGE9w4K5jKdimigO7jzpb+UKIoPOd/ZgnO50Hn1ffr8AYbpFRSf5Q==",
-                PositionId = (int?)3, OrgUnitId = (int?)33, IsActive = true, LastLoginAt = (DateTime?)null,
+                PositionId = (int?)3, OrgUnitId = (int?)52, IsActive = true, LastLoginAt = (DateTime?)null,
                 Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 4, FullName = "Тимур Иманалиев", Email = "timanaliev@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEP0K+N392Olc2GDbaBBKmr+iMP2+9/8p4xm/bMhVOsFGUFBw+56Uwfncnq3D3ioFSg==",
-                PositionId = (int?)4, OrgUnitId = (int?)35, IsActive = true, LastLoginAt = (DateTime?)null,
+                PositionId = (int?)4, OrgUnitId = (int?)null, IsActive = true, LastLoginAt = (DateTime?)null,
                 Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
@@ -104,14 +114,14 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             {
                 Id = 6, FullName = "Айгуль Маматова", Email = "amamatova@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEJsegtPXOp1+XnMfDYn+/my6rUZeZP/mc11xAOs3fgVFJxu8xfdFoQKxjULd0pNp3g==",
-                PositionId = (int?)6, OrgUnitId = (int?)37, IsActive = true, LastLoginAt = (DateTime?)null,
+                PositionId = (int?)6, OrgUnitId = (int?)null, IsActive = true, LastLoginAt = (DateTime?)null,
                 Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 7, FullName = "Бакыт Кадыров", Email = "bkadyrov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEMIfWpsAG+CZv+Ne2uZBrKf1Wce56WoQWK1QkEJ7Mlhy6/CbH7VcSIG22izU03JewQ==",
-                PositionId = (int?)7, OrgUnitId = (int?)38, IsActive = true, LastLoginAt = (DateTime?)null,
+                PositionId = (int?)7, OrgUnitId = (int?)null, IsActive = true, LastLoginAt = (DateTime?)null,
                 Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
@@ -125,28 +135,28 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             {
                 Id = 9, FullName = "Алия Жумаева", Email = "ajumaeva@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEHqpAAB4JDlfYHk91LymTPuh0fK0lTjEyIqsUskrPHlify//ciM1Pgj+tHYkf8i4Mg==",
-                PositionId = (int?)9, OrgUnitId = (int?)32, IsActive = true, LastLoginAt = (DateTime?)null,
+                PositionId = (int?)9, OrgUnitId = (int?)null, IsActive = true, LastLoginAt = (DateTime?)null,
                 Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 10, FullName = "Руслан Ормонов", Email = "rormonov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEOWaZvoD8t9WLi3j+9ROOKm4VfhoSC41MG0f6nol0WCiRsjmAn6uhIXOuoxdEyiU3w==",
-                PositionId = (int?)10, OrgUnitId = (int?)39, IsActive = true, LastLoginAt = (DateTime?)null,
+                PositionId = (int?)10, OrgUnitId = (int?)null, IsActive = true, LastLoginAt = (DateTime?)null,
                 Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 11, FullName = "Салтанат Ибраева", Email = "sibraeva@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEFbfx4mqL8rO9aGfQnkhjR81i+g55Np6sSjzVvt8+zh2hhSvvEeR4cx6k7aq32NVWw==",
-                PositionId = (int?)11, OrgUnitId = (int?)38, IsActive = true, LastLoginAt = (DateTime?)null,
+                PositionId = (int?)11, OrgUnitId = (int?)null, IsActive = true, LastLoginAt = (DateTime?)null,
                 Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
             {
                 Id = 12, FullName = "Данияр Усенов", Email = "dusenov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEKHOs8yYxWNUVqDlX7az+fTMoaJ+etAefAuscQcbQvaG+3myOORWgkwziGQQ0MNVHQ==",
-                PositionId = (int?)12, OrgUnitId = (int?)4, IsActive = true, LastLoginAt = (DateTime?)null,
+                PositionId = (int?)12, OrgUnitId = (int?)null, IsActive = true, LastLoginAt = (DateTime?)null,
                 Source = UserSource.Local, FailedLoginAttempts = 0, CreatedAt = seedDate, UpdatedAt = seedDate
             },
             new
@@ -184,7 +194,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             {
                 Id = 17, FullName = "Нурбек Осконов", Email = "noskonov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEKXQ0AW10isOhlDcbGPT3gKxa/FaM3gtb2FxhkLBzurisRAXL0HeBBusit2wDqDOkA==",
-                PositionId = (int?)3, OrgUnitId = (int?)33,
+                PositionId = (int?)3, OrgUnitId = (int?)52,
                 IsActive = true, LastLoginAt = (DateTime?)null, Source = UserSource.Local,
                 CreatedAt = seedDate, UpdatedAt = seedDate
             }, // Методология (замена Бермет), пароль: noskonov
@@ -192,7 +202,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             {
                 Id = 18, FullName = "Айнура Токоева", Email = "atokoeva@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEIPjSgpvjJwzYCkxoEjkiZaopA0lLwFnDpT75Vvr78Y3YX3VGFQKXmXpy2F57M2VJQ==",
-                PositionId = (int?)8, OrgUnitId = (int?)3,
+                PositionId = (int?)8, OrgUnitId = (int?)null,
                 IsActive = true, LastLoginAt = (DateTime?)null, Source = UserSource.Local,
                 CreatedAt = seedDate, UpdatedAt = seedDate
             }, // Custom-этап, например от ИБ, пароль: atokoeva
@@ -200,7 +210,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             {
                 Id = 19, FullName = "Данил Петров", Email = "dpetrov@keremetbank.kg",
                 PasswordHash = "AQAAAAEAAYagAAAAEHCfve+vcccRWGbiuG7dVDwSpv4ep13q1yGPUnZH66qz101wPZ5GV3becS/qgn4PHA==",
-                PositionId = (int?)2, OrgUnitId = (int?)37,
+                PositionId = (int?)2, OrgUnitId = (int?)null,
                 IsActive = true, LastLoginAt = (DateTime?)null, Source = UserSource.Local,
                 CreatedAt = seedDate, UpdatedAt = seedDate
             } // Обычный сотрудник-инициатор, пароль: dpetrov

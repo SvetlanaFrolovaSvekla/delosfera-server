@@ -1614,54 +1614,136 @@ public class VndService : IVndService
                             .FirstOrDefaultAsync()
                             ?? throw new InvalidOperationException("У ВНД ещё нет ни одной редакции");
 
+        return await EditRedactionDirectlyCoreAsync(vnd, lastRedaction, request, currentUserId);
+    }
+
+    /// <summary>То же самое, что EditLastRevisionDirectlyAsync, но для явно указанной редакции —
+    /// не обязательно последней (см. EditRedactionDirectlyCoreAsync и RedactionsSidebar на
+    /// фронте, где кнопка "Редактировать" раньше показывалась только у последней редакции).</summary>
+    public async Task<VndRedactionResponse> EditRedactionDirectlyAsync(
+        int vndId, int redactionId, EditLastRevisionDirectlyRequest request, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments.FindAsync(vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        var redaction = await IncludeRequisites(_db.VndRedactions
+                                .Where(r => r.Id == redactionId && r.VndId == vndId)
+                                .Include(r => r.Attachments).ThenInclude(a => a.FileAttachment))
+                            .FirstOrDefaultAsync()
+                            ?? throw new KeyNotFoundException($"Редакция с id={redactionId} у ВНД id={vndId} не найдена");
+
+        return await EditRedactionDirectlyCoreAsync(vnd, redaction, request, currentUserId);
+    }
+
+    /// <summary>Общая логика прямого редактирования редакции главным редактором (без согласования,
+    /// без создания новой редакции, без изменения даты актуализации) — используется и для
+    /// последней редакции (EditLastRevisionDirectlyAsync), и для произвольной (EditRedactionDirectlyAsync).
+    /// Помимо основных файлов документа (RU/KG/EN) и обычных вложений, умеет загружать/заменять/убирать
+    /// специальные вложения (ТИД/Лист согласования/Матрица разногласий) — в т.ч. там, где их
+    /// изначально не было (например, у редакций, перенесённых из isrib).</summary>
+    private async Task<VndRedactionResponse> EditRedactionDirectlyCoreAsync(
+        VndDocument vnd, VndRedaction redaction, EditLastRevisionDirectlyRequest request, int currentUserId)
+    {
         // Редакция, отправленная на согласование, редактируется только через отзыв согласования
         // (VndApprovalService.CancelAsync возвращает её в черновик) — иначе главный редактор мог бы
         // незаметно подменить файл, который уже смотрят согласующие. Действующую редакцию (не
         // отправленную на согласование — ApprovalStatus NotRequired/Draft/Approved/Rejected) это
         // не ограничивает, её можно менять напрямую, как и раньше.
-        if (lastRedaction.ApprovalStatus == RedactionApprovalStatus.Pending)
+        if (redaction.ApprovalStatus == RedactionApprovalStatus.Pending)
             throw new InvalidOperationException(
                 "Редакция отправлена на согласование — сначала отзовите согласование во вкладке " +
                 "«Согласование», чтобы редактировать её напрямую");
 
         var hasChanges = false;
 
+        // Момент замены — общий для всех документов, заменённых в рамках этого вызова (тот же
+        // паттерн, что и в VndApprovalService.ResubmitAfterRevisionAsync).
+        var editedAt = DateTime.UtcNow;
+
         if (request.DocRu is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocRu, currentUserId);
-            lastRedaction.DocFileRuId = saved.Id;
+            redaction.DocFileRuId = saved.Id;
             hasChanges = true;
         }
 
         if (request.DocKg is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocKg, currentUserId);
-            lastRedaction.DocFileKgId = saved.Id;
+            redaction.DocFileKgId = saved.Id;
+            redaction.DocKgUpdatedAt = editedAt;
             hasChanges = true;
         }
-        else if (request.RemoveDocKg && lastRedaction.DocFileKgId is not null)
+        else if (request.RemoveDocKg && redaction.DocFileKgId is not null)
         {
             // Явное удаление документа на кыргызском без замены (тот же паттерн, что и в
             // VndApprovalService.ResubmitAfterRevisionAsync).
-            lastRedaction.DocFileKgId = null;
+            redaction.DocFileKgId = null;
+            redaction.DocKgUpdatedAt = null;
             hasChanges = true;
         }
 
         if (request.DocEn is not null)
         {
             var saved = await _fileService.SaveAsync(request.DocEn, currentUserId);
-            lastRedaction.DocFileEnId = saved.Id;
+            redaction.DocFileEnId = saved.Id;
+            redaction.DocEnUpdatedAt = editedAt;
             hasChanges = true;
         }
-        else if (request.RemoveDocEn && lastRedaction.DocFileEnId is not null)
+        else if (request.RemoveDocEn && redaction.DocFileEnId is not null)
         {
-            lastRedaction.DocFileEnId = null;
+            redaction.DocFileEnId = null;
+            redaction.DocEnUpdatedAt = null;
             hasChanges = true;
         }
 
-        if (request.Description is not null && request.Description != lastRedaction.Description)
+        // Специальные вложения - те же файлы, что обычно формируются автоматически или грузятся в
+        // рамках согласования, но здесь главный редактор может приложить/заменить/убрать их вручную
+        // для ЛЮБОЙ редакции (в т.ч. там, где их никогда не было - см. комментарий у
+        // EditLastRevisionDirectlyRequest). Факт правки любого из них фиксируем в DocRuUpdatedAt -
+        // то же поле, которое "Изменение редакции" на вкладке "Реквизиты" показывает для основного
+        // файла (см. activeRequisites.revisionChangedDate на фронте); отдельного поля под три вида
+        // специальных вложений заводить не стали - для отображения истории правки редакции неважно,
+        // какой именно файл поменяли, важен сам факт и дата.
+        if (request.Tid is not null)
         {
-            lastRedaction.Description = request.Description;
+            var saved = await _fileService.SaveAsync(request.Tid, currentUserId);
+            redaction.TidFileId = saved.Id;
+            hasChanges = true;
+        }
+        else if (request.RemoveTid && redaction.TidFileId is not null)
+        {
+            redaction.TidFileId = null;
+            hasChanges = true;
+        }
+
+        if (request.ApprovalSheet is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.ApprovalSheet, currentUserId);
+            redaction.ApprovalSheetFileId = saved.Id;
+            hasChanges = true;
+        }
+        else if (request.RemoveApprovalSheet && redaction.ApprovalSheetFileId is not null)
+        {
+            redaction.ApprovalSheetFileId = null;
+            hasChanges = true;
+        }
+
+        if (request.DisagreementMatrix is not null)
+        {
+            var saved = await _fileService.SaveAsync(request.DisagreementMatrix, currentUserId);
+            redaction.DisagreementMatrixFileId = saved.Id;
+            hasChanges = true;
+        }
+        else if (request.RemoveDisagreementMatrix && redaction.DisagreementMatrixFileId is not null)
+        {
+            redaction.DisagreementMatrixFileId = null;
+            hasChanges = true;
+        }
+
+        if (request.Description is not null && request.Description != redaction.Description)
+        {
+            redaction.Description = request.Description;
             hasChanges = true;
         }
 
@@ -1670,13 +1752,13 @@ public class VndService : IVndService
         foreach (var file in request.NewAttachments ?? [])
         {
             var saved = await _fileService.SaveAsync(file, currentUserId);
-            lastRedaction.Attachments.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
+            redaction.Attachments.Add(new VndRedactionAttachment { FileAttachmentId = saved.Id });
             hasChanges = true;
         }
 
         if (request.RemovedAttachmentFileIds is { Count: > 0 })
         {
-            var toRemove = lastRedaction.Attachments
+            var toRemove = redaction.Attachments
                 .Where(a => request.RemovedAttachmentFileIds.Contains(a.FileAttachmentId))
                 .ToList();
             if (toRemove.Count > 0)
@@ -1686,16 +1768,21 @@ public class VndService : IVndService
             }
         }
 
-        // RevisionChangedDate фиксирует факт правки содержимого редакции — обновляем,
-        // только если реально что-то поменялось (не на пустой запрос).
-        // DueActualizationDate, Period, ActualizationResponsibleUserId и статус ВНД
-        // намеренно не трогаем — это прямое редактирование "как есть", без цикла актуализации.
+        // RevisionChangedDate (документ-уровня, для обратной совместимости - см. те же места, что
+        // уже читают его сейчас) и DocRuUpdatedAt редакции (то же самое, но по конкретной редакции -
+        // источник "Изменение редакции" на вкладке "Реквизиты") фиксируют факт правки содержимого
+        // редакции — обновляем, только если реально что-то поменялось (не на пустой запрос).
+        // DueActualizationDate, Period, ActualizationResponsibleUserId и статус ВНД намеренно не
+        // трогаем — это прямое редактирование "как есть", без цикла актуализации.
         if (hasChanges)
+        {
+            redaction.DocRuUpdatedAt = editedAt;
             vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        }
 
         await _db.SaveChangesAsync();
 
-        return ToRedactionResponse(lastRedaction, vnd);
+        return ToRedactionResponse(redaction, vnd);
     }
 
     /// <summary>Кнопка "Сформировать или загрузить ТИД" — прикладывает файл ТИД (Таблица изменений
