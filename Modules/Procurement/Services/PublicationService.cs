@@ -92,7 +92,7 @@ public class PublicationService : IPublicationService
 
                 Адрес: {BankAddress}. ИНН: {BankInn}.
                 Контакты и конкурсная документация предоставляются по запросу
-                в Сектор закупок Административного отдела.
+                в Сектор закупок.
                 """;
     }
 }
