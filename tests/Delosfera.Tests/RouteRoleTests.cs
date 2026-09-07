@@ -86,6 +86,19 @@ public class RouteRoleTests
     }
 
     [Fact]
+    public async Task Участник_подразделение_разрешается_в_его_руководителя()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+
+        // «Подразделение согласует» значит «согласует руководитель отдела» —
+        // иначе этап без конкретного человека тихо повис бы.
+        var маршрут = await ЗапуститьПоПодразделениюАsync(db, стенд, стенд.Подразделение);
+
+        Assert.Equal(стенд.Начальник, Участник(маршрут));
+    }
+
+    [Fact]
     public async Task Поимённый_участник_ролью_не_подменяется()
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
@@ -105,21 +118,22 @@ public class RouteRoleTests
     private static int? Участник(RouteInstance instance) =>
         instance.Steps.Single().Participants.Single().UserId;
 
-    private static async Task<RouteInstance> ЗапуститьАsync(
-        DelosferaDbContext db, Стенд стенд, string roleRef, int? userId = null)
+    private static Task<RouteInstance> ЗапуститьАsync(
+        DelosferaDbContext db, Стенд стенд, string roleRef, int? userId = null) =>
+        ЗапуститьУчастникомАsync(db, стенд, new RouteTemplateParticipant {RoleRef = roleRef, UserId = userId});
+
+    private static Task<RouteInstance> ЗапуститьПоПодразделениюАsync(
+        DelosferaDbContext db, Стенд стенд, int unitId) =>
+        ЗапуститьУчастникомАsync(db, стенд, new RouteTemplateParticipant {UnitId = unitId});
+
+    private static async Task<RouteInstance> ЗапуститьУчастникомАsync(
+        DelosferaDbContext db, Стенд стенд, RouteTemplateParticipant participant)
     {
         var template = new RouteTemplate
         {
             DocumentType = DocumentType.Sz,
             Name = "Проверка ролей",
-            Steps =
-            [
-                new RouteTemplateStep
-                {
-                    Order = 1,
-                    Participants = [new RouteTemplateParticipant {RoleRef = roleRef, UserId = userId}],
-                },
-            ],
+            Steps = [new RouteTemplateStep {Order = 1, Participants = [participant]}],
         };
         db.RouteTemplates.Add(template);
         await db.SaveChangesAsync();

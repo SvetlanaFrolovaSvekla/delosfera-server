@@ -91,13 +91,23 @@ public class RouteEngine : IRouteEngine
 
         foreach (var participant in tpl.Steps.SelectMany(s => s.Participants))
         {
-            if (participant.UserId is not null || string.IsNullOrWhiteSpace(participant.RoleRef))
-                continue;
+            if (participant.UserId is not null) continue;
 
-            var userId = await _roles.ResolveAsync(participant.RoleRef, context);
+            // Участник задан ролью или подразделением. Подразделение значит «пусть
+            // согласует руководитель этого отдела» — иначе этап без конкретного
+            // человека так же тихо повис бы, как повисала неразрешённая роль.
+            var roleRef = !string.IsNullOrWhiteSpace(participant.RoleRef)
+                ? participant.RoleRef
+                : participant.UnitId is { } unitId
+                    ? $"{RouteRoles.UnitHeadPrefix}{unitId}"
+                    : null;
+
+            if (roleRef is null) continue;
+
+            var userId = await _roles.ResolveAsync(roleRef, context);
             resolved[participant.Id] = userId;
 
-            if (userId is null) unresolved.Add(_roles.Explain(participant.RoleRef));
+            if (userId is null) unresolved.Add(_roles.Explain(roleRef));
         }
 
         if (unresolved.Count > 0)
