@@ -16,8 +16,13 @@ namespace delosfera_server.Modules.Procurement.Services;
 public class AuthorityMatrixService : IAuthorityMatrixService
 {
     private readonly DelosferaDbContext _db;
+    private readonly Documents.Services.IAuditService _audit;
 
-    public AuthorityMatrixService(DelosferaDbContext db) => _db = db;
+    public AuthorityMatrixService(DelosferaDbContext db, Documents.Services.IAuditService audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     public async Task<MatrixResolveResponse> ResolveAsync(MatrixResolveRequest request)
     {
@@ -258,4 +263,169 @@ public class AuthorityMatrixService : IAuthorityMatrixService
         decimal Nsk,
         decimal ProtocolThreshold,
         int? RegulationDocumentId);
+
+    // ── настройка ────────────────────────────────────────────────────────────
+
+    public async Task<List<MatrixRuleEditDto>> RulesForEditAsync()
+    {
+        return await _db.AuthorityMatrixRules
+            .Include(r => r.Method)
+            .OrderBy(r => r.IsAffiliated).ThenBy(r => r.SortOrder)
+            .Select(r => new MatrixRuleEditDto
+            {
+                Id = r.Id,
+                MethodId = r.MethodId,
+                MethodShortTitle = r.Method!.ShortTitleRu,
+                IsAffiliated = r.IsAffiliated,
+                MinValue = r.MinValue, MinBase = r.MinBase,
+                MaxValue = r.MaxValue, MaxBase = r.MaxBase,
+                ApprovalChainRu = r.ApprovalChainRu,
+                ApprovalAuthority = r.ApprovalAuthority,
+                CommissionRequired = r.CommissionRequired,
+                CommissionSize = r.CommissionSize,
+                CommissionMinBoardMembers = r.CommissionMinBoardMembers,
+                CommissionNoteRu = r.CommissionNoteRu,
+                SortOrder = r.SortOrder,
+                IsActive = r.IsActive,
+            })
+            .ToListAsync();
+    }
+
+    public async Task<List<ProcurementMethodEditDto>> MethodsForEditAsync()
+    {
+        return await _db.ProcurementMethods
+            .OrderBy(m => m.Id)
+            .Select(m => new ProcurementMethodEditDto
+            {
+                Id = m.Id,
+                Code = m.Code.ToString(),
+                TitleRu = m.TitleRu,
+                ShortTitleRu = m.ShortTitleRu,
+                MinProposals = m.MinProposals,
+                RequiresJustification = m.RequiresJustification,
+                RequiresPublication = m.RequiresPublication,
+                IsActive = m.IsActive,
+            })
+            .ToListAsync();
+    }
+
+    public async Task<MatrixRuleEditDto> CreateRuleAsync(MatrixRuleSaveRequest request, int actorUserId)
+    {
+        Validate(request);
+
+        var rule = new AuthorityMatrixRule
+        {
+            MethodId = request.MethodId,
+            IsAffiliated = request.IsAffiliated,
+            MinValue = request.MinValue, MinBase = request.MinBase,
+            MaxValue = request.MaxValue, MaxBase = request.MaxBase,
+            ApprovalChainRu = request.ApprovalChainRu.Trim(),
+            ApprovalAuthority = request.ApprovalAuthority,
+            CommissionRequired = request.CommissionRequired,
+            CommissionSize = request.CommissionSize,
+            CommissionMinBoardMembers = request.CommissionMinBoardMembers,
+            CommissionNoteRu = request.CommissionNoteRu.Trim(),
+            SortOrder = request.SortOrder,
+            IsActive = request.IsActive,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        _db.AuthorityMatrixRules.Add(rule);
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("AuthorityMatrixRule", rule.Id, "Created", actorUserId, new {request.MethodId});
+
+        return (await RulesForEditAsync()).First(r => r.Id == rule.Id);
+    }
+
+    public async Task<MatrixRuleEditDto> UpdateRuleAsync(int id, MatrixRuleSaveRequest request, int actorUserId)
+    {
+        Validate(request);
+
+        var rule = await _db.AuthorityMatrixRules.FirstOrDefaultAsync(r => r.Id == id)
+                   ?? throw new KeyNotFoundException("Правило матрицы не найдено");
+
+        rule.MethodId = request.MethodId;
+        rule.IsAffiliated = request.IsAffiliated;
+        rule.MinValue = request.MinValue; rule.MinBase = request.MinBase;
+        rule.MaxValue = request.MaxValue; rule.MaxBase = request.MaxBase;
+        rule.ApprovalChainRu = request.ApprovalChainRu.Trim();
+        rule.ApprovalAuthority = request.ApprovalAuthority;
+        rule.CommissionRequired = request.CommissionRequired;
+        rule.CommissionSize = request.CommissionSize;
+        rule.CommissionMinBoardMembers = request.CommissionMinBoardMembers;
+        rule.CommissionNoteRu = request.CommissionNoteRu.Trim();
+        rule.SortOrder = request.SortOrder;
+        rule.IsActive = request.IsActive;
+        rule.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("AuthorityMatrixRule", rule.Id, "Updated", actorUserId);
+
+        return (await RulesForEditAsync()).First(r => r.Id == rule.Id);
+    }
+
+    /// <summary>
+    /// Правило не удаляется физически, а гасится: по нему уже могли пройти
+    /// закупки, а решение в их карточках берётся из сохранённой копии — но история
+    /// матрицы должна остаться прослеживаемой.
+    /// </summary>
+    public async Task DeleteRuleAsync(int id, int actorUserId)
+    {
+        var rule = await _db.AuthorityMatrixRules.FirstOrDefaultAsync(r => r.Id == id)
+                   ?? throw new KeyNotFoundException("Правило матрицы не найдено");
+
+        rule.IsActive = false;
+        rule.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("AuthorityMatrixRule", rule.Id, "Deactivated", actorUserId);
+    }
+
+    public async Task<ProcurementMethodEditDto> UpdateMethodAsync(
+        int id, ProcurementMethodSaveRequest request, int actorUserId)
+    {
+        var method = await _db.ProcurementMethods.FirstOrDefaultAsync(m => m.Id == id)
+                     ?? throw new KeyNotFoundException("Способ закупки не найден");
+
+        if (string.IsNullOrWhiteSpace(request.TitleRu))
+            throw new ArgumentException("Укажите название способа");
+
+        if (request.MinProposals < 0)
+            throw new ArgumentException("Минимум предложений не может быть отрицательным");
+
+        method.TitleRu = request.TitleRu.Trim();
+        method.ShortTitleRu = string.IsNullOrWhiteSpace(request.ShortTitleRu)
+            ? method.ShortTitleRu
+            : request.ShortTitleRu.Trim();
+        method.MinProposals = request.MinProposals;
+        method.IsActive = request.IsActive;
+        method.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("ProcurementMethod", method.Id, "Updated", actorUserId,
+            new {method.MinProposals});
+
+        return (await MethodsForEditAsync()).First(m => m.Id == method.Id);
+    }
+
+    /// <summary>
+    /// Правило должно замыкать диапазон: «от» без «до» — открытый верх, но обе
+    /// границы пустыми оставлять нельзя — такое правило подходит под любую сумму и
+    /// перекрывает остальные.
+    /// </summary>
+    private static void Validate(MatrixRuleSaveRequest r)
+    {
+        if (r.MinValue is null && r.MaxValue is null)
+            throw new ArgumentException("Укажите хотя бы одну границу диапазона — «от» или «до»");
+
+        if (r.MinValue is { } min && r.MaxValue is { } max && r.MinBase == r.MaxBase && max < min)
+            throw new ArgumentException("Верхняя граница диапазона меньше нижней");
+
+        if (r.CommissionRequired && r.CommissionSize is null or <= 0)
+            throw new ArgumentException("Для комиссии укажите её размер");
+
+        if (string.IsNullOrWhiteSpace(r.ApprovalChainRu))
+            throw new ArgumentException("Опишите состав согласования");
+    }
 }

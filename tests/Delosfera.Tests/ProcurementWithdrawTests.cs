@@ -125,7 +125,7 @@ public class ProcurementWithdrawTests
             new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
 
         return new ProcurementRequestService(
-            db, documents, audit, new AuthorityMatrixService(db),
+            db, documents, audit, new AuthorityMatrixService(db, new AuditService(db)),
             new ProcurementRouteService(db, engine), engine, new BankClock());
     }
 
