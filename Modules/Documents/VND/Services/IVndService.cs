@@ -24,6 +24,12 @@ public interface IVndService
     Task DeleteLinkAsync(int vndId, int linkId);
     Task<VndRedactionResponse> EditLastRevisionDirectlyAsync(
         int vndId, EditLastRevisionDirectlyRequest request, int currentUserId);
+    /// <summary>То же самое, что EditLastRevisionDirectlyAsync, но для ЛЮБОЙ редакции документа,
+    /// а не только последней — главный редактор может править файлы и специальные вложения
+    /// (ТИД/Лист согласования/Матрица разногласий) исторических редакций (например, у
+    /// мигрированных из isrib документов, где этих файлов изначально нет).</summary>
+    Task<VndRedactionResponse> EditRedactionDirectlyAsync(
+        int vndId, int redactionId, EditLastRevisionDirectlyRequest request, int currentUserId);
     /// <summary>Приложить ТИД к последней редакции (кнопка "Сформировать или загрузить ТИД") —
     /// см. UploadRedactionTidRequest</summary>
     Task<VndRedactionResponse> UploadTidForLastRedactionAsync(

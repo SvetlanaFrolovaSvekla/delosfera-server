@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260907072725_ReplaceKeywordRubricWithIsrib")]
+    partial class ReplaceKeywordRubricWithIsrib
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -6592,7 +6595,7 @@ namespace delosfera_server.Migrations
                             ApproverUserId = 3,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Order = 4,
-                            OrgUnitId = 33,
+                            OrgUnitId = 52,
                             Title = "Методология",
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
@@ -8082,12 +8085,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("character varying(50)")
                         .HasColumnName("reg_number");
 
-                    b.Property<NpgsqlTsVector>("SearchVector")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("tsvector")
-                        .HasColumnName("search_vector")
-                        .HasComputedColumnSql("to_tsvector('russian', coalesce(title, '') || ' ' || coalesce(body, '') || ' ' || coalesce(basis, '') || ' ' || coalesce(reg_number, ''))", true);
-
                     b.Property<DateTime?>("SignedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("signed_at");
@@ -8129,11 +8126,6 @@ namespace delosfera_server.Migrations
 
                     b.HasIndex("NomenclatureCaseId")
                         .HasDatabaseName("ix_hr_order_nomenclature_case_id");
-
-                    b.HasIndex("SearchVector")
-                        .HasDatabaseName("ix_hr_order_search_vector");
-
-                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchVector"), "GIN");
 
                     b.HasIndex("SignerUserId")
                         .HasDatabaseName("ix_hr_order_signer_user_id");
@@ -8196,47 +8188,6 @@ namespace delosfera_server.Migrations
                         .HasDatabaseName("ix_hr_order_employee_order_id_user_id");
 
                     b.ToTable("hr_order_employee", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Hr.Models.HrOrderFile", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("FileId")
-                        .HasColumnType("integer")
-                        .HasColumnName("file_id");
-
-                    b.Property<int>("OrderId")
-                        .HasColumnType("integer")
-                        .HasColumnName("order_id");
-
-                    b.Property<int>("UploadedByUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("uploaded_by_user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_hr_order_file");
-
-                    b.HasIndex("FileId")
-                        .HasDatabaseName("ix_hr_order_file_file_id");
-
-                    b.HasIndex("OrderId")
-                        .HasDatabaseName("ix_hr_order_file_order_id");
-
-                    b.HasIndex("OrderId", "FileId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_hr_order_file_order_id_file_id");
-
-                    b.ToTable("hr_order_file", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Integrations.Directory.DirectorySettings", b =>
@@ -8810,10 +8761,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("text")
                         .HasColumnName("documents_url");
 
-                    b.Property<string>("DraftResolution")
-                        .HasColumnType("text")
-                        .HasColumnName("draft_resolution");
-
                     b.Property<int>("MeetingId")
                         .HasColumnType("integer")
                         .HasColumnName("meeting_id");
@@ -8900,68 +8847,6 @@ namespace delosfera_server.Migrations
                     b.ToTable("meeting_agenda_item", (string)null);
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.BodyMember", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Basis")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("basis");
-
-                    b.Property<int>("Body")
-                        .HasColumnType("integer")
-                        .HasColumnName("body");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("CreatedByUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("created_by_user_id");
-
-                    b.Property<DateOnly?>("From")
-                        .HasColumnType("date")
-                        .HasColumnName("from");
-
-                    b.Property<int>("Role")
-                        .HasColumnType("integer")
-                        .HasColumnName("role");
-
-                    b.Property<DateOnly?>("To")
-                        .HasColumnType("date")
-                        .HasColumnName("to");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_meeting_body_member");
-
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("ix_meeting_body_member_user_id");
-
-                    b.HasIndex("Body", "Role")
-                        .HasDatabaseName("ix_meeting_body_member_body_role");
-
-                    b.HasIndex("Body", "UserId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_meeting_body_member_body_user_id");
-
-                    b.ToTable("meeting_body_member", (string)null);
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.Meeting", b =>
                 {
                     b.Property<int>("Id")
@@ -9033,53 +8918,6 @@ namespace delosfera_server.Migrations
                         .HasDatabaseName("ix_meeting_year_body_number");
 
                     b.ToTable("meeting", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.MeetingAttendance", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("MarkedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("marked_at");
-
-                    b.Property<int>("MarkedByUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("marked_by_user_id");
-
-                    b.Property<int>("MeetingId")
-                        .HasColumnType("integer")
-                        .HasColumnName("meeting_id");
-
-                    b.Property<string>("Note")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("note");
-
-                    b.Property<bool>("Present")
-                        .HasColumnType("boolean")
-                        .HasColumnName("present");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_meeting_attendance");
-
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("ix_meeting_attendance_user_id");
-
-                    b.HasIndex("MeetingId", "UserId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_meeting_attendance_meeting_id_user_id");
-
-                    b.ToTable("meeting_attendance", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Notifications.Models.Notification", b =>
@@ -12609,7 +12447,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 1,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56 },
                             TitleEn = "Administrator",
                             TitleKg = "Администратор",
                             TitleRu = "Администратор",
@@ -12639,7 +12477,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 4,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56 },
                             TitleEn = "Chief VND Editor",
                             TitleKg = "ВНД башкы редактору",
                             TitleRu = "Главный редактор ВНД",
@@ -14821,27 +14659,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Hr.Models.HrOrderFile", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "File")
-                        .WithMany()
-                        .HasForeignKey("FileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_hr_order_file_file_attachments_file_id");
-
-                    b.HasOne("delosfera_server.Modules.Hr.Models.HrOrder", "Order")
-                        .WithMany("Files")
-                        .HasForeignKey("OrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_hr_order_file_hr_order_order_id");
-
-                    b.Navigation("File");
-
-                    b.Navigation("Order");
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.AgendaAssignment", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Meetings.Models.AgendaItem", "AgendaItem")
@@ -14987,18 +14804,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("SpeakerUnit");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.BodyMember", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_meeting_body_member_users_user_id");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.Meeting", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Dictionaries.Models.OrganizationUnit", "SecretaryUnit")
@@ -15017,27 +14822,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("Secretary");
 
                     b.Navigation("SecretaryUnit");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.MeetingAttendance", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Meetings.Models.Meeting", "Meeting")
-                        .WithMany()
-                        .HasForeignKey("MeetingId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_meeting_attendance_meetings_meeting_id");
-
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_meeting_attendance_users_user_id");
-
-                    b.Navigation("Meeting");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Notifications.Models.Notification", b =>
@@ -16217,8 +16001,6 @@ namespace delosfera_server.Migrations
             modelBuilder.Entity("delosfera_server.Modules.Hr.Models.HrOrder", b =>
                 {
                     b.Navigation("Employees");
-
-                    b.Navigation("Files");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Meetings.Models.AgendaItem", b =>

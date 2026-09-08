@@ -255,7 +255,9 @@ public class VndController : ControllerBase
     }
     
     /// <summary>Прямое редактирование последней редакции (подмена файлов/описания) - без согласования,
-    /// без создания новой редакции, без изменения даты актуализации. Только для EditLastRevisionDirectly.</summary>
+    /// без создания новой редакции, без изменения даты актуализации. Только для EditLastRevisionDirectly.
+    /// Оставлен для обратной совместимости - см. более общий EditRedactionDirectly ниже, который
+    /// работает для любой редакции, не только последней.</summary>
     [HttpPut("{vndId:int}/redactions/last")]
     [Consumes("multipart/form-data")]
     [RequirePermission(PermissionCode.EditLastRevisionDirectly)]
@@ -267,6 +269,27 @@ public class VndController : ControllerBase
         try
         {
             return Ok(await _service.EditLastRevisionDirectlyAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    /// <summary>Прямое редактирование ЛЮБОЙ редакции (подмена основных файлов, специальных
+    /// вложений — ТИД/Лист согласования/Матрица разногласий — и/или описания) - без согласования,
+    /// без создания новой редакции, без изменения даты актуализации. Тот же паттерн, что и
+    /// EditLastRevisionDirectly выше, но не ограничен последней редакцией - см. RedactionsSidebar
+    /// на фронте, где кнопка "Редактировать" теперь показывается у любой редакции.</summary>
+    [HttpPut("{vndId:int}/redactions/{redactionId:int}/edit-directly")]
+    [Consumes("multipart/form-data")]
+    [RequirePermission(PermissionCode.EditLastRevisionDirectly)]
+    [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<VndRedactionResponse>> EditRedactionDirectly(
+        int vndId, int redactionId, [FromForm] EditLastRevisionDirectlyRequest request)
+    {
+        try
+        {
+            return Ok(await _service.EditRedactionDirectlyAsync(vndId, redactionId, request, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
