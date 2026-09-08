@@ -31,48 +31,21 @@ public class ProcurementRouteUnitLookupTests
     public ProcurementRouteUnitLookupTests(PostgresFixture postgres) => _postgres = postgres;
 
     [Fact]
-    public async Task Бюджетный_этап_берёт_портальное_управление_а_не_тёзку_из_сида()
+    public async Task Бюджетный_этап_берёт_портальное_управление_по_номеру()
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
 
-        // Пустая запись из сида носит имя, по которому раньше и шёл поиск.
-        var тёзка = await db.OrganizationUnits
-            .FirstAsync(u => u.TitleRu == "Управление стратегического планирования и бюджетирования");
+        // Синхронизация привела реальную оргструктуру: бюджетное управление
+        // приходит из портала под номером 59 как «Управление планирования и
+        // анализа». Маршрут находит его по номеру портала, а не по названию.
+        var бюджетное = await db.OrganizationUnits
+            .FirstAsync(u => u.ExternalId == BudgetPortalId);
 
-        var пустышка = await ПользовательАsync(db, "Начальник пустого управления");
-        тёзка.HeadUserId = пустышка;
-
-        // Настоящее управление приходит из портала под другим названием.
-        var настоящий = await ПользовательАsync(db, "Кожомуратова Анара");
-        db.OrganizationUnits.Add(new OrganizationUnit
-        {
-            TitleRu = "Управление планирования и анализа",
-            ExternalId = BudgetPortalId,
-            HeadUserId = настоящий,
-        });
+        var начальник = await ПользовательАsync(db, "Кожомуратова Анара");
+        бюджетное.HeadUserId = начальник;
         await db.SaveChangesAsync();
 
-        var участники = await МаршрутАsync(db);
-
-        Assert.Contains(настоящий, участники);
-        Assert.DoesNotContain(пустышка, участники);
-    }
-
-    [Fact]
-    public async Task Без_портальной_записи_остаётся_поиск_по_названию()
-    {
-        await using var db = await _postgres.NewIsolatedDbAsync();
-
-        // База, куда портал ещё не приходил: работает прежний путь.
-        Assert.Empty(await db.OrganizationUnits.Where(u => u.ExternalId == BudgetPortalId).ToListAsync());
-
-        var поИмени = await ПользовательАsync(db, "Начальник по названию");
-        var тёзка = await db.OrganizationUnits
-            .FirstAsync(u => u.TitleRu == "Управление стратегического планирования и бюджетирования");
-        тёзка.HeadUserId = поИмени;
-        await db.SaveChangesAsync();
-
-        Assert.Contains(поИмени, await МаршрутАsync(db));
+        Assert.Contains(начальник, await МаршрутАsync(db));
     }
 
     // ── стенд ────────────────────────────────────────────────────────────────
