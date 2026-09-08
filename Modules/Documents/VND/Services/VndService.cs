@@ -159,7 +159,11 @@ public class VndService : IVndService
         query = ApplyLinkedToMeFilter(query, request.LinkedToMeOnly, request.LinkedToMeRelations);
         query = ApplyDraftVisibilityFilter(query, request.DraftOwnerScope);
 
-        var entities = await query.ToListAsync();
+        // Поиск — только чтение с проекцией в DTO, отслеживание не нужно (AsNoTracking).
+        // AsSplitQuery: у VndDocument пять коллекций в Include (ResponsibleExecutors, Rubrics,
+        // Keywords, UserGroups, Redactions) — один общий JOIN давал декартово произведение
+        // строк-потомков; разбивка на отдельные запросы убирает взрывной рост.
+        var entities = await query.AsNoTracking().AsSplitQuery().ToListAsync();
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         // Виды связи с текущим пользователем считаем только когда запрошен LinkedToMeOnly —
