@@ -1,4 +1,5 @@
 using delosfera_server.Modules.Procurement.DTO;
+using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Procurement.Models;
 using delosfera_server.Modules.Procurement.Services;
 
@@ -116,7 +117,7 @@ public class AuthorityMatrixTests
     private async Task<MatrixResolveResponse> ResolveAsync(decimal amount, bool isAffiliated = false)
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
-        var service = new AuthorityMatrixService(db);
+        var service = new AuthorityMatrixService(db, new AuditService(db));
 
         return await service.ResolveAsync(new MatrixResolveRequest
         {

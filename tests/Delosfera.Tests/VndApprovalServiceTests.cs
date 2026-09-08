@@ -22,7 +22,8 @@ public class VndApprovalServiceTests
     private static VndApprovalService NewService(DelosferaDbContext db) =>
         new(db, new NoopFileStorage(), new NoopNotificationService(),
             new FakeCurrentUser(Approver1), NullLogger<VndApprovalService>.Instance,
-            new FakeActivityLog(), new FixedApprovalUnitResolver(db));
+            new FakeActivityLog(), new ApprovalSheetGenerator(),
+            new FixedApprovalUnitResolver(db));
 
     // Двухэтапный процесс на первичной фазе: решение по одному этапу не завершает фазу,
     // поэтому изолируем логику DecideAsync без тяжёлого перехода фаз.
@@ -46,6 +47,11 @@ public class VndApprovalServiceTests
             VndId = vnd.Id,
             Number = 1,
             Code = $"Р-{Guid.NewGuid():N}"[..8],
+            TitleRu = "Редакция для проверки согласования",
+            OrganId = db.ApprovalBodies.OrderBy(x => x.Id).First().Id,
+            DeveloperId = db.OrganizationUnits.OrderBy(x => x.Id).First().Id,
+            SecrecyLevelId = db.SecurityLevels.OrderBy(x => x.Id).First().Id,
+            TypeId = db.TypesVnd.OrderBy(x => x.Id).First().Id,
             DocFileRuId = file.Id,
         };
         db.VndRedactions.Add(redaction);

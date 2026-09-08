@@ -111,3 +111,75 @@ public class MatrixNoteResponse
     /// <summary>Документ Положения в базе ВНД, если он туда загружен.</summary>
     public int? DocumentId { get; set; }
 }
+
+/// <summary>
+/// Правило матрицы в сыром виде — для экрана настройки, а не для показа. Здесь
+/// пороги и состав лежат полями, которые редактируют, а не строкой «от…до».
+/// </summary>
+public class MatrixRuleEditDto
+{
+    public int Id { get; set; }
+
+    public int MethodId { get; set; }
+    public required string MethodShortTitle { get; set; }
+    public bool IsAffiliated { get; set; }
+
+    public decimal? MinValue { get; set; }
+    public ThresholdBase MinBase { get; set; }
+    public decimal? MaxValue { get; set; }
+    public ThresholdBase MaxBase { get; set; }
+
+    public required string ApprovalChainRu { get; set; }
+    public ApprovalAuthority ApprovalAuthority { get; set; }
+    public bool CommissionRequired { get; set; }
+    public int? CommissionSize { get; set; }
+    public int? CommissionMinBoardMembers { get; set; }
+    public required string CommissionNoteRu { get; set; }
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; }
+}
+
+/// <summary>Что можно изменить в правиле матрицы.</summary>
+public class MatrixRuleSaveRequest
+{
+    public int MethodId { get; set; }
+    public bool IsAffiliated { get; set; }
+
+    public decimal? MinValue { get; set; }
+    public ThresholdBase MinBase { get; set; } = ThresholdBase.Absolute;
+    public decimal? MaxValue { get; set; }
+    public ThresholdBase MaxBase { get; set; } = ThresholdBase.Absolute;
+
+    public string ApprovalChainRu { get; set; } = "";
+    public ApprovalAuthority ApprovalAuthority { get; set; }
+    public bool CommissionRequired { get; set; }
+    public int? CommissionSize { get; set; }
+    public int? CommissionMinBoardMembers { get; set; }
+    public string CommissionNoteRu { get; set; } = "";
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>Способ закупки для настройки: минимум КП и подписи.</summary>
+public class ProcurementMethodEditDto
+{
+    public int Id { get; set; }
+    public required string Code { get; set; }
+    public required string TitleRu { get; set; }
+    public required string ShortTitleRu { get; set; }
+
+    /// <summary>Сколько коммерческих предложений минимум. 0 — не требуется.</summary>
+    public int MinProposals { get; set; }
+    public bool RequiresJustification { get; set; }
+    public bool RequiresPublication { get; set; }
+    public bool IsActive { get; set; }
+}
+
+/// <summary>Что можно изменить в способе закупки. Код и признаки процедуры неизменны.</summary>
+public class ProcurementMethodSaveRequest
+{
+    public string TitleRu { get; set; } = "";
+    public string ShortTitleRu { get; set; } = "";
+    public int MinProposals { get; set; }
+    public bool IsActive { get; set; } = true;
+}

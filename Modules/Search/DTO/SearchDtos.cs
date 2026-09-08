@@ -21,6 +21,15 @@ public enum SearchScope
 
     /// <summary>Доверенности.</summary>
     PowerOfAttorney = 7,
+
+    /// <summary>
+    /// Приказы по личному составу.
+    ///
+    /// В поиске закрыты жёстче прочих контуров: приказ содержит оклад, взыскание,
+    /// причину увольнения. Кадровая служба видит все, остальные — только приказы
+    /// о себе, и одно слово из текста чужого приказа ничего не открывает.
+    /// </summary>
+    HrOrder = 8,
 }
 
 public class SearchRequest
@@ -108,6 +117,7 @@ public static class SearchScopeMap
         SearchScope.Vnd => "Нормативные документы",
         SearchScope.Correspondence => "Корреспонденция",
         SearchScope.PowerOfAttorney => "Доверенности",
+        SearchScope.HrOrder => "Кадровые приказы",
         _ => scope.ToString(),
     };
 

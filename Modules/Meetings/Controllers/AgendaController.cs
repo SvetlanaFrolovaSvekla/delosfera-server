@@ -40,6 +40,11 @@ public class AgendaController : MeetingControllerBase
         await Run(() => _agenda.UpdateItemAsync(itemId, request));
 
     /// <summary>Удалить вопрос, по которому ещё нет отчётов.</summary>
+    /// <summary>Переставить вопросы повестки — порядок задаёт секретарь.</summary>
+    [HttpPost("{meetingId:int}/items/reorder")]
+    public async Task<IActionResult> Reorder(int meetingId, [FromBody] List<int> itemIdsInOrder) =>
+        await Run(() => _agenda.ReorderAsync(meetingId, itemIdsInOrder));
+
     [HttpDelete("items/{itemId:int}")]
     public async Task<IActionResult> DeleteItem(int itemId) =>
         await Run(async () => { await _agenda.DeleteItemAsync(itemId); return true; });
@@ -60,6 +65,12 @@ public class AgendaController : MeetingControllerBase
         await Run(() => _agenda.AddAssignmentAsync(itemId, request));
 
     /// <summary>Снять поручение, по которому нет отчёта.</summary>
+    /// <summary>Поправить поручение: исполнителя, текст или срок.</summary>
+    [HttpPut("assignments/{assignmentId:int}")]
+    public async Task<IActionResult> UpdateAssignment(
+        int assignmentId, [FromBody] AgendaAssignmentRequest request) =>
+        await Run(() => _agenda.UpdateAssignmentAsync(assignmentId, request));
+
     [HttpDelete("assignments/{assignmentId:int}")]
     public async Task<IActionResult> RemoveAssignment(int assignmentId) =>
         await Run(() => _agenda.RemoveAssignmentAsync(assignmentId));

@@ -538,8 +538,14 @@ public class ProcurementRequestService : IProcurementRequestService
 
     private async Task<ProcurementCardDto> BuildCardAsync(ProcurementRequest r)
     {
+        // Рассмотрение на коллегиальном органе: связь существовала, но в карточке
+        // её не показывали — по заявке было не видно, дошла ли она до Правления и
+        // чем там кончилось.
+        var boardReview = await Meetings.Services.BoardReviewLookup.ForProcurementAsync(_db, r.Id);
+
         var card = new ProcurementCardDto
         {
+            BoardReview = boardReview,
             Id = r.Id,
             DocumentId = r.DocumentId,
             RegNumber = r.Document!.RegNumber,

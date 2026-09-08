@@ -122,10 +122,10 @@ public class ProcurementWithdrawTests
         // и заглушка подтверждала бы только то, что метод вызван.
         var engine = new RouteEngine(
             db, audit, [new ProcurementRouteCompletionHandler(db, documents, audit)],
-            new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
+            new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
 
         return new ProcurementRequestService(
-            db, documents, audit, new AuthorityMatrixService(db),
+            db, documents, audit, new AuthorityMatrixService(db, new AuditService(db)),
             new ProcurementRouteService(db, engine), engine, new BankClock());
     }
 

@@ -66,6 +66,7 @@ public class WorkflowController : ControllerBase
 
     /// <summary>Создать шаблон маршрута (справочник, TID-06).</summary>
     [HttpPost("templates")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
     public async Task<ActionResult<int>> CreateTemplate([FromBody] CreateRouteTemplateRequest req)
     {
         var tpl = new RouteTemplate
@@ -103,6 +104,21 @@ public class WorkflowController : ControllerBase
                 .ThenInclude(s => s.Participants)
             .FirstOrDefaultAsync(t => t.Id == id, ct);
 
+        // Имена людей и подразделений подставляем одним запросом: иначе экран
+        // показывал бы номера, а маршрут настраивают по фамилиям.
+        var userIds = tpl?.Steps.SelectMany(s => s.Participants)
+            .Where(p => p.UserId != null).Select(p => p.UserId!.Value).Distinct().ToList() ?? [];
+        var unitIds = tpl?.Steps.SelectMany(s => s.Participants)
+            .Where(p => p.UnitId != null).Select(p => p.UnitId!.Value).Distinct().ToList() ?? [];
+
+        var userNames = await _db.Users.AsNoTracking()
+            .Where(u => userIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName, ct);
+
+        var unitTitles = await _db.OrganizationUnits.AsNoTracking()
+            .Where(u => unitIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.TitleRu, ct);
+
         if (tpl is null) return NotFound(new {message = "Шаблон маршрута не найден"});
 
         return Ok(new RouteTemplateResponse
@@ -120,9 +136,102 @@ public class WorkflowController : ControllerBase
                 IsFinalMethodology = s.IsFinalMethodology,
                 TimeNormHours = s.TimeNormHours,
                 ParticipantCount = s.Participants.Count,
+                Participants = s.Participants.Select(p => new TemplateParticipantResponse
+                {
+                    Id = p.Id,
+                    UserId = p.UserId,
+                    UserName = p.UserId is { } uid && userNames.TryGetValue(uid, out var name) ? name : null,
+                    UnitId = p.UnitId,
+                    UnitTitle = p.UnitId is { } unit && unitTitles.TryGetValue(unit, out var title) ? title : null,
+                    RoleRef = p.RoleRef,
+                    Required = p.Required,
+                }).ToList(),
                 RequiredSignatureLevel = s.RequiredSignatureLevel,
             }).ToList(),
         });
+    }
+
+    /// <summary>
+    /// Переписать шаблон целиком: этапы и участники задаются заново.
+    ///
+    /// Целиком, а не по частям: маршрут — это порядок, и правка одного этапа в
+    /// отрыве от соседних чаще ломает последовательность, чем чинит. Изменение
+    /// действует на новые маршруты; запущенные идут по правилам, при которых
+    /// стартовали.
+    /// </summary>
+    [HttpPut("templates/{id:int}")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> UpdateTemplate(
+        int id, [FromBody] CreateRouteTemplateRequest req, CancellationToken ct)
+    {
+        var tpl = await _db.RouteTemplates
+            .Include(t => t.Steps).ThenInclude(s => s.Participants)
+            .FirstOrDefaultAsync(t => t.Id == id, ct);
+
+        if (tpl is null) return NotFound(new {message = "Шаблон маршрута не найден"});
+
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return BadRequest(new {message = "Укажите название шаблона"});
+
+        if (req.Steps.Count == 0)
+            return BadRequest(new {message = "В маршруте нет ни одного этапа"});
+
+        var пустые = req.Steps.Where(s => s.Participants.Count == 0).Select(s => s.Order).ToList();
+        if (пустые.Count > 0)
+            return BadRequest(new
+            {
+                message = $"На этапе {string.Join(", ", пустые)} нет согласующих — маршрут остановится на нём",
+            });
+
+        tpl.Name = req.Name.Trim();
+        tpl.DocumentType = req.DocumentType;
+        tpl.IsGlobalRule = req.IsGlobalRule;
+
+        _db.RouteTemplateSteps.RemoveRange(tpl.Steps);
+
+        tpl.Steps = req.Steps.OrderBy(s => s.Order).Select((s, i) => new RouteTemplateStep
+        {
+            Order = i + 1,
+            Mode = s.Mode,
+            Kind = s.Kind,
+            IsFinalMethodology = s.IsFinalMethodology,
+            TimeNormHours = s.TimeNormHours,
+            RequiredSignatureLevel = s.RequiredSignatureLevel,
+            Participants = s.Participants.Select(p => new RouteTemplateParticipant
+            {
+                UserId = p.UserId, UnitId = p.UnitId, RoleRef = p.RoleRef, Required = p.Required,
+            }).ToList(),
+        }).ToList();
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("RouteTemplate", tpl.Id, "Updated", _currentUser.UserId, new {tpl.Name});
+
+        return Ok(new {tpl.Id});
+    }
+
+    /// <summary>
+    /// Удалить шаблон. Запущенные по нему маршруты остаются: они уже собраны и
+    /// живут своей жизнью — иначе исчезла бы история согласований.
+    /// </summary>
+    [HttpDelete("templates/{id:int}")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> DeleteTemplate(int id, CancellationToken ct)
+    {
+        var tpl = await _db.RouteTemplates.FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (tpl is null) return NotFound(new {message = "Шаблон маршрута не найден"});
+
+        var видыЗаписок = await _db.SzKinds.CountAsync(k => k.RouteTemplateId == id, ct);
+        if (видыЗаписок > 0)
+            return BadRequest(new
+            {
+                message = $"Шаблон закреплён за видами записок ({видыЗаписок}) — сначала выберите им другой маршрут",
+            });
+
+        _db.RouteTemplates.Remove(tpl);
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("RouteTemplate", id, "Deleted", _currentUser.UserId, new {tpl.Name});
+
+        return NoContent();
     }
 
     /// <summary>

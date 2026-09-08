@@ -99,6 +99,12 @@ builder.Services.AddScoped<ICoordinationDefaultApproverService, CoordinationDefa
 builder.Services.AddScoped<IVndActualizationService, VndActualizationService>();
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 
+// История документа поверх технического аудита: журнал действий по всем
+// контурам, а не только по ВНД.
+builder.Services.AddScoped<
+    delosfera_server.Modules.ActivityLog.Services.IDocumentHistoryService,
+    delosfera_server.Modules.ActivityLog.Services.DocumentHistoryService>();
+
 builder.AddDatabase();
 builder.AddDictionaryServices();
 builder.AddVndServices();

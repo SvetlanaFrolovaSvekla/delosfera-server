@@ -99,7 +99,8 @@ public class HrOrderCancellationTests
             db, new FakeCurrentUser(userId), new PassthroughHtml(),
             new AcknowledgementService(
                 db, new FakeSignatures(), new SilentNotifications(), audit,
-                NullLogger<AcknowledgementService>.Instance));
+                NullLogger<AcknowledgementService>.Instance),
+            new NoopFileStorage());
     }
 
     private static async Task<Стенд> SeedAsync(DelosferaDbContext db)

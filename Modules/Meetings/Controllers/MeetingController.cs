@@ -20,15 +20,19 @@ public class MeetingController : MeetingControllerBase
     private readonly IMeetingRegistryService _registry;
     private readonly ICurrentUserService _currentUser;
 
+    private readonly IBodyMemberService _bodyMembers;
+
     public MeetingController(
         IMeetingService meetings,
         IMeetingNotificationService notifications,
         IMeetingRegistryService registry,
+        IBodyMemberService bodyMembers,
         ICurrentUserService currentUser)
     {
         _meetings = meetings;
         _notifications = notifications;
         _registry = registry;
+        _bodyMembers = bodyMembers;
         _currentUser = currentUser;
     }
 
@@ -68,6 +72,22 @@ public class MeetingController : MeetingControllerBase
     [HttpPost("{id:int}/notify")]
     public async Task<IActionResult> Notify(int id) =>
         await Run(() => _notifications.NotifyAboutMeetingAsync(id, _currentUser.UserId));
+
+    /// <summary>
+    /// Состав органа на заседании с отметками явки.
+    ///
+    /// Кворум считается по присутствовавшим, и протокол начинается со списка:
+    /// кто был, кто отсутствовал и почему.
+    /// </summary>
+    [HttpGet("{id:int}/attendance")]
+    public async Task<IActionResult> Attendance(int id, CancellationToken ct) =>
+        await Run(() => _bodyMembers.AttendanceAsync(id, ct));
+
+    /// <summary>Отметить отсутствие члена органа; по умолчанию все присутствуют.</summary>
+    [HttpPost("{id:int}/attendance")]
+    public async Task<IActionResult> MarkAttendance(
+        int id, [FromBody] AttendanceMarkRequest request, CancellationToken ct) =>
+        await Run(() => _bodyMembers.MarkAttendanceAsync(id, request, _currentUser.UserId, ct));
 
     /// <summary>Реестр решений за период в Excel.</summary>
     [HttpGet("registry")]

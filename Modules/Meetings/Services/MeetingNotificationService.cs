@@ -31,20 +31,42 @@ public class MeetingNotificationService : IMeetingNotificationService
     private readonly INotificationService _notifications;
     private readonly ILogger<MeetingNotificationService> _logger;
 
+    private readonly IBodyMemberService _bodyMembers;
+
     public MeetingNotificationService(
         DelosferaDbContext db,
         INotificationService notifications,
+        IBodyMemberService bodyMembers,
         ILogger<MeetingNotificationService> logger)
     {
         _db = db;
         _notifications = notifications;
+        _bodyMembers = bodyMembers;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Повестка строкой: номер вопроса и тема.
+    ///
+    /// Человеку нужно знать не только дату заседания, но и каким по счёту слушают
+    /// его вопрос — иначе он приходит к началу и ждёт всё заседание.
+    /// </summary>
+    private static string Questions(Meeting meeting)
+    {
+        if (meeting.Items.Count == 0) return "";
+
+        var lines = meeting.Items
+            .OrderBy(i => i.Order)
+            .Select(i => $"{i.Order}. {i.Topic}");
+
+        return $"Вопросы повестки: {string.Join("; ", lines)}. ";
     }
 
     public async Task<MeetingNotifyResultDto> NotifyAboutMeetingAsync(int meetingId, int currentUserId)
     {
         var meeting = await _db.Meetings
             .Include(m => m.Items).ThenInclude(i => i.Guests)
+            .Include(m => m.Items).ThenInclude(i => i.SourceSz).ThenInclude(s => s!.Document)
             .FirstOrDefaultAsync(m => m.Id == meetingId)
             ?? throw new KeyNotFoundException("Заседание не найдено");
 
@@ -56,6 +78,11 @@ public class MeetingNotificationService : IMeetingNotificationService
             if (item.SpeakerHeadUserId is { } head) recipients.Add(head);
             if (item.DeputySecretaryUserId is { } deputy) recipients.Add(deputy);
             foreach (var guest in item.Guests) recipients.Add(guest.UserId);
+
+            // Автор записки, из которой вырос вопрос. Он просил вынести вопрос на
+            // орган и до сих пор узнавал о заседании последним — или не узнавал:
+            // докладчиком по своей записке автор бывает не всегда.
+            if (item.SourceSz?.Document?.AuthorId is { } author) recipients.Add(author);
         }
 
         foreach (var member in await MembersOfAsync(meeting.Body)) recipients.Add(member);
@@ -64,6 +91,7 @@ public class MeetingNotificationService : IMeetingNotificationService
         var body =
             $"Добрый день, уважаемые коллеги! {meeting.Date:dd.MM.yyyy} в {meeting.Time:HH\\:mm} " +
             $"состоится заседание {MeetingTitles.BodyGenitive(meeting.Body)}. " +
+            Questions(meeting) +
             $"Материалы размещены по ссылке{Link(meeting.MaterialsUrl)}";
 
         await _notifications.CreateAsync(new CreateNotificationRequest
@@ -195,8 +223,18 @@ public class MeetingNotificationService : IMeetingNotificationService
     /// Члены органа определяются правом роли, а не отдельным списком: состав меняется
     /// приказом, и вести его вторым справочником — гарантированно получить расхождение.
     /// </summary>
+    /// <summary>
+    /// Состав органа берётся из справочника состава, а не из прав роли: роли с
+    /// полным набором прав делали членами Правления администраторов, и письма о
+    /// заседании уходили им, а не тем, кто в органе состоит.
+    /// </summary>
     private async Task<List<int>> MembersOfAsync(MeetingBody body)
     {
+        var members = await _bodyMembers.CurrentMemberIdsAsync(body);
+        if (members.Count > 0) return members;
+
+        // Состав ещё не заведён — пока держимся прежнего признака, чтобы
+        // уведомления не пропали на базе, где справочник не заполнен.
         var code = (int)MeetingAccessService.MembershipFor(body);
 
         return await _db.Users

@@ -55,6 +55,9 @@ public class CoordinationDefaultApproverConfiguration : IEntityTypeConfiguration
             },
             new
             {
+                // «Отдел методологии» из портала (номер 52): синхронизация
+                // справочников привела реальные подразделения, и этап ссылается
+                // на настоящее, а не на запись из сида.
                 Id = 4, Title = "Методология", Order = 4, OrgUnitId = 52,
                 ApproverUserId = (int?)3, CreatedAt = seedDate, UpdatedAt = seedDate
             }

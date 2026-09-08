@@ -91,7 +91,7 @@ public class ProcurementRouteCompositionTests
     private static async Task<List<int?>> МаршрутАsync(DelosferaDbContext db, Стенд стенд)
     {
         var audit = new AuditService(db);
-        var engine = new RouteEngine(db, audit, [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
+        var engine = new RouteEngine(db, audit, [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
         var service = new ProcurementRouteService(db, engine);
 
         var request = await db.ProcurementRequests.FirstAsync(r => r.Id == стенд.RequestId);
@@ -109,7 +109,7 @@ public class ProcurementRouteCompositionTests
         var автор = await ПользовательАsync(db, "Инициатор заявки");
 
         var (инициатор, ри, ки) = await ПодразделениеАsync(db, "Управление делами");
-        var (_, рб, _) = await ПодразделениеАsync(db, "Управление стратегического планирования и бюджетирования");
+        var (_, рб, _) = await ПодразделениеАsync(db, "Управление планирования и анализа");
         var (_, рз, кз) = await ПодразделениеАsync(db, "Сектор закупок");
         var (_, ра, ка) = await ПодразделениеАsync(db, "Административный отдел");
 

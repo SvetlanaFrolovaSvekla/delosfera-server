@@ -199,6 +199,9 @@ public class DelosferaDbContext : DbContext
     public DbSet<delosfera_server.Modules.Hr.Models.HrOrderEmployee> HrOrderEmployees =>
         Set<delosfera_server.Modules.Hr.Models.HrOrderEmployee>();
 
+    public DbSet<delosfera_server.Modules.Hr.Models.HrOrderFile> HrOrderFiles =>
+        Set<delosfera_server.Modules.Hr.Models.HrOrderFile>();
+
     /// <summary>Пожелания и замечания сотрудников с экранов системы — обкатка подразделениями.</summary>
     public DbSet<delosfera_server.Modules.Feedback.Models.FeedbackItem> FeedbackItems =>
         Set<delosfera_server.Modules.Feedback.Models.FeedbackItem>();
@@ -247,6 +250,14 @@ public class DelosferaDbContext : DbContext
     // --- Заседания Правления, КПА и комитетов (ТЗ «Исполнение решений КПА, Правления и Комитетов») ---
     public DbSet<Meeting> Meetings => Set<Meeting>();
     public DbSet<AgendaItem> AgendaItems => Set<AgendaItem>();
+
+    /// <summary>Состав коллегиальных органов: кто входит в Правление, КПА, Кредитный комитет.</summary>
+    public DbSet<delosfera_server.Modules.Meetings.Models.BodyMember> BodyMembers =>
+        Set<delosfera_server.Modules.Meetings.Models.BodyMember>();
+
+    /// <summary>Явка членов органа на заседание: по ней считается кворум.</summary>
+    public DbSet<delosfera_server.Modules.Meetings.Models.MeetingAttendance> MeetingAttendances =>
+        Set<delosfera_server.Modules.Meetings.Models.MeetingAttendance>();
     public DbSet<AgendaGuest> AgendaGuests => Set<AgendaGuest>();
     public DbSet<AgendaAssignment> AgendaAssignments => Set<AgendaAssignment>();
     public DbSet<AgendaFile> AgendaFiles => Set<AgendaFile>();

@@ -261,5 +261,18 @@ public class DocumentAttachmentTests
             Content.Remove(fileId);
             return Task.CompletedTask;
         }
+
+        public Task<FileAttachment> SaveGeneratedAsync(
+            byte[] content, string fileName, string contentType, int userId,
+            CancellationToken ct = default) => throw new NotSupportedException();
+
+        /// <summary>Хеш считается по содержимому: на нём держится дедупликация вложений.</summary>
+        public async Task<string> ComputeHashAsync(IFormFile file, CancellationToken ct = default)
+        {
+            await using var stream = file.OpenReadStream();
+            var hash = await System.Security.Cryptography.SHA256.HashDataAsync(stream, ct);
+
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
     }
 }

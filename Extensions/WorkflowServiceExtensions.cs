@@ -6,6 +6,9 @@ public static class WorkflowServiceExtensions
 {
     public static WebApplicationBuilder AddWorkflowServices(this WebApplicationBuilder builder)
     {
+        // Роли шаблона превращаются в людей на запуске маршрута: шаблон должен
+        // переживать смену людей в должностях.
+        builder.Services.AddScoped<IRouteRoleResolver, RouteRoleResolver>();
         builder.Services.AddScoped<IRouteEngine, RouteEngine>();
 
         // Адресные уведомления по задачам и итогам маршрута (GEN-12, SZ-03, PRC-23)

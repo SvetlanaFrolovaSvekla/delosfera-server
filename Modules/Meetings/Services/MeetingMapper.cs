@@ -14,6 +14,7 @@ public static class MeetingMapper
         Topic = item.Topic,
         ProtocolNumber = item.ProtocolNumber,
         ProtocolDate = item.ProtocolDate,
+        DraftResolution = item.DraftResolution,
         Decision = item.Decision,
 
         SpeakerUserId = item.SpeakerUserId,

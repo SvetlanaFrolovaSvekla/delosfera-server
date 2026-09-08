@@ -11,6 +11,10 @@ public static class MeetingServiceExtensions
     public static WebApplicationBuilder AddMeetingServices(this WebApplicationBuilder builder)
     {
         builder.Services.AddScoped<IMeetingAccessService, MeetingAccessService>();
+
+        // Состав органов — отдельная настройка: банк меняет его решением, а не
+        // перенастройкой прав.
+        builder.Services.AddScoped<IBodyMemberService, BodyMemberService>();
         builder.Services.AddScoped<IMeetingService, MeetingService>();
         builder.Services.AddScoped<IAgendaService, AgendaService>();
         builder.Services.AddScoped<IAgendaFileService, AgendaFileService>();

@@ -23,20 +23,48 @@ public class RouteEngine : IRouteEngine
     private readonly ISubstitutionService _substitutions;
     private readonly IWorkflowNotifier _notifier;
     private readonly ISignatureService _signatures;
+    private readonly IRouteRoleResolver _roles;
 
     public RouteEngine(
         DelosferaDbContext db, IAuditService audit,
         IEnumerable<IRouteCompletionHandler> completionHandlers,
         ISubstitutionService substitutions,
         IWorkflowNotifier notifier,
-        ISignatureService signatures)
+        ISignatureService signatures,
+        IRouteRoleResolver roles)
     {
+        _roles = roles;
         _db = db;
         _audit = audit;
         _completionHandlers = completionHandlers;
         _substitutions = substitutions;
         _notifier = notifier;
         _signatures = signatures;
+    }
+
+    /// <summary>
+    /// Что известно о документе для разрешения ролей: подразделение автора и
+    /// подразделение, выбранное в самом документе.
+    /// </summary>
+    private async Task<RouteContext> BuildContextAsync(int documentId)
+    {
+        var authorUnit = await _db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => d.Author!.OrgUnitId)
+            .FirstOrDefaultAsync();
+
+        // Подразделение из карточки: у записки это адресное подразделение, у
+        // заявки на закупку — инициирующее.
+        var targetUnit = await _db.SzDocuments.AsNoTracking()
+            .Where(s => s.DocumentId == documentId)
+            .Select(s => s.CorrespondentUnitId ?? s.EmployeeUnitId ?? s.AuthorUnitId)
+            .FirstOrDefaultAsync()
+            ?? await _db.ProcurementRequests.AsNoTracking()
+                .Where(r => r.DocumentId == documentId)
+                .Select(r => r.InitiatorUnitId)
+                .FirstOrDefaultAsync();
+
+        return new RouteContext(documentId, authorUnit, targetUnit ?? authorUnit);
     }
 
     private IQueryable<RouteInstance> InstanceQuery() =>
@@ -53,6 +81,40 @@ public class RouteEngine : IRouteEngine
             .FirstOrDefaultAsync(t => t.Id == templateId)
             ?? throw new KeyNotFoundException($"Шаблон маршрута id={templateId} не найден");
 
+        // Роли шаблона превращаются в людей здесь, на запуске маршрута. Раньше
+        // роль копировалась в участника как есть и человеком не становилась
+        // никогда: задача не создавалась, участник числился активным, и маршрут
+        // вставал навсегда — молча, потому что формально всё было в порядке.
+        var context = await BuildContextAsync(documentId);
+        var resolved = new Dictionary<int, int?>();
+        var unresolved = new List<string>();
+
+        foreach (var participant in tpl.Steps.SelectMany(s => s.Participants))
+        {
+            if (participant.UserId is not null) continue;
+
+            // Участник задан ролью или подразделением. Подразделение значит «пусть
+            // согласует руководитель этого отдела» — иначе этап без конкретного
+            // человека так же тихо повис бы, как повисала неразрешённая роль.
+            var roleRef = !string.IsNullOrWhiteSpace(participant.RoleRef)
+                ? participant.RoleRef
+                : participant.UnitId is { } unitId
+                    ? $"{RouteRoles.UnitHeadPrefix}{unitId}"
+                    : null;
+
+            if (roleRef is null) continue;
+
+            var userId = await _roles.ResolveAsync(roleRef, context);
+            resolved[participant.Id] = userId;
+
+            if (userId is null) unresolved.Add(_roles.Explain(roleRef));
+        }
+
+        if (unresolved.Count > 0)
+            throw new InvalidOperationException(
+                "Не удалось определить согласующих: " + string.Join("; ", unresolved.Distinct()) +
+                ". Заполните справочник оргструктуры или состав органа");
+
         var instance = new RouteInstance
         {
             DocumentId = documentId,
@@ -68,7 +130,7 @@ public class RouteEngine : IRouteEngine
                 RequiredSignatureLevel = ts.RequiredSignatureLevel,
                 Participants = ts.Participants.Select(tp => new RouteParticipant
                 {
-                    UserId = tp.UserId,
+                    UserId = tp.UserId ?? (resolved.TryGetValue(tp.Id, out var byRole) ? byRole : null),
                     UnitId = tp.UnitId,
                     RoleRef = tp.RoleRef,
                     Required = tp.Required,

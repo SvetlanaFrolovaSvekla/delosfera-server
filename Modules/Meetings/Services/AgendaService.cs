@@ -13,10 +13,17 @@ public interface IAgendaService
     Task<AgendaItemDto> UpdateItemAsync(int itemId, AgendaItemRequest request);
     Task DeleteItemAsync(int itemId);
 
+    /// <summary>Переставить вопрос в повестке: порядок вопросов задаёт секретарь.</summary>
+    Task<List<AgendaItemDto>> ReorderAsync(int meetingId, List<int> itemIdsInOrder);
+
     Task<AgendaItemDto> AddGuestAsync(int itemId, AgendaGuestRequest request);
     Task<AgendaItemDto> RemoveGuestAsync(int guestId);
 
     Task<AgendaItemDto> AddAssignmentAsync(int itemId, AgendaAssignmentRequest request);
+
+    /// <summary>Поправить поручение: исполнителя, текст или срок.</summary>
+    Task<AgendaItemDto> UpdateAssignmentAsync(int assignmentId, AgendaAssignmentRequest request);
+
     Task<AgendaItemDto> RemoveAssignmentAsync(int assignmentId);
 
     Task<AgendaAssignmentDto> ReportAsync(int assignmentId, AgendaReportRequest request, int currentUserId);
@@ -69,6 +76,7 @@ public class AgendaService : IAgendaService
                 ? DefaultProtocolNumber(meeting)
                 : request.ProtocolNumber.Trim(),
             ProtocolDate = request.ProtocolDate ?? meeting.Date,
+            DraftResolution = request.DraftResolution?.Trim(),
             Decision = request.Decision?.Trim(),
             SpeakerUserId = request.SpeakerUserId,
             SpeakerHeadUserId = request.SpeakerHeadUserId,
@@ -92,6 +100,7 @@ public class AgendaService : IAgendaService
         if (!string.IsNullOrWhiteSpace(request.Topic)) item.Topic = request.Topic.Trim();
         if (request.ProtocolNumber is not null) item.ProtocolNumber = request.ProtocolNumber.Trim();
         if (request.ProtocolDate is { } date) item.ProtocolDate = date;
+        if (request.DraftResolution is not null) item.DraftResolution = request.DraftResolution.Trim();
         if (request.Decision is not null) item.Decision = request.Decision.Trim();
         if (request.DocumentsUrl is not null) item.DocumentsUrl = request.DocumentsUrl.Trim();
 
@@ -103,6 +112,40 @@ public class AgendaService : IAgendaService
 
         await _db.SaveChangesAsync();
         return await LoadDtoAsync(itemId);
+    }
+
+    /// <summary>
+    /// Переставить вопросы повестки.
+    ///
+    /// Порядок вопроса значим: по нему заседание и идёт, и в уведомлении человек
+    /// читает, каким по счёту слушают его вопрос. Раньше порядок только
+    /// проставлялся при добавлении и изменить его было нечем — вопрос, внесённый
+    /// последним, последним и обсуждался.
+    /// </summary>
+    public async Task<List<AgendaItemDto>> ReorderAsync(int meetingId, List<int> itemIdsInOrder)
+    {
+        var meeting = await _db.Meetings.Include(m => m.Items)
+            .FirstOrDefaultAsync(m => m.Id == meetingId)
+            ?? throw new KeyNotFoundException("Заседание не найдено");
+
+        _access.RequireManage(meeting.Body);
+
+        var known = meeting.Items.ToDictionary(i => i.Id);
+
+        // Порядок задаётся целиком: перечислен должен быть каждый вопрос, иначе
+        // пропущенный получил бы чужой номер.
+        if (itemIdsInOrder.Count != known.Count || itemIdsInOrder.Any(id => !known.ContainsKey(id)))
+            throw new InvalidOperationException("Перечислите все вопросы повестки в нужном порядке");
+
+        for (var i = 0; i < itemIdsInOrder.Count; i++)
+            known[itemIdsInOrder[i]].Order = i + 1;
+
+        await _db.SaveChangesAsync();
+
+        var result = new List<AgendaItemDto>();
+        foreach (var id in itemIdsInOrder) result.Add(await LoadDtoAsync(id));
+
+        return result;
     }
 
     public async Task DeleteItemAsync(int itemId)
@@ -175,6 +218,46 @@ public class AgendaService : IAgendaService
 
         await _db.SaveChangesAsync();
         return await LoadDtoAsync(itemId);
+    }
+
+    /// <summary>
+    /// Поправить поручение: исполнителя, текст, срок.
+    ///
+    /// Поручения расписывают после заседания и по горячим следам ошибаются —
+    /// не тот исполнитель, не тот срок. Исправить можно было только удалением и
+    /// заведением заново, а вместе с поручением стирался и отчёт по нему.
+    ///
+    /// Отчёт правка не трогает: его пишет исполнитель, а не секретарь.
+    /// </summary>
+    public async Task<AgendaItemDto> UpdateAssignmentAsync(int assignmentId, AgendaAssignmentRequest request)
+    {
+        var assignment = await _db.AgendaAssignments
+            .Include(a => a.AgendaItem).ThenInclude(i => i!.Meeting)
+            .FirstOrDefaultAsync(a => a.Id == assignmentId)
+            ?? throw new KeyNotFoundException("Поручение не найдено");
+
+        _access.RequireManage(assignment.AgendaItem!.Meeting!.Body);
+
+        if (request.UserId > 0 && request.UserId != assignment.UserId)
+        {
+            assignment.UserId = request.UserId;
+
+            // Подразделение следует за исполнителем, если его не задали явно:
+            // иначе поручение осталось бы числиться за прежним отделом.
+            assignment.OrgUnitId = request.OrgUnitId ?? await UnitOfAsync(request.UserId);
+        }
+        else if (request.OrgUnitId is { } unitId)
+        {
+            assignment.OrgUnitId = unitId;
+        }
+
+        if (request.Text is not null)
+            assignment.Text = string.IsNullOrWhiteSpace(request.Text) ? null : request.Text.Trim();
+
+        if (request.DueDate is { } due) assignment.DueDate = due;
+
+        await _db.SaveChangesAsync();
+        return await LoadDtoAsync(assignment.AgendaItemId);
     }
 
     public async Task<AgendaItemDto> RemoveAssignmentAsync(int assignmentId)

@@ -2,6 +2,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.Models;
 using delosfera_server.Modules.Documents.VND.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Delosfera.Tests;
 
@@ -15,7 +16,12 @@ public class VndServiceTests
     private const int Creator = 100;
 
     private static VndService NewService(DelosferaDbContext db, int currentUserId, params delosfera_server.Modules.Users.Models.PermissionCode[] perms) =>
-        new(db, new NoopFileStorage(), new FakeCurrentUser(currentUserId, perms), new FakeActivityLog());
+        new(db, new NoopFileStorage(), new FakeCurrentUser(currentUserId, perms), new FakeActivityLog(),
+            new VndApprovalService(
+                db, new NoopFileStorage(), new NoopNotificationService(),
+                new FakeCurrentUser(currentUserId, perms),
+                NullLogger<VndApprovalService>.Instance, new FakeActivityLog(),
+                new ApprovalSheetGenerator(), new FixedApprovalUnitResolver(db)));
 
     private static VndDocument SeedVnd(DelosferaDbContext db, VndStatus status) =>
         TestSupport.SeedVnd(db, status, Creator);

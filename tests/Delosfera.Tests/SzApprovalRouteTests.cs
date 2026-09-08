@@ -148,7 +148,8 @@ public class SzApprovalRouteTests
             .ToListAsync();
 
     private static RouteEngine NewEngine(DelosferaDbContext db) =>
-        new(db, new AuditService(db), [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures());
+        new(db, new AuditService(db), [], new NoSubstitutions(), new SilentNotifier(),
+            new FakeSignatures(), new RouteRoleResolver(db));
 
     /// <summary>Записка и заданное число согласующих.</summary>
     private static async Task<(int DocumentId, List<int> Approvers)> SeedAsync(

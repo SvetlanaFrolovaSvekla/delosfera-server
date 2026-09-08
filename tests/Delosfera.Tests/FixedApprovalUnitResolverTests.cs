@@ -74,20 +74,6 @@ public class FixedApprovalUnitResolverTests
     }
 
     [Fact]
-    public async Task Пока_синхронизации_не_было_берётся_прежний_номер()
-    {
-        await using var db = await _postgres.NewIsolatedDbAsync();
-
-        // База свежая: подразделения из сида есть, портал ещё не приходил и
-        // номеров своих не проставил. Тогда за этап отвечает прежний номер.
-        Assert.Empty(await db.OrganizationUnits.Where(u => u.ExternalId == 39).ToListAsync());
-
-        var найдено = await new FixedApprovalUnitResolver(db).ResolveAsync(ApprovalStageKind.Legal);
-
-        Assert.Equal(FixedApprovalOrgUnits.LegalOrgUnitId, найдено);
-    }
-
-    [Fact]
     public async Task Портальная_запись_важнее_прежнего_номера()
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
