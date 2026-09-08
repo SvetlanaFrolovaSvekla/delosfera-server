@@ -5,6 +5,8 @@ using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
+using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Hr.Models;
 using delosfera_server.Modules.Users.Models;
 
@@ -66,12 +68,14 @@ public class HrOrderController : ControllerBase
     private readonly Documents.Services.IAcknowledgementService _acknowledgements;
     private readonly Files.Services.IFileStorageService _storage;
     private readonly Documents.Services.IAuditService _audit;
+    private readonly INumeratorService _numerator;
 
     public HrOrderController(
         DelosferaDbContext db, ICurrentUserService currentUser, IDocumentHtmlService html,
         Documents.Services.IAcknowledgementService acknowledgements,
         Files.Services.IFileStorageService storage,
-        Documents.Services.IAuditService audit)
+        Documents.Services.IAuditService audit,
+        INumeratorService numerator)
     {
         _db = db;
         _currentUser = currentUser;
@@ -79,6 +83,7 @@ public class HrOrderController : ControllerBase
         _acknowledgements = acknowledgements;
         _storage = storage;
         _audit = audit;
+        _numerator = numerator;
     }
 
     /// <summary>
@@ -568,23 +573,7 @@ public class HrOrderController : ControllerBase
 
     private async Task<string> NextNumberAsync(int year, CancellationToken ct)
     {
-        var used = await _db.HrOrders
-            .Where(o => o.Year == year && o.RegNumber != null)
-            .Select(o => o.RegNumber!)
-            .ToListAsync(ct);
-
-        var max = used
-            .Select(n =>
-            {
-                var digits = new string(n.TakeWhile(char.IsDigit).ToArray());
-                return int.TryParse(digits, out var v) ? v : 0;
-            })
-            .DefaultIfEmpty(0)
-            .Max();
-
-        // «12-лс» — приказы по личному составу нумеруются отдельно от приказов
-        // по основной деятельности, и индекс это показывает.
-        return $"{max + 1}-лс";
+        return await _numerator.NextAsync(DocumentType.HrOrder, "global", year.ToString(), "{seq}-лс");
     }
 
     private static string? Validate(HrOrderSaveRequest request)

@@ -280,6 +280,11 @@ using (var scope = app.Services.CreateScope())
         db,
         app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("RoleDefaults"));
 
+    // Разовая инициализация нумераторов из текущих максимумов — до первой выдачи
+    // номера через INumeratorService, иначе номер начался бы с 1 и столкнулся с
+    // существующими регистрационными номерами. Идемпотентно.
+    await delosfera_server.Modules.Documents.Services.NumeratorSeeder.SeedAsync(db);
+
     // Пароль администратору выдаётся только так — из настройки, не из хеша в коде.
     // Блок находит уже заведённую учётную запись и ставит ей пароль; новых он не
     // создаёт. Учётные записи приходят из справочника банка, и завести здесь ещё

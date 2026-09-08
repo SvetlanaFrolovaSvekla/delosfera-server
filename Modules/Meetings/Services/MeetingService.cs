@@ -5,6 +5,7 @@ using delosfera_server.Modules.Meetings.DTO;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.Services;
+using delosfera_server.Modules.Documents.Models;
 
 namespace delosfera_server.Modules.Meetings.Services;
 
@@ -32,19 +33,22 @@ public class MeetingService : IMeetingService
     private readonly ICurrentUserService _currentUser;
     private readonly IBankClock _clock;
     private readonly IAuditService _audit;
+    private readonly INumeratorService _numerator;
 
     public MeetingService(
         DelosferaDbContext db,
         IMeetingAccessService access,
         ICurrentUserService currentUser,
         IBankClock clock,
-        IAuditService audit)
+        IAuditService audit,
+        INumeratorService numerator)
     {
         _db = db;
         _access = access;
         _currentUser = currentUser;
         _clock = clock;
         _audit = audit;
+        _numerator = numerator;
     }
 
     /// <summary>
@@ -286,11 +290,8 @@ public class MeetingService : IMeetingService
 
     private async Task<int> NextNumberAsync(int year, MeetingBody body)
     {
-        var max = await _db.Meetings
-            .Where(m => m.Year == year && m.Body == body)
-            .MaxAsync(m => (int?)m.Number) ?? 0;
-
-        return max + 1;
+        var next = await _numerator.NextAsync(DocumentType.Meeting, body.ToString(), year.ToString(), "{seq}");
+        return int.Parse(next);
     }
 
     private async Task RequireFreeNumberAsync(int year, MeetingBody body, int number, int? exceptId)

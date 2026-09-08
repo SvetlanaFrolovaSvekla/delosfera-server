@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
+using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Procurement.DTO;
 using delosfera_server.Modules.Procurement.Models;
@@ -69,12 +70,14 @@ public class TenderService : ITenderService
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
     private readonly IBankClock _clock;
+    private readonly INumeratorService _numerator;
 
-    public TenderService(DelosferaDbContext db, IAuditService audit, IBankClock clock)
+    public TenderService(DelosferaDbContext db, IAuditService audit, IBankClock clock, INumeratorService numerator)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
+        _numerator = numerator;
     }
 
     public async Task<TenderDto?> GetAsync(int requestId)
@@ -692,17 +695,7 @@ public class TenderService : ITenderService
 
     private async Task<string> NextNumberAsync()
     {
-        var year = _clock.Today.Year;
-        var prefix = $"КНК-{year}-";
-
-        var last = await _db.Tenders
-            .Where(t => t.RegNumber != null && t.RegNumber.StartsWith(prefix))
-            .OrderByDescending(t => t.RegNumber)
-            .Select(t => t.RegNumber)
-            .FirstOrDefaultAsync();
-
-        var seq = last is null ? 1 : int.Parse(last[prefix.Length..]) + 1;
-        return $"{prefix}{seq:D4}";
+        return await _numerator.NextAsync(DocumentType.Procurement, "tender", _clock.Today.Year.ToString(), "КНК-{year}-{seq:D4}");
     }
 
 

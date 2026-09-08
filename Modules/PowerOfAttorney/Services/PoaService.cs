@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.PowerOfAttorney.DTO;
 using delosfera_server.Modules.PowerOfAttorney.Models;
@@ -39,11 +40,14 @@ public class PoaService : IPoaService
 
     private readonly IAuditService _audit;
 
-    public PoaService(DelosferaDbContext db, Files.Services.IFileStorageService storage, IAuditService audit)
+    private readonly INumeratorService _numerator;
+
+    public PoaService(DelosferaDbContext db, Files.Services.IFileStorageService storage, IAuditService audit, INumeratorService numerator)
     {
         _db = db;
         _storage = storage;
         _audit = audit;
+        _numerator = numerator;
     }
 
     /// <summary>
@@ -429,17 +433,7 @@ public class PoaService : IPoaService
 
     private async Task<string> NextNumberAsync(int year, CancellationToken ct)
     {
-        var used = await _db.PowersOfAttorney
-            .Where(p => p.Year == year && p.RegNumber != null)
-            .Select(p => p.RegNumber!)
-            .ToListAsync(ct);
-
-        var max = used
-            .Select(n => int.TryParse(n.Split('/')[0], out var v) ? v : 0)
-            .DefaultIfEmpty(0)
-            .Max();
-
-        return $"{max + 1}/{year}";
+        return await _numerator.NextAsync(DocumentType.PowerOfAttorney, "global", year.ToString(), "{seq}/{year}");
     }
 
     private static string? Trim(string? value) =>
