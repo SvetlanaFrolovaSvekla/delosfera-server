@@ -11,4 +11,13 @@ public class VndActualizationSummaryResponse
     /// <summary>Normal + Approaching + Critical + Overdue.
     /// Документы без DueActualizationDate сюда не входят.</summary>
     public int Total { get; set; }
+
+    /// <summary>Всего ВНД на странице "Планирование актуализации" (тот же набор статусов, что и
+    /// сам список документов - см. ACTUALIZATION_PLANNING_STATUSES на фронте) - в отличие от Total
+    /// выше, не требует наличия DueActualizationDate, поэтому может быть больше Total.</summary>
+    public int TotalActive { get; set; }
+
+    /// <summary>Из них — ни разу не актуализированные, т.е. с единственной (первой) редакцией.
+    /// Тот же критерий, что у чекбокса "Только ни разу не актуализированные" в фильтрах.</summary>
+    public int NeverActualized { get; set; }
 }

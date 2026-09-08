@@ -239,16 +239,29 @@ public class VndService : IVndService
         return ToResponse(entity, languageCode, today, canViewExtended);
     }
 
-    /// <summary>Сводка по срокам актуализации для дашборда планирования.
-    /// Документы без DueActualizationDate (архив/черновики) не учитываются.
-    /// Считается одним SQL-запросом через условные COUNT.</summary>
+    /// <summary>Сводка по срокам актуализации для дашборда планирования ("Планирование
+    /// актуализации" - тайлы "Все"/"В норме"/"Подходит срок"/"Горит или просрочено" и точки на
+    /// ActualizationFilterPills). Документы без DueActualizationDate не учитываются - но одного
+    /// этого недостаточно: у архивированного (или ещё не отправленного - черновик) документа
+    /// значение DueActualizationDate в БД может остаться (при архивации его не сбрасывают - см.
+    /// CancelAsync), поэтому статус исключаем явно тем же набором, что и сам список документов на
+    /// этой странице (см. ACTUALIZATION_PLANNING_STATUSES на фронте/ActualizationPage.tsx) - иначе
+    /// сводка и список расходятся: архив в тайлах, но не в таблице. Считается одним SQL-запросом
+    /// через условные COUNT.</summary>
     public async Task<VndActualizationSummaryResponse> GetActualizationSummaryAsync()
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var criticalEnd = today.AddDays(ActualizationThresholds.CriticalDays);
         var approachingEnd = today.AddDays(ActualizationThresholds.ApproachingDays);
 
-        var counts = await _db.VndDocuments
+        // Тот же набор статусов, что и у самого списка документов на странице "Планирование
+        // актуализации" (см. комментарий выше и ACTUALIZATION_PLANNING_STATUSES на фронте) -
+        // используется и для бакетов по сроку ниже, и для двух отдельных карточек (TotalActive/
+        // NeverActualized), которым в отличие от бакетов не важно, есть ли DueActualizationDate.
+        var planningScope = _db.VndDocuments
+            .Where(x => x.Status != VndStatus.Archived && x.Status != VndStatus.Draft);
+
+        var counts = await planningScope
             .Where(x => x.DueActualizationDate != null)
             .GroupBy(x => 1)
             .Select(g => new VndActualizationSummaryResponse
@@ -261,6 +274,12 @@ public class VndService : IVndService
                 Normal = g.Count(x => x.DueActualizationDate!.Value > approachingEnd)
             })
             .FirstOrDefaultAsync() ?? new VndActualizationSummaryResponse();
+
+        // "Всего действующих ВНД" — вся популяция страницы, вне зависимости от того, задан ли
+        // срок актуализации. "Ни разу не актуализированные" — из них те, у кого всего одна
+        // (первая) редакция, тот же критерий, что и у чекбокса в фильтрах.
+        counts.TotalActive = await planningScope.CountAsync();
+        counts.NeverActualized = await planningScope.CountAsync(x => x.Redactions.Count == 1);
 
         counts.Total = counts.Normal + counts.Approaching + counts.Critical + counts.Overdue;
         return counts;
