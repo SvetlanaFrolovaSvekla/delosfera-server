@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Obligations.Models;
 
 namespace delosfera_server.Modules.Obligations.Services;
@@ -33,8 +34,13 @@ public class ObligationService : IObligationService
     private const int PeriodsAhead = 1;
 
     private readonly DelosferaDbContext _db;
+    private readonly IAuditService _audit;
 
-    public ObligationService(DelosferaDbContext db) => _db = db;
+    public ObligationService(DelosferaDbContext db, IAuditService audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     public async Task<(int Created, int AutoFulfilled, int Missed)> SyncAsync(CancellationToken ct = default)
     {
@@ -163,6 +169,8 @@ public class ObligationService : IObligationService
         period.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Obligation", period.ObligationId, "PeriodFulfilled", currentUserId, new { periodId });
     }
 
     /// <summary>
@@ -182,6 +190,8 @@ public class ObligationService : IObligationService
         period.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Obligation", period.ObligationId, "PeriodWaived", currentUserId, new { periodId });
     }
 
     private async Task<ObligationPeriod> Load(int periodId, CancellationToken ct) =>

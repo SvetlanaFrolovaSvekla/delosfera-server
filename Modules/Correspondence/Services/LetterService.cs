@@ -35,15 +35,18 @@ public class LetterService : ILetterService
     private readonly DelosferaDbContext _db;
     private readonly Files.Services.IFileStorageService _storage;
     private readonly Common.Services.Authorization.ICurrentUserService _currentUser;
+    private readonly Documents.Services.IAuditService _audit;
 
     public LetterService(
         DelosferaDbContext db,
         Common.Services.Authorization.ICurrentUserService currentUser,
-        Files.Services.IFileStorageService storage)
+        Files.Services.IFileStorageService storage,
+        Documents.Services.IAuditService audit)
     {
         _db = db;
         _currentUser = currentUser;
         _storage = storage;
+        _audit = audit;
     }
 
     /// <summary>
@@ -75,6 +78,9 @@ public class LetterService : ILetterService
 
         _db.LetterFiles.Add(link);
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Letter", letterId, "FileAttached", actorUserId,
+            new { fileId = stored.Id, fileName = stored.OriginalFileName });
 
         return new LetterFileDto
         {
@@ -226,6 +232,13 @@ public class LetterService : ILetterService
         _db.CorrespondenceLetters.Add(letter);
         await _db.SaveChangesAsync(ct);
 
+        if (letter.Status == LetterStatus.Draft)
+            await _audit.LogAsync("Letter", letter.Id, "Created", currentUserId,
+                new { direction = letter.Direction.ToString() });
+        else
+            await _audit.LogAsync("Letter", letter.Id, "Registered", currentUserId,
+                new { regNumber = letter.RegNumber, direction = letter.Direction.ToString() });
+
         // Ответ закрывает срок входящего: письмо отвечено, и видно каким.
         if (letter.Direction == LetterDirection.Outgoing && letter.InReplyToId is {} parentId)
             await MarkAnsweredAsync(parentId, currentUserId, ct);
@@ -305,6 +318,10 @@ public class LetterService : ILetterService
         letter.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Letter", letter.Id, "Resolved", currentUserId,
+            new { responsibleUserId = letter.ResponsibleUserId, dueDate = letter.DueDate });
+
         return await GetAsync(id, ct);
     }
 
@@ -328,6 +345,10 @@ public class LetterService : ILetterService
         letter.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Letter", letter.Id, "Closed", currentUserId,
+            new { regNumber = letter.RegNumber });
+
         return await GetAsync(id, ct);
     }
 

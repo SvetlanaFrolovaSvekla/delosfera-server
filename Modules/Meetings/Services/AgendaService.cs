@@ -4,6 +4,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Meetings.DTO;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Modules.Documents.Services;
 
 namespace delosfera_server.Modules.Meetings.Services;
 
@@ -42,17 +43,20 @@ public class AgendaService : IAgendaService
     private readonly IMeetingAccessService _access;
     private readonly ICurrentUserService _currentUser;
     private readonly IBankClock _clock;
+    private readonly IAuditService _audit;
 
     public AgendaService(
         DelosferaDbContext db,
         IMeetingAccessService access,
         ICurrentUserService currentUser,
-        IBankClock clock)
+        IBankClock clock,
+        IAuditService audit)
     {
         _db = db;
         _access = access;
         _currentUser = currentUser;
         _clock = clock;
+        _audit = audit;
     }
 
     public async Task<AgendaItemDto> AddItemAsync(int meetingId, AgendaItemRequest request)
@@ -89,6 +93,9 @@ public class AgendaService : IAgendaService
         _db.AgendaItems.Add(item);
         await _db.SaveChangesAsync();
 
+        await _audit.LogAsync("AgendaItem", item.Id, "Created", _currentUser.UserId,
+            new { item.MeetingId, item.Order, item.Topic });
+
         return await LoadDtoAsync(item.Id);
     }
 
@@ -111,6 +118,11 @@ public class AgendaService : IAgendaService
         item.ControllerUserId = request.ControllerUserId;
 
         await _db.SaveChangesAsync();
+
+        if (!string.IsNullOrWhiteSpace(request.Decision))
+            await _audit.LogAsync("AgendaItem", item.Id, "DecisionRecorded", _currentUser.UserId,
+                new { item.ProtocolNumber });
+
         return await LoadDtoAsync(itemId);
     }
 
@@ -314,6 +326,9 @@ public class AgendaService : IAgendaService
 
         assignment.Status = request.Status;
         await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("AgendaItem", assignment.AgendaItemId, "ExecutionReported", currentUserId,
+            new { assignmentId = assignment.Id, status = assignment.Status });
 
         return MeetingMapper.ToDto(assignment, _clock.Today);
     }

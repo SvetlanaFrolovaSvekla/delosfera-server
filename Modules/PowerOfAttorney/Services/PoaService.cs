@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.PowerOfAttorney.DTO;
 using delosfera_server.Modules.PowerOfAttorney.Models;
 
@@ -36,10 +37,13 @@ public class PoaService : IPoaService
 
     private readonly Files.Services.IFileStorageService _storage;
 
-    public PoaService(DelosferaDbContext db, Files.Services.IFileStorageService storage)
+    private readonly IAuditService _audit;
+
+    public PoaService(DelosferaDbContext db, Files.Services.IFileStorageService storage, IAuditService audit)
     {
         _db = db;
         _storage = storage;
+        _audit = audit;
     }
 
     /// <summary>
@@ -67,6 +71,9 @@ public class PoaService : IPoaService
 
         _db.PoaFiles.Add(link);
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("PowerOfAttorney", poa.Id, "FileAdded", actorUserId,
+            new { fileId = stored.Id, fileName = stored.OriginalFileName });
 
         return new PoaFileDto
         {
@@ -129,6 +136,9 @@ public class PoaService : IPoaService
         _db.PowersOfAttorney.Add(poa);
         await _db.SaveChangesAsync(ct);
 
+        await _audit.LogAsync("PowerOfAttorney", poa.Id, "Created", currentUserId,
+            new { holder = poa.HolderName, validFrom = poa.ValidFrom, validTo = poa.ValidTo });
+
         return await GetAsync(poa.Id, ct);
     }
 
@@ -187,6 +197,10 @@ public class PoaService : IPoaService
         poa.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("PowerOfAttorney", poa.Id, "Issued", currentUserId,
+            new { number = poa.RegNumber, holder = poa.HolderName, validFrom = poa.ValidFrom, validTo = poa.ValidTo });
+
         return await GetAsync(id, ct);
     }
 
@@ -228,6 +242,16 @@ public class PoaService : IPoaService
         }
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("PowerOfAttorney", poa.Id, "Revoked", currentUserId,
+            new { number = poa.RegNumber, reason = poa.RevokeReason, revokedOn = poa.RevokedOn });
+
+        foreach (var child in children)
+        {
+            await _audit.LogAsync("PowerOfAttorney", child.Id, "Revoked", currentUserId,
+                new { number = child.RegNumber, reason = child.RevokeReason, revokedOn = child.RevokedOn, parentPoaId = id });
+        }
+
         return await GetAsync(id, ct);
     }
 

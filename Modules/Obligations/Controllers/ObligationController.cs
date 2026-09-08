@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
+using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Modules.Obligations.Models;
 using delosfera_server.Modules.Obligations.Services;
@@ -53,13 +54,16 @@ public class ObligationController : ControllerBase
     private readonly DelosferaDbContext _db;
     private readonly IObligationService _obligations;
     private readonly ICurrentUserService _currentUser;
+    private readonly IAuditService _audit;
 
     public ObligationController(
-        DelosferaDbContext db, IObligationService obligations, ICurrentUserService currentUser)
+        DelosferaDbContext db, IObligationService obligations, ICurrentUserService currentUser,
+        IAuditService audit)
     {
         _db = db;
         _obligations = obligations;
         _currentUser = currentUser;
+        _audit = audit;
     }
 
     /// <summary>Перечень обязательств с ближайшим сроком и состоянием текущего периода.</summary>
@@ -194,6 +198,9 @@ public class ObligationController : ControllerBase
         _db.RecurringObligations.Add(obligation);
         await _db.SaveChangesAsync(ct);
 
+        await _audit.LogAsync("Obligation", obligation.Id, "Created", _currentUser.UserId,
+            new {obligation.Title, Periodicity = obligation.Periodicity.ToString()});
+
         // Сразу заводим периоды, чтобы обязательство не выглядело пустым до
         // ближайшего срабатывания фоновой службы.
         await _obligations.SyncAsync(ct);
@@ -211,6 +218,8 @@ public class ObligationController : ControllerBase
         var obligation = await _db.RecurringObligations.FirstOrDefaultAsync(o => o.Id == id, ct);
         if (obligation is null) return NotFound();
 
+        var previousPeriodicity = obligation.Periodicity;
+
         obligation.Title = request.Title.Trim();
         obligation.Description = Trim(request.Description);
         obligation.Basis = Trim(request.Basis);
@@ -226,6 +235,13 @@ public class ObligationController : ControllerBase
         obligation.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Obligation", obligation.Id, "Updated", _currentUser.UserId);
+
+        if (previousPeriodicity != obligation.Periodicity)
+            await _audit.LogAsync("Obligation", obligation.Id, "PeriodicityChanged", _currentUser.UserId,
+                new {From = previousPeriodicity.ToString(), To = obligation.Periodicity.ToString()});
+
         return Ok();
     }
 

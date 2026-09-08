@@ -65,17 +65,20 @@ public class HrOrderController : ControllerBase
     private readonly IDocumentHtmlService _html;
     private readonly Documents.Services.IAcknowledgementService _acknowledgements;
     private readonly Files.Services.IFileStorageService _storage;
+    private readonly Documents.Services.IAuditService _audit;
 
     public HrOrderController(
         DelosferaDbContext db, ICurrentUserService currentUser, IDocumentHtmlService html,
         Documents.Services.IAcknowledgementService acknowledgements,
-        Files.Services.IFileStorageService storage)
+        Files.Services.IFileStorageService storage,
+        Documents.Services.IAuditService audit)
     {
         _db = db;
         _currentUser = currentUser;
         _html = html;
         _acknowledgements = acknowledgements;
         _storage = storage;
+        _audit = audit;
     }
 
     /// <summary>
@@ -254,6 +257,9 @@ public class HrOrderController : ControllerBase
         _db.HrOrders.Add(order);
         await _db.SaveChangesAsync(ct);
 
+        await _audit.LogAsync("HrOrder", order.Id, "Created", _currentUser.UserId,
+            new { kind = order.Kind.ToString(), title = order.Title });
+
         return Ok(new { id = order.Id });
     }
 
@@ -296,6 +302,9 @@ public class HrOrderController : ControllerBase
         await FillEmployeesAsync(order, request.Employees, ct);
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("HrOrder", order.Id, "Updated", _currentUser.UserId);
+
         return Ok();
     }
 
@@ -332,6 +341,7 @@ public class HrOrderController : ControllerBase
         //
         // Момент — подписание, а не создание: пока приказ черновик, он ничего не
         // отменяет, и передумать ещё можно.
+        int? cancelledOrderId = null;
         if (order.CancelsOrderId is int cancelledId)
         {
             var cancelled = await _db.HrOrders.FirstOrDefaultAsync(o => o.Id == cancelledId, ct);
@@ -340,10 +350,18 @@ public class HrOrderController : ControllerBase
             {
                 cancelled.Status = HrOrderStatus.Cancelled;
                 cancelled.UpdatedAt = DateTime.UtcNow;
+                cancelledOrderId = cancelled.Id;
             }
         }
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("HrOrder", order.Id, "Signed", _currentUser.UserId,
+            new { regNumber = order.RegNumber });
+
+        if (cancelledOrderId is int cancelledLogId)
+            await _audit.LogAsync("HrOrder", cancelledLogId, "Cancelled", _currentUser.UserId,
+                new { byOrderId = order.Id });
 
         return Ok(new { order.RegNumber, order.SignedAt });
     }
@@ -378,6 +396,9 @@ public class HrOrderController : ControllerBase
         _db.HrOrderFiles.Add(link);
         order.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("HrOrder", order.Id, "FileAttached", _currentUser.UserId,
+            new { fileLinkId = link.Id, fileId = stored.Id });
 
         return Ok(new
         {
@@ -429,6 +450,9 @@ public class HrOrderController : ControllerBase
         _db.HrOrderFiles.Remove(link);
         await _db.SaveChangesAsync(ct);
 
+        await _audit.LogAsync("HrOrder", id, "FileRemoved", _currentUser.UserId,
+            new { fileLinkId = link.Id, fileId = link.FileId });
+
         return NoContent();
     }
 
@@ -478,6 +502,9 @@ public class HrOrderController : ControllerBase
 
             order.AcknowledgementSheetId = sheet.Id;
             await _db.SaveChangesAsync(ct);
+
+            await _audit.LogAsync("HrOrder", order.Id, "AcknowledgementCreated", _currentUser.UserId,
+                new { sheetId = sheet.Id });
 
             return Ok(new {sheetId = sheet.Id});
         }

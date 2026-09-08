@@ -4,6 +4,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Meetings.DTO;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Common.Services.Authorization;
+using delosfera_server.Modules.Documents.Services;
 
 namespace delosfera_server.Modules.Meetings.Services;
 
@@ -30,17 +31,20 @@ public class MeetingService : IMeetingService
     private readonly IMeetingAccessService _access;
     private readonly ICurrentUserService _currentUser;
     private readonly IBankClock _clock;
+    private readonly IAuditService _audit;
 
     public MeetingService(
         DelosferaDbContext db,
         IMeetingAccessService access,
         ICurrentUserService currentUser,
-        IBankClock clock)
+        IBankClock clock,
+        IAuditService audit)
     {
         _db = db;
         _access = access;
         _currentUser = currentUser;
         _clock = clock;
+        _audit = audit;
     }
 
     /// <summary>
@@ -194,6 +198,9 @@ public class MeetingService : IMeetingService
         _db.Meetings.Add(meeting);
         await _db.SaveChangesAsync();
 
+        await _audit.LogAsync("Meeting", meeting.Id, "Created", currentUserId,
+            new { meeting.Body, meeting.Number, meeting.Year });
+
         return await GetAsync(meeting.Id);
     }
 
@@ -215,11 +222,13 @@ public class MeetingService : IMeetingService
             }
         }
 
+        var renumbered = false;
         if (request.Number is { } number)
         {
             if (number <= 0) throw new InvalidOperationException("Номер заседания начинается с 01");
             await RequireFreeNumberAsync(meeting.Year, meeting.Body, number, meeting.Id);
             meeting.Number = number;
+            renumbered = true;
         }
 
         if (request.Form is { } form) meeting.Form = form;
@@ -229,6 +238,12 @@ public class MeetingService : IMeetingService
         if (request.MaterialsUrl is not null) meeting.MaterialsUrl = request.MaterialsUrl.Trim();
 
         await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Meeting", meeting.Id, "Updated", _currentUser.UserId);
+        if (renumbered)
+            await _audit.LogAsync("Meeting", meeting.Id, "Numbered", _currentUser.UserId,
+                new { meeting.Number, meeting.Year });
+
         return await GetAsync(id);
     }
 
@@ -245,6 +260,9 @@ public class MeetingService : IMeetingService
 
         _db.Meetings.Remove(meeting);
         await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Meeting", id, "Deleted", _currentUser.UserId,
+            new { meeting.Body, meeting.Number, meeting.Year });
     }
 
     // ── внутреннее ───────────────────────────────────────────────────────────
