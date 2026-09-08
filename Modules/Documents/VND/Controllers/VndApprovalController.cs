@@ -54,6 +54,17 @@ public class VndApprovalController : ControllerBase
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
     }
 
+    /// <summary>История всех процессов согласования ВНД — по всем редакциям и циклам
+    /// актуализации, включая завершённые/отозванные/отклонённые. Для таба "История" ->
+    /// "Редакции и юридическая значимость".</summary>
+    [HttpGet("history")]
+    [RequirePermission(PermissionCode.ViewVnd)]
+    [ProducesResponseType(typeof(List<ApprovalProcessResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<ApprovalProcessResponse>>> GetHistory(int vndId)
+    {
+        return Ok(await _service.GetHistoryByVndIdAsync(vndId));
+    }
+
     /// <summary>Решение согласующего по своему этапу. multipart/form-data — согласующий
     /// может приложить файлы к своей резолюции (см. <see cref="ApprovalDecisionRequest.Files"/>).</summary>
     [HttpPost("stages/{stageId:int}/decision")]

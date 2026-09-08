@@ -42,23 +42,39 @@ public class ActivityLogService : IActivityLogService
             .Take(limit)
             .ToListAsync();
 
-        return entries.Select(x => new ActivityLogEntryResponse
-        {
-            Id = x.Id,
-            Module = x.Module,
-            EntityId = x.EntityId,
-            EntityCode = x.EntityCode,
-            Icon = MapIcon(x.Kind),
-            Text = languageCode switch
-            {
-                "en" => string.IsNullOrWhiteSpace(x.TextEn) ? x.TextRu : x.TextEn,
-                "kg" => string.IsNullOrWhiteSpace(x.TextKg) ? x.TextRu : x.TextKg,
-                _ => x.TextRu
-            },
-            Url = x.Url,
-            CreatedAt = x.CreatedAt
-        }).ToList();
+        return entries.Select(x => ToResponse(x, languageCode)).ToList();
     }
+
+    /// <summary>Весь журнал активности по одному документу — не "последние N" для дашборда
+    /// (см. GetRecentAsync), а полностью. Для таба "История" на карточке документа: там нужен
+    /// весь накопленный аудит по этой ВНД (или другому документу модуля), без ограничения.</summary>
+    public async Task<List<ActivityLogEntryResponse>> GetByEntityAsync(
+        string module, int entityId, string languageCode)
+    {
+        var entries = await _db.Set<ActivityLogEntry>()
+            .Where(x => x.Module == module && x.EntityId == entityId)
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync();
+
+        return entries.Select(x => ToResponse(x, languageCode)).ToList();
+    }
+
+    private static ActivityLogEntryResponse ToResponse(ActivityLogEntry x, string languageCode) => new()
+    {
+        Id = x.Id,
+        Module = x.Module,
+        EntityId = x.EntityId,
+        EntityCode = x.EntityCode,
+        Icon = MapIcon(x.Kind),
+        Text = languageCode switch
+        {
+            "en" => string.IsNullOrWhiteSpace(x.TextEn) ? x.TextRu : x.TextEn,
+            "kg" => string.IsNullOrWhiteSpace(x.TextKg) ? x.TextRu : x.TextKg,
+            _ => x.TextRu
+        },
+        Url = x.Url,
+        CreatedAt = x.CreatedAt
+    };
 
     // Вспомогательный метод для маппинга иконок
     private static string MapIcon(ActivityEventKind kind) => kind switch

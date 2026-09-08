@@ -56,4 +56,17 @@ public class ActivityLogController : ControllerBase
 
         return Ok(await _history.ForAsync(entityType, entityId, related, ct));
     }
+
+    /// <summary>
+    /// Весь журнал активности по одному документу конкретного модуля (не "последние N" для
+    /// дашборда, см. GetRecent, а полностью) — для таба "История" на карточке документа.
+    /// Пока используется только для ВНД (module = "vnd"), но не завязан на модуль жёстко.
+    /// </summary>
+    [HttpGet("entity/{module}/{entityId:int}")]
+    [ProducesResponseType(typeof(List<ActivityLogEntryResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<ActivityLogEntryResponse>>> GetByEntity(string module, int entityId)
+    {
+        var language = _languageResolver.Resolve(Request);
+        return Ok(await _service.GetByEntityAsync(module, entityId, language));
+    }
 }
