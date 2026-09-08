@@ -101,10 +101,17 @@ public class TasksService : ITasksService
         // висеть здесь ОДНОВРЕМЕННО с задачей в GetConsolidationTasksAsync: пользователь видит
         // два "дубликата" одной и той же работы, причём актуализационная карточка выглядит
         // "свежее" из-за собственной сортировки/CreatedAt, хотя по факту документ уже ушёл дальше.
+        // Если последний процесс согласования по документу закончился отклонением - это уже
+        // отдельная, более конкретная задача во вкладке "Отклонено" (см.
+        // GetRejectedTasksAsync). Не дублируем её здесь безликим "На актуализации" - тем же
+        // приёмом, каким выше исключается пересечение с GetConsolidationTasksAsync.
+        var rejectedVndIds = (await GetLatestRejectedProcessesAsync()).Select(p => p.VndId).ToHashSet();
+
         var docs = await _db.VndDocuments
             .Where(x => openVndIds.Contains(x.Id)
                         && x.ActualizationResponsibleUserId == userId
-                        && x.Status == VndStatus.OnActualization)
+                        && x.Status == VndStatus.OnActualization
+                        && !rejectedVndIds.Contains(x.Id))
             .ToListAsync();
 
         return docs.Select(x => new VndTaskResponse
@@ -231,6 +238,99 @@ public class TasksService : ITasksService
         return result.OrderBy(t => t.CreatedAt).ToList();
     }
 
+    /// <summary>"Отклонено" — см. ITasksService.GetRejectedTasksAsync. Показываем инициатору
+    /// того процесса, который закончился отклонением, при условии, что это последний процесс
+    /// по документу (иначе инициатор уже отправил редакцию заново, и актуальна другая задача —
+    /// "Ждущие моего согласования"/"Мои ВНД на согласовании" по новому процессу).</summary>
+    public async Task<List<VndTaskResponse>> GetRejectedTasksAsync(int userId)
+    {
+        var rejectedProcesses = await GetLatestRejectedProcessesAsync();
+        var mine = rejectedProcesses.Where(p => p.InitiatorUserId == userId).ToList();
+        if (mine.Count == 0) return new List<VndTaskResponse>();
+
+        var rejecterIds = mine
+            .Select(p => GetRejectionDecision(p)?.ApproverUserId)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+        var rejecterNames = await _db.Users
+            .Where(u => rejecterIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        return mine.Select(p =>
+            {
+                var rejection = GetRejectionDecision(p);
+                return new VndTaskResponse
+                {
+                    VndId = p.VndId,
+                    VndCode = p.Vnd!.Code,
+                    VndTitle = p.Vnd!.TitleRu,
+                    Scope = "rejected",
+                    VndStatus = MapVndStatus(p.Vnd!.Status),
+                    RedactionId = p.RedactionId,
+                    RedactionCode = p.Redaction!.Code,
+                    StatusLabel = "Редакция отклонена — необходимо внести правки и отправить заново",
+                    RejectedByName = rejection is not null
+                        ? rejecterNames.GetValueOrDefault(rejection.Value.ApproverUserId, "—")
+                        : null,
+                    RejectionComment = rejection?.Comment,
+                    ActualizationPlannedNoChanges = p.Vnd!.ActualizationPlannedNoChanges,
+                    CreatedAt = p.CompletedAt ?? p.UpdatedAt,
+                };
+            })
+            .OrderByDescending(t => t.CreatedAt)
+            .ToList();
+    }
+
+    /// <summary>Последний (по CreatedAt) процесс согласования на каждый ВНД из числа тех, что
+    /// сейчас закончился отклонением - т.е. документов, которые отклонение вернуло в
+    /// "Черновик"/"На актуализации" (см. VndApprovalService.RejectApprovalAsync) и по которым
+    /// ещё не запускался новый цикл согласования. Ограничиваемся документами в этих двух
+    /// статусах, чтобы не поднимать в память процессы по всем ВНД банка - отклонение больше
+    /// ни в каком другом статусе документа появиться не может.</summary>
+    private async Task<List<VndApprovalProcess>> GetLatestRejectedProcessesAsync()
+    {
+        var candidateVndIds = await _db.VndDocuments
+            .Where(v => v.Status == VndStatus.Draft || v.Status == VndStatus.OnActualization)
+            .Select(v => v.Id)
+            .ToListAsync();
+        if (candidateVndIds.Count == 0) return new List<VndApprovalProcess>();
+
+        var processes = await _db.VndApprovalProcesses
+            .Include(p => p.Vnd)
+            .Include(p => p.Redaction)
+            .Include(p => p.Stages)
+            .Where(p => candidateVndIds.Contains(p.VndId))
+            .ToListAsync();
+
+        return processes
+            .GroupBy(p => p.VndId)
+            .Select(g => g.OrderByDescending(p => p.CreatedAt).First())
+            .Where(p => p.Status == ApprovalProcessStatus.Rejected)
+            .ToList();
+    }
+
+    /// <summary>Этап и решение (согласующий + комментарий-причина), которым процесс был
+    /// отклонён - ровно один из трёх, т.к. отклонение сразу и необратимо прекращает процесс
+    /// (см. RejectApprovalAsync). Null, если процесс не был отклонён вовсе - вызывающий код
+    /// сам гарантирует Status == Rejected, но метод остаётся защищённым на случай неполных
+    /// данных (например, старой записи без Stages).</summary>
+    private static (int ApproverUserId, string? Comment)? GetRejectionDecision(VndApprovalProcess process)
+    {
+        foreach (var stage in process.Stages)
+        {
+            if (stage.PrimaryDecision == ApprovalStageDecision.Rejected)
+                return (stage.ApproverUserId, stage.PrimaryComment);
+            if (stage.RepeatDecision == ApprovalStageDecision.Rejected)
+                return (stage.ApproverUserId, stage.RepeatComment);
+            if (stage.FinalHoldDecision == ApprovalStageDecision.Rejected)
+                return (stage.ApproverUserId, stage.FinalHoldComment);
+        }
+
+        return null;
+    }
+
     private async Task<Dictionary<int, string>> GetInitiatorNamesAsync(IEnumerable<int> initiatorUserIds)
     {
         var ids = initiatorUserIds.Distinct().ToList();
@@ -284,13 +384,15 @@ public class TasksService : ITasksService
         var actualizationCount = (await GetActualizationTasksAsync(userId)).Count;
         var consolidationCount = (await GetConsolidationTasksAsync(userId)).Count;
         var myVndApprovalCount = (await GetMyVndApprovalTasksAsync(userId)).Count;
+        var rejectedCount = (await GetRejectedTasksAsync(userId)).Count;
 
         return new VndTaskCountsResponse
         {
             Coordination = coordinationCount,
             Actualization = actualizationCount,
             Consolidation = consolidationCount,
-            MyVndApproval = myVndApprovalCount
+            MyVndApproval = myVndApprovalCount,
+            Rejected = rejectedCount
         };
     }
 
