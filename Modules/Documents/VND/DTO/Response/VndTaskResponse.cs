@@ -6,7 +6,7 @@ public class VndTaskResponse
     public required string VndCode { get; set; }
     public required string VndTitle { get; set; }
 
-    /// <summary>"coordination" | "actualization" | "consolidation" | "myVndApproval"</summary>
+    /// <summary>"coordination" | "actualization" | "consolidation" | "myVndApproval" | "rejected"</summary>
     public required string Scope { get; set; }
 
     /// <summary>Человекочитаемый статус процесса (например, "В процессе согласования первой редакции ВНД").
@@ -57,6 +57,13 @@ public class VndTaskResponse
     /// пока false, карточка actualization должна вести на экран "Выполнить актуализацию", а не
     /// сразу на загрузку/согласование редакции (см. VndDocument.ActualizationPerformed).</summary>
     public bool ActualizationPerformed { get; set; }
+
+    // --- Только для rejected ---
+    /// <summary>ФИО согласующего, который отклонил редакцию</summary>
+    public string? RejectedByName { get; set; }
+
+    /// <summary>Комментарий (причина), с которым редакция была отклонена</summary>
+    public string? RejectionComment { get; set; }
 
     public DateTime CreatedAt { get; set; }
 }

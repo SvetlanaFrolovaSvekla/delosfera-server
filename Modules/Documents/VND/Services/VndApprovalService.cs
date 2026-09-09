@@ -242,6 +242,23 @@ public class VndApprovalService : IVndApprovalService
         return await LoadResponseAsync(process.Id);
     }
 
+    /// <summary>История ВСЕХ процессов согласования этого ВНД — по всем редакциям и циклам
+    /// актуализации, включая уже завершённые/отозванные/отклонённые (в отличие от
+    /// GetByVndIdAsync выше, который отдаёт только процесс последней редакции).</summary>
+    public async Task<List<ApprovalProcessResponse>> GetHistoryByVndIdAsync(int vndId)
+    {
+        var processIds = await _db.VndApprovalProcesses
+            .Where(x => x.VndId == vndId)
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => x.Id)
+            .ToListAsync();
+
+        var result = new List<ApprovalProcessResponse>(processIds.Count);
+        foreach (var id in processIds)
+            result.Add(await LoadResponseAsync(id));
+        return result;
+    }
+
     public async Task<ApprovalProcessResponse> DecideAsync(
         int vndId, int stageId, ApprovalDecisionRequest request, int currentUserId)
     {

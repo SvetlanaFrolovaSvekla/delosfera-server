@@ -10,6 +10,13 @@ public interface ITasksService
     Task<List<VndTaskResponse>> GetActualizationTasksAsync(int userId);
     Task<List<VndTaskResponse>> GetConsolidationTasksAsync(int userId);
     Task<List<VndTaskResponse>> GetMyVndApprovalTasksAsync(int userId);
+
+    /// <summary>"Отклонено" — для инициатора: последний процесс согласования по документу
+    /// завершился отклонением, и новый цикл согласования по нему ещё не запускался. Раньше
+    /// после отклонения инициатор не получал отдельной задачи — документ просто возвращался в
+    /// "Черновик"/"На актуализации" и терялся среди обычных задач, требуя внимания только по
+    /// уведомлению.</summary>
+    Task<List<VndTaskResponse>> GetRejectedTasksAsync(int userId);
     Task<VndTaskCountsResponse> GetCountsAsync(int userId);
 
     /// <summary>Сводка персональных KPI для карточек на главной странице</summary>

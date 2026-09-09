@@ -38,6 +38,12 @@ public class TasksController : ControllerBase
     public async Task<ActionResult<List<VndTaskResponse>>> GetMyVndApproval() =>
         Ok(await _service.GetMyVndApprovalTasksAsync(_currentUser.UserId));
 
+    /// <summary>"Отклонено" — редакции, отклонённые при согласовании и ожидающие правок
+    /// инициатора (см. TasksService.GetRejectedTasksAsync).</summary>
+    [HttpGet("rejected")]
+    public async Task<ActionResult<List<VndTaskResponse>>> GetRejected() =>
+        Ok(await _service.GetRejectedTasksAsync(_currentUser.UserId));
+
     [HttpGet("counts")]
     public async Task<ActionResult<VndTaskCountsResponse>> GetCounts() =>
         Ok(await _service.GetCountsAsync(_currentUser.UserId));

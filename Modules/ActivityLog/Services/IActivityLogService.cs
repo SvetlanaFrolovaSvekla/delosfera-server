@@ -12,4 +12,8 @@ public interface IActivityLogService
 
     // Получение последних записей журнала активности
     Task<List<ActivityLogEntryResponse>> GetRecentAsync(int limit, string languageCode, string? module = null);
+
+    /// <summary>Весь журнал активности по одному документу — не "последние N" для дашборда
+    /// (см. GetRecentAsync), а полностью. Для таба "История" на карточке документа.</summary>
+    Task<List<ActivityLogEntryResponse>> GetByEntityAsync(string module, int entityId, string languageCode);
 }
