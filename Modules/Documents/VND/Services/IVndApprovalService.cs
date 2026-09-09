@@ -7,6 +7,11 @@ public interface IVndApprovalService
 {
     Task<ApprovalProcessResponse> StartAsync(int vndId, StartApprovalRequest request, int currentUserId);
     Task<ApprovalProcessResponse> GetByVndIdAsync(int vndId);
+    /// <summary>История ВСЕХ процессов согласования этого ВНД — по всем редакциям и циклам
+    /// актуализации, включая уже завершённые/отозванные/отклонённые. Для таба "История" ->
+    /// "Редакции и юридическая значимость" (кто инициировал согласование каждой редакции,
+    /// кто и как согласовывал).</summary>
+    Task<List<ApprovalProcessResponse>> GetHistoryByVndIdAsync(int vndId);
     Task<ApprovalProcessResponse> DecideAsync(int vndId, int stageId, ApprovalDecisionRequest request, int currentUserId);
     Task<ApprovalProcessResponse> CancelAsync(int vndId, int currentUserId);
     /// <summary>Отзыв согласования как часть архивации ВНД (см. VndService.CancelAsync) —
