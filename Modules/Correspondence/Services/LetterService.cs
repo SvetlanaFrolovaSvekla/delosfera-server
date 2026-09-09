@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Correspondence.DTO;
 using delosfera_server.Modules.Correspondence.Models;
+using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Documents.Services;
 
 namespace delosfera_server.Modules.Correspondence.Services;
 
@@ -35,15 +37,21 @@ public class LetterService : ILetterService
     private readonly DelosferaDbContext _db;
     private readonly Files.Services.IFileStorageService _storage;
     private readonly Common.Services.Authorization.ICurrentUserService _currentUser;
+    private readonly Documents.Services.IAuditService _audit;
+    private readonly INumeratorService _numerator;
 
     public LetterService(
         DelosferaDbContext db,
         Common.Services.Authorization.ICurrentUserService currentUser,
-        Files.Services.IFileStorageService storage)
+        Files.Services.IFileStorageService storage,
+        Documents.Services.IAuditService audit,
+        INumeratorService numerator)
     {
         _db = db;
         _currentUser = currentUser;
         _storage = storage;
+        _audit = audit;
+        _numerator = numerator;
     }
 
     /// <summary>
@@ -75,6 +83,9 @@ public class LetterService : ILetterService
 
         _db.LetterFiles.Add(link);
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Letter", letterId, "FileAttached", actorUserId,
+            new { fileId = stored.Id, fileName = stored.OriginalFileName });
 
         return new LetterFileDto
         {
@@ -226,6 +237,13 @@ public class LetterService : ILetterService
         _db.CorrespondenceLetters.Add(letter);
         await _db.SaveChangesAsync(ct);
 
+        if (letter.Status == LetterStatus.Draft)
+            await _audit.LogAsync("Letter", letter.Id, "Created", currentUserId,
+                new { direction = letter.Direction.ToString() });
+        else
+            await _audit.LogAsync("Letter", letter.Id, "Registered", currentUserId,
+                new { regNumber = letter.RegNumber, direction = letter.Direction.ToString() });
+
         // Ответ закрывает срок входящего: письмо отвечено, и видно каким.
         if (letter.Direction == LetterDirection.Outgoing && letter.InReplyToId is {} parentId)
             await MarkAnsweredAsync(parentId, currentUserId, ct);
@@ -305,6 +323,10 @@ public class LetterService : ILetterService
         letter.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Letter", letter.Id, "Resolved", currentUserId,
+            new { responsibleUserId = letter.ResponsibleUserId, dueDate = letter.DueDate });
+
         return await GetAsync(id, ct);
     }
 
@@ -328,6 +350,10 @@ public class LetterService : ILetterService
         letter.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Letter", letter.Id, "Closed", currentUserId,
+            new { regNumber = letter.RegNumber });
+
         return await GetAsync(id, ct);
     }
 
@@ -528,22 +554,8 @@ public class LetterService : ILetterService
     private async Task<string> NextNumberAsync(LetterDirection direction, int year, CancellationToken ct)
     {
         var prefix = direction == LetterDirection.Incoming ? "вх" : "исх";
-
-        var used = await _db.CorrespondenceLetters
-            .Where(l => l.Direction == direction && l.Year == year && l.RegNumber != null)
-            .Select(l => l.RegNumber!)
-            .ToListAsync(ct);
-
-        var max = used
-            .Select(n =>
-            {
-                var digits = new string(n.SkipWhile(c => !char.IsDigit(c)).TakeWhile(char.IsDigit).ToArray());
-                return int.TryParse(digits, out var v) ? v : 0;
-            })
-            .DefaultIfEmpty(0)
-            .Max();
-
-        return $"{prefix}-{max + 1}/{year}";
+        return await _numerator.NextAsync(
+            DocumentType.Correspondence, direction.ToString(), year.ToString(), $"{prefix}-{{seq}}/{{year}}");
     }
 
     private static string? Trim(string? value) =>

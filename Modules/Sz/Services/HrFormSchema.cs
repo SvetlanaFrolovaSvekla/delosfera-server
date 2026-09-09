@@ -156,8 +156,12 @@ public static class HrFormSchema
                 [
                     new() {Code = "positionNew", Label = "Должность", Type = HrFieldType.Text,
                            Required = true, PerEmployee = true},
-                    new() {Code = "unitTo", Label = "Подразделение", Type = HrFieldType.OrgUnit, Required = true},
-                    Salary,
+                    // Подразделение приёма — это подразделение самого сотрудника (поле в блоке
+                    // сотрудника). Отдельное общее «В подразделение» его дублировало и мешало
+                    // принять двоих в разные отделы одной запиской. Оклад у нового сотрудника
+                    // не «новый» — просто оклад.
+                    new() {Code = "salary", Label = "Оклад", Type = HrFieldType.Money,
+                           Required = true, PerEmployee = true},
                     new() {Code = "startDate", Label = "Дата выхода", Type = HrFieldType.Date, Required = true},
                     new() {Code = "probation", Label = "Испытательный срок", Type = HrFieldType.Select,
                            Options = ["без испытательного срока", "1 месяц", "2 месяца", "3 месяца"]},

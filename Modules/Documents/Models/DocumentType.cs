@@ -25,5 +25,20 @@ public enum DocumentType
     /// в Document.DefinitionId: одно значение перечисления на все настраиваемые типы,
     /// иначе каждый новый тип требовал бы правки кода и миграции.
     /// </summary>
-    Custom = 6
+    Custom = 6,
+
+    // Ниже — контуры вне единой карточки Document. Они не заводят Document, но их
+    // регистрационные номера выдаёт тот же INumeratorService (устранение гонок max+1).
+
+    /// <summary>Приказ по личному составу</summary>
+    HrOrder = 7,
+
+    /// <summary>Доверенность</summary>
+    PowerOfAttorney = 8,
+
+    /// <summary>Входящее/исходящее письмо (корреспонденция)</summary>
+    Correspondence = 9,
+
+    /// <summary>Заседание коллегиального органа</summary>
+    Meeting = 10
 }

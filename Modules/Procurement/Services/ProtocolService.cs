@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
+using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Procurement.DTO;
 using delosfera_server.Modules.Procurement.Models;
@@ -40,14 +41,16 @@ public class ProtocolService : IProtocolService
     private readonly IProposalService _proposals;
     private readonly IAuditService _audit;
     private readonly IBankClock _clock;
+    private readonly INumeratorService _numerator;
 
     public ProtocolService(
-        DelosferaDbContext db, IProposalService proposals, IAuditService audit, IBankClock clock)
+        DelosferaDbContext db, IProposalService proposals, IAuditService audit, IBankClock clock, INumeratorService numerator)
     {
         _db = db;
         _proposals = proposals;
         _audit = audit;
         _clock = clock;
+        _numerator = numerator;
     }
 
     public async Task<ProtocolDto?> GetAsync(int requestId)
@@ -304,17 +307,7 @@ public class ProtocolService : IProtocolService
 
     private async Task<string> NextNumberAsync()
     {
-        var year = _clock.Today.Year;
-        var prefix = $"ПЗ-{year}-";
-
-        var last = await _db.ProcurementProtocols
-            .Where(p => p.RegNumber != null && p.RegNumber.StartsWith(prefix))
-            .OrderByDescending(p => p.RegNumber)
-            .Select(p => p.RegNumber)
-            .FirstOrDefaultAsync();
-
-        var seq = last is null ? 1 : int.Parse(last[prefix.Length..]) + 1;
-        return $"{prefix}{seq:D4}";
+        return await _numerator.NextAsync(DocumentType.Procurement, "protocol", _clock.Today.Year.ToString(), "ПЗ-{year}-{seq:D4}");
     }
 
     /// <summary>

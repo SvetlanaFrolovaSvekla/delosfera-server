@@ -10,6 +10,8 @@ using delosfera_server.Modules.ActivityLog.Models;
 using delosfera_server.Modules.ActivityLog.Services;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Documents.Services;
 
 namespace delosfera_server.Modules.Documents.VND.Services;
 
@@ -20,17 +22,19 @@ public class VndService : IVndService
     private readonly ICurrentUserService _currentUser;
     private readonly IActivityLogService _activityLog;
     private readonly IVndApprovalService _approvalService;
+    private readonly INumeratorService _numerator;
 
     public VndService(
         DelosferaDbContext db, IFileStorageService fileService,
         ICurrentUserService currentUser, IActivityLogService activityLog,
-        IVndApprovalService approvalService)
+        IVndApprovalService approvalService, INumeratorService numerator)
     {
         _db = db;
         _fileService = fileService;
         _currentUser = currentUser;
         _activityLog = activityLog;
         _approvalService = approvalService;
+        _numerator = numerator;
     }
 
     public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
@@ -159,7 +163,11 @@ public class VndService : IVndService
         query = ApplyLinkedToMeFilter(query, request.LinkedToMeOnly, request.LinkedToMeRelations);
         query = ApplyDraftVisibilityFilter(query, request.DraftOwnerScope);
 
-        var entities = await query.ToListAsync();
+        // Поиск — только чтение с проекцией в DTO, отслеживание не нужно (AsNoTracking).
+        // AsSplitQuery: у VndDocument пять коллекций в Include (ResponsibleExecutors, Rubrics,
+        // Keywords, UserGroups, Redactions) — один общий JOIN давал декартово произведение
+        // строк-потомков; разбивка на отдельные запросы убирает взрывной рост.
+        var entities = await query.AsNoTracking().AsSplitQuery().ToListAsync();
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         // Виды связи с текущим пользователем считаем только когда запрошен LinkedToMeOnly —
@@ -803,18 +811,7 @@ public class VndService : IVndService
 
     private async Task<string> GenerateNextCodeAsync()
     {
-        const int startingNumber = 10210;
-
-        var maxExisting = await _db.VndDocuments
-            .Select(x => x.Code)
-            .ToListAsync(); // коды хранятся строкой — парсим на стороне клиента
-
-        var maxNum = maxExisting
-            .Select(c => int.TryParse(c, out var n) ? n : 0)
-            .DefaultIfEmpty(0)
-            .Max();
-
-        return (Math.Max(maxNum, startingNumber - 1) + 1).ToString();
+        return await _numerator.NextAsync(DocumentType.Vnd, "code", "global", "{seq}");
     }
 
     private async Task<List<T>> GetByIdsAsync<T>(DbSet<T> set, List<int> ids, string entityName) where T : class
