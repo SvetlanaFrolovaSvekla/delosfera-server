@@ -11,6 +11,10 @@ public static class WorkflowServiceExtensions
         builder.Services.AddScoped<IRouteRoleResolver, RouteRoleResolver>();
         builder.Services.AddScoped<IRouteEngine, RouteEngine>();
 
+        // Выбор шаблона маршрута по (тип документа + подразделение) — единый конструктор
+        // согласующих взамен захардкоженных цепочек.
+        builder.Services.AddScoped<IRouteTemplateSelector, RouteTemplateSelector>();
+
         // Адресные уведомления по задачам и итогам маршрута (GEN-12, SZ-03, PRC-23)
         builder.Services.AddScoped<IWorkflowNotifier, WorkflowNotifier>();
         builder.Services.AddScoped<ITaskInboxService, TaskInboxService>();

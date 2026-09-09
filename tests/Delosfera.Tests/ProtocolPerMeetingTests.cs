@@ -127,7 +127,7 @@ public class ProtocolPerMeetingTests
         var audit = new AuditService(db);
         var clock = new delosfera_server.Common.Services.BankClock();
 
-        return new ProtocolService(db, new ProposalService(db, audit, clock), audit, clock);
+        return new ProtocolService(db, new ProposalService(db, audit, clock), audit, clock, new delosfera_server.Modules.Documents.Services.NumeratorService(db));
     }
 
     private static async Task НазначитьЗаседаниеАsync(

@@ -109,7 +109,7 @@ public class HrOrderFilesTests
             new AcknowledgementService(
                 db, new FakeSignatures(), new SilentNotifications(), audit,
                 NullLogger<AcknowledgementService>.Instance),
-            new ХранилищеВПамяти(db));
+            new ХранилищеВПамяти(db), audit, new delosfera_server.Modules.Documents.Services.NumeratorService(db));
     }
 
     private static IFormFile Файл(string name, bool пустой = false)

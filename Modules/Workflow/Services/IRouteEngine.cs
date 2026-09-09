@@ -8,7 +8,8 @@ namespace delosfera_server.Modules.Workflow.Services;
 public interface IRouteEngine
 {
     /// <summary>Создать экземпляр маршрута из шаблона (копирование этапов/участников).</summary>
-    Task<RouteInstance> InstantiateFromTemplateAsync(int documentId, int templateId);
+    Task<RouteInstance> InstantiateFromTemplateAsync(
+        int documentId, int templateId, IReadOnlySet<string>? satisfiedConditions = null);
 
     /// <summary>Запустить маршрут: валидация (обяз. согласующие, ОМ финальный) + активация первого этапа.</summary>
     Task StartAsync(int routeInstanceId, int actorUserId);

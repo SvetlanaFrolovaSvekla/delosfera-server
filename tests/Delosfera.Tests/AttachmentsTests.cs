@@ -96,10 +96,10 @@ public class AttachmentsTests
     private sealed record Стенд(int LetterId, int PoaId, int Actor);
 
     private static ILetterService Письма(DelosferaDbContext db, int userId) =>
-        new LetterService(db, new FakeCurrentUser(userId), new ХранилищеВПамяти(db));
+        new LetterService(db, new FakeCurrentUser(userId), new ХранилищеВПамяти(db), new delosfera_server.Modules.Documents.Services.AuditService(db), new delosfera_server.Modules.Documents.Services.NumeratorService(db));
 
     private static IPoaService Доверенности(DelosferaDbContext db) =>
-        new PoaService(db, new ХранилищеВПамяти(db));
+        new PoaService(db, new ХранилищеВПамяти(db), new delosfera_server.Modules.Documents.Services.AuditService(db), new delosfera_server.Modules.Documents.Services.NumeratorService(db));
 
     private static IFormFile Файл(string name)
     {

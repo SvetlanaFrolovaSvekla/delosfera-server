@@ -330,6 +330,12 @@ public class HrOrderController : ControllerBase
         if (order.Status == HrOrderStatus.Signed)
             return Conflict(new { message = "Приказ уже подписан." });
 
+        // Отменённый приказ подписывать нельзя: раньше проверялся только статус
+        // «Подписан», и отменённый приказ можно было подписать заново — он «воскресал»
+        // действующим при погашенном оригинале.
+        if (order.Status == HrOrderStatus.Cancelled)
+            return Conflict(new { message = "Приказ отменён — подписать нельзя, издайте новый." });
+
         if (order.Employees.Count == 0)
             return BadRequest(new { message = "В приказе нет ни одного сотрудника." });
 

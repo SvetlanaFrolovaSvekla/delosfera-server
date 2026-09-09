@@ -143,7 +143,7 @@ public class AgendaOrderAndAssignmentsTests
         var currentUser = new FakeCurrentUser(userId, PermissionCode.ManageBoardMeetings);
 
         return new AgendaService(
-            db, new MeetingAccessService(db, currentUser), currentUser, new BankClock());
+            db, new MeetingAccessService(db, currentUser), currentUser, new BankClock(), new delosfera_server.Modules.Documents.Services.AuditService(db));
     }
 
     private static async Task<List<int>> ПорядокАsync(DelosferaDbContext db, int meetingId) =>

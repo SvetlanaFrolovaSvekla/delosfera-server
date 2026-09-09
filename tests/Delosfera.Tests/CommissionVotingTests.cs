@@ -223,7 +223,7 @@ public class CommissionVotingTests(PostgresFixture postgres)
     private static async Task<(TenderService Service, int BidId, Состав Члены)> ЗавестиКонкурсАsync(
         DelosferaDbContext db)
     {
-        var service = new TenderService(db, new NoopAudit(), new BankClock());
+        var service = new TenderService(db, new NoopAudit(), new BankClock(), new delosfera_server.Modules.Documents.Services.NumeratorService(db));
 
         var method = await db.ProcurementMethods
             .FirstAsync(m => m.Code == ProcurementMethodCode.TenderOpen);

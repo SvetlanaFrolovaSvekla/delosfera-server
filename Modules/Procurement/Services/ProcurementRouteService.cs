@@ -56,15 +56,39 @@ public class ProcurementRouteService : IProcurementRouteService
 
     private readonly DelosferaDbContext _db;
     private readonly IRouteEngine _engine;
+    private readonly IRouteTemplateSelector _templates;
 
-    public ProcurementRouteService(DelosferaDbContext db, IRouteEngine engine)
+    public ProcurementRouteService(DelosferaDbContext db, IRouteEngine engine, IRouteTemplateSelector templates)
     {
         _db = db;
         _engine = engine;
+        _templates = templates;
     }
 
     public async Task<RouteInstance> StartAsync(ProcurementRequest request, int actorUserId)
     {
+        // Единый конструктор: если для закупки настроен шаблон (уровня типа или под
+        // инициирующее подразделение) — маршрут строится из него. Условные этапы
+        // (хозтовары, вынесение на орган) включаются по вычисленным здесь условиям.
+        // Иначе — прежняя программная сборка ниже (защита на случай отсутствия шаблона).
+        var template = await _templates.SelectAsync(
+            Documents.Models.DocumentType.Procurement, request.InitiatorUnitId);
+        if (template is not null)
+        {
+            var conditions = new HashSet<string>();
+            if (request.SubjectKind == ProcurementSubjectKind.HouseholdGoods)
+                conditions.Add(ProcurementRouteConditions.HouseholdGoods);
+            if (request.ApprovalAuthority is ApprovalAuthority.Board
+                or ApprovalAuthority.SupervisoryBoard
+                or ApprovalAuthority.Shareholders)
+                conditions.Add(ProcurementRouteConditions.BoardAuthority);
+
+            var fromTemplate = await _engine.InstantiateFromTemplateAsync(
+                request.DocumentId, template.Id, conditions);
+            await _engine.StartAsync(fromTemplate.Id, actorUserId);
+            return fromTemplate;
+        }
+
         var initiatorUnit = request.InitiatorUnitId is { } unitId
             ? await _db.OrganizationUnits.FirstOrDefaultAsync(u => u.Id == unitId)
             : null;

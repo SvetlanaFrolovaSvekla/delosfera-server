@@ -79,6 +79,7 @@ public class CorrespondenceController : ControllerBase
 
     /// <summary>Резолюция руководителя: кому, что и к какому сроку.</summary>
     [HttpPost("{id:int}/resolve")]
+    [RequirePermission(PermissionCode.RegisterCorrespondence)]
     public async Task<IActionResult> Resolve(int id, [FromBody] ResolveLetterRequest request, CancellationToken ct)
     {
         try { return Ok(await _letters.ResolveAsync(id, request, _currentUser.UserId, ct)); }
@@ -88,6 +89,7 @@ public class CorrespondenceController : ControllerBase
 
     /// <summary>Закрыть письмо без ответа с указанием, чем закончилось.</summary>
     [HttpPost("{id:int}/close")]
+    [RequirePermission(PermissionCode.RegisterCorrespondence)]
     public async Task<IActionResult> Close(int id, [FromBody] CloseLetterRequest request, CancellationToken ct)
     {
         try { return Ok(await _letters.CloseAsync(id, request.Note, _currentUser.UserId, ct)); }
