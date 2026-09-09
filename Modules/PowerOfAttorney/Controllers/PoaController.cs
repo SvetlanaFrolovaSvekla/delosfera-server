@@ -96,6 +96,7 @@ public class PoaController : ControllerBase
 
     /// <summary>Сканы доверенности.</summary>
     [HttpGet("{id:int}/files")]
+    [RequirePermission(PermissionCode.ViewPowersOfAttorney)]
     public async Task<IActionResult> Files(int id, CancellationToken ct) =>
         Ok(await _poa.FilesAsync(id, ct));
 

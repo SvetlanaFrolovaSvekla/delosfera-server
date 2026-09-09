@@ -247,6 +247,7 @@ public class ObligationController : ControllerBase
 
     /// <summary>Отметить период исполненным. Для заседаний недоступно — они закрываются сами.</summary>
     [HttpPost("periods/{periodId:int}/fulfil")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
     public async Task<IActionResult> Fulfil(int periodId, [FromBody] FulfilRequest request, CancellationToken ct)
     {
         try
