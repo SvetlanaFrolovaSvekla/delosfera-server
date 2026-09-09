@@ -68,8 +68,11 @@ public static class ProcurementRouteTemplateSeeder
             });
         }
 
-        Step(RouteRoles.AuthorHead);
-        Step(RouteRoles.AuthorCurator);
+        // Инициирующее подразделение заявки в контексте маршрута — это TargetUnit
+        // (BuildContextAsync берёт ProcurementRequest.InitiatorUnitId), поэтому первые
+        // два этапа — руководитель и куратор именно инициирующего подразделения.
+        Step(RouteRoles.TargetUnitHead);
+        Step(RouteRoles.TargetUnitCurator);
         if (adminId is { } a)
             Step($"{RouteRoles.UnitHeadPrefix}{a}", condition: ProcurementRouteConditions.HouseholdGoods);
         Step($"{RouteRoles.UnitHeadPrefix}{budgetId}");
