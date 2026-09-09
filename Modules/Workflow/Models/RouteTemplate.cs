@@ -15,6 +15,13 @@ public class RouteTemplate
     /// <summary>Глобальное правило: авто-включение обязательных согласующих (TID-03).</summary>
     public bool IsGlobalRule { get; set; }
 
+    /// <summary>
+    /// Подразделение-инициатор, для которого действует шаблон. null — шаблон уровня типа
+    /// (действует для всех подразделений). Селектор выбирает шаблон по (тип + подразделение),
+    /// с откатом на шаблон уровня типа, если для подразделения своего нет.
+    /// </summary>
+    public int? OrgUnitId { get; set; }
+
     public ICollection<RouteTemplateStep> Steps { get; set; } = new List<RouteTemplateStep>();
 }
 
