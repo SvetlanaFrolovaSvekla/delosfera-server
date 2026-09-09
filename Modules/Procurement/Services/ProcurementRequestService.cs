@@ -22,7 +22,7 @@ public interface IProcurementRequestService
 
     /// <summary>Удалить черновик заявки — только автору и только до отправки.</summary>
     Task DeleteAsync(int id, int actorUserId);
-    Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId);
+    Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId, IReadOnlyList<int>? extraApproverUserIds = null);
 
     /// <summary>Отозвать заявку с согласования — право инициатора.</summary>
     Task<ProcurementCardDto> WithdrawAsync(int id, string reason, int actorUserId);
@@ -443,7 +443,7 @@ public class ProcurementRequestService : IProcurementRequestService
             new {entity.Subject});
     }
 
-    public async Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId)
+    public async Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId, IReadOnlyList<int>? extraApproverUserIds = null)
     {
         var entity = await LoadAsync(id);
         var card = await BuildCardAsync(entity);
@@ -462,7 +462,7 @@ public class ProcurementRequestService : IProcurementRequestService
 
         // Маршрут строится до смены статуса: если согласующих определить не удалось,
         // заявка должна остаться черновиком, а не повиснуть «на согласовании» без задач.
-        var route = await _routes.StartAsync(entity, actorUserId);
+        var route = await _routes.StartAsync(entity, actorUserId, extraApproverUserIds);
         entity.Document.CurrentRouteInstanceId = route.Id;
 
         await _documents.ChangeStatusAsync(entity.DocumentId, ProcurementStatus.OnApproval, actorUserId);

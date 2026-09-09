@@ -9,8 +9,13 @@ namespace delosfera_server.Modules.Procurement.Services;
 
 public interface IProcurementRouteService
 {
-    /// <summary>Построить и запустить маршрут согласования заявки (PRC-08).</summary>
-    Task<RouteInstance> StartAsync(ProcurementRequest request, int actorUserId);
+    /// <summary>
+    /// Построить и запустить маршрут согласования заявки (PRC-08).
+    /// extraApproverUserIds — дополнительные согласующие, которых инициатор добавил
+    /// сверх автоподобранной цепочки; идут отдельными этапами в конце.
+    /// </summary>
+    Task<RouteInstance> StartAsync(
+        ProcurementRequest request, int actorUserId, IReadOnlyList<int>? extraApproverUserIds = null);
 }
 
 /// <summary>
@@ -65,7 +70,8 @@ public class ProcurementRouteService : IProcurementRouteService
         _templates = templates;
     }
 
-    public async Task<RouteInstance> StartAsync(ProcurementRequest request, int actorUserId)
+    public async Task<RouteInstance> StartAsync(
+        ProcurementRequest request, int actorUserId, IReadOnlyList<int>? extraApproverUserIds = null)
     {
         // Единый конструктор: если для закупки настроен шаблон (уровня типа или под
         // инициирующее подразделение) — маршрут строится из него. Условные этапы
@@ -85,6 +91,7 @@ public class ProcurementRouteService : IProcurementRouteService
 
             var fromTemplate = await _engine.InstantiateFromTemplateAsync(
                 request.DocumentId, template.Id, conditions);
+            await AppendExtraApproversAsync(fromTemplate, extraApproverUserIds);
             await _engine.StartAsync(fromTemplate.Id, actorUserId);
             return fromTemplate;
         }
@@ -163,8 +170,48 @@ public class ProcurementRouteService : IProcurementRouteService
         _db.RouteInstances.Add(instance);
         await _db.SaveChangesAsync();
 
+        await AppendExtraApproversAsync(instance, extraApproverUserIds);
         await _engine.StartAsync(instance.Id, actorUserId);
         return instance;
+    }
+
+    /// <summary>
+    /// Дополнительные согласующие инициатора: каждый — отдельным этапом в конце
+    /// маршрута. Пропускаем несуществующих и уже присутствующих в маршруте, чтобы не
+    /// задвоить. Обязательный (автоподобранный) состав не трогаем — только добавляем.
+    /// </summary>
+    private async Task AppendExtraApproversAsync(RouteInstance instance, IReadOnlyList<int>? extraApproverUserIds)
+    {
+        if (extraApproverUserIds is null || extraApproverUserIds.Count == 0) return;
+
+        var already = instance.Steps
+            .SelectMany(s => s.Participants)
+            .Where(p => p.UserId is not null)
+            .Select(p => p.UserId!.Value)
+            .ToHashSet();
+
+        var wanted = extraApproverUserIds.Distinct().Where(id => !already.Contains(id)).ToList();
+        if (wanted.Count == 0) return;
+
+        var valid = await _db.Users.Where(u => wanted.Contains(u.Id)).Select(u => u.Id).ToListAsync();
+        var order = instance.Steps.Count == 0 ? 1 : instance.Steps.Max(s => s.Order) + 1;
+
+        foreach (var userId in valid)
+        {
+            instance.Steps.Add(new RouteStep
+            {
+                Order = order++,
+                Mode = StepMode.Sequential,
+                Kind = StepKind.Approval,
+                TimeNormHours = StepTimeNormHours,
+                Participants =
+                [
+                    new RouteParticipant { UserId = userId, Required = true, State = ParticipantState.Pending },
+                ],
+            });
+        }
+
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>

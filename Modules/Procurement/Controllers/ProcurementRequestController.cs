@@ -10,6 +10,9 @@ namespace delosfera_server.Modules.Procurement.Controllers;
 /// <summary>Обоснование отзыва: почему заявку забрали с согласования.</summary>
 public record WithdrawRequest(string Reason);
 
+/// <summary>Отправка на согласование. extraApproverUserIds — доп. согласующие сверх автоцепочки.</summary>
+public record SubmitProcurementRequest(List<int>? ExtraApproverUserIds = null);
+
 /// <summary>
 /// Реестр заявок на закупку (PRC-01/03): поиск, счётчики, создание мастером,
 /// отправка на согласование.
@@ -78,8 +81,8 @@ public class ProcurementRequestController : ControllerBase
     }
 
     [HttpPost("requests/{id:int}/submit")]
-    public async Task<IActionResult> Submit(int id) =>
-        await Run(() => _requests.SubmitAsync(id, _currentUser.UserId));
+    public async Task<IActionResult> Submit(int id, [FromBody] SubmitProcurementRequest? request = null) =>
+        await Run(() => _requests.SubmitAsync(id, _currentUser.UserId, request?.ExtraApproverUserIds));
 
     /// <summary>Отозвать заявку с согласования — право инициатора.</summary>
     [HttpPost("requests/{id:int}/withdraw")]
