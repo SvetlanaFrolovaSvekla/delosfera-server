@@ -59,7 +59,7 @@ public class WorkflowController : ControllerBase
             q = q.Where(t => t.DocumentType == dt);
 
         var items = await q
-            .Select(t => new { t.Id, t.Name, documentType = t.DocumentType.ToString(), t.IsGlobalRule })
+            .Select(t => new { t.Id, t.Name, documentType = t.DocumentType.ToString(), t.IsGlobalRule, t.OrgUnitId })
             .ToListAsync();
         return Ok(items);
     }
@@ -74,6 +74,7 @@ public class WorkflowController : ControllerBase
             DocumentType = req.DocumentType,
             Name = req.Name,
             IsGlobalRule = req.IsGlobalRule,
+            OrgUnitId = req.OrgUnitId,
             Steps = req.Steps.Select(s => new RouteTemplateStep
             {
                 Order = s.Order,
@@ -81,6 +82,7 @@ public class WorkflowController : ControllerBase
                 Kind = s.Kind,
                 IsFinalMethodology = s.IsFinalMethodology,
                 TimeNormHours = s.TimeNormHours,
+                Condition = s.Condition,
                 RequiredSignatureLevel = s.RequiredSignatureLevel,
                 Participants = s.Participants.Select(p => new RouteTemplateParticipant
                 {
@@ -121,12 +123,19 @@ public class WorkflowController : ControllerBase
 
         if (tpl is null) return NotFound(new {message = "Шаблон маршрута не найден"});
 
+        var orgUnitTitle = tpl.OrgUnitId is { } ouId
+            ? await _db.OrganizationUnits.AsNoTracking()
+                .Where(u => u.Id == ouId).Select(u => u.TitleRu).FirstOrDefaultAsync(ct)
+            : null;
+
         return Ok(new RouteTemplateResponse
         {
             Id = tpl.Id,
             Name = tpl.Name,
             DocumentType = tpl.DocumentType.ToString(),
             IsGlobalRule = tpl.IsGlobalRule,
+            OrgUnitId = tpl.OrgUnitId,
+            OrgUnitTitle = orgUnitTitle,
             Steps = tpl.Steps.OrderBy(s => s.Order).Select(s => new RouteTemplateStepResponse
             {
                 Id = s.Id,
@@ -135,6 +144,7 @@ public class WorkflowController : ControllerBase
                 Kind = s.Kind.ToString(),
                 IsFinalMethodology = s.IsFinalMethodology,
                 TimeNormHours = s.TimeNormHours,
+                Condition = s.Condition,
                 ParticipantCount = s.Participants.Count,
                 Participants = s.Participants.Select(p => new TemplateParticipantResponse
                 {
@@ -186,6 +196,7 @@ public class WorkflowController : ControllerBase
         tpl.Name = req.Name.Trim();
         tpl.DocumentType = req.DocumentType;
         tpl.IsGlobalRule = req.IsGlobalRule;
+        tpl.OrgUnitId = req.OrgUnitId;
 
         _db.RouteTemplateSteps.RemoveRange(tpl.Steps);
 
@@ -196,6 +207,7 @@ public class WorkflowController : ControllerBase
             Kind = s.Kind,
             IsFinalMethodology = s.IsFinalMethodology,
             TimeNormHours = s.TimeNormHours,
+            Condition = s.Condition,
             RequiredSignatureLevel = s.RequiredSignatureLevel,
             Participants = s.Participants.Select(p => new RouteTemplateParticipant
             {

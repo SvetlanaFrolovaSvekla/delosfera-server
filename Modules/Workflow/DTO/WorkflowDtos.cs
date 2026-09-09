@@ -10,6 +10,10 @@ public class CreateRouteTemplateRequest
     public DocumentType DocumentType { get; set; }
     public required string Name { get; set; }
     public bool IsGlobalRule { get; set; }
+
+    /// <summary>Подразделение-инициатор шаблона; null — шаблон уровня типа (все подразделения).</summary>
+    public int? OrgUnitId { get; set; }
+
     public List<TemplateStepDto> Steps { get; set; } = [];
 }
 
@@ -20,6 +24,9 @@ public class TemplateStepDto
     public StepKind Kind { get; set; }
     public bool IsFinalMethodology { get; set; }
     public int? TimeNormHours { get; set; }
+
+    /// <summary>Условие включения этапа (null — всегда). Контур передаёт выполненные условия.</summary>
+    public string? Condition { get; set; }
 
     /// <summary>
     /// Чем закрывается этап: простой подписью, квалифицированной или ничем.
@@ -157,6 +164,8 @@ public class RouteTemplateResponse
     public required string Name { get; set; }
     public required string DocumentType { get; set; }
     public bool IsGlobalRule { get; set; }
+    public int? OrgUnitId { get; set; }
+    public string? OrgUnitTitle { get; set; }
     public List<RouteTemplateStepResponse> Steps { get; set; } = [];
 }
 
@@ -168,6 +177,7 @@ public class RouteTemplateStepResponse
     public required string Kind { get; set; }
     public bool IsFinalMethodology { get; set; }
     public int? TimeNormHours { get; set; }
+    public string? Condition { get; set; }
     public int ParticipantCount { get; set; }
 
     /// <summary>
