@@ -285,6 +285,10 @@ using (var scope = app.Services.CreateScope())
     // существующими регистрационными номерами. Идемпотентно.
     await delosfera_server.Modules.Documents.Services.NumeratorSeeder.SeedAsync(db);
 
+    // Глобальный шаблон маршрута закупки из прежней цепочки (единый конструктор
+    // согласующих). Идемпотентно: если шаблон уже есть — не трогает.
+    await delosfera_server.Modules.Procurement.Services.ProcurementRouteTemplateSeeder.SeedAsync(db);
+
     // Пароль администратору выдаётся только так — из настройки, не из хеша в коде.
     // Блок находит уже заведённую учётную запись и ставит ей пароль; новых он не
     // создаёт. Учётные записи приходят из справочника банка, и завести здесь ещё

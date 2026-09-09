@@ -74,12 +74,21 @@ public class RouteEngine : IRouteEngine
                     .ThenInclude(p => p.Resolution)
                         .ThenInclude(r => r!.Remarks);
 
-    public async Task<RouteInstance> InstantiateFromTemplateAsync(int documentId, int templateId)
+    public async Task<RouteInstance> InstantiateFromTemplateAsync(
+        int documentId, int templateId, IReadOnlySet<string>? satisfiedConditions = null)
     {
         var tpl = await _db.RouteTemplates
             .Include(t => t.Steps.OrderBy(s => s.Order)).ThenInclude(s => s.Participants)
             .FirstOrDefaultAsync(t => t.Id == templateId)
             ?? throw new KeyNotFoundException($"Шаблон маршрута id={templateId} не найден");
+
+        // Условные этапы: без условия — всегда, с условием — только если контур передал
+        // это условие как выполненное (например household-goods, board-authority).
+        var steps = tpl.Steps
+            .Where(s => s.Condition is null
+                        || (satisfiedConditions is not null && satisfiedConditions.Contains(s.Condition)))
+            .OrderBy(s => s.Order)
+            .ToList();
 
         // Роли шаблона превращаются в людей здесь, на запуске маршрута. Раньше
         // роль копировалась в участника как есть и человеком не становилась
@@ -89,7 +98,7 @@ public class RouteEngine : IRouteEngine
         var resolved = new Dictionary<int, int?>();
         var unresolved = new List<string>();
 
-        foreach (var participant in tpl.Steps.SelectMany(s => s.Participants))
+        foreach (var participant in steps.SelectMany(s => s.Participants))
         {
             if (participant.UserId is not null) continue;
 
@@ -120,7 +129,7 @@ public class RouteEngine : IRouteEngine
             DocumentId = documentId,
             TemplateId = templateId,
             Status = RouteInstanceStatus.Draft,
-            Steps = tpl.Steps.Select(ts => new RouteStep
+            Steps = steps.Select(ts => new RouteStep
             {
                 Order = ts.Order,
                 Mode = ts.Mode,

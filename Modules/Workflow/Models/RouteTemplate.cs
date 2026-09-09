@@ -39,6 +39,15 @@ public class RouteTemplateStep
     public bool IsFinalMethodology { get; set; }
     public int? TimeNormHours { get; set; }
 
+    /// <summary>
+    /// Условие включения этапа. null — этап включается всегда. Иначе этап попадает в
+    /// маршрут только если строка условия есть в наборе, который контур передаёт при
+    /// инстанцировании (у контура есть данные документа для его вычисления). Так один
+    /// шаблон описывает и обязательные, и условные этапы (например «Вынесение на
+    /// Правление» — только при соответствующем пороге полномочий).
+    /// </summary>
+    public string? Condition { get; set; }
+
     /// <summary>Требуемый уровень подписи на этапе (SIG-04); переносится в маршрут при создании.</summary>
     public Signing.Models.SignatureLevel? RequiredSignatureLevel { get; set; }
 
