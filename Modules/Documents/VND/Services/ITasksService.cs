@@ -21,4 +21,14 @@ public interface ITasksService
 
     /// <summary>Сводка персональных KPI для карточек на главной странице</summary>
     Task<VndHomeSummaryResponse> GetHomeSummaryAsync(int userId);
+
+    // --- История "Выполнено" по каждому разделу — с пагинацией, т.к. список может расти
+    // без ограничения по времени (см. TasksService для точного критерия "выполнено" в каждом
+    // случае: решение принято / актуализация выполнена / документ опубликован / отправлено
+    // повторно после отклонения).
+    Task<PagedResult<VndTaskResponse>> GetCoordinationDoneTasksAsync(int userId, int page, int pageSize);
+    Task<PagedResult<VndTaskResponse>> GetMyVndApprovalDoneTasksAsync(int userId, int page, int pageSize);
+    Task<PagedResult<VndTaskResponse>> GetActualizationDoneTasksAsync(int userId, int page, int pageSize);
+    Task<PagedResult<VndTaskResponse>> GetConsolidationDoneTasksAsync(int userId, int page, int pageSize);
+    Task<PagedResult<VndTaskResponse>> GetRejectedDoneTasksAsync(int userId, int page, int pageSize);
 }

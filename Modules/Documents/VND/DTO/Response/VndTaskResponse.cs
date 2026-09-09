@@ -66,4 +66,15 @@ public class VndTaskResponse
     public string? RejectionComment { get; set; }
 
     public DateTime CreatedAt { get; set; }
+
+    // --- Только для карточек из вкладки "Выполнено" (см. TasksService.Get*DoneTasksAsync) ---
+    /// <summary>true для задач из истории "Выполнено" — на фронте вместо обратного отсчёта до
+    /// дедлайна показывается дата завершения (CompletedAt), и такие карточки не попадают в
+    /// счётчики текущих ("активных") задач.</summary>
+    public bool IsCompleted { get; set; }
+
+    /// <summary>Когда задача перешла в разряд выполненных — момент решения (coordination),
+    /// публикации (myVndApproval/consolidation), выполнения актуализации (actualization) или
+    /// повторной отправки редакции (rejected). Заполняется только при IsCompleted == true.</summary>
+    public DateTime? CompletedAt { get; set; }
 }

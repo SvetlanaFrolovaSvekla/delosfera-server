@@ -48,6 +48,34 @@ public class TasksController : ControllerBase
     public async Task<ActionResult<VndTaskCountsResponse>> GetCounts() =>
         Ok(await _service.GetCountsAsync(_currentUser.UserId));
 
+    // --- История "Выполнено" по каждому разделу — см. TasksService для точного критерия
+    // "выполнено" в каждом случае. page — с единицы, pageSize ограничен 1..100.
+
+    [HttpGet("coordination/done")]
+    public async Task<ActionResult<PagedResult<VndTaskResponse>>> GetCoordinationDone(
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
+        Ok(await _service.GetCoordinationDoneTasksAsync(_currentUser.UserId, page, pageSize));
+
+    [HttpGet("my-vnd-approval/done")]
+    public async Task<ActionResult<PagedResult<VndTaskResponse>>> GetMyVndApprovalDone(
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
+        Ok(await _service.GetMyVndApprovalDoneTasksAsync(_currentUser.UserId, page, pageSize));
+
+    [HttpGet("actualization/done")]
+    public async Task<ActionResult<PagedResult<VndTaskResponse>>> GetActualizationDone(
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
+        Ok(await _service.GetActualizationDoneTasksAsync(_currentUser.UserId, page, pageSize));
+
+    [HttpGet("consolidation/done")]
+    public async Task<ActionResult<PagedResult<VndTaskResponse>>> GetConsolidationDone(
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
+        Ok(await _service.GetConsolidationDoneTasksAsync(_currentUser.UserId, page, pageSize));
+
+    [HttpGet("rejected/done")]
+    public async Task<ActionResult<PagedResult<VndTaskResponse>>> GetRejectedDone(
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
+        Ok(await _service.GetRejectedDoneTasksAsync(_currentUser.UserId, page, pageSize));
+
     /// <summary>Персональные KPI для карточек на главной странице</summary>
     [HttpGet("home-summary")]
     [ProducesResponseType(typeof(VndHomeSummaryResponse), StatusCodes.Status200OK)]
