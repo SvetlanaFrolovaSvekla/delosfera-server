@@ -89,7 +89,7 @@ public class ProcurementRouteUnitLookupTests
         var engine = new RouteEngine(
             db, audit, [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
 
-        var instance = await new ProcurementRouteService(db, engine).StartAsync(request, автор);
+        var instance = await new ProcurementRouteService(db, engine, new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db)).StartAsync(request, автор);
 
         return await db.RouteSteps
             .Where(s => s.RouteInstanceId == instance.Id)

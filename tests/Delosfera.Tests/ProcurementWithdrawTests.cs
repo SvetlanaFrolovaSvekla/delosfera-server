@@ -126,7 +126,7 @@ public class ProcurementWithdrawTests
 
         return new ProcurementRequestService(
             db, documents, audit, new AuthorityMatrixService(db, new AuditService(db)),
-            new ProcurementRouteService(db, engine), engine, new BankClock());
+            new ProcurementRouteService(db, engine, new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db)), engine, new BankClock());
     }
 
     private static async Task<string> СтатусАsync(DelosferaDbContext db, int documentId) =>

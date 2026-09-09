@@ -21,7 +21,8 @@ public class VndServiceTests
                 db, new NoopFileStorage(), new NoopNotificationService(),
                 new FakeCurrentUser(currentUserId, perms),
                 NullLogger<VndApprovalService>.Instance, new FakeActivityLog(),
-                new ApprovalSheetGenerator(), new FixedApprovalUnitResolver(db)));
+                new ApprovalSheetGenerator(), new FixedApprovalUnitResolver(db)),
+            new delosfera_server.Modules.Documents.Services.NumeratorService(db));
 
     private static VndDocument SeedVnd(DelosferaDbContext db, VndStatus status) =>
         TestSupport.SeedVnd(db, status, Creator);

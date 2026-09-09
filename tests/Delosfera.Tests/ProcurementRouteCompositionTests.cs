@@ -92,7 +92,7 @@ public class ProcurementRouteCompositionTests
     {
         var audit = new AuditService(db);
         var engine = new RouteEngine(db, audit, [], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
-        var service = new ProcurementRouteService(db, engine);
+        var service = new ProcurementRouteService(db, engine, new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db));
 
         var request = await db.ProcurementRequests.FirstAsync(r => r.Id == стенд.RequestId);
         var instance = await service.StartAsync(request, стенд.Actor);

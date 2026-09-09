@@ -64,7 +64,7 @@ public class TenderOpenBidsTests
     private sealed record Стенд(int TenderId, int Actor);
 
     private static ITenderService Сервис(DelosferaDbContext db, DateOnly today) =>
-        new TenderService(db, new AuditService(db), new FixedClock(today));
+        new TenderService(db, new AuditService(db), new FixedClock(today), new delosfera_server.Modules.Documents.Services.NumeratorService(db));
 
     private static async Task<Стенд> SeedAsync(DelosferaDbContext db, DateOnly deadline)
     {

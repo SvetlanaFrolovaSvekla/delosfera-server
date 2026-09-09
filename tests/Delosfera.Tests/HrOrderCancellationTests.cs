@@ -100,7 +100,7 @@ public class HrOrderCancellationTests
             new AcknowledgementService(
                 db, new FakeSignatures(), new SilentNotifications(), audit,
                 NullLogger<AcknowledgementService>.Instance),
-            new NoopFileStorage());
+            new NoopFileStorage(), audit, new delosfera_server.Modules.Documents.Services.NumeratorService(db));
     }
 
     private static async Task<Стенд> SeedAsync(DelosferaDbContext db)
