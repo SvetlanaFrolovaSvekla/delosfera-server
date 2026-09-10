@@ -89,6 +89,11 @@ public class ProcurementRequestController : ControllerBase
     public async Task<IActionResult> Withdraw(int id, [FromBody] WithdrawRequest request) =>
         await Run(() => _requests.WithdrawAsync(id, request.Reason, _currentUser.UserId));
 
+    /// <summary>Закрыть закупку без договора (мелкая закупка, раздел VII Положения).</summary>
+    [HttpPost("requests/{id:int}/complete-without-contract")]
+    public async Task<IActionResult> CompleteWithoutContract(int id) =>
+        await Run(() => _requests.CompleteWithoutContractAsync(id, _currentUser.UserId));
+
     private async Task<IActionResult> Run<T>(Func<Task<T>> action)
     {
         try

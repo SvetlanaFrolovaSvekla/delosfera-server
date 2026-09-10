@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Models;
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
+using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Procurement.DTO;
@@ -26,6 +28,7 @@ public interface IProcurementRequestService
 
     /// <summary>Отозвать заявку с согласования — право инициатора.</summary>
     Task<ProcurementCardDto> WithdrawAsync(int id, string reason, int actorUserId);
+    Task<ProcurementCardDto> CompleteWithoutContractAsync(int id, int actorUserId);
 }
 
 /// <summary>
@@ -49,11 +52,12 @@ public class ProcurementRequestService : IProcurementRequestService
     private readonly IProcurementRouteService _routes;
     private readonly IRouteEngine _routeEngine;
     private readonly IBankClock _clock;
+    private readonly ICurrentUserService _currentUser;
 
     public ProcurementRequestService(
         DelosferaDbContext db, IDocumentService documents, IAuditService audit,
         IAuthorityMatrixService matrix, IProcurementRouteService routes,
-        IRouteEngine routeEngine, IBankClock clock)
+        IRouteEngine routeEngine, IBankClock clock, ICurrentUserService currentUser)
     {
         _db = db;
         _documents = documents;
@@ -62,12 +66,26 @@ public class ProcurementRequestService : IProcurementRequestService
         _routes = routes;
         _routeEngine = routeEngine;
         _clock = clock;
+        _currentUser = currentUser;
     }
+
+    /// <summary>
+    /// Видит ли текущий пользователь чужие заявки. Право ViewAllProcurements есть у
+    /// Сектора закупок, УПиА, секретаря комиссии и администратора — тех, кто заявки
+    /// обрабатывает. Инициатор видит только свои; согласующие получают заявку в задачи
+    /// через маршрут, а не через общий реестр.
+    /// </summary>
+    private bool SeesAllRequests => _currentUser.HasPermission(PermissionCode.ViewAllProcurements);
+
+    private IQueryable<ProcurementRequest> RestrictVisibility(IQueryable<ProcurementRequest> q, int currentUserId) =>
+        SeesAllRequests ? q : q.Where(r => r.Document!.AuthorId == currentUserId);
 
     public async Task<PagedResult<ProcurementListItemDto>> SearchAsync(
         ProcurementSearchRequest request, int currentUserId)
     {
-        var q = BaseQuery();
+        // Реестр заявок закрыт: без права ViewAllProcurements видны только свои — раньше
+        // Search отдавал все заявки банка любому вошедшему.
+        var q = RestrictVisibility(BaseQuery(), currentUserId);
 
         if (!string.IsNullOrWhiteSpace(request.Query))
         {
@@ -130,7 +148,7 @@ public class ProcurementRequestService : IProcurementRequestService
 
     public async Task<ProcurementCountersDto> CountersAsync(int currentUserId)
     {
-        var byStatus = await BaseQuery()
+        var byStatus = await RestrictVisibility(BaseQuery(), currentUserId)
             .GroupBy(r => r.Document!.StatusCode)
             .Select(g => new {Status = g.Key, Count = g.Count()})
             .ToDictionaryAsync(x => x.Status, x => x.Count);
@@ -153,6 +171,12 @@ public class ProcurementRequestService : IProcurementRequestService
     public async Task<ProcurementCardDto> GetAsync(int id)
     {
         var r = await LoadAsync(id);
+
+        // Карточку чужой заявки без права ViewAllProcurements не отдаём — иначе реестр
+        // закрыт, а прямой переход по id открывал бы любую заявку.
+        if (!SeesAllRequests && r.Document!.AuthorId != _currentUser.UserId)
+            throw new UnauthorizedAccessException("Заявка на закупку доступна только автору и Сектору закупок");
+
         return await BuildCardAsync(r);
     }
 
@@ -530,6 +554,56 @@ public class ProcurementRequestService : IProcurementRequestService
         return await BuildCardAsync(await LoadAsync(id));
     }
 
+    /// <summary>
+    /// Завершить закупку без заключения договора.
+    ///
+    /// Мелкая закупка договора не требует (раздел VII Положения): согласованной
+    /// заявки достаточно, товар получают и закупку закрывают. Но завершалась
+    /// закупка только через исполнение договора (ContractService) — для беспороговых
+    /// закупок договора не возникало, и заявка «в закупке» висела вечно, а счётчик
+    /// завершённых по ним стоял на нуле. Здесь инициатор или Сектор закупок
+    /// подтверждает, что потребность закрыта, и заявка переходит в «Исполнена».
+    /// </summary>
+    public async Task<ProcurementCardDto> CompleteWithoutContractAsync(int id, int actorUserId)
+    {
+        var entity = await LoadAsync(id);
+
+        // Закрыть закупку вправе инициатор (получил товар) либо Сектор закупок.
+        if (!SeesAllRequests && entity.Document!.AuthorId != actorUserId)
+            throw new UnauthorizedAccessException(
+                "Закрыть закупку может её инициатор или Сектор закупок");
+
+        // Без договора закрывается только закупка, реально находящаяся в работе.
+        if (entity.Document!.StatusCode != ProcurementStatus.InProcurement)
+            throw new InvalidOperationException("Без договора завершается закупка, находящаяся в работе");
+
+        // Похожие закупки при InProcurement карточка уже не ищет — для решения о
+        // дроблении (п. 10.3) считаем их явно, чтобы не закрыть без договора то,
+        // что по Положению его требует.
+        var similar = await FindSimilarAsync(entity);
+        var решение = await РешениеОДоговореАsync(entity, similar.Count > 0);
+
+        if (решение.Required)
+            throw new InvalidOperationException(
+                $"По этой закупке требуется договор ({решение.Reason}) — " +
+                "закрытие идёт через исполнение договора");
+
+        // Если договор всё же заведён — закрывается он, а не заявка напрямую.
+        var hasContract = await _db.ProcurementContracts
+            .AnyAsync(c => c.RequestId == entity.Id && c.Status != ContractStatus.Terminated);
+        if (hasContract)
+            throw new InvalidOperationException(
+                "По закупке заведён договор — закрытие идёт через его исполнение");
+
+        await _documents.ChangeStatusAsync(entity.DocumentId, ProcurementStatus.Completed, actorUserId);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("ProcurementRequest", entity.Id, "CompletedWithoutContract", actorUserId,
+            new {reason = решение.Reason});
+
+        return await BuildCardAsync(await LoadAsync(id));
+    }
+
     private IQueryable<ProcurementRequest> BaseQuery() =>
         _db.ProcurementRequests
             .Include(r => r.Document).ThenInclude(d => d!.Author)
@@ -635,21 +709,31 @@ public class ProcurementRequestService : IProcurementRequestService
     /// </summary>
     private async Task ЗаполнитьРешениеОДоговореАsync(ProcurementCardDto card, ProcurementRequest r)
     {
+        var решение = await РешениеОДоговореАsync(r, card.SimilarRequests.Count > 0);
+        card.ContractRequired = решение.Required;
+        card.ContractRequirementReason = решение.Reason;
+    }
+
+    /// <summary>
+    /// Решение «нужен ли договор» по заявке. Вынесено из заполнения карточки, чтобы
+    /// тем же правилом пользовалось закрытие закупки без договора: карточка при
+    /// InProcurement похожих закупок уже не ищет, а для решения о дроблении их надо
+    /// учесть — поэтому признак передаётся явно.
+    /// </summary>
+    private async Task<ContractDecision> РешениеОДоговореАsync(ProcurementRequest r, bool hasRecentSimilar)
+    {
         var нерезидент = await _db.ProcurementContracts
             .Where(c => c.RequestId == r.Id)
             .Select(c => c.Supplier!.IsNonResident)
             .FirstOrDefaultAsync();
 
-        var решение = ContractRequirement.Decide(
+        return ContractRequirement.Decide(
             r.SubjectKind,
             r.Amount,
             supplierIsNonResident: нерезидент,
-            hasRecentSimilar: card.SimilarRequests.Count > 0,
+            hasRecentSimilar: hasRecentSimilar,
             goodsThreshold: await ПараметрАsync(ContractRequirement.GoodsThresholdCode),
             worksThreshold: await ПараметрАsync(ContractRequirement.WorksThresholdCode));
-
-        card.ContractRequired = решение.Required;
-        card.ContractRequirementReason = решение.Reason;
     }
 
     private async Task<decimal?> ПараметрАsync(string code) =>

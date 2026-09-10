@@ -1,4 +1,5 @@
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
@@ -109,11 +110,69 @@ public class ProcurementWithdrawTests
         Assert.Equal(ProcurementStatus.Draft, await СтатусАsync(db, стенд.DocumentId));
     }
 
+    // ── закрытие закупки без договора (тупик InProcurement) ────────────────────
+
+    [Fact]
+    public async Task Мелкая_закупка_закрывается_без_договора()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        // 45 000 сом за товары — ниже порога (50 000), договор не требуется.
+        var стенд = await SeedAsync(db, ProcurementStatus.InProcurement);
+
+        await Заявки(db).CompleteWithoutContractAsync(стенд.RequestId, стенд.Author);
+
+        // Раньше заявка без договора висела в «в закупке» навсегда; теперь закрывается.
+        Assert.Equal(ProcurementStatus.Completed, await СтатусАsync(db, стенд.DocumentId));
+    }
+
+    [Fact]
+    public async Task Закупка_с_договором_без_договора_не_закрыть()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        // 200 000 сом за товары — выше порога: по Положению нужен договор.
+        var стенд = await SeedAsync(db, ProcurementStatus.InProcurement, amount: 200_000m);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Заявки(db).CompleteWithoutContractAsync(стенд.RequestId, стенд.Author));
+
+        Assert.Equal(ProcurementStatus.InProcurement, await СтатусАsync(db, стенд.DocumentId));
+    }
+
+    [Fact]
+    public async Task Закрыть_можно_только_закупку_в_работе()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db); // OnApproval
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Заявки(db).CompleteWithoutContractAsync(стенд.RequestId, стенд.Author));
+    }
+
+    [Fact]
+    public async Task Чужую_закупку_без_права_не_закрыть()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db, ProcurementStatus.InProcurement);
+        var посторонний = await ПользовательАsync(db, "Посторонний");
+
+        // Текущий пользователь — посторонний без права «видеть все заявки».
+        var заявки = Заявки(db, new FakeCurrentUser(посторонний));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => заявки.CompleteWithoutContractAsync(стенд.RequestId, посторонний));
+
+        Assert.Equal(ProcurementStatus.InProcurement, await СтатусАsync(db, стенд.DocumentId));
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private sealed record Стенд(int RequestId, int DocumentId, int RouteId, int Author);
 
-    private static IProcurementRequestService Заявки(DelosferaDbContext db)
+    // По умолчанию текущий пользователь — Сектор закупок (видит все заявки): отзыв
+    // проверяет автора по actorUserId, а не по текущему пользователю. Где важен сам
+    // контроль доступа (закрытие без договора), тест задаёт currentUser явно.
+    private static IProcurementRequestService Заявки(
+        DelosferaDbContext db, ICurrentUserService? currentUser = null)
     {
         var audit = new AuditService(db);
         var documents = new DocumentService(db, audit, new NumeratorService(db));
@@ -126,7 +185,8 @@ public class ProcurementWithdrawTests
 
         return new ProcurementRequestService(
             db, documents, audit, new AuthorityMatrixService(db, new AuditService(db)),
-            new ProcurementRouteService(db, engine, new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db)), engine, new BankClock());
+            new ProcurementRouteService(db, engine, new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db)), engine, new BankClock(),
+            currentUser ?? new FakeCurrentUser(0, PermissionCode.ViewAllProcurements));
     }
 
     private static async Task<string> СтатусАsync(DelosferaDbContext db, int documentId) =>
@@ -151,7 +211,7 @@ public class ProcurementWithdrawTests
     }
 
     private static async Task<Стенд> SeedAsync(
-        DelosferaDbContext db, string status = ProcurementStatus.OnApproval)
+        DelosferaDbContext db, string status = ProcurementStatus.OnApproval, decimal amount = 45_000m)
     {
         var автор = await ПользовательАsync(db, "Инициатор закупки");
         var method = await db.ProcurementMethods.AsNoTracking().FirstAsync();
@@ -178,7 +238,7 @@ public class ProcurementWithdrawTests
             DocumentId = doc.Id,
             Subject = "Мониторы",
             SubjectKind = ProcurementSubjectKind.Goods,
-            Amount = 45_000m,
+            Amount = amount,
             MethodId = method.Id,
         });
         await db.SaveChangesAsync();
