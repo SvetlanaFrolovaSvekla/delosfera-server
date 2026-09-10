@@ -23,6 +23,12 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
     /// <summary>Тип задачи адресата — по нему её находят и закрывают при решении.</summary>
     public const string AddresseeDecisionTask = "AddresseeDecision";
 
+    /// <summary>
+    /// Тип задачи автору на устранение замечаний — по нему её находят и закрывают,
+    /// когда записка снова уходит на согласование.
+    /// </summary>
+    public const string RemarksResolutionTask = "RemarksResolution";
+
     private readonly DelosferaDbContext _db;
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
@@ -106,6 +112,66 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
             await NotifyAddresseeAsync(sz, actorUserId);
         }
 
+        // Возврат на доработку — это работа автора: записка должна попасть в его
+        // список задач, а не только в уведомления. Задача снимается, когда записка
+        // уходит с доработки (повторное согласование, отзыв, брак).
+        if (status == SzStatus.OnRevision)
+            await CreateRevisionTaskAsync(sz);
+        else
+            await CloseRevisionTaskAsync(sz.DocumentId);
+    }
+
+    /// <summary>
+    /// Задача автору на устранение замечаний в общий список задач. Одного уведомления
+    /// мало: вернувшаяся записка иначе не видна автору среди задач, и по списку не
+    /// понять, что он кому-то должен доработку.
+    /// </summary>
+    public async Task CreateRevisionTaskAsync(SzDocument sz)
+    {
+        var exists = await _db.WorkflowTasks.AnyAsync(t =>
+            t.DocumentId == sz.DocumentId
+            && t.Type == RemarksResolutionTask
+            && t.State == WorkflowTaskState.Open);
+
+        // Повторный возврат на доработку приводит сюда снова — второй такой же задачи
+        // быть не должно.
+        if (exists) return;
+
+        _db.WorkflowTasks.Add(new WorkflowTask
+        {
+            DocumentId = sz.DocumentId,
+            SourceEntityId = sz.Id,
+            AssigneeUserId = sz.Document!.AuthorId,
+            Type = RemarksResolutionTask,
+            // Срок доработки — срок исполнения записки: доработка и есть то, без чего
+            // её нельзя двигать дальше.
+            DueAt = sz.DueDate?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+            State = WorkflowTaskState.Open,
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        await _db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Снимает задачу на доработку, когда записка ушла с доработки: повторно отправлена
+    /// на согласование, отозвана или забракована. Без этого доработка висела бы в
+    /// задачах автора и после того, как он её уже сдал.
+    /// </summary>
+    public async Task CloseRevisionTaskAsync(int documentId)
+    {
+        var open = await _db.WorkflowTasks
+            .Where(t => t.DocumentId == documentId
+                        && t.Type == RemarksResolutionTask
+                        && t.State == WorkflowTaskState.Open)
+            .ToListAsync();
+
+        if (open.Count == 0) return;
+
+        foreach (var task in open)
+            task.State = WorkflowTaskState.Done;
+
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>

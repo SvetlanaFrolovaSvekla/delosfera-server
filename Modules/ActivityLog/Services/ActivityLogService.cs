@@ -29,20 +29,94 @@ public class ActivityLogService : IActivityLogService
         });
     }
 
-    // Получение последних записей журнала активности
+    /// <summary>Иконки, которые понимает виджет «Последняя активность»; прочие
+    /// (напр. "edit" из аудита) сводятся к нейтральной.</summary>
+    private static readonly HashSet<string> WidgetIcons = ["check", "x", "doc", "clock", "info"];
+
+    /// <summary>Какие типы аудита относятся к какому разделу дашборда. Берём только
+    /// корневую запись контура: её id совпадает с id карточки в интерфейсе, поэтому
+    /// ссылка ведёт куда надо (дочерние сущности живут под своими id).</summary>
+    private static readonly (string Module, string[] EntityTypes)[] AuditSlices =
+    [
+        (ActivityModules.Sz, ["Sz"]),
+        (ActivityModules.Procurement, ["ProcurementRequest"]),
+    ];
+
+    // Получение последних записей журнала активности по всем контурам.
+    //
+    // ВНД ведёт собственный человекочитаемый поток в таблице журнала. СЗ и закупки
+    // такого потока не ведут — их события берутся из технического аудита и
+    // превращаются в строки журнала на лету (как история документа), иначе на
+    // дашборде были бы видны только события ВНД.
     public async Task<List<ActivityLogEntryResponse>> GetRecentAsync(
         int limit, string languageCode, string? module = null)
     {
-        var query = _db.Set<ActivityLogEntry>().AsQueryable();
-        if (!string.IsNullOrWhiteSpace(module))
-            query = query.Where(x => x.Module == module);
+        var result = new List<ActivityLogEntryResponse>();
 
-        var entries = await query
+        if (module is null || module == ActivityModules.Vnd)
+        {
+            var entries = await _db.Set<ActivityLogEntry>()
+                .Where(x => x.Module == ActivityModules.Vnd)
+                .OrderByDescending(x => x.CreatedAt)
+                .Take(limit)
+                .ToListAsync();
+            result.AddRange(entries.Select(x => ToResponse(x, languageCode)));
+        }
+
+        foreach (var (mod, entityTypes) in AuditSlices)
+        {
+            if (module is not null && module != mod) continue;
+            result.AddRange(await RecentFromAuditAsync(mod, entityTypes, limit));
+        }
+
+        return result
             .OrderByDescending(x => x.CreatedAt)
+            .Take(limit)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Последние события контура из технического аудита, оформленные как строки
+    /// журнала. Тексты — русские (аудит другого языка не хранит), как и в истории
+    /// документа; локализованный поток есть только у ВНД.
+    /// </summary>
+    private async Task<List<ActivityLogEntryResponse>> RecentFromAuditAsync(
+        string module, string[] entityTypes, int limit)
+    {
+        var rows = await _db.AuditEntries.AsNoTracking()
+            .Where(a => entityTypes.Contains(a.EntityType))
+            .OrderByDescending(a => a.At).ThenByDescending(a => a.Id)
             .Take(limit)
             .ToListAsync();
 
-        return entries.Select(x => ToResponse(x, languageCode)).ToList();
+        if (rows.Count == 0) return [];
+
+        var actorIds = rows.Where(a => a.UserId != null).Select(a => a.UserId!.Value).Distinct().ToList();
+        var actors = await _db.Users.AsNoTracking()
+            .Where(u => actorIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        return rows.Select(a =>
+        {
+            var (_, urlPrefix) = AuditActivityText.Origin(a.EntityType);
+            var (ru, icon) = AuditActivityText.Describe(a.EntityType, a.Action);
+            var actor = a.UserId is { } uid && actors.TryGetValue(uid, out var name) ? name : "Система";
+
+            return new ActivityLogEntryResponse
+            {
+                // Id аудита — long; в отклике он лишь ключ строки, переполнение при
+                // сужении не влияет на отображение.
+                Id = unchecked((int)a.Id),
+                Module = module,
+                EntityId = a.EntityId,
+                EntityCode = "",
+                Icon = WidgetIcons.Contains(icon) ? icon : "info",
+                // «Иванов зарегистрировал записку»; у системного события подлежащее — «Система».
+                Text = $"{actor} {ru}",
+                Url = $"{urlPrefix}{a.EntityId}",
+                CreatedAt = a.At,
+            };
+        }).ToList();
     }
 
     /// <summary>Весь журнал активности по одному документу — не "последние N" для дашборда

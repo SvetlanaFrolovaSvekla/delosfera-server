@@ -93,6 +93,10 @@ public class AgendaCandidateService : IAgendaCandidateService
         SzStatus.OnAddresseeDecision,
         SzStatus.OnExecution,
         SzStatus.Executed,
+        // Записку, помеченную «вынести на орган» (SubmitToBodyAsync → OnBoardReview),
+        // секретарь ещё должен взять в повестку. Без этого статуса она выпадала из
+        // кандидатов и в повестку попасть не могла — тупик.
+        SzStatus.OnBoardReview,
     ];
 
     private readonly DelosferaDbContext _db;

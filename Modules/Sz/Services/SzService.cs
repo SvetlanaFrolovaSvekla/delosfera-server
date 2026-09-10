@@ -357,6 +357,18 @@ public class SzService : ISzService
         sz.ApprovalRounds++;
 
         await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnApproval, actorUserId);
+
+        // Отправка с доработки закрывает задачу автора на устранение замечаний:
+        // работа сдана, из его списка задач она уходит. Смену статуса ведёт сам
+        // сервис, поэтому обработчик маршрута сюда не подключается — снимаем здесь.
+        var revisionTasks = await _db.WorkflowTasks
+            .Where(t => t.DocumentId == sz.DocumentId
+                        && t.Type == SzRouteCompletionHandler.RemarksResolutionTask
+                        && t.State == WorkflowTaskState.Open)
+            .ToListAsync();
+        foreach (var task in revisionTasks)
+            task.State = WorkflowTaskState.Done;
+
         await _db.SaveChangesAsync();
 
         await _audit.LogAsync("Sz", sz.Id, "SubmittedForApproval", actorUserId, new

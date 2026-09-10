@@ -446,6 +446,13 @@ public class ProcurementRequestService : IProcurementRequestService
     public async Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId, IReadOnlyList<int>? extraApproverUserIds = null)
     {
         var entity = await LoadAsync(id);
+
+        // Отправить заявку на согласование может только её автор — как и правку
+        // (UpdateAsync). Раньше проверки не было: любой аутентифицированный мог
+        // отправить чужой черновик по id.
+        if (entity.Document!.AuthorId != actorUserId)
+            throw new UnauthorizedAccessException("Отправить заявку на согласование может только её автор");
+
         var card = await BuildCardAsync(entity);
 
         if (entity.Document!.StatusCode != ProcurementStatus.Draft
