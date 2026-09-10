@@ -97,6 +97,16 @@ public class CorrespondenceController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new {message = ex.Message}); }
     }
 
+    /// <summary>Отправить исходящее письмо адресату (проект/зарегистрированное → отправлено).</summary>
+    [HttpPost("{id:int}/send")]
+    [RequirePermission(PermissionCode.RegisterCorrespondence)]
+    public async Task<IActionResult> Send(int id, CancellationToken ct)
+    {
+        try { return Ok(await _letters.SendAsync(id, _currentUser.UserId, ct)); }
+        catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
+        catch (InvalidOperationException ex) { return BadRequest(new {message = ex.Message}); }
+    }
+
     // ── справочник корреспондентов ──────────────────────────────
 
     /// <summary>Корреспонденты: кому пишем и кто пишет нам.</summary>
