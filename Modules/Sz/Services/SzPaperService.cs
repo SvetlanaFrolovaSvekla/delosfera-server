@@ -1,10 +1,12 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Signing.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Workflow.Models;
 
 namespace delosfera_server.Modules.Sz.Services;
@@ -31,18 +33,34 @@ public class SzPaperService : ISzPaperService
 {
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
+    private readonly ICurrentUserService _currentUser;
 
     private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
 
-    public SzPaperService(DelosferaDbContext db, IAuditService audit)
+    public SzPaperService(DelosferaDbContext db, IAuditService audit, ICurrentUserService currentUser)
     {
         _db = db;
         _audit = audit;
+        _currentUser = currentUser;
+    }
+
+    // Контроль бумажного оригинала — делопроизводство: право «регистрировать записки»
+    // или «видеть все записки» снимает привязку к подразделению. Остальным доступна
+    // своя записка и записки своего подразделения.
+    private bool CanManageAll =>
+        _currentUser.HasPermission(PermissionCode.RegisterSz)
+        || _currentUser.HasPermission(PermissionCode.ViewAllSz);
+
+    private async Task EnsureAccessAsync(SzDocument sz)
+    {
+        if (!await SzVisibility.CanAccessAsync(_db, sz, _currentUser.UserId, CanManageAll))
+            throw new UnauthorizedAccessException("Нет доступа к бумажному контуру этой записки");
     }
 
     public async Task<SzOriginalResponse> HandOverAsync(int szId, SzHandoverRequest req, int actorUserId)
     {
         var sz = await LoadAsync(szId);
+        await EnsureAccessAsync(sz);
 
         if (!sz.Document!.IsPaperCarrier)
             throw new InvalidOperationException("Записка ведётся электронно: бумажного оригинала нет");
@@ -73,6 +91,7 @@ public class SzPaperService : ISzPaperService
     public async Task<SzOriginalResponse> ReturnAsync(int szId, int actorUserId)
     {
         var sz = await LoadAsync(szId);
+        await EnsureAccessAsync(sz);
 
         if (sz.OriginalHandedAt == null || sz.OriginalReturnedAt != null)
             throw new InvalidOperationException("Оригинал не выдавался или уже возвращён");
@@ -87,10 +106,20 @@ public class SzPaperService : ISzPaperService
         return await GetOriginalAsync(szId);
     }
 
-    public async Task<SzOriginalResponse> GetOriginalAsync(int szId) => Map(await LoadAsync(szId));
+    public async Task<SzOriginalResponse> GetOriginalAsync(int szId)
+    {
+        var sz = await LoadAsync(szId);
+        await EnsureAccessAsync(sz);
+        return Map(sz);
+    }
 
     public async Task<List<SzOriginalResponse>> OutstandingAsync(bool overdueOnly = false)
     {
+        // Реестр невозвращённых оригиналов сводит записки всех подразделений — это
+        // рабочий инструмент делопроизводства, не карточка отдельной записки.
+        if (!CanManageAll)
+            throw new UnauthorizedAccessException("Реестр оригиналов доступен делопроизводству");
+
         var query = _db.SzDocuments.AsNoTracking()
             .Include(x => x.Document)
             .Include(x => x.OriginalHolderUser)
@@ -119,6 +148,8 @@ public class SzPaperService : ISzPaperService
             .Include(x => x.TransferUnit)
             .FirstOrDefaultAsync(x => x.Id == szId)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        await EnsureAccessAsync(sz);
 
         var form = new SzPrintFormResponse
         {

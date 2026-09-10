@@ -98,7 +98,7 @@ public class SzAddresseeResolutionTests
         var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
 
         return new SzService(db, documents, audit, engine, new PassthroughHtml(),
-            new FakeCurrentUser(userId), handler, new SzProcurementService(db, documents, audit),
+            new FakeCurrentUser(userId), handler, new SzProcurementService(db, documents, audit, new FakeCurrentUser(userId, PermissionCode.ViewAllSz)),
             new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db));
     }
 

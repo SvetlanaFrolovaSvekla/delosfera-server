@@ -101,7 +101,7 @@ public class SzToBodyTests
         var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
         var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
         var currentUser = new FakeCurrentUser(0, PermissionCode.ViewAllSz);
-        var procurement = new SzProcurementService(db, documents, audit);
+        var procurement = new SzProcurementService(db, documents, audit, currentUser);
 
         var service = new SzService(db, documents, audit, engine, new PassthroughHtml(),
             currentUser, handler, procurement,

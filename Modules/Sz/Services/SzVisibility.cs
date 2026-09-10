@@ -51,6 +51,26 @@ public static class SzVisibility
     }
 
     /// <summary>
+    /// Вправе ли пользователь работать с конкретной запиской вне маршрута
+    /// согласования: бумажный оригинал, архив, передача в закупку, печатная форма.
+    /// Круг тот же, что и видимость в реестре, но уже: автор и руководитель
+    /// подразделения-автора. <paramref name="canManageAll"/> — делопроизводственное
+    /// право (RegisterSz/ViewAllSz/ViewAllProcurements), снимающее привязку целиком.
+    ///
+    /// До этой проверки любой аутентифицированный сотрудник мог выдать чужой
+    /// оригинал, подшить чужую записку в дело или запустить по ней закупку.
+    /// </summary>
+    public static async Task<bool> CanAccessAsync(
+        DelosferaDbContext db, SzDocument sz, int currentUserId, bool canManageAll)
+    {
+        if (canManageAll) return true;
+        if (sz.Document!.AuthorId == currentUserId) return true;
+        if (sz.AuthorUnitId is int unit)
+            return (await VisibleUnitIdsAsync(db, currentUserId)).Contains(unit);
+        return false;
+    }
+
+    /// <summary>
     /// Подразделения, записки которых видит руководитель: его собственное и все
     /// вложенные. Управление отвечает за свои отделы, значит и видеть должно их.
     ///

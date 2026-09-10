@@ -42,6 +42,7 @@ public class SzProcurementController : ControllerBase
             return Ok(await action());
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+            catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 }

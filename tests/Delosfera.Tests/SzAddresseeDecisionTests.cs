@@ -161,7 +161,7 @@ public class SzAddresseeDecisionTests
         // а не видимости реестра.
         var currentUser = new FakeCurrentUser(0, PermissionCode.ViewAllSz);
 
-        var procurement = new SzProcurementService(db, documents, audit);
+        var procurement = new SzProcurementService(db, documents, audit, currentUser);
 
         return (new SzService(db, documents, audit, engine, new PassthroughHtml(),
             currentUser, handler, procurement,

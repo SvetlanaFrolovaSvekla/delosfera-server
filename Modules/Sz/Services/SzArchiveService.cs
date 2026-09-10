@@ -1,10 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Sz.Services;
 
@@ -28,19 +30,37 @@ public class SzArchiveService : ISzArchiveService
     private readonly DelosferaDbContext _db;
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
+    private readonly ICurrentUserService _currentUser;
 
     private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
 
-    public SzArchiveService(DelosferaDbContext db, IDocumentService documents, IAuditService audit)
+    public SzArchiveService(
+        DelosferaDbContext db, IDocumentService documents, IAuditService audit,
+        ICurrentUserService currentUser)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
+        _currentUser = currentUser;
+    }
+
+    // Подшивка в дело — делопроизводственная операция: право «регистрировать записки»
+    // или «видеть все записки» снимает привязку к подразделению. Прочим доступна
+    // только своя записка (автор) и записки своего подразделения (руководитель).
+    private bool CanManageAll =>
+        _currentUser.HasPermission(PermissionCode.RegisterSz)
+        || _currentUser.HasPermission(PermissionCode.ViewAllSz);
+
+    private async Task EnsureAccessAsync(SzDocument sz)
+    {
+        if (!await SzVisibility.CanAccessAsync(_db, sz, _currentUser.UserId, CanManageAll))
+            throw new UnauthorizedAccessException("Нет доступа к архивному хранению этой записки");
     }
 
     public async Task<SzArchiveResponse> ArchiveAsync(int szId, SzArchiveRequest req, int actorUserId)
     {
         var sz = await LoadAsync(szId);
+        await EnsureAccessAsync(sz);
         var doc = sz.Document!;
 
         // В дело подшивают документ, работа по которому закончена.
@@ -86,6 +106,7 @@ public class SzArchiveService : ISzArchiveService
     public async Task<SzArchiveResponse> RestoreAsync(int szId, int actorUserId)
     {
         var sz = await LoadAsync(szId);
+        await EnsureAccessAsync(sz);
         var doc = sz.Document!;
 
         if (doc.StatusCode != SzStatus.Archived)
@@ -107,10 +128,20 @@ public class SzArchiveService : ISzArchiveService
         return await GetAsync(szId);
     }
 
-    public async Task<SzArchiveResponse> GetAsync(int szId) => Map(await LoadAsync(szId));
+    public async Task<SzArchiveResponse> GetAsync(int szId)
+    {
+        var sz = await LoadAsync(szId);
+        await EnsureAccessAsync(sz);
+        return Map(sz);
+    }
 
     public async Task<List<SzArchiveResponse>> CaseInventoryAsync(int caseId)
     {
+        // Опись дела — целиком делопроизводственный документ: он смешивает записки
+        // разных подразделений, поэтому доступен только делопроизводству.
+        if (!CanManageAll)
+            throw new UnauthorizedAccessException("Опись дела доступна делопроизводству");
+
         var items = await BaseQuery()
             .Where(x => x.Document!.NomenclatureCaseId == caseId)
             .OrderBy(x => x.Document!.RegNumber)

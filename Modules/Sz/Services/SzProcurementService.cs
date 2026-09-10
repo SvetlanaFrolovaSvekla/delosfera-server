@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Sz.Services;
 
@@ -33,20 +35,43 @@ public class SzProcurementService : ISzProcurementService
     private readonly DelosferaDbContext _db;
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
+    private readonly ICurrentUserService _currentUser;
 
-    public SzProcurementService(DelosferaDbContext db, IDocumentService documents, IAuditService audit)
+    public SzProcurementService(
+        DelosferaDbContext db, IDocumentService documents, IAuditService audit,
+        ICurrentUserService currentUser)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
+        _currentUser = currentUser;
     }
 
-    public async Task<SzProcurementResponse> GetAsync(int szId) => await BuildAsync(await LoadAsync(szId));
+    // Передача в закупку — дело инициатора либо Сектора закупок; чужую записку в
+    // закупочный контур посторонний запускать не должен.
+    private bool CanManageAll =>
+        _currentUser.HasPermission(PermissionCode.ViewAllSz)
+        || _currentUser.HasPermission(PermissionCode.ViewAllProcurements);
+
+    private async Task EnsureAccessAsync(SzDocument sz)
+    {
+        if (!await SzVisibility.CanAccessAsync(_db, sz, _currentUser.UserId, CanManageAll))
+            throw new UnauthorizedAccessException(
+                "Передача записки в закупку доступна автору и Сектору закупок");
+    }
+
+    public async Task<SzProcurementResponse> GetAsync(int szId)
+    {
+        var sz = await LoadAsync(szId);
+        await EnsureAccessAsync(sz);
+        return await BuildAsync(sz);
+    }
 
     public async Task<SzProcurementResponse> HandOverAsync(
         int szId, SzProcurementHandoffRequest req, int actorUserId)
     {
         var sz = await LoadAsync(szId);
+        await EnsureAccessAsync(sz);
         var state = await BuildAsync(sz);
 
         if (state.IsHandedOver)
