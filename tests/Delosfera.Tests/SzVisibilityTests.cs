@@ -135,7 +135,8 @@ public class SzVisibilityTests
 
         return new SzService(db, documents, audit, engine, new PassthroughHtml(),
             new FakeCurrentUser(userId, permissions), handler,
-            new SzProcurementService(db, documents, audit));
+            new SzProcurementService(db, documents, audit),
+            new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db));
     }
 
     /// <summary>

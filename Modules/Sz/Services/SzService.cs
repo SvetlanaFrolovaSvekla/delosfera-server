@@ -70,11 +70,13 @@ public class SzService : ISzService
     private readonly ICurrentUserService _currentUser;
     private readonly SzRouteCompletionHandler _addresseeTasks;
     private readonly ISzProcurementService _procurement;
+    private readonly IRouteTemplateSelector _templates;
 
     public SzService(
         DelosferaDbContext db, IDocumentService documents, IAuditService audit,
         IRouteEngine routeEngine, IDocumentHtmlService html, ICurrentUserService currentUser,
-        SzRouteCompletionHandler addresseeTasks, ISzProcurementService procurement)
+        SzRouteCompletionHandler addresseeTasks, ISzProcurementService procurement,
+        IRouteTemplateSelector templates)
     {
         _procurement = procurement;
         _currentUser = currentUser;
@@ -84,6 +86,7 @@ public class SzService : ISzService
         _audit = audit;
         _routeEngine = routeEngine;
         _html = html;
+        _templates = templates;
     }
 
     private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
@@ -372,6 +375,17 @@ public class SzService : ISzService
     /// </summary>
     private async Task<RouteInstance> InstantiateFromKindAsync(SzDocument sz)
     {
+        // Единый конструктор согласующих: если администратор завёл шаблон СЗ под
+        // подразделение-инициатор (автора записки) — маршрут берётся из него. Берём
+        // только адресный шаблон (OrgUnitId совпал), а не общий уровня типа — иначе
+        // селектор перехватил бы шаблон вида записки ниже.
+        if (sz.AuthorUnitId is { } unit)
+        {
+            var byUnit = await _templates.SelectAsync(Documents.Models.DocumentType.Sz, unit);
+            if (byUnit is not null && byUnit.OrgUnitId == unit)
+                return await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, byUnit.Id);
+        }
+
         var templateId = sz.Kind?.RouteTemplateId
             ?? (await _db.SzKinds.Where(k => k.Id == sz.KindId)
                     .Select(k => k.RouteTemplateId).FirstOrDefaultAsync())
