@@ -156,6 +156,9 @@ public class PowerOfAttorney : IAuditableEntity
     /// </summary>
     public string? OriginalLocation { get; set; }
 
+    // TODO: учёт бумажного оригинала доверенности пока не реализован — ни один эндпоинт
+    // эти поля не пишет, они лишь отдаются в DTO (всегда null). Либо завести операции
+    // выдачи/возврата оригинала (как у СЗ в SzPaperService), либо убрать поля и колонки.
     /// <summary>Оригинал выдан на руки представителю.</summary>
     public DateTime? OriginalHandedAt { get; set; }
 
