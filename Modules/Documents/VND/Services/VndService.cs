@@ -23,11 +23,13 @@ public class VndService : IVndService
     private readonly IActivityLogService _activityLog;
     private readonly IVndApprovalService _approvalService;
     private readonly INumeratorService _numerator;
+    private readonly IDocxLegacyLinkExtractor _legacyLinkExtractor;
 
     public VndService(
         DelosferaDbContext db, IFileStorageService fileService,
         ICurrentUserService currentUser, IActivityLogService activityLog,
-        IVndApprovalService approvalService, INumeratorService numerator)
+        IVndApprovalService approvalService, INumeratorService numerator,
+        IDocxLegacyLinkExtractor legacyLinkExtractor)
     {
         _db = db;
         _fileService = fileService;
@@ -35,6 +37,7 @@ public class VndService : IVndService
         _activityLog = activityLog;
         _approvalService = approvalService;
         _numerator = numerator;
+        _legacyLinkExtractor = legacyLinkExtractor;
     }
 
     public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
@@ -1550,8 +1553,12 @@ public class VndService : IVndService
 
     public async Task<VndLinksResponse> GetLinksAsync(int vndId, string languageCode)
     {
-        var exists = await _db.VndDocuments.AnyAsync(x => x.Id == vndId);
-        if (!exists) throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+        var vnd = await _db.VndDocuments
+                      .Include(x => x.CurrentRedaction)
+                      .ThenInclude(r => r!.Attachments)
+                      .ThenInclude(a => a.FileAttachment)
+                      .FirstOrDefaultAsync(x => x.Id == vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         var outgoing = await _db.Set<VndLink>()
             .Where(l => l.SourceVndId == vndId)
@@ -1563,11 +1570,118 @@ public class VndService : IVndService
             .Include(l => l.SourceVnd)
             .ToListAsync();
 
-        return new VndLinksResponse
+        var response = new VndLinksResponse
         {
             Outgoing = outgoing.Select(l => ToLinkResponse(l.Id, l.TargetVnd!, languageCode)).ToList(),
             Incoming = incoming.Select(l => ToLinkResponse(l.Id, l.SourceVnd!, languageCode)).ToList()
         };
+
+        // Легаси-гиперссылки db://... унаследованные из старой системы (isrib) — см.
+        // обсуждение с Пупуриком (документ 7985/ред5): извлекаем их из текста текущей редакции
+        // и подмешиваем как автоматически обнаруженные. В vnd_link они не хранятся — это
+        // вычисляется на лету при каждом запросе связей, чтобы не заводить отдельную таблицу
+        // и миграцию под MVP этой функциональности.
+        if (vnd.CurrentRedaction is { DocFileRuId: > 0 } redaction)
+        {
+            var refs = await ExtractLegacyReferencesAsync(redaction.DocFileRuId);
+
+            if (refs.DocumentCodes.Count > 0)
+            {
+                var alreadyLinkedIds = response.Outgoing.Select(x => x.VndId).ToHashSet();
+                var byCode = await _db.VndDocuments
+                    .Where(x => refs.DocumentCodes.Contains(x.Code) && x.Id != vndId)
+                    .ToListAsync();
+
+                foreach (var doc in byCode)
+                {
+                    if (!alreadyLinkedIds.Add(doc.Id)) continue; // уже есть как ручная связь
+                    var autoLink = ToLinkResponse(0, doc, languageCode);
+                    autoLink.IsAutoDetected = true;
+                    response.Outgoing.Add(autoLink);
+                }
+            }
+
+            var attachmentsInOrder = redaction.Attachments
+                .OrderBy(a => a.Id)
+                .Select(a => a.FileAttachment!)
+                .ToList();
+
+            response.AttachmentReferences = refs.AttachmentIndexes.Select(legacyIndex =>
+            {
+                var file = legacyIndex >= 1 && legacyIndex <= attachmentsInOrder.Count
+                    ? attachmentsInOrder[legacyIndex - 1]
+                    : null;
+
+                return new VndAttachmentLinkResponse
+                {
+                    LegacyIndex = legacyIndex,
+                    FileId = file?.Id ?? 0,
+                    FileName = file?.OriginalFileName ?? $"Вложение №{legacyIndex}",
+                    Resolved = file != null,
+                };
+            }).ToList();
+        }
+
+        return response;
+    }
+
+    /// <summary>Скачивает Word-файл текущей редакции и извлекает из него легаси-гиперссылки
+    /// db://... — см. DocxLegacyLinkExtractor. Ошибки скачивания/парсинга не пробрасываются
+    /// дальше (см. её же catch) — не должны ронять показ вкладки "Связи".</summary>
+    private async Task<LegacyLinkReferences> ExtractLegacyReferencesAsync(int docFileId)
+    {
+        try
+        {
+            var (stream, _, _) = await _fileService.DownloadAsync(docFileId);
+            await using (stream)
+            {
+                return _legacyLinkExtractor.Extract(stream);
+            }
+        }
+        catch
+        {
+            return LegacyLinkReferences.Empty;
+        }
+    }
+
+    public async Task<LegacyLinkResolveResponse> ResolveLegacyLinkAsync(int vndId, string type, string legacyId)
+    {
+        if (type == "documents")
+        {
+            var code = legacyId.TrimStart('0');
+            if (code.Length == 0) code = "0";
+
+            var doc = await _db.VndDocuments.FirstOrDefaultAsync(x => x.Code == code)
+                      ?? throw new KeyNotFoundException($"Документ с кодом {legacyId} не найден");
+
+            return new LegacyLinkResolveResponse { Kind = "vnd", VndId = doc.Id, Code = doc.Code };
+        }
+
+        if (type == "attachments")
+        {
+            if (!int.TryParse(legacyId, out var legacyIndex) || legacyIndex < 1)
+                throw new KeyNotFoundException($"Некорректный номер вложения: {legacyId}");
+
+            var vnd = await _db.VndDocuments
+                          .Include(x => x.CurrentRedaction)
+                          .ThenInclude(r => r!.Attachments)
+                          .ThenInclude(a => a.FileAttachment)
+                          .FirstOrDefaultAsync(x => x.Id == vndId)
+                      ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+            var attachmentsInOrder = vnd.CurrentRedaction?.Attachments
+                .OrderBy(a => a.Id)
+                .Select(a => a.FileAttachment!)
+                .ToList() ?? [];
+
+            if (legacyIndex > attachmentsInOrder.Count)
+                throw new KeyNotFoundException($"Вложение №{legacyId} не найдено у документа {vnd.Code}");
+
+            var file = attachmentsInOrder[legacyIndex - 1];
+            return new LegacyLinkResolveResponse { Kind = "attachment", FileId = file.Id, FileName = file.OriginalFileName };
+        }
+
+        throw new KeyNotFoundException($"Неизвестный тип легаси-ссылки: {type}");
     }
 
     public async Task<VndLinkResponse> AddLinkAsync(int vndId, AddVndLinkRequest request, string languageCode)

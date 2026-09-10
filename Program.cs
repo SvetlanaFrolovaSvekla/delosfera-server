@@ -88,6 +88,9 @@ builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
 builder.Services.AddScoped<IFixedApprovalUnitResolver, FixedApprovalUnitResolver>();
 builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 builder.Services.AddSingleton<IApprovalSheetGenerator, ApprovalSheetGenerator>();
+// Разбор легаси-гиперссылок db://documents/{code} и db://attachments/{n} из старой системы
+// (isrib) внутри текста ВНД — не хранит состояния, поэтому синглтон (как ApprovalSheetGenerator выше).
+builder.Services.AddSingleton<IDocxLegacyLinkExtractor, DocxLegacyLinkExtractor>();
 builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();
 
 // Отзыв сертификата происходит между подписаниями: узнать о нём система должна
