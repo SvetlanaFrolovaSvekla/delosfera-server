@@ -69,6 +69,46 @@ public class SzDefaultRouteTests
         Assert.Equal(headId, participant.UserId);
     }
 
+    [Fact]
+    public async Task Безголовое_подразделение_визирует_руководитель_выше_по_дереву()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        await SzRouteTemplateSeeder.SeedAsync(db);
+
+        var (service, draftId, ancestorHeadId, documentId) =
+            await SeedDraftHeadlessUnitAsync(db, ancestorHasHead: true);
+
+        var details = await service.SubmitAsync(draftId, await AuthorOfAsync(db, draftId));
+
+        Assert.Equal(SzStatus.OnApproval, details.StatusCode);
+
+        // Своего руководителя у подразделения нет — визирует руководитель управления выше.
+        var participant = await db.RouteParticipants.AsNoTracking()
+            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == documentId)
+            .SingleAsync();
+        Assert.Equal(ancestorHeadId, participant.UserId);
+    }
+
+    [Fact]
+    public async Task Совсем_безголовое_подразделение_визирует_адресат()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        await SzRouteTemplateSeeder.SeedAsync(db);
+
+        var (service, draftId, addresseeId, documentId) =
+            await SeedDraftHeadlessUnitAsync(db, ancestorHasHead: false);
+
+        var details = await service.SubmitAsync(draftId, await AuthorOfAsync(db, draftId));
+
+        Assert.Equal(SzStatus.OnApproval, details.StatusCode);
+
+        // Руководителя нет нигде по дереву — крайний визирующий — адресат записки.
+        var participant = await db.RouteParticipants.AsNoTracking()
+            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == documentId)
+            .SingleAsync();
+        Assert.Equal(addresseeId, participant.UserId);
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private static async Task<(ISzService Service, int DraftId, int HeadId, int DocumentId)>
@@ -119,6 +159,64 @@ public class SzDefaultRouteTests
             .Where(x => x.Id == draft.Id).Select(x => x.DocumentId).SingleAsync();
 
         return (service, draft.Id, head.Id, documentId);
+    }
+
+    /// <summary>
+    /// Черновик записки автора из подразделения без своего руководителя. Родительское
+    /// управление либо имеет руководителя (ancestorHasHead), либо нет. Возвращает
+    /// ожидаемого согласующего: руководителя выше по дереву или адресата записки.
+    /// </summary>
+    private static async Task<(ISzService Service, int DraftId, int ExpectedApproverId, int DocumentId)>
+        SeedDraftHeadlessUnitAsync(DelosferaDbContext db, bool ancestorHasHead)
+    {
+        var audit = new AuditService(db);
+        var documents = new DocumentService(db, audit, new NumeratorService(db));
+        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
+        var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(),
+            new FakeSignatures(), new RouteRoleResolver(db));
+        var currentUser = new FakeCurrentUser(0, PermissionCode.ViewAllSz);
+        var procurement = new SzProcurementService(db, documents, audit, currentUser);
+
+        var service = new SzService(db, documents, audit, engine, new PassthroughHtml(),
+            currentUser, handler, procurement, new RouteTemplateSelector(db));
+
+        // Родительское управление — с руководителем или без.
+        User? ancestorHead = ancestorHasHead ? await AddUserAsync(db, "Начальник управления") : null;
+        var parent = new OrganizationUnit { TitleRu = "Управление", HeadUserId = ancestorHead?.Id };
+        db.OrganizationUnits.Add(parent);
+        await db.SaveChangesAsync();
+
+        // Подразделение автора без своего руководителя.
+        var unit = new OrganizationUnit { TitleRu = "Отдел без головы", HeadUserId = null, ParentId = parent.Id };
+        db.OrganizationUnits.Add(unit);
+        await db.SaveChangesAsync();
+
+        var author = new User
+        {
+            FullName = "Автор из отдела",
+            Email = $"sz-def-{Guid.NewGuid():N}@keremetbank.kg",
+            PasswordHash = "x",
+            OrgUnitId = unit.Id,
+        };
+        db.Users.Add(author);
+        await db.SaveChangesAsync();
+
+        var addressee = await AddUserAsync(db, "Адресат записки");
+        var kind = await db.SzKinds.AsNoTracking().FirstAsync();
+
+        var draft = await service.CreateDraftAsync(new SzSaveRequest
+        {
+            Title = "Записка из безголового отдела",
+            KindId = kind.Id,
+            Body = "Текст записки",
+            AddresseeUserId = addressee.Id,
+        }, author.Id);
+
+        var documentId = await db.SzDocuments.AsNoTracking()
+            .Where(x => x.Id == draft.Id).Select(x => x.DocumentId).SingleAsync();
+
+        var expected = ancestorHasHead ? ancestorHead!.Id : addressee.Id;
+        return (service, draft.Id, expected, documentId);
     }
 
     private static async Task<int> AuthorOfAsync(DelosferaDbContext db, int szId) =>

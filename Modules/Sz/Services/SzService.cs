@@ -390,10 +390,14 @@ public class SzService : ISzService
         // Единый конструктор согласующих. Приоритет источника маршрута:
         //   1) адресный шаблон под подразделение-инициатор (автора записки);
         //   2) шаблон, прописанный в виде записки (SzKind.RouteTemplateId);
-        //   3) глобальный шаблон уровня типа — из коробки виза руководителя автора.
-        // Раньше шага 3 не было: адресный шаблон брался, а общий уровня типа
-        // отбрасывался, и записка без вручную названных согласующих не уходила на
-        // согласование вовсе (SzRouteTemplateSeeder закрывает случай из коробки).
+        //   3) глобальный шаблон уровня типа — виза руководителя автора, если он есть;
+        //   4) fallback для «безголового» подразделения: руководитель выше по дереву,
+        //      иначе адресат записки.
+        // Раньше были только шаги 1–2: общий шаблон уровня типа отбрасывался, и
+        // записка без вручную названных согласующих не уходила на согласование вовсе.
+        // Шаг 3 (SzRouteTemplateSeeder) закрыл случай из коробки для подразделений с
+        // руководителем; шаг 4 — для тех, у кого руководитель не задан (в оргструктуре
+        // банка таких большинство).
 
         // 1) адресный шаблон подразделения
         if (sz.AuthorUnitId is { } unit)
@@ -410,13 +414,58 @@ public class SzService : ISzService
         if (kindTemplateId is int ktid)
             return await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, ktid);
 
-        // 3) глобальный шаблон уровня типа (OrgUnitId = null)
+        // 3) глобальный шаблон уровня типа — когда виза руководителя автора
+        //    резолвится (у подразделения автора есть руководитель, и это не сам
+        //    автор): сохраняем структуру шаблона, вдруг администратор её расширил.
         var global = await _templates.SelectAsync(Documents.Models.DocumentType.Sz, sz.AuthorUnitId);
-        if (global is not null)
+        var directHead = sz.AuthorUnitId is { } au ? await UnitHeadAsync(au) : null;
+        if (global is not null && directHead is not null && directHead != sz.Document!.AuthorId)
             return await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, global.Id);
+
+        // 4) подразделение автора без руководителя (в оргструктуре банка таких
+        //    большинство): author-head шаблона резолвился бы в null, и записка
+        //    снова не ушла бы на согласование. Берём ближайшего руководителя выше
+        //    по дереву, а если и там никого — адресата записки (он при отправке
+        //    указан всегда). Так запись всегда получает хотя бы одного визирующего.
+        var fallback = await ResolveDefaultApproverAsync(sz);
+        if (fallback is { } approver)
+            return await _routeEngine.InstantiateForApproversAsync(
+                sz.DocumentId, [approver], parallel: false, signerUserId: null);
 
         throw new InvalidOperationException(
             "Не задан маршрут согласования: назовите согласующих или настройте шаблон СЗ в конструкторе согласующих");
+    }
+
+    private async Task<int?> UnitHeadAsync(int unitId) =>
+        await _db.OrganizationUnits.AsNoTracking()
+            .Where(u => u.Id == unitId)
+            .Select(u => u.HeadUserId)
+            .FirstOrDefaultAsync();
+
+    /// <summary>
+    /// Согласующий по умолчанию для записки из подразделения без руководителя:
+    /// ближайший руководитель вверх по дереву оргструктуры, а если его нет нигде —
+    /// адресат записки. Автор сам себе визирующим не становится (визировать
+    /// собственную записку бессмысленно) — такой руководитель пропускается.
+    /// </summary>
+    private async Task<int?> ResolveDefaultApproverAsync(SzDocument sz)
+    {
+        var authorId = sz.Document!.AuthorId;
+
+        var unitId = sz.AuthorUnitId;
+        for (var guard = 0; unitId is { } uid && guard < 20; guard++)
+        {
+            var unit = await _db.OrganizationUnits.AsNoTracking()
+                .Where(u => u.Id == uid)
+                .Select(u => new { u.HeadUserId, u.ParentId })
+                .FirstOrDefaultAsync();
+            if (unit is null) break;
+            if (unit.HeadUserId is { } head && head != authorId)
+                return head;
+            unitId = unit.ParentId;
+        }
+
+        return sz.AddresseeUserId is { } addressee && addressee != authorId ? addressee : null;
     }
 
     public async Task<SzDetails> SetApproversAsync(int id, IReadOnlyList<int> userIds, bool parallel, int actorUserId)
