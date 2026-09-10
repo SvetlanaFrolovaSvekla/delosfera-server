@@ -273,14 +273,20 @@ public class VndController : ControllerBase
     }
 
     /// <summary>Прямое редактирование последней редакции (подмена файлов/описания) - без согласования,
-    /// без создания новой редакции, без изменения даты актуализации. Только для EditLastRevisionDirectly.
-    /// Оставлен для обратной совместимости - см. более общий EditRedactionDirectly ниже, который
-    /// работает для любой редакции, не только последней.</summary>
+    /// без создания новой редакции, без изменения даты актуализации. Раньше требовало право
+    /// EditLastRevisionDirectly безусловно; теперь оно даёт безусловный доступ (любая редакция,
+    /// включая уже действующую), а без него сервис (см. EditRedactionDirectlyCoreAsync) всё равно
+    /// пускает разработчика/куратора/ответственного/инициатора/главного редактора редактировать
+    /// СВОЙ ещё не согласованный черновик (в т.ч. вернувшийся в черновик после отклонения на
+    /// согласовании) - иначе им попросту нечем исправить отклонённый документ. Оставлен для
+    /// обратной совместимости - см. более общий EditRedactionDirectly ниже, который работает для
+    /// любой редакции, не только последней.</summary>
     [HttpPut("{vndId:int}/redactions/last")]
     [Consumes("multipart/form-data")]
-    [RequirePermission(PermissionCode.EditLastRevisionDirectly)]
+    [RequirePermission(PermissionCode.ViewVnd)]
     [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<VndRedactionResponse>> EditLastRevisionDirectly(
         int vndId, [FromForm] EditLastRevisionDirectlyRequest request)
     {
@@ -290,18 +296,21 @@ public class VndController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
     /// <summary>Прямое редактирование ЛЮБОЙ редакции (подмена основных файлов, специальных
     /// вложений — ТИД/Лист согласования/Матрица разногласий — и/или описания) - без согласования,
     /// без создания новой редакции, без изменения даты актуализации. Тот же паттерн, что и
-    /// EditLastRevisionDirectly выше, но не ограничен последней редакцией - см. RedactionsSidebar
-    /// на фронте, где кнопка "Редактировать" теперь показывается у любой редакции.</summary>
+    /// EditLastRevisionDirectly выше (см. её комментарий про разграничение прав), но не ограничен
+    /// последней редакцией - см. RedactionsSidebar на фронте, где кнопка "Редактировать" теперь
+    /// показывается у любой редакции.</summary>
     [HttpPut("{vndId:int}/redactions/{redactionId:int}/edit-directly")]
     [Consumes("multipart/form-data")]
-    [RequirePermission(PermissionCode.EditLastRevisionDirectly)]
+    [RequirePermission(PermissionCode.ViewVnd)]
     [ProducesResponseType(typeof(VndRedactionResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<VndRedactionResponse>> EditRedactionDirectly(
         int vndId, int redactionId, [FromForm] EditLastRevisionDirectlyRequest request)
     {
@@ -311,6 +320,7 @@ public class VndController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
     /// <summary>Кнопка "Сформировать или загрузить ТИД" — прикладывает файл ТИД к черновику
