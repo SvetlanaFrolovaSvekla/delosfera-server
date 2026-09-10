@@ -237,6 +237,126 @@ public static class PermissionCatalog
             TitleRu = "Архивировать (отменить) ВНД — на любом статусе, кроме черновика и уже архивированного",
             TitleEn = "Archive (cancel) a VND — at any status except draft and already archived",
             TitleKg = "ВНДди архивдөө (жокко чыгаруу) — черновиктен жана мурунтан эле архивделгенден башка бардык статуста"
+        },
+
+        // Системные настройки
+        [PermissionCode.ManageSystemSettings] = new PermissionDescription
+        {
+            TitleRu = "Системные настройки и интеграции (шаблоны маршрутов, справочники подписи, состав органов)",
+            TitleEn = "System settings and integrations (route templates, signing dictionaries, body composition)",
+            TitleKg = "Системалык жөндөөлөр жана интеграциялар"
+        },
+
+        // Доверенности
+        [PermissionCode.ViewPowersOfAttorney] = new PermissionDescription
+        {
+            TitleRu = "Просмотр реестра доверенностей",
+            TitleEn = "View the powers of attorney registry",
+            TitleKg = "Ишеним каттардын реестрин көрүү"
+        },
+        [PermissionCode.ManagePowersOfAttorney] = new PermissionDescription
+        {
+            TitleRu = "Ведение доверенностей: выдача, подписание, отзыв",
+            TitleEn = "Manage powers of attorney: issue, sign, revoke",
+            TitleKg = "Ишеним каттарды жүргүзүү: берүү, кол коюу, кайра чакыртып алуу"
+        },
+
+        // Корреспонденция
+        [PermissionCode.ViewCorrespondence] = new PermissionDescription
+        {
+            TitleRu = "Просмотр книги корреспонденции",
+            TitleEn = "View the correspondence book",
+            TitleKg = "Кат алышуу китебин көрүү"
+        },
+        [PermissionCode.RegisterCorrespondence] = new PermissionDescription
+        {
+            TitleRu = "Регистрация входящих/исходящих писем и ведение справочника корреспондентов",
+            TitleEn = "Register incoming/outgoing letters and manage the correspondents directory",
+            TitleKg = "Кирүүчү/чыгуучу каттарды каттоо жана корреспонденттердин маалымдамасын жүргүзүү"
+        },
+        [PermissionCode.ViewBankSecrecyInquiries] = new PermissionDescription
+        {
+            TitleRu = "Доступ к запросам по банковской тайне",
+            TitleEn = "Access to bank-secrecy inquiries",
+            TitleKg = "Банктык сырга байланыштуу суроо-талаптарга кирүү"
+        },
+
+        // Кадровые приказы
+        [PermissionCode.ViewHrOrders] = new PermissionDescription
+        {
+            TitleRu = "Просмотр книги кадровых приказов",
+            TitleEn = "View the HR orders book",
+            TitleKg = "Кадрдык буйруктардын китебин көрүү"
+        },
+        [PermissionCode.ManageHrOrders] = new PermissionDescription
+        {
+            TitleRu = "Издание кадровых приказов: создание, подписание, ознакомление",
+            TitleEn = "Issue HR orders: create, sign, acknowledge",
+            TitleKg = "Кадрдык буйруктарды чыгаруу: түзүү, кол коюу, тааныштыруу"
+        },
+
+        // Закупки
+        [PermissionCode.ViewAllProcurements] = new PermissionDescription
+        {
+            TitleRu = "Видеть все заявки на закупку, а не только свои",
+            TitleEn = "See all procurement requests, not only own",
+            TitleKg = "Өздүкүн гана эмес, бардык сатып алуу арыздарын көрүү"
+        },
+        [PermissionCode.ConductProcurement] = new PermissionDescription
+        {
+            TitleRu = "Вести закупочную процедуру (Сектор закупок): конкурс, публикация, вскрытие",
+            TitleEn = "Conduct the procurement procedure (Procurement Unit): tender, publication, bid opening",
+            TitleKg = "Сатып алуу жол-жобосун жүргүзүү (Сатып алуу сектору)"
+        },
+        [PermissionCode.RecordCommissionDecisions] = new PermissionDescription
+        {
+            TitleRu = "Вносить решения комиссии по закупке (секретарь комиссии)",
+            TitleEn = "Record procurement commission decisions (commission secretary)",
+            TitleKg = "Сатып алуу комиссиясынын чечимдерин киргизүү (комиссиянын катчысы)"
+        },
+        [PermissionCode.ManageProcurementProtocol] = new PermissionDescription
+        {
+            TitleRu = "Формировать протокол закупки",
+            TitleEn = "Form the procurement protocol",
+            TitleKg = "Сатып алуу протоколун түзүү"
+        },
+        [PermissionCode.ManageProcurementContracts] = new PermissionDescription
+        {
+            TitleRu = "Договоры по закупкам: акты, претензии, исполнение",
+            TitleEn = "Procurement contracts: acts, claims, fulfilment",
+            TitleKg = "Сатып алуу боюнча келишимдер: актылар, дооматтар, аткаруу"
+        },
+        [PermissionCode.ManageProcurementPlan] = new PermissionDescription
+        {
+            TitleRu = "Вести План закупок",
+            TitleEn = "Manage the procurement plan",
+            TitleKg = "Сатып алуу планын жүргүзүү"
+        },
+        [PermissionCode.ManageSuppliers] = new PermissionDescription
+        {
+            TitleRu = "Реестр поставщиков и чёрный список недобросовестных",
+            TitleEn = "Suppliers registry and blacklist of unreliable suppliers",
+            TitleKg = "Жеткирүүчүлөрдүн реестри жана кара тизме"
+        },
+
+        // Служебные записки
+        [PermissionCode.ViewAllSz] = new PermissionDescription
+        {
+            TitleRu = "Видеть все служебные записки банка, а не только свои и своего подразделения",
+            TitleEn = "See all internal memos of the bank, not only own and own unit's",
+            TitleKg = "Банктын бардык кызматтык каттарын көрүү"
+        },
+        [PermissionCode.RegisterSz] = new PermissionDescription
+        {
+            TitleRu = "Регистрировать служебные записки: присваивать номер согласованной записке",
+            TitleEn = "Register internal memos: assign a number to an approved memo",
+            TitleKg = "Кызматтык каттарды каттоо: макулдашылган катка номер берүү"
+        },
+        [PermissionCode.SubmitSzToBody] = new PermissionDescription
+        {
+            TitleRu = "Выносить служебные записки на коллегиальный орган",
+            TitleEn = "Submit internal memos to a collegial body",
+            TitleKg = "Кызматтык каттарды коллегиалдуу органга чыгаруу"
         }
     };
     
