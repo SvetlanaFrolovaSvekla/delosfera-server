@@ -90,7 +90,12 @@ public class TasksService : ITasksService
     /// <summary>Видит ответственный за актуализацию этого конкретного цикла
     /// (VndDocument.ActualizationResponsibleUserId) — раньше здесь ошибочно фильтровалось по
     /// CreatedByUserId (создателю ВНД), из-за чего назначенный ответственный (если это не он
-    /// сам создавал документ) вообще не видел задачу о необходимости актуализировать.</summary>
+    /// сам создавал документ) вообще не видел задачу о необходимости актуализировать.
+    ///
+    /// Исключает документы с уже пройденным шагом "Выполнить актуализацию"
+    /// (ActualizationPerformed == true) — для ответственного его собственная часть работы там
+    /// уже сделана, и такие карточки теперь показываются в GetActualizationDoneTasksAsync,
+    /// а не одновременно висят и здесь, и там.</summary>
     public async Task<List<VndTaskResponse>> GetActualizationTasksAsync(int userId)
     {
         var openVndIds = await GetOpenActualizationVndIdsAsync();
@@ -111,6 +116,7 @@ public class TasksService : ITasksService
             .Where(x => openVndIds.Contains(x.Id)
                         && x.ActualizationResponsibleUserId == userId
                         && x.Status == VndStatus.OnActualization
+                        && !x.ActualizationPerformed
                         && !rejectedVndIds.Contains(x.Id))
             .ToListAsync();
 
@@ -281,6 +287,277 @@ public class TasksService : ITasksService
             })
             .OrderByDescending(t => t.CreatedAt)
             .ToList();
+    }
+
+    // ── История "Выполнено" по каждому разделу ─────────────────────────────
+    //
+    // Критерий "выполнено" разный для каждого раздела — это не текущий статус документа
+    // (он общий и переходный), а завершение именно ТОЙ работы, которую раздел отслеживает:
+    //   Согласование        — по этапу принято решение (согласовано/отклонено/зачтено
+    //                          по таймауту), может быть несколько записей на этап, если
+    //                          согласующий участвовал в нескольких турах одного процесса.
+    //   Мои ВНД на согласовании — процесс инициатора завершился согласованием.
+    //   Актуализация        — шаг "Выполнить актуализацию" пройден (см. правку выше в
+    //                          GetActualizationTasksAsync).
+    //   Консолидация        — документ опубликован (VndActualizationRecord.PublishedAt).
+    //     Не покрывает консолидацию самой первой редакции документа вне цикла актуализации
+    //     (для такого документа VndActualizationRecord не заводится вовсе) — это узкий и
+    //     редкий случай, для него сейчас нет постоянной записи "кто опубликовал", отдельно
+    //     обсудим, если понадобится.
+    //   Отклонено           — редакция была отклонена, но по документу с тех пор запущен
+    //                          новый процесс согласования (значит, отклонение уже не последнее).
+
+    private static string MapDecisionLabel(ApprovalStageDecision decision) => decision switch
+    {
+        ApprovalStageDecision.Approved => "Согласовано",
+        ApprovalStageDecision.ApprovedWithComment => "Согласовано с замечаниями",
+        ApprovalStageDecision.Rejected => "Отклонено",
+        ApprovalStageDecision.AutoApprovedByTimeout => "Согласовано по истечении срока (автоматически)",
+        _ => "Решение принято"
+    };
+
+    private static PagedResult<T> Paginate<T>(List<T> items, int page, int pageSize)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        return new PagedResult<T>
+        {
+            Items = items.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToList(),
+            TotalCount = items.Count,
+            Page = safePage,
+            PageSize = safePageSize
+        };
+    }
+
+    public async Task<PagedResult<VndTaskResponse>> GetCoordinationDoneTasksAsync(int userId, int page, int pageSize)
+    {
+        var stages = await _db.Set<VndApprovalStage>()
+            .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Vnd)
+            .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Redaction)
+            .Where(s => s.ApproverUserId == userId)
+            .Where(s =>
+                (s.PrimaryDecision != ApprovalStageDecision.Pending)
+                || (s.RepeatDecision != null && s.RepeatDecision != ApprovalStageDecision.Pending)
+                || (s.FinalHoldDecision != null && s.FinalHoldDecision != ApprovalStageDecision.Pending))
+            .ToListAsync();
+
+        var initiators = await GetInitiatorNamesAsync(stages.Select(s => s.ApprovalProcess!.InitiatorUserId));
+
+        var items = new List<VndTaskResponse>();
+        foreach (var s in stages)
+        {
+            var process = s.ApprovalProcess!;
+
+            void AddIfDecided(ApprovalStageDecision? decision, string phase, DateTime? decidedAt)
+            {
+                if (decision is null || decision == ApprovalStageDecision.Pending) return;
+
+                items.Add(new VndTaskResponse
+                {
+                    VndId = process.VndId,
+                    VndCode = process.Vnd!.Code,
+                    VndTitle = process.Vnd!.TitleRu,
+                    Scope = "coordination",
+                    VndStatus = MapVndStatus(process.Vnd!.Status),
+                    RedactionId = process.RedactionId,
+                    RedactionCode = process.Redaction!.Code,
+                    StageId = s.Id,
+                    StagePhase = phase,
+                    StageKind = MapStageKind(s.Kind),
+                    StageTitle = s.Title ?? MapLegacyStageTitle(s.Kind),
+                    InitiatorName = initiators.GetValueOrDefault(process.InitiatorUserId, "—"),
+                    StatusLabel = MapDecisionLabel(decision.Value),
+                    ActualizationPlannedNoChanges = process.Vnd!.ActualizationPlannedNoChanges,
+                    IsCompleted = true,
+                    CompletedAt = decidedAt,
+                    CreatedAt = decidedAt ?? process.CreatedAt
+                });
+            }
+
+            AddIfDecided(s.PrimaryDecision, "primary", s.PrimaryDecidedAt);
+            AddIfDecided(s.RepeatDecision, "repeat", s.RepeatDecidedAt);
+            AddIfDecided(s.FinalHoldDecision, "final", s.FinalHoldDecidedAt);
+        }
+
+        return Paginate(items.OrderByDescending(t => t.CompletedAt).ToList(), page, pageSize);
+    }
+
+    public async Task<PagedResult<VndTaskResponse>> GetMyVndApprovalDoneTasksAsync(int userId, int page, int pageSize)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+
+        var query = _db.VndApprovalProcesses
+            .Include(p => p.Vnd)
+            .Include(p => p.Redaction)
+            .Where(p => p.InitiatorUserId == userId && p.Status == ApprovalProcessStatus.Approved)
+            .OrderByDescending(p => p.CompletedAt);
+
+        var totalCount = await query.CountAsync();
+        var processes = await query.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToListAsync();
+
+        return new PagedResult<VndTaskResponse>
+        {
+            Items = processes.Select(p => new VndTaskResponse
+            {
+                VndId = p.VndId,
+                VndCode = p.Vnd!.Code,
+                VndTitle = p.Vnd!.TitleRu,
+                Scope = "myVndApproval",
+                VndStatus = MapVndStatus(p.Vnd!.Status),
+                RedactionId = p.RedactionId,
+                RedactionCode = p.Redaction?.Code,
+                StatusLabel = "Редакция согласована",
+                IsCompleted = true,
+                CompletedAt = p.CompletedAt,
+                CreatedAt = p.CompletedAt ?? p.UpdatedAt
+            }).ToList(),
+            TotalCount = totalCount,
+            Page = safePage,
+            PageSize = safePageSize
+        };
+    }
+
+    public async Task<PagedResult<VndTaskResponse>> GetActualizationDoneTasksAsync(int userId, int page, int pageSize)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+
+        var openVndIds = await GetOpenActualizationVndIdsAsync();
+        if (openVndIds.Count == 0)
+            return new PagedResult<VndTaskResponse> { Page = safePage, PageSize = safePageSize };
+
+        var rejectedVndIds = (await GetLatestRejectedProcessesAsync()).Select(p => p.VndId).ToHashSet();
+
+        var query = _db.VndDocuments
+            .Where(x => openVndIds.Contains(x.Id)
+                        && x.ActualizationResponsibleUserId == userId
+                        && x.Status == VndStatus.OnActualization
+                        && x.ActualizationPerformed
+                        && !rejectedVndIds.Contains(x.Id))
+            .OrderByDescending(x => x.UpdatedAt);
+
+        var totalCount = await query.CountAsync();
+        var docs = await query.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToListAsync();
+
+        return new PagedResult<VndTaskResponse>
+        {
+            Items = docs.Select(x => new VndTaskResponse
+            {
+                VndId = x.Id,
+                VndCode = x.Code,
+                VndTitle = x.TitleRu,
+                Scope = "actualization",
+                VndStatus = MapVndStatus(x.Status),
+                StatusLabel = x.ActualizationPlannedNoChanges
+                    ? "Актуализация выполнена — без изменений"
+                    : "Актуализация выполнена",
+                DueActualizationDate = x.DueActualizationDate,
+                ActualizationPlannedNoChanges = x.ActualizationPlannedNoChanges,
+                ActualizationPerformed = x.ActualizationPerformed,
+                IsCompleted = true,
+                CompletedAt = x.UpdatedAt,
+                CreatedAt = x.UpdatedAt
+            }).ToList(),
+            TotalCount = totalCount,
+            Page = safePage,
+            PageSize = safePageSize
+        };
+    }
+
+    /// <summary>"Выполнено" для консолидации — на данный момент только та её часть, что прошла
+    /// через цикл актуализации (VndActualizationRecord.PublishedAt). Консолидация самой первой
+    /// редакции документа (без цикла актуализации) сюда пока не попадает — см. комментарий
+    /// в блоке "История Выполнено" выше.</summary>
+    public async Task<PagedResult<VndTaskResponse>> GetConsolidationDoneTasksAsync(int userId, int page, int pageSize)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+
+        var query = _db.Set<VndActualizationRecord>()
+            .Include(r => r.Vnd)
+            .Where(r => r.PublishedAt != null && r.ResponsibleUserId == userId)
+            .OrderByDescending(r => r.PublishedAt);
+
+        var totalCount = await query.CountAsync();
+        var records = await query.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToListAsync();
+
+        return new PagedResult<VndTaskResponse>
+        {
+            Items = records.Select(r => new VndTaskResponse
+            {
+                VndId = r.VndId,
+                VndCode = r.Vnd!.Code,
+                VndTitle = r.Vnd!.TitleRu,
+                Scope = "consolidation",
+                VndStatus = MapVndStatus(r.Vnd!.Status),
+                StatusLabel = "Документ опубликован",
+                ActualizationPlannedNoChanges = r.PlannedNoChanges,
+                IsCompleted = true,
+                CompletedAt = r.PublishedAt,
+                CreatedAt = r.PublishedAt ?? r.UpdatedAt
+            }).ToList(),
+            TotalCount = totalCount,
+            Page = safePage,
+            PageSize = safePageSize
+        };
+    }
+
+    public async Task<PagedResult<VndTaskResponse>> GetRejectedDoneTasksAsync(int userId, int page, int pageSize)
+    {
+        var myProcesses = await _db.VndApprovalProcesses
+            .Include(p => p.Vnd)
+            .Include(p => p.Redaction)
+            .Include(p => p.Stages)
+            .Where(p => p.InitiatorUserId == userId)
+            .ToListAsync();
+
+        var latestIdByVnd = myProcesses
+            .GroupBy(p => p.VndId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.CreatedAt).First().Id);
+
+        // Отклонения, которые с тех пор уже перекрыты новым процессом по этому же документу —
+        // значит, редакция была доработана и отправлена заново, "Отклонено" для неё в прошлом.
+        var superseded = myProcesses
+            .Where(p => p.Status == ApprovalProcessStatus.Rejected && latestIdByVnd[p.VndId] != p.Id)
+            .OrderByDescending(p => p.UpdatedAt)
+            .ToList();
+
+        var rejecterIds = superseded
+            .Select(p => GetRejectionDecision(p)?.ApproverUserId)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+        var rejecterNames = await _db.Users
+            .Where(u => rejecterIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        var items = superseded.Select(p =>
+        {
+            var rejection = GetRejectionDecision(p);
+            return new VndTaskResponse
+            {
+                VndId = p.VndId,
+                VndCode = p.Vnd!.Code,
+                VndTitle = p.Vnd!.TitleRu,
+                Scope = "rejected",
+                VndStatus = MapVndStatus(p.Vnd!.Status),
+                RedactionId = p.RedactionId,
+                RedactionCode = p.Redaction!.Code,
+                StatusLabel = "Отправлено повторно на согласование",
+                RejectedByName = rejection is not null
+                    ? rejecterNames.GetValueOrDefault(rejection.Value.ApproverUserId, "—")
+                    : null,
+                RejectionComment = rejection?.Comment,
+                ActualizationPlannedNoChanges = p.Vnd!.ActualizationPlannedNoChanges,
+                IsCompleted = true,
+                CompletedAt = p.UpdatedAt,
+                CreatedAt = p.UpdatedAt
+            };
+        }).ToList();
+
+        return Paginate(items, page, pageSize);
     }
 
     /// <summary>Последний (по CreatedAt) процесс согласования на каждый ВНД из числа тех, что
