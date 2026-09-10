@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Workflow.Models;
 
 namespace delosfera_server.Modules.Sz.Services;
@@ -45,14 +47,35 @@ public class SzExecutionService : ISzExecutionService
     private readonly DelosferaDbContext _db;
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
+    private readonly ICurrentUserService _currentUser;
 
     private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
 
-    public SzExecutionService(DelosferaDbContext db, IDocumentService documents, IAuditService audit)
+    public SzExecutionService(
+        DelosferaDbContext db, IDocumentService documents, IAuditService audit,
+        ICurrentUserService currentUser)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
+        _currentUser = currentUser;
+    }
+
+    /// <summary>
+    /// Кто вправе распоряжаться исполнением записки: выносить резолюцию, продлевать срок,
+    /// закрывать. Это адресат (кому записка направлена и кто по ней решает), автор записки,
+    /// уже вынёсший резолюцию, либо делопроизводство/руководство с правом «видеть все
+    /// записки». Прежде проверки не было — любой аутентифицированный мог выдать резолюцию,
+    /// продлить срок или закрыть чужую записку на исполнении.
+    /// </summary>
+    private void EnsureCanControl(SzDocument sz, int actorUserId)
+    {
+        if (_currentUser.HasPermission(PermissionCode.ViewAllSz)) return;
+        if (sz.Document!.AuthorId == actorUserId) return;
+        if (sz.AddresseeUserId == actorUserId) return;
+        if (sz.ExecutionResolutionByUserId == actorUserId) return;
+        throw new UnauthorizedAccessException(
+            "Распоряжаться исполнением записки может её адресат, автор или делопроизводство");
     }
 
     public async Task<List<SzAssignmentResponse>> ResolveAsync(
@@ -66,6 +89,7 @@ public class SzExecutionService : ISzExecutionService
             throw new InvalidOperationException("Ответственный исполнитель может быть только один");
 
         var sz = await LoadAsync(szId);
+        EnsureCanControl(sz, actorUserId);
 
         // Поручения выдаются по согласованной записке: до этого исполнять нечего.
         if (sz.Document!.StatusCode != SzStatus.OnExecution)
@@ -256,6 +280,7 @@ public class SzExecutionService : ISzExecutionService
             throw new InvalidOperationException("Укажите обоснование продления срока");
 
         var sz = await LoadAsync(szId);
+        EnsureCanControl(sz, actorUserId);
 
         if (sz.Document!.StatusCode != SzStatus.OnExecution)
             throw new InvalidOperationException("Срок продлевается у записки на исполнении");
@@ -290,6 +315,7 @@ public class SzExecutionService : ISzExecutionService
             throw new InvalidOperationException("Укажите итог исполнения");
 
         var sz = await LoadAsync(szId);
+        EnsureCanControl(sz, actorUserId);
 
         if (sz.Document!.StatusCode != SzStatus.OnExecution)
             throw new InvalidOperationException("Исполненной отмечается записка на исполнении");

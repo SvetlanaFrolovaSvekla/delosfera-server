@@ -84,6 +84,43 @@ public class SzAddresseeDecisionTests
     }
 
     [Fact]
+    public async Task Execution_ControlActions_RefuseOutsider()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (service, engine) = NewService(db);
+        // Без права «видеть все записки»: распоряжение исполнением проверяется по автору/адресату.
+        var execution = new SzExecutionService(db,
+            new DocumentService(db, new AuditService(db), new NumeratorService(db)),
+            new AuditService(db), new FakeCurrentUser(0));
+
+        var (szId, addresseeId, _) = await SeedApprovedAsync(db, service, engine);
+        await service.DecideAsAddresseeAsync(szId, "Согласен, прошу исполнить", addresseeId);
+
+        var посторонний = await AddUserAsync(db, "Посторонний сотрудник");
+        var исполнитель = await AddUserAsync(db, "Исполнитель");
+
+        // Прежде любой аутентифицированный мог выдать резолюцию/продлить/закрыть чужую записку.
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            execution.ResolveAsync(szId, new SzResolutionRequest
+            {
+                Text = "Поручаю", Assignments = [new SzAssignmentRequest {AssigneeUserId = исполнитель.Id, Text = "Сделать"}],
+            }, посторонний.Id));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            execution.ExtendDueDateAsync(szId, DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30), "Продлить", посторонний.Id));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            execution.CompleteAsync(szId, "Готово", посторонний.Id));
+
+        // А адресат — может.
+        var assignments = await execution.ResolveAsync(szId, new SzResolutionRequest
+        {
+            Text = "Поручаю", Assignments = [new SzAssignmentRequest {AssigneeUserId = исполнитель.Id, Text = "Сделать", IsPrimary = true}],
+        }, addresseeId);
+        Assert.Single(assignments);
+    }
+
+    [Fact]
     public async Task Addressee_GetsTaskInInbox_UntilDecisionIsMade()
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
@@ -114,7 +151,7 @@ public class SzAddresseeDecisionTests
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
         var (service, engine) = NewService(db);
-        var execution = new SzExecutionService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)), new AuditService(db));
+        var execution = new SzExecutionService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)), new AuditService(db), new FakeCurrentUser(0, PermissionCode.ViewAllSz));
 
         var (szId, addresseeId, _) = await SeedApprovedAsync(db, service, engine);
         var performer = await AddUserAsync(db, "Исполнитель поручения");

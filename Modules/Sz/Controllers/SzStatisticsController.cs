@@ -1,15 +1,21 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using delosfera_server.Common.Authorization;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Services;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Sz.Controllers;
 
 /// <summary>Статистика по служебным запискам и её выгрузка в Excel (SZ-06).</summary>
+/// <remarks>Сводка охватывает записки всех подразделений, поэтому доступна только
+/// обладателям права «видеть все записки» (делопроизводство, руководство). Прежде
+/// эндпоинты были открыты любому аутентифицированному пользователю.</remarks>
 [ApiController]
 [Route("api/sz/statistics")]
 [Tags("Служебные записки — статистика")]
 [Authorize]
+[RequirePermission(PermissionCode.ViewAllSz)]
 public class SzStatisticsController : ControllerBase
 {
     private readonly ISzStatisticsService _statistics;
