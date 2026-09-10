@@ -164,7 +164,8 @@ public class SzAddresseeDecisionTests
         var procurement = new SzProcurementService(db, documents, audit);
 
         return (new SzService(db, documents, audit, engine, new PassthroughHtml(),
-            currentUser, handler, procurement), engine);
+            currentUser, handler, procurement,
+            new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db)), engine);
     }
 
     /// <summary>
