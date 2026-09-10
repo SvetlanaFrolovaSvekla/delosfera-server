@@ -317,8 +317,12 @@ public class SzExecutionService : ISzExecutionService
         var sz = await LoadAsync(szId);
         EnsureCanControl(sz, actorUserId);
 
-        if (sz.Document!.StatusCode != SzStatus.OnExecution)
-            throw new InvalidOperationException("Исполненной отмечается записка на исполнении");
+        // Закрывается записка на исполнении, а также вынесенная на коллегиальный орган:
+        // после рассмотрения органом её тоже нужно довести до «Исполнена» и в архив,
+        // иначе она навсегда остаётся в OnBoardReview.
+        if (sz.Document!.StatusCode is not (SzStatus.OnExecution or SzStatus.OnBoardReview))
+            throw new InvalidOperationException(
+                "Исполненной отмечается записка на исполнении или после рассмотрения органом");
 
         var open = await _db.SzAssignments.CountAsync(a => a.SzDocumentId == sz.Id
             && a.State != SzAssignmentState.Done && a.State != SzAssignmentState.Cancelled);

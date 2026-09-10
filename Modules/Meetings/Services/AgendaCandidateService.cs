@@ -100,8 +100,13 @@ public class AgendaCandidateService : IAgendaCandidateService
     ];
 
     private readonly DelosferaDbContext _db;
+    private readonly Documents.Services.IDocumentService _documents;
 
-    public AgendaCandidateService(DelosferaDbContext db) => _db = db;
+    public AgendaCandidateService(DelosferaDbContext db, Documents.Services.IDocumentService documents)
+    {
+        _db = db;
+        _documents = documents;
+    }
 
     public async Task<List<AgendaCandidateDto>> ListAsync(MeetingBody body, CancellationToken ct = default)
     {
@@ -314,7 +319,8 @@ public class AgendaCandidateService : IAgendaCandidateService
     /// </summary>
     public async Task<int> DeclineAsync(int szId, int currentUserId, CancellationToken ct = default)
     {
-        var sz = await _db.SzDocuments.FirstOrDefaultAsync(s => s.Id == szId, ct)
+        var sz = await _db.SzDocuments.Include(s => s.Document)
+            .FirstOrDefaultAsync(s => s.Id == szId, ct)
             ?? throw new InvalidOperationException("Записка не найдена.");
 
         var already = await _db.AgendaItems.AnyAsync(a => a.SourceSzId == szId, ct);
@@ -326,6 +332,12 @@ public class AgendaCandidateService : IAgendaCandidateService
         sz.SubmitToBodyQuestion = null;
         sz.SubmitToBodyRequestedAt = null;
         sz.SubmitToBodyRequestedByUserId = null;
+
+        // Отклонённая секретарём записка возвращается на исполнение, а не остаётся
+        // висеть «на рассмотрении органа» без отметки: иначе она застревает в
+        // OnBoardReview и не доходит ни до исполнения, ни до архива.
+        if (sz.Document is {StatusCode: SzStatus.OnBoardReview})
+            await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, currentUserId);
 
         await _db.SaveChangesAsync(ct);
         return szId;

@@ -51,6 +51,37 @@ public class SzToBodyTests
     }
 
     [Fact]
+    public async Task Снятие_вопроса_возвращает_записку_на_исполнение()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (service, addresseeId, szId) = await SeedSignedAsync(db);
+
+        await service.SubmitToBodyAsync(szId, new SzToBodyRequest {Body = MeetingBody.Board}, addresseeId);
+
+        // Пока вопрос не в повестке, адресат вправе снять его — записка возвращается
+        // на обычное исполнение, а не остаётся висеть «на рассмотрении органа».
+        var итог = await service.WithdrawFromBodyAsync(szId, addresseeId);
+
+        Assert.Equal(SzStatus.OnExecution, итог.StatusCode);
+
+        var sz = await db.SzDocuments.AsNoTracking().SingleAsync(x => x.Id == szId);
+        Assert.Null(sz.SubmitToBody);
+        Assert.Null(sz.SubmitToBodyRequestedByUserId);
+    }
+
+    [Fact]
+    public async Task Снять_вопрос_может_только_адресат()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (service, addresseeId, szId) = await SeedSignedAsync(db);
+        await service.SubmitToBodyAsync(szId, new SzToBodyRequest {Body = MeetingBody.Board}, addresseeId);
+
+        var посторонний = await AddUserAsync(db, "Посторонний");
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => service.WithdrawFromBodyAsync(szId, посторонний.Id));
+    }
+
+    [Fact]
     public async Task Вопрос_выносит_только_тот_кому_записка_адресована()
     {
         await using var db = await _postgres.NewIsolatedDbAsync();

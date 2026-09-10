@@ -1,5 +1,6 @@
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Modules.Meetings.Services;
 using delosfera_server.Modules.Procurement.Models;
@@ -30,7 +31,7 @@ public class AgendaFromProcurementTests
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db);
 
-        var очередь = await new AgendaCandidateService(db).ListAsync(MeetingBody.Board);
+        var очередь = await new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db))).ListAsync(MeetingBody.Board);
 
         var заявка = Assert.Single(очередь.Where(c => c.Kind == AgendaCandidateKind.Procurement));
         Assert.Equal(стенд.RequestId, заявка.ProcurementRequestId);
@@ -43,7 +44,7 @@ public class AgendaFromProcurementTests
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db, этапАктивен: false);
 
-        var очередь = await new AgendaCandidateService(db).ListAsync(MeetingBody.Board);
+        var очередь = await new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db))).ListAsync(MeetingBody.Board);
 
         // Заявка ещё ходит по подразделениям: выносить нечего, пока согласование
         // не дошло до этапа, где решение принимает орган.
@@ -56,7 +57,7 @@ public class AgendaFromProcurementTests
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db, орган: ApprovalAuthority.Curator);
 
-        var очередь = await new AgendaCandidateService(db).ListAsync(MeetingBody.Board);
+        var очередь = await new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db))).ListAsync(MeetingBody.Board);
 
         Assert.DoesNotContain(очередь, c => c.ProcurementRequestId == стенд.RequestId);
     }
@@ -69,7 +70,7 @@ public class AgendaFromProcurementTests
 
         // Заседания Совета директоров и собрания акционеров система не ведёт, а
         // кредитный комитет закупки не утверждает: чужую очередь засорять нечем.
-        var кредитный = await new AgendaCandidateService(db).ListAsync(MeetingBody.CreditCommittee);
+        var кредитный = await new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db))).ListAsync(MeetingBody.CreditCommittee);
 
         Assert.DoesNotContain(кредитный, c => c.Kind == AgendaCandidateKind.Procurement);
     }
@@ -79,7 +80,7 @@ public class AgendaFromProcurementTests
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db);
-        var сервис = new AgendaCandidateService(db);
+        var сервис = new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)));
 
         var item = await сервис.TakeProcurementIntoAgendaAsync(
             стенд.MeetingId, стенд.RequestId, "О приобретении серверов", null, стенд.Actor);
@@ -97,7 +98,7 @@ public class AgendaFromProcurementTests
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db);
-        var сервис = new AgendaCandidateService(db);
+        var сервис = new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)));
 
         await сервис.TakeProcurementIntoAgendaAsync(стенд.MeetingId, стенд.RequestId, null, null, стенд.Actor);
 
@@ -122,7 +123,7 @@ public class AgendaFromProcurementTests
         await db.SaveChangesAsync();
 
         var ошибка = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => new AgendaCandidateService(db)
+            () => new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)))
                 .TakeProcurementIntoAgendaAsync(кредитный.Id, стенд.RequestId, null, null, стенд.Actor));
 
         Assert.Contains("другого органа", ошибка.Message);

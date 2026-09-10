@@ -35,6 +35,9 @@ public interface ISzService
     /// <summary>Вынести вопрос по записке на коллегиальный орган.</summary>
     Task<SzDetails> SubmitToBodyAsync(int id, SzToBodyRequest request, int actorUserId);
 
+    /// <summary>Снять записку с вынесения на коллегиальный орган (пока не в повестке).</summary>
+    Task<SzDetails> WithdrawFromBodyAsync(int id, int actorUserId);
+
     /// <summary>
     /// Зарегистрировать: присвоить номер, дату и срок исполнения, запустить маршрут
     /// согласования (SZ-01). Шаблон берётся из вида записки или указывается явно.
@@ -596,6 +599,37 @@ public class SzService : ISzService
         await _audit.LogAsync("Sz", sz.Id, "SubmittedToBody", actorUserId,
             new {body = request.Body.ToString(), question = sz.SubmitToBodyQuestion});
 
+        return (await GetAsync(sz.Id))!;
+    }
+
+    public async Task<SzDetails> WithdrawFromBodyAsync(int id, int actorUserId)
+    {
+        var sz = await _db.SzDocuments.Include(x => x.Document)
+            .FirstOrDefaultAsync(x => x.Id == id)
+            ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        if (sz.AddresseeUserId != actorUserId)
+            throw new UnauthorizedAccessException("Снять вопрос может тот, кому записка адресована");
+
+        if (sz.Document!.StatusCode != SzStatus.OnBoardReview)
+            throw new InvalidOperationException("Записка не вынесена на коллегиальный орган");
+
+        // После включения в повестку решать судьбу вопроса — секретарю через саму
+        // повестку, а не автору отметки.
+        if (await _db.AgendaItems.AnyAsync(a => a.SourceSzId == id))
+            throw new InvalidOperationException(
+                "Записка уже включена в повестку — снять вопрос можно только через повестку заседания");
+
+        sz.SubmitToBody = null;
+        sz.SubmitToBodyQuestion = null;
+        sz.SubmitToBodyRequestedAt = null;
+        sz.SubmitToBodyRequestedByUserId = null;
+
+        // Вопрос снят — записка возвращается на обычное исполнение.
+        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, actorUserId);
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", sz.Id, "WithdrawnFromBody", actorUserId, null);
         return (await GetAsync(sz.Id))!;
     }
 
