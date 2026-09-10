@@ -16,6 +16,7 @@ public interface ILetterService
 
     Task<LetterDto> ResolveAsync(int id, ResolveLetterRequest request, int currentUserId, CancellationToken ct = default);
     Task<LetterDto> CloseAsync(int id, string? note, int currentUserId, CancellationToken ct = default);
+    Task<LetterDto> SendAsync(int id, int currentUserId, CancellationToken ct = default);
 
     Task<List<LetterDto>> OverdueAsync(CancellationToken ct = default);
 
@@ -352,6 +353,37 @@ public class LetterService : ILetterService
         await _db.SaveChangesAsync(ct);
 
         await _audit.LogAsync("Letter", letter.Id, "Closed", currentUserId,
+            new { regNumber = letter.RegNumber });
+
+        return await GetAsync(id, ct);
+    }
+
+    /// <summary>
+    /// Отправить исходящее письмо адресату. Раньше статус «Отправлено» был объявлен,
+    /// но выставить его было нечем: проект/зарегистрированное исходящее зависало без
+    /// финального шага, а книга не показывала, что письмо ушло. Черновику при отправке
+    /// присваивается регистрационный номер (до этого его не было).
+    /// </summary>
+    public async Task<LetterDto> SendAsync(int id, int currentUserId, CancellationToken ct = default)
+    {
+        var letter = await Load(id, ct);
+
+        if (letter.Direction != LetterDirection.Outgoing)
+            throw new InvalidOperationException("Отправить можно только исходящее письмо.");
+
+        if (letter.Status is not (LetterStatus.Draft or LetterStatus.Registered))
+            throw new InvalidOperationException(
+                "Отправить можно только проект или зарегистрированное исходящее письмо.");
+
+        // Проект регистрируется в момент отправки — раньше номера у него не было.
+        letter.RegNumber ??= await NextNumberAsync(letter.Direction, letter.Year, ct);
+        letter.RegisteredOn ??= DateOnly.FromDateTime(DateTime.UtcNow);
+        letter.Status = LetterStatus.Sent;
+        letter.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync("Letter", letter.Id, "Sent", currentUserId,
             new { regNumber = letter.RegNumber });
 
         return await GetAsync(id, ct);
