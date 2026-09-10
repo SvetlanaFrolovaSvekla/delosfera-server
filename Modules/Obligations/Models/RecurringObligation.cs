@@ -146,8 +146,6 @@ public class ObligationPeriod : IAuditableEntity
     public int? MeetingId { get; set; }
     public Meeting? Meeting { get; set; }
 
-    public int? DocumentId { get; set; }
-
     /// <summary>Пояснение исполнителя или причина снятия периода.</summary>
     public string? Comment { get; set; }
 
