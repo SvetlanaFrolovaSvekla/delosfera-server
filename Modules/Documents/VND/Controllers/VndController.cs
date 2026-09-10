@@ -253,7 +253,25 @@ public class VndController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
     }
-    
+
+    /// <summary>Разрешить легаси-ссылку db://documents/{code} или db://attachments/{n},
+    /// унаследованную из старой системы (isrib) и встречающуюся в тексте документа как обычная
+    /// внешняя гиперссылка (открывала пустую страницу) — см. VndService.ResolveLegacyLinkAsync
+    /// и useDocxLegacyLinks на фронте (клик по такой ссылке внутри отрендеренного docx).</summary>
+    [HttpGet("{vndId:int}/legacy-link")]
+    [RequirePermission(PermissionCode.ViewVnd)]
+    [ProducesResponseType(typeof(LegacyLinkResolveResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<LegacyLinkResolveResponse>> ResolveLegacyLink(
+        int vndId, [FromQuery] string type, [FromQuery] string legacyId)
+    {
+        try
+        {
+            return Ok(await _service.ResolveLegacyLinkAsync(vndId, type, legacyId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    }
+
     /// <summary>Прямое редактирование последней редакции (подмена файлов/описания) - без согласования,
     /// без создания новой редакции, без изменения даты актуализации. Только для EditLastRevisionDirectly.
     /// Оставлен для обратной совместимости - см. более общий EditRedactionDirectly ниже, который

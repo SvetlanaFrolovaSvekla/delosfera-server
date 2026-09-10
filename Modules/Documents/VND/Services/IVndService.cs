@@ -22,6 +22,11 @@ public interface IVndService
     Task<VndLinksResponse> GetLinksAsync(int vndId, string languageCode);
     Task<VndLinkResponse> AddLinkAsync(int vndId, AddVndLinkRequest request, string languageCode);
     Task DeleteLinkAsync(int vndId, int linkId);
+    /// <summary>Разрешает легаси-ссылку (db://documents/{code} или db://attachments/{n}) из
+    /// текста документа vndId в реальный документ/вложение системы — см.
+    /// LegacyLinkResolveResponse и DocxLegacyLinkExtractor. Бросает KeyNotFoundException, если
+    /// ссылка ни на что не разрешилась.</summary>
+    Task<LegacyLinkResolveResponse> ResolveLegacyLinkAsync(int vndId, string type, string legacyId);
     Task<VndRedactionResponse> EditLastRevisionDirectlyAsync(
         int vndId, EditLastRevisionDirectlyRequest request, int currentUserId);
     /// <summary>То же самое, что EditLastRevisionDirectlyAsync, но для ЛЮБОЙ редакции документа,
