@@ -292,6 +292,10 @@ using (var scope = app.Services.CreateScope())
     // согласующих). Идемпотентно: если шаблон уже есть — не трогает.
     await delosfera_server.Modules.Procurement.Services.ProcurementRouteTemplateSeeder.SeedAsync(db);
 
+    // Глобальный шаблон маршрута СЗ — виза руководителя автора. Без него записка
+    // без вручную названных согласующих не уходила на согласование. Идемпотентно.
+    await delosfera_server.Modules.Sz.Services.SzRouteTemplateSeeder.SeedAsync(db);
+
     // Пароль администратору выдаётся только так — из настройки, не из хеша в коде.
     // Блок находит уже заведённую учётную запись и ставит ей пароль; новых он не
     // создаёт. Учётные записи приходят из справочника банка, и завести здесь ещё

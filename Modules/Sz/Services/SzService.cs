@@ -387,10 +387,15 @@ public class SzService : ISzService
     /// </summary>
     private async Task<RouteInstance> InstantiateFromKindAsync(SzDocument sz)
     {
-        // Единый конструктор согласующих: если администратор завёл шаблон СЗ под
-        // подразделение-инициатор (автора записки) — маршрут берётся из него. Берём
-        // только адресный шаблон (OrgUnitId совпал), а не общий уровня типа — иначе
-        // селектор перехватил бы шаблон вида записки ниже.
+        // Единый конструктор согласующих. Приоритет источника маршрута:
+        //   1) адресный шаблон под подразделение-инициатор (автора записки);
+        //   2) шаблон, прописанный в виде записки (SzKind.RouteTemplateId);
+        //   3) глобальный шаблон уровня типа — из коробки виза руководителя автора.
+        // Раньше шага 3 не было: адресный шаблон брался, а общий уровня типа
+        // отбрасывался, и записка без вручную названных согласующих не уходила на
+        // согласование вовсе (SzRouteTemplateSeeder закрывает случай из коробки).
+
+        // 1) адресный шаблон подразделения
         if (sz.AuthorUnitId is { } unit)
         {
             var byUnit = await _templates.SelectAsync(Documents.Models.DocumentType.Sz, unit);
@@ -398,13 +403,20 @@ public class SzService : ISzService
                 return await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, byUnit.Id);
         }
 
-        var templateId = sz.Kind?.RouteTemplateId
-            ?? (await _db.SzKinds.Where(k => k.Id == sz.KindId)
-                    .Select(k => k.RouteTemplateId).FirstOrDefaultAsync())
-            ?? throw new InvalidOperationException(
-                "Не задан маршрут согласования: назовите согласующих или пропишите шаблон в виде записки");
+        // 2) шаблон вида записки
+        var kindTemplateId = sz.Kind?.RouteTemplateId
+            ?? await _db.SzKinds.Where(k => k.Id == sz.KindId)
+                    .Select(k => k.RouteTemplateId).FirstOrDefaultAsync();
+        if (kindTemplateId is int ktid)
+            return await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, ktid);
 
-        return await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, templateId);
+        // 3) глобальный шаблон уровня типа (OrgUnitId = null)
+        var global = await _templates.SelectAsync(Documents.Models.DocumentType.Sz, sz.AuthorUnitId);
+        if (global is not null)
+            return await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, global.Id);
+
+        throw new InvalidOperationException(
+            "Не задан маршрут согласования: назовите согласующих или настройте шаблон СЗ в конструкторе согласующих");
     }
 
     public async Task<SzDetails> SetApproversAsync(int id, IReadOnlyList<int> userIds, bool parallel, int actorUserId)
