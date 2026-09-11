@@ -13,7 +13,7 @@ public interface IMailQueue
     /// <summary>Поставить уведомление в очередь на отправку получателям.</summary>
     Task EnqueueAsync(
         IEnumerable<int> userIds, string subject, string body, string? url, int? notificationId,
-        CancellationToken ct = default);
+        MailAttachment? attachment = null, CancellationToken ct = default);
 
     /// <summary>Отправить накопившееся. Возвращает число ушедших писем.</summary>
     Task<int> FlushAsync(CancellationToken ct = default);
@@ -54,7 +54,7 @@ public class MailQueue : IMailQueue
 
     public async Task EnqueueAsync(
         IEnumerable<int> userIds, string subject, string body, string? url, int? notificationId,
-        CancellationToken ct = default)
+        MailAttachment? attachment = null, CancellationToken ct = default)
     {
         var settings = await _settings.LoadAsync(ct);
         if (!settings.Enabled) return;
@@ -78,6 +78,9 @@ public class MailQueue : IMailQueue
                 Body = BuildBody(recipient.FullName, body, url, settings.BaseUrl),
                 NotificationId = notificationId,
                 CreatedAt = DateTime.UtcNow,
+                AttachmentBytes = attachment?.Bytes,
+                AttachmentFileName = attachment?.FileName,
+                AttachmentContentType = attachment?.ContentType,
             });
         }
 
@@ -112,6 +115,21 @@ public class MailQueue : IMailQueue
                     IsBodyHtml = false,
                 };
                 message.To.Add(email.ToAddress);
+
+                // Вложение живёт только на время отправки: MemoryStream закрывается вместе с
+                // Attachment (Dispose пробрасывается), а исходные байты остаются в email —
+                // при ошибке отправки повторная попытка вложение не потеряет.
+                using var attachmentStream = email.AttachmentBytes is { } bytes
+                    ? new MemoryStream(bytes)
+                    : null;
+
+                if (attachmentStream is not null)
+                {
+                    message.Attachments.Add(new Attachment(
+                        attachmentStream,
+                        email.AttachmentFileName ?? "attachment",
+                        email.AttachmentContentType ?? "application/octet-stream"));
+                }
 
                 await client.SendMailAsync(message, ct);
 

@@ -41,11 +41,18 @@ public class VndService : IVndService
         _legacyLinkExtractor = legacyLinkExtractor;
     }
 
-    public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
+    public async Task<List<VndResponse>> SearchAsync(
+        VndSearchRequest request, string languageCode, bool ignoreVisibilityRestriction = false)
     {
         // Вычисляется здесь (а не только перед ToListAsync, как раньше), т.к. теперь используется
         // и для ограничения видимости "Статуса ВНД" (документ-уровня) ниже.
-        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        //
+        // ignoreVisibilityRestriction — для системных вызовов без текущего HTTP-пользователя
+        // (ежемесячная сводка по актуализации и её предпросмотр, см.
+        // ActualizationNotificationService): там HasPermission всегда вернула бы false из-за
+        // отсутствия HttpContext, и без этого флага сводка тихо теряла бы часть документов.
+        var canViewExtended =
+            ignoreVisibilityRestriction || _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
 
         IQueryable<VndDocument> query = _db.VndDocuments
             .Include(x => x.Type)
@@ -203,6 +210,19 @@ public class VndService : IVndService
         if (request.NeverActualizedOnly)
             rows = rows.Where(r => r.RedactionIds.Count == 1).ToList();
 
+        return await BuildActualizationPlanExcelAsync(rows, request.Columns);
+    }
+
+    /// <summary>
+    /// Собственно сборка Excel-файла плана актуализации из уже отфильтрованного набора строк —
+    /// общая часть для кнопки "Экспорт плана в Excel" (ExportActualizationPlanAsync, строки из
+    /// SearchAsync по фильтрам пользователя) и ежемесячной сводки по СП
+    /// (ActualizationNotificationService, строки уже отобраны по разработчику/ответственным
+    /// исполнителям конкретного подразделения). Набор и подпись колонок, ширины и цвета —
+    /// в одном месте, чтобы вложение к письму визуально не разъезжалось с обычным экспортом.
+    /// </summary>
+    public async Task<byte[]> BuildActualizationPlanExcelAsync(List<VndResponse> rows, List<string> columns)
+    {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         var keywordNames = await _db.Keywords.ToDictionaryAsync(k => k.Id, k => k.TitleRu);
@@ -235,7 +255,7 @@ public class VndService : IVndService
         string LastActualizationStatusCell(VndResponse r) =>
             r.LastActualizationDate is null ? "—" : (r.LastActualizationHadChanges ? "С изменениями" : "Без изменений");
 
-        var columns = new (string Key, string Header, bool Fixed, Func<VndResponse, string> Value)[]
+        var columnDefs = new (string Key, string Header, bool Fixed, Func<VndResponse, string> Value)[]
         {
             ("code", "Код", true, r => r.Code),
             ("name", "Наименование", true, r => r.Name),
@@ -261,12 +281,12 @@ public class VndService : IVndService
             ("userGroups", "Группы доступа", false, r => Join(r.UserGroupIds, userGroupNames)),
         };
 
-        var selected = request.Columns.ToHashSet();
-        var chosen = columns.Where(c => c.Fixed || selected.Contains(c.Key)).ToList();
+        var selected = columns.ToHashSet();
+        var chosen = columnDefs.Where(c => c.Fixed || selected.Contains(c.Key)).ToList();
 
         // Пустой/бессмысленный выбор колонок (например, фронт прислал только неизвестные ключи) —
         // не отдаём книгу вовсе без колонок, а откатываемся к обязательному набору.
-        if (chosen.Count == 0) chosen = columns.Where(c => c.Fixed).ToList();
+        if (chosen.Count == 0) chosen = columnDefs.Where(c => c.Fixed).ToList();
 
         // "Статус срока" всегда среди обязательных колонок — раскрашиваем в ней текст
         // теми же цветами, что и бейдж этого статуса на странице (см. ExportBucketColorHex).

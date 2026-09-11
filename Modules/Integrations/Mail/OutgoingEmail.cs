@@ -32,6 +32,17 @@ public class OutgoingEmail
     /// должен видеть, что уведомление до сотрудника не дошло.
     /// </summary>
     public bool Failed { get; set; }
+
+    /// <summary>
+    /// Необязательное вложение (например, Excel-план актуализации к ежемесячной сводке —
+    /// см. ActualizationNotificationService). Хранится тем же способом, что и тело письма —
+    /// по получателю, а не по ссылке на общий файл: очередь и так дублирует тело письма
+    /// на каждого адресата, а совместное хранение одного вложения усложнило бы модель
+    /// ради экономии, которая на объёмах банка не заметна.
+    /// </summary>
+    public byte[]? AttachmentBytes { get; set; }
+    public string? AttachmentFileName { get; set; }
+    public string? AttachmentContentType { get; set; }
 }
 
 public class OutgoingEmailConfiguration : IEntityTypeConfiguration<OutgoingEmail>

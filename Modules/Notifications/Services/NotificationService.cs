@@ -71,7 +71,7 @@ public class NotificationService : INotificationService
         // Копия уведомления уходит на корпоративную почту (INT-02). Ставим в очередь,
         // а не отправляем здесь: иначе согласование ждало бы почтовый сервер.
         await _mail.EnqueueAsync(
-            recipientIds, request.TitleRu, request.BodyRu, request.Url, notification.Id);
+            recipientIds, request.TitleRu, request.BodyRu, request.Url, notification.Id, request.Attachment);
 
         return notification.Id;
     }
