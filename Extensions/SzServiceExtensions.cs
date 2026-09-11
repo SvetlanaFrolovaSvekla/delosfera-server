@@ -13,6 +13,9 @@ public static class SzServiceExtensions
         builder.Services.AddScoped<ISzArchiveService, SzArchiveService>();
         builder.Services.AddScoped<ISzProcurementService, SzProcurementService>();
 
+        // Предпросмотр согласующих по виду записки (автоподстановка в форму)
+        builder.Services.AddScoped<ISzApproverPreviewService, SzApproverPreviewService>();
+
         // Напоминания о сроках исполнения поручений в 9:00 по времени банка (SZ-03)
         builder.Services.AddScoped<ISzDeadlineNotifier, SzDeadlineNotifier>();
 

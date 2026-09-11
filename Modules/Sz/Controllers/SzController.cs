@@ -28,19 +28,22 @@ public class SzController : ControllerBase
     private readonly DelosferaDbContext _db;
     private readonly IDocumentService _documents;
     private readonly ICurrentUserService _currentUser;
+    private readonly ISzApproverPreviewService _approverPreview;
 
     public SzController(
         ISzService sz,
         ISzExecutionService execution,
         DelosferaDbContext db,
         IDocumentService documents,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ISzApproverPreviewService approverPreview)
     {
         _sz = sz;
         _execution = execution;
         _db = db;
         _documents = documents;
         _currentUser = currentUser;
+        _approverPreview = approverPreview;
     }
 
     /// <summary>Реестр СЗ с фильтрами. Пустой список статусов — неархивные записки.</summary>
@@ -286,6 +289,14 @@ public class SzController : ControllerBase
             .OrderBy(k => k.Id)
             .Select(k => new { k.Id, k.TitleRu, k.TitleEn, k.TitleKg, formKey = k.FormKey.ToString(), k.IsPaperByDefault, k.ExecutionDays })
             .ToListAsync());
+
+    /// <summary>Согласующие из шаблона выбранного вида — для автоподстановки в форму.</summary>
+    /// <remarks>Возвращает список тех, кого подставит движок при отправке (по шаблону
+    /// вида/подразделения), чтобы автор видел его заранее и мог поправить. Пусто —
+    /// шаблон не настроен, согласующих выбирают вручную.</remarks>
+    [HttpGet("kinds/{kindId:int}/preview-approvers")]
+    public async Task<IActionResult> PreviewApprovers(int kindId, [FromQuery] int? correspondentUnitId) =>
+        Ok(await _approverPreview.PreviewAsync(kindId, correspondentUnitId));
 
     /// <summary>Справочник видов кадровых СЗ.</summary>
     /// <summary>

@@ -120,6 +120,14 @@ public class SzListItem
     public bool IsPaperCarrier { get; set; }
 }
 
+/// <summary>Согласующий, подставленный из шаблона вида записки (предпросмотр).</summary>
+public class SzApproverPreviewDto
+{
+    public int UserId { get; set; }
+    public string FullName { get; set; } = string.Empty;
+    public string? Position { get; set; }
+}
+
 /// <summary>Карточка СЗ целиком.</summary>
 public class SzDetails : SzListItem
 {
