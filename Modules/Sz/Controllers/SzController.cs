@@ -48,6 +48,17 @@ public class SzController : ControllerBase
     public async Task<IActionResult> Search([FromBody] SzSearchRequest request) =>
         Ok(await _sz.SearchAsync(request, _currentUser.UserId));
 
+    /// <summary>Тот же реестр целиком, книгой Excel. Видимость — как у поиска.</summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] SzSearchRequest request)
+    {
+        var bytes = await _sz.ExportAsync(request, _currentUser.UserId);
+        var stamp = DateTime.Now.ToString("dd.MM.yyyy");
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"Реестр СЗ {stamp}.xlsx");
+    }
+
     /// <summary>Карточка служебной записки.</summary>
     [HttpGet("{id:int}")]
     public async Task<IActionResult> Get(int id)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Export;
 using delosfera_server.Common.Models;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
@@ -18,6 +19,10 @@ namespace delosfera_server.Modules.Sz.Services;
 public interface ISzService
 {
     Task<PagedResult<SzListItem>> SearchAsync(SzSearchRequest request, int currentUserId);
+
+    /// <summary>Реестр по тому же фильтру, что и поиск, но целиком — книгой Excel.</summary>
+    Task<byte[]> ExportAsync(SzSearchRequest request, int currentUserId);
+
     Task<SzDetails?> GetAsync(int id);
     Task<SzDetails> CreateDraftAsync(SzSaveRequest request, int authorId);
     Task<SzDetails> UpdateDraftAsync(int id, SzSaveRequest request, int actorUserId);
@@ -96,6 +101,73 @@ public class SzService : ISzService
 
     public async Task<PagedResult<SzListItem>> SearchAsync(SzSearchRequest request, int currentUserId)
     {
+        var query = await FilteredQueryAsync(request, currentUserId);
+
+        var total = await query.CountAsync();
+
+        var page = request.Page < 1 ? 1 : request.Page;
+        var pageSize = request.PageSize is < 1 or > 200 ? 25 : request.PageSize;
+
+        var items = await query
+            .OrderByDescending(x => x.RegisteredOn ?? DateOnly.MaxValue)
+            .ThenByDescending(x => x.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return new PagedResult<SzListItem>
+        {
+            Items = items.Select(ToListItem).ToList(),
+            Total = total,
+            Page = page,
+            PageSize = pageSize
+        };
+    }
+
+    public async Task<byte[]> ExportAsync(SzSearchRequest request, int currentUserId)
+    {
+        var query = await FilteredQueryAsync(request, currentUserId);
+
+        // Выгружаем весь отфильтрованный реестр, без страниц: бумажная книга
+        // регистрации не знает, что такое «первая сотня».
+        var rows = await query
+            .OrderByDescending(x => x.RegisteredOn ?? DateOnly.MaxValue)
+            .ThenByDescending(x => x.Id)
+            .ToListAsync();
+
+        var today = Today;
+        var sheet = new XlsxSheet
+        {
+            Name = "Реестр СЗ",
+            Header =
+            [
+                "Рег. номер", "Дата регистрации", "Тема", "Вид", "Автор",
+                "Адресат", "Срок исполнения", "Статус",
+            ],
+            Widths = [18, 15, 50, 26, 28, 34, 16, 22],
+            Rows = rows
+                .Select(ToListItem)
+                .Select(i => new[]
+                {
+                    i.RegNumber ?? "—",
+                    i.RegisteredOn?.ToString("dd.MM.yyyy") ?? "—",
+                    i.Title,
+                    i.Kind,
+                    i.Author ?? "—",
+                    i.CorrespondentUnit ?? "—",
+                    i.DueDate?.ToString("dd.MM.yyyy") ?? "—",
+                    SzStatusTitles.Title(i.StatusCode),
+                })
+                .ToList(),
+        };
+
+        return XlsxWorkbook.Build(sheet);
+    }
+
+    /// <summary>Фильтр реестра — общий для страничного поиска и полной выгрузки.</summary>
+    private async Task<IQueryable<SzDocument>> FilteredQueryAsync(
+        SzSearchRequest request, int currentUserId)
+    {
         var query = BaseQuery();
 
         if (request.MineOnly)
@@ -142,25 +214,7 @@ public class SzService : ISzService
                                   && x.Document!.StatusCode != SzStatus.Executed);
         }
 
-        var total = await query.CountAsync();
-
-        var page = request.Page < 1 ? 1 : request.Page;
-        var pageSize = request.PageSize is < 1 or > 200 ? 25 : request.PageSize;
-
-        var items = await query
-            .OrderByDescending(x => x.RegisteredOn ?? DateOnly.MaxValue)
-            .ThenByDescending(x => x.Id)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync();
-
-        return new PagedResult<SzListItem>
-        {
-            Items = items.Select(ToListItem).ToList(),
-            Total = total,
-            Page = page,
-            PageSize = pageSize
-        };
+        return query;
     }
 
     /// <summary>
