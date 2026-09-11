@@ -395,37 +395,55 @@ public class SzService : ISzService
         if (sz.AddresseeUserId is null && sz.CorrespondentUnitId is null)
             throw new InvalidOperationException("Укажите адресата записки");
 
+        // Регистрация идёт ДО согласования: черновик уходит в Сектор делопроизводства
+        // на присвоение номера, и только зарегистрированную записку согласуют. Записку,
+        // у которой номер уже есть (вернулась с доработки или была отозвана после
+        // регистрации), повторно не регистрируют — она сразу уходит на согласование.
+        if (sz.Document!.RegNumber is null)
+        {
+            await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.PendingRegistration, actorUserId);
+            await CloseRevisionTasksAsync(sz.DocumentId);
+            await _db.SaveChangesAsync();
+
+            await _audit.LogAsync("Sz", sz.Id, "SubmittedForRegistration", actorUserId, new { });
+        }
+        else
+        {
+            await StartApprovalRouteAsync(sz, actorUserId);
+            await CloseRevisionTasksAsync(sz.DocumentId);
+            await _db.SaveChangesAsync();
+
+            await _audit.LogAsync("Sz", sz.Id, "ResubmittedForApproval", actorUserId,
+                new { round = sz.ApprovalRounds });
+        }
+
+        return (await GetAsync(sz.Id))!;
+    }
+
+    /// <summary>
+    /// Запустить маршрут согласования: по названным автором согласующим, а если он
+    /// их не назвал — по шаблону вида записки. Общий шаг для первичной регистрации
+    /// (запускает делопроизводство) и повторной отправки уже зарегистрированной
+    /// записки с доработки.
+    /// </summary>
+    private async Task StartApprovalRouteAsync(SzDocument sz, int actorUserId)
+    {
         var approvers = await _db.SzApprovers
             .Where(a => a.SzDocumentId == sz.Id)
             .OrderBy(a => a.Order)
             .Select(a => a.UserId)
             .ToListAsync();
 
-        // Согласование идёт до регистрации, поэтому номер здесь не присваивается:
-        // регистрируют то, с чем уже согласились. Маршрут строится по названным
-        // автором согласующим, а если он их не назвал — по шаблону вида записки.
         var instance = approvers.Count > 0
             ? await _routeEngine.InstantiateForApproversAsync(
                 sz.DocumentId, approvers, sz.ApprovalIsParallel, signerUserId: null)
             : await InstantiateFromKindAsync(sz);
 
         await _routeEngine.StartAsync(instance.Id, actorUserId);
-        sz.Document.CurrentRouteInstanceId = instance.Id;
+        sz.Document!.CurrentRouteInstanceId = instance.Id;
         sz.ApprovalRounds++;
 
         await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnApproval, actorUserId);
-
-        // Отправка с доработки закрывает задачу автора на устранение замечаний:
-        // работа сдана, из его списка задач она уходит. Смену статуса ведёт сам
-        // сервис, поэтому обработчик маршрута сюда не подключается — снимаем здесь.
-        var revisionTasks = await _db.WorkflowTasks
-            .Where(t => t.DocumentId == sz.DocumentId
-                        && t.Type == SzRouteCompletionHandler.RemarksResolutionTask
-                        && t.State == WorkflowTaskState.Open)
-            .ToListAsync();
-        foreach (var task in revisionTasks)
-            task.State = WorkflowTaskState.Done;
-
         await _db.SaveChangesAsync();
 
         await _audit.LogAsync("Sz", sz.Id, "SubmittedForApproval", actorUserId, new
@@ -435,8 +453,22 @@ public class SzService : ISzService
             round = sz.ApprovalRounds,
             routeInstanceId = instance.Id,
         });
+    }
 
-        return (await GetAsync(sz.Id))!;
+    /// <summary>
+    /// Закрыть задачу автора на устранение замечаний: запиской снова занялись, и
+    /// висеть в списке задач ей больше незачем. Смену статуса ведёт сам сервис,
+    /// поэтому обработчик маршрута сюда не подключается — снимаем здесь.
+    /// </summary>
+    private async Task CloseRevisionTasksAsync(int documentId)
+    {
+        var revisionTasks = await _db.WorkflowTasks
+            .Where(t => t.DocumentId == documentId
+                        && t.Type == SzRouteCompletionHandler.RemarksResolutionTask
+                        && t.State == WorkflowTaskState.Open)
+            .ToListAsync();
+        foreach (var task in revisionTasks)
+            task.State = WorkflowTaskState.Done;
     }
 
     /// <summary>
@@ -695,7 +727,7 @@ public class SzService : ISzService
 
         if (sz.Document!.StatusCode != SzStatus.PendingRegistration)
             throw new InvalidOperationException(
-                "Регистрируется согласованная записка: она ещё не прошла согласование");
+                "Регистрируется отправленная записка: она ещё не отправлена на регистрацию");
 
         var number = await _documents.RegisterAsync(
             sz.DocumentId, "Sz", "global", NumberPattern, actorUserId);
@@ -710,54 +742,11 @@ public class SzService : ISzService
         await _audit.LogAsync("Sz", sz.Id, "Registered", actorUserId,
             new { number, registeredOn = sz.RegisteredOn, dueDate = sz.DueDate });
 
-        // Подписант получает записку после регистрации: он подписывает то, что уже
-        // согласовано и внесено в книгу регистрации, и менять там больше нечего.
-        // Раньше подписантом был отдельный человек; теперь записку подписывает
-        // адресат. У записок, заведённых до объединения, подписант свой — их
-        // маршрут строится по нему.
-        if ((sz.AddresseeUserId ?? sz.SignerUserId) is { } signer)
-        {
-            var instance = await _routeEngine.InstantiateForSignerAsync(sz.DocumentId, signer);
-
-            await _routeEngine.StartAsync(instance.Id, actorUserId);
-            sz.Document.CurrentRouteInstanceId = instance.Id;
-
-            await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnSigning, actorUserId);
-            await _db.SaveChangesAsync();
-
-            await _audit.LogAsync("Sz", sz.Id, "SentToSigner", actorUserId,
-                new { signer, routeInstanceId = instance.Id });
-
-            return (await GetAsync(sz.Id))!;
-        }
-
-        // Подписанта нет — записка идёт дальше сразу: к адресату за решением по
-        // существу, а если адресата не назвали, то на исполнение.
-        await MoveAfterSigningAsync(sz, actorUserId);
+        // После регистрации записка уходит на согласование: номер получает то, что
+        // ещё будут согласовывать и подписывать. По завершении маршрута согласования
+        // обработчик сам отправит записку на подпись адресату (руководству).
+        await StartApprovalRouteAsync(sz, actorUserId);
         return (await GetAsync(sz.Id))!;
-    }
-
-    /// <summary>
-    /// Куда записка идёт после подписания: к адресату за решением либо сразу на
-    /// исполнение. Общий путь для двух случаев — подписант был и подписант не нужен.
-    /// </summary>
-    private async Task MoveAfterSigningAsync(SzDocument sz, int actorUserId)
-    {
-        if (sz.AddresseeUserId is null)
-        {
-            await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, actorUserId);
-            await _db.SaveChangesAsync();
-            return;
-        }
-
-        await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnAddresseeDecision, actorUserId);
-        await _db.SaveChangesAsync();
-
-        // Задача и уведомление адресату — тем же способом, что и при завершении
-        // маршрута подписания: адресат согласующим не был, и без задачи в списке
-        // он о записке не узнает.
-        await _addresseeTasks.CreateAddresseeTaskAsync(sz);
-        await _addresseeTasks.NotifyAddresseeAsync(sz, actorUserId);
     }
 
     public async Task<SzDetails> WithdrawAsync(int id, string reason, int actorUserId)

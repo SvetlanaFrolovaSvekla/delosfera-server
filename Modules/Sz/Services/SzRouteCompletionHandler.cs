@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
@@ -34,16 +35,25 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
     private readonly IAuditService _audit;
     private readonly INotificationService _notifications;
 
+    /// <summary>
+    /// Провайдер нужен ради маршрута подписания: после согласования обработчик
+    /// сам запускает маршрут подписи, а прямая зависимость от IRouteEngine
+    /// замкнула бы кольцо — движок держит список обработчиков. Резолвим по месту.
+    /// </summary>
+    private readonly IServiceProvider _serviceProvider;
+
     public SzRouteCompletionHandler(
         DelosferaDbContext db,
         IDocumentService documents,
         IAuditService audit,
-        INotificationService notifications)
+        INotificationService notifications,
+        IServiceProvider serviceProvider)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
         _notifications = notifications;
+        _serviceProvider = serviceProvider;
     }
 
     public Task OnRouteApprovedAsync(int routeInstanceId, int documentId, int actorUserId) =>
@@ -70,34 +80,47 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
         // По записке проходят два маршрута: согласование и подписание. Куда вести
         // дальше — зависит от того, какой из них завершился, а различает их текущий
         // статус записки: до регистрации она на согласовании, после — у подписанта.
-        var подписание = sz.Document!.StatusCode == SzStatus.OnSigning;
+        // По записке проходят два маршрута — согласование и подписание. Какой из
+        // них завершился, различает текущий статус: до подписи она «на согласовании»,
+        // на подписи — «на подписи».
+        var наПодписи = sz.Document!.StatusCode == SzStatus.OnSigning;
 
-        // Записки, заведённые до перестройки порядка, получили номер ещё до
-        // согласования. Отправлять их «ждать регистрации» нельзя: регистрация
-        // выдаст второй номер тому, что уже занесено в книгу под первым.
-        var ужеЗарегистрирована = sz.Document.RegNumber is not null;
+        // Согласование завершено — записка идёт на подпись руководству (адресату).
+        // Регистрация проходит ДО согласования, поэтому следующий шаг не регистрация,
+        // а подпись: здесь же запускаем маршрут подписи. Из обработчика это безопасно —
+        // движок сохраняет маршрут согласования завершённым ещё ДО вызова обработчиков
+        // (RouteEngine.AdvanceToNextStep), так что отдельный маршрут не реентрантен.
+        // IRouteEngine достаём из провайдера: прямая зависимость замкнула бы кольцо,
+        // ведь движок держит список обработчиков.
+        if (routeStatus == RouteInstanceStatus.Approved && !наПодписи
+            && (sz.AddresseeUserId ?? sz.SignerUserId) is { } signer)
+        {
+            var engine = _serviceProvider.GetRequiredService<IRouteEngine>();
+            var signing = await engine.InstantiateForSignerAsync(sz.DocumentId, signer);
+            await engine.StartAsync(signing.Id, actorUserId);
+            sz.Document.CurrentRouteInstanceId = signing.Id;
+
+            await _documents.ChangeStatusAsync(documentId, SzStatus.OnSigning, actorUserId);
+            await _audit.LogAsync("Sz", sz.Id, "SentToSigner", actorUserId,
+                new { signer, routeInstanceId = signing.Id });
+            return;
+        }
 
         var status = routeStatus switch
         {
-            // Согласование пройдено — записка идёт на регистрацию: номер получает
-            // то, с чем уже согласились. Кроме записок прежнего порядка: у них
-            // номер уже есть, и они идут дальше сразу.
-            RouteInstanceStatus.Approved when !подписание && !ужеЗарегистрирована
-                => SzStatus.PendingRegistration,
+            // Подписано — записка на исполнении: подписывает тот, кому она адресована,
+            // и он же отписывает её исполнителям резолюцией. Отдельного решения между
+            // подписью и резолюцией нет — это одно действие одного человека.
+            RouteInstanceStatus.Approved when наПодписи => SzStatus.OnExecution,
 
-            // Подписано — записка на исполнении: подписывает тот, кому она
-            // адресована, и он же отписывает её исполнителям резолюцией.
-            // Отдельного решения между подписью и резолюцией нет: это одно
-            // действие одного человека, разнесённое на два только на бумаге.
-            RouteInstanceStatus.Approved when подписание => SzStatus.OnExecution,
-
-            // Подписания не было — записка идёт к адресату за решением по существу.
+            // Подписанта нет (адресат не указан) — записка идёт к адресату за решением
+            // по существу, а без адресата сразу на исполнение.
             RouteInstanceStatus.Approved when sz.AddresseeUserId is not null => SzStatus.OnAddresseeDecision,
             RouteInstanceStatus.Approved => SzStatus.OnExecution,
 
             RouteInstanceStatus.Rejected => SzStatus.Rejected,
             RouteInstanceStatus.OnRevision => SzStatus.OnRevision,
-            RouteInstanceStatus.Running => подписание ? SzStatus.OnSigning : SzStatus.OnApproval,
+            RouteInstanceStatus.Running => наПодписи ? SzStatus.OnSigning : SzStatus.OnApproval,
             _ => null
         };
         if (status is null || sz.Document!.StatusCode == status) return;

@@ -191,8 +191,10 @@ public class SzAddresseeDecisionTests
 
         // Обработчик контура обязателен: именно он переводит записку к адресату по
         // завершении маршрута. Без него проверялся бы движок, а не поведение системы.
-        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
+        var signingProvider = new TestServiceProvider();
+        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications(), signingProvider);
         var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
+        signingProvider.Engine = engine;
 
         // Право «видеть все записки» — чтобы проверка касалась движения записки,
         // а не видимости реестра.
@@ -237,24 +239,28 @@ public class SzAddresseeDecisionTests
 
         await service.SubmitAsync(draft.Id, author.Id);
 
+        // Регистрация идёт первой и запускает согласование.
+        var registered = await service.RegisterAsync(draft.Id, author.Id);
+        Assert.NotNull(registered.RegNumber);
+        Assert.Equal(SzStatus.OnApproval, registered.StatusCode);
+
         var sz = await db.SzDocuments.AsNoTracking().SingleAsync(x => x.Id == draft.Id);
 
         var participant = await db.RouteParticipants
-            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == sz.DocumentId)
+            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == sz.DocumentId
+                        && p.RouteStep.Kind == StepKind.Approval)
             .OrderBy(p => p.Id)
             .FirstAsync();
 
         await engine.ResolveAsync(participant.Id, ResolutionType.Approved, null, approver.Id);
 
-        var registered = await service.RegisterAsync(draft.Id, author.Id);
-
-        // Номер присвоен, и записка ушла подписанту — а не упала на построении
-        // маршрута и не проскочила подписание.
-        Assert.NotNull(registered.RegNumber);
-        Assert.Equal(SzStatus.OnSigning, registered.StatusCode);
+        // Согласование пройдено — записка ушла подписанту (адресату), а не упала на
+        // построении маршрута и не проскочила подписание.
+        var status = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == sz.DocumentId).Select(d => d.StatusCode).SingleAsync();
+        Assert.Equal(SzStatus.OnSigning, status);
 
         // Подписывает тот, кому записка адресована: подписант и адресат — одно лицо.
-
         var signingParticipant = await db.RouteParticipants
             .Include(p => p.RouteStep)
             .Where(p => p.RouteStep!.RouteInstance!.DocumentId == sz.DocumentId
@@ -295,24 +301,24 @@ public class SzAddresseeDecisionTests
     {
         var (szId, addresseeId, approverId) = await SeedSubmittedAsync(db, service, engine);
 
+        // Регистрация идёт до согласования: отправленная записка ждёт номера, и только
+        // зарегистрированную согласуют.
+        var afterSubmit = await db.SzDocuments.AsNoTracking()
+            .Include(x => x.Document)
+            .SingleAsync(x => x.Id == szId);
+        Assert.Equal(SzStatus.PendingRegistration, afterSubmit.Document!.StatusCode);
+
+        await service.RegisterAsync(szId, approverId);
+
         var sz = await db.SzDocuments.AsNoTracking().SingleAsync(x => x.Id == szId);
 
         var participant = await db.RouteParticipants
-            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == sz.DocumentId)
+            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == sz.DocumentId
+                        && p.RouteStep.Kind == StepKind.Approval)
             .OrderBy(p => p.Id)
             .FirstAsync();
 
         await engine.ResolveAsync(participant.Id, ResolutionType.Approved, null, approverId);
-
-        // Согласование идёт до регистрации: согласованная записка ждёт номера,
-        // а к адресату попадает уже зарегистрированной.
-        var afterApproval = await db.SzDocuments.AsNoTracking()
-            .Include(x => x.Document)
-            .SingleAsync(x => x.Id == szId);
-
-        Assert.Equal(SzStatus.PendingRegistration, afterApproval.Document!.StatusCode);
-
-        await service.RegisterAsync(szId, approverId);
 
         var afterRegistration = await db.SzDocuments
             .Include(x => x.Document)
@@ -328,7 +334,7 @@ public class SzAddresseeDecisionTests
 
         var handler = new SzRouteCompletionHandler(
             db, new DocumentService(db, new AuditService(db), new NumeratorService(db)),
-            new AuditService(db), new SilentNotifications());
+            new AuditService(db), new SilentNotifications(), new TestServiceProvider());
 
         await handler.CreateAddresseeTaskAsync(afterRegistration);
 

@@ -214,6 +214,21 @@ internal sealed class NoSubstitutions : ISubstitutionService
         Task.FromResult(new List<int>());
 }
 
+/// <summary>
+/// Провайдер для обработчика СЗ. После согласования обработчик берёт из него
+/// IRouteEngine, чтобы запустить маршрут подписи. В приложении это делает
+/// контейнер; здесь движок строится вручную и кладётся сюда уже ПОСЛЕ
+/// конструктора обработчика — обработчик и движок ссылаются друг на друга,
+/// и конструктором это кольцо не собрать.
+/// </summary>
+internal sealed class TestServiceProvider : IServiceProvider
+{
+    public IRouteEngine? Engine { get; set; }
+
+    public object? GetService(Type serviceType) =>
+        serviceType == typeof(IRouteEngine) ? Engine : null;
+}
+
 /// <summary>Уведомления в этих проверках не участвуют — важны переходы состояний.</summary>
 internal sealed class SilentNotifier : IWorkflowNotifier
 {

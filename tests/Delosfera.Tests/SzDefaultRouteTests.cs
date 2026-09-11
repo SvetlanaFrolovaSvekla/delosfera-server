@@ -58,7 +58,10 @@ public class SzDefaultRouteTests
 
         // Раньше здесь был throw «Не задан маршрут»; теперь маршрут берётся из
         // глобального шаблона.
-        var details = await service.SubmitAsync(draftId, await AuthorOfAsync(db, draftId));
+        // Порядок: отправка кладёт записку на регистрацию, и только зарегистрированная
+        // уходит на согласование — маршрут строится при регистрации.
+        await service.SubmitAsync(draftId, await AuthorOfAsync(db, draftId));
+        var details = await service.RegisterAsync(draftId, await AuthorOfAsync(db, draftId));
 
         Assert.Equal(SzStatus.OnApproval, details.StatusCode);
 
@@ -78,7 +81,10 @@ public class SzDefaultRouteTests
         var (service, draftId, ancestorHeadId, documentId) =
             await SeedDraftHeadlessUnitAsync(db, ancestorHasHead: true);
 
-        var details = await service.SubmitAsync(draftId, await AuthorOfAsync(db, draftId));
+        // Порядок: отправка кладёт записку на регистрацию, и только зарегистрированная
+        // уходит на согласование — маршрут строится при регистрации.
+        await service.SubmitAsync(draftId, await AuthorOfAsync(db, draftId));
+        var details = await service.RegisterAsync(draftId, await AuthorOfAsync(db, draftId));
 
         Assert.Equal(SzStatus.OnApproval, details.StatusCode);
 
@@ -98,7 +104,10 @@ public class SzDefaultRouteTests
         var (service, draftId, addresseeId, documentId) =
             await SeedDraftHeadlessUnitAsync(db, ancestorHasHead: false);
 
-        var details = await service.SubmitAsync(draftId, await AuthorOfAsync(db, draftId));
+        // Порядок: отправка кладёт записку на регистрацию, и только зарегистрированная
+        // уходит на согласование — маршрут строится при регистрации.
+        await service.SubmitAsync(draftId, await AuthorOfAsync(db, draftId));
+        var details = await service.RegisterAsync(draftId, await AuthorOfAsync(db, draftId));
 
         Assert.Equal(SzStatus.OnApproval, details.StatusCode);
 
@@ -116,9 +125,11 @@ public class SzDefaultRouteTests
     {
         var audit = new AuditService(db);
         var documents = new DocumentService(db, audit, new NumeratorService(db));
-        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
+        var signingProvider = new TestServiceProvider();
+        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications(), signingProvider);
         var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(),
             new FakeSignatures(), new RouteRoleResolver(db));
+        signingProvider.Engine = engine;
         var currentUser = new FakeCurrentUser(0, PermissionCode.ViewAllSz);
         var procurement = new SzProcurementService(db, documents, audit, currentUser);
 
@@ -171,9 +182,11 @@ public class SzDefaultRouteTests
     {
         var audit = new AuditService(db);
         var documents = new DocumentService(db, audit, new NumeratorService(db));
-        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
+        var signingProvider = new TestServiceProvider();
+        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications(), signingProvider);
         var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(),
             new FakeSignatures(), new RouteRoleResolver(db));
+        signingProvider.Engine = engine;
         var currentUser = new FakeCurrentUser(0, PermissionCode.ViewAllSz);
         var procurement = new SzProcurementService(db, documents, audit, currentUser);
 

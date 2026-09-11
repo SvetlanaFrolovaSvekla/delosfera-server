@@ -94,8 +94,10 @@ public class SzAddresseeResolutionTests
     {
         var audit = new AuditService(db);
         var documents = new DocumentService(db, audit, new NumeratorService(db));
-        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
+        var signingProvider = new TestServiceProvider();
+        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications(), signingProvider);
         var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
+        signingProvider.Engine = engine;
 
         return new SzService(db, documents, audit, engine, new PassthroughHtml(),
             new FakeCurrentUser(userId), handler, new SzProcurementService(db, documents, audit, new FakeCurrentUser(userId, PermissionCode.ViewAllSz)),

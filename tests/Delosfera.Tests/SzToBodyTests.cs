@@ -129,8 +129,10 @@ public class SzToBodyTests
     {
         var audit = new AuditService(db);
         var documents = new DocumentService(db, audit, new NumeratorService(db));
-        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications());
+        var signingProvider = new TestServiceProvider();
+        var handler = new SzRouteCompletionHandler(db, documents, audit, new SilentNotifications(), signingProvider);
         var engine = new RouteEngine(db, audit, [handler], new NoSubstitutions(), new SilentNotifier(), new FakeSignatures(), new RouteRoleResolver(db));
+        signingProvider.Engine = engine;
         var currentUser = new FakeCurrentUser(0, PermissionCode.ViewAllSz);
         var procurement = new SzProcurementService(db, documents, audit, currentUser);
 
@@ -162,17 +164,21 @@ public class SzToBodyTests
 
         await service.SubmitAsync(draft.Id, author.Id);
 
+        // Регистрация идёт до согласования и запускает его маршрут.
+        await service.RegisterAsync(draft.Id, author.Id);
+
         if (stopAtApproval) return (service, addressee.Id, draft.Id);
 
         var sz = await db.SzDocuments.AsNoTracking().SingleAsync(x => x.Id == draft.Id);
 
         var approval = await db.RouteParticipants
-            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == sz.DocumentId)
+            .Where(p => p.RouteStep!.RouteInstance!.DocumentId == sz.DocumentId
+                        && p.RouteStep.Kind == StepKind.Approval)
             .OrderBy(p => p.Id)
             .FirstAsync();
 
+        // Согласование завершено — обработчик отправляет записку на подпись адресату.
         await engine.ResolveAsync(approval.Id, ResolutionType.Approved, null, approver.Id);
-        await service.RegisterAsync(draft.Id, author.Id);
 
         var signing = await db.RouteParticipants
             .Include(p => p.RouteStep)
