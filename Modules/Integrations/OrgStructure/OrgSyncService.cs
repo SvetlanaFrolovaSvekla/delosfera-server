@@ -90,7 +90,7 @@ public class OrgSyncService(
 
             var byExternalId = await SyncUnitsAsync(units, settings, run, notes, ct);
             await SyncEmployeesAsync(employees, byExternalId, settings, run, notes, ct);
-            await LinkUnitHeadsAsync(units, byExternalId, notes, ct);
+            await LinkUnitHeadsAsync(units, employees, byExternalId, notes, ct);
             await LinkManagersAsync(employees, settings, run, notes, ct);
 
             await db.SaveChangesAsync(ct);
@@ -494,7 +494,8 @@ public class OrgSyncService(
     /// начальник — сотрудник, а сотрудников расставили только что.
     /// </summary>
     private async Task LinkUnitHeadsAsync(
-        List<PortalUnit> units, Dictionary<int, OrganizationUnit> unitsByExternal,
+        List<PortalUnit> units, List<PortalEmployee> employees,
+        Dictionary<int, OrganizationUnit> unitsByExternal,
         List<string> notes, CancellationToken ct)
     {
         await db.SaveChangesAsync(ct);
@@ -534,6 +535,22 @@ public class OrgSyncService(
             {
                 notes.Add($"Куратор «{missing.Name}» подразделения «{portalUnit.Name}» не найден среди пользователей.");
             }
+        }
+
+        // Портал указывает главенство не только на подразделении (unit.Head), но и на
+        // самом сотруднике (employee.HeadsUnit — «этот работник возглавляет
+        // подразделение X»). Прежде второй источник игнорировался, и большинство
+        // подразделений оставались без руководителя, хотя в портале он назначен.
+        // Заполняем только пустые: явное назначение на подразделении выше приоритетом.
+        foreach (var employee in employees)
+        {
+            if (employee.HeadsUnit is not { } headsUnit) continue;
+            if (!unitsByExternal.TryGetValue(headsUnit.Id, out var unit)) continue;
+            if (unit.HeadUserId is not null) continue;
+            if (!byLogin.TryGetValue(employee.Login.Trim(), out var headUser)) continue;
+
+            unit.HeadUserId = headUser.Id;
+            unit.UpdatedAt = now;
         }
     }
 }

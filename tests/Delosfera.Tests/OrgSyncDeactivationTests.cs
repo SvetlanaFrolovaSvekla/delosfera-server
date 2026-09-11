@@ -270,4 +270,33 @@ public class OrgSyncDeactivationTests(PostgresFixture postgres)
 
         Assert.True(вернувшийся.IsActive);
     }
+
+    [Fact]
+    public async Task Главенство_из_HeadsUnit_проставляет_руководителя()
+    {
+        var (unitId, ids) = await ЗавестиЛюдей(2);
+
+        // Портал указывает главенство на самом сотруднике (HeadsUnit), а не на
+        // подразделении (unit.Head). Прежде этот источник игнорировался, и
+        // подразделение оставалось без руководителя.
+        var изПортала = new List<PortalEmployee>
+        {
+            new()
+            {
+                Login = $"proverka-{_метка}-0",
+                Name = "Проверочный Сотрудник 0",
+                Email = $"proverka-{_метка}-0@keremetbank.kg",
+                Unit = new PortalUnitRef { Id = _внешнийНомер, Name = "Отдел" },
+                HeadsUnit = new PortalUnitRef { Id = _внешнийНомер, Name = "Отдел" },
+                Active = true,
+            },
+            Сотрудник(1, работает: true),
+        };
+
+        await Синхронизировать(изПортала);
+
+        await using var db = new DelosferaDbContext(Options(), new FakeCurrentUser(0));
+        var unit = await db.OrganizationUnits.FirstAsync(u => u.Id == unitId);
+        Assert.Equal(ids[0], unit.HeadUserId);
+    }
 }
