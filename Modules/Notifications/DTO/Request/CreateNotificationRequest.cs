@@ -1,4 +1,5 @@
-﻿using delosfera_server.Modules.Notifications.Models;
+﻿using delosfera_server.Modules.Integrations.Mail;
+using delosfera_server.Modules.Notifications.Models;
 
 namespace delosfera_server.Modules.Notifications.DTO.Request;
 
@@ -25,4 +26,8 @@ public class CreateNotificationRequest
 
     /// <summary>Разослать всем активным пользователям системы</summary>
     public bool ToAllUsers { get; set; }
+
+    /// <summary>Вложение к письму (не к внутреннему уведомлению — там файлов нет). Например,
+    /// Excel-план актуализации к ежемесячной сводке (ActualizationNotificationService).</summary>
+    public MailAttachment? Attachment { get; set; }
 }

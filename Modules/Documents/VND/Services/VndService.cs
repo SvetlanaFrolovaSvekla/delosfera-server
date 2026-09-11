@@ -4,6 +4,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
+using delosfera_server.Common.Export;
 using delosfera_server.Common.Extensions;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.ActivityLog.Models;
@@ -40,11 +41,18 @@ public class VndService : IVndService
         _legacyLinkExtractor = legacyLinkExtractor;
     }
 
-    public async Task<List<VndResponse>> SearchAsync(VndSearchRequest request, string languageCode)
+    public async Task<List<VndResponse>> SearchAsync(
+        VndSearchRequest request, string languageCode, bool ignoreVisibilityRestriction = false)
     {
         // Вычисляется здесь (а не только перед ToListAsync, как раньше), т.к. теперь используется
         // и для ограничения видимости "Статуса ВНД" (документ-уровня) ниже.
-        var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
+        //
+        // ignoreVisibilityRestriction — для системных вызовов без текущего HTTP-пользователя
+        // (ежемесячная сводка по актуализации и её предпросмотр, см.
+        // ActualizationNotificationService): там HasPermission всегда вернула бы false из-за
+        // отсутствия HttpContext, и без этого флага сводка тихо теряла бы часть документов.
+        var canViewExtended =
+            ignoreVisibilityRestriction || _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
 
         IQueryable<VndDocument> query = _db.VndDocuments
             .Include(x => x.Type)
@@ -184,6 +192,163 @@ public class VndService : IVndService
             .Select(x => ToResponse(x, languageCode, today, canViewExtended, relationsByVndId?.GetValueOrDefault(x.Id)))
             .ToList();
     }
+
+    /// <summary>
+    /// Экспорт таблицы страницы "Планирование актуализации" в Excel — кнопка "Экспорт плана в
+    /// Excel" (см. ActualizationPageHeader на фронте). Строится поверх SearchAsync: фильтры в
+    /// request.Filter — то же самое, что пользователь может донастроить прямо в модалке
+    /// экспорта (по умолчанию модалка открывается с текущими фильтрами страницы). Колонки — по
+    /// тем же ключам, что в ACTUALIZATION_COLUMNS на фронте; обязательные (fixed там) колонки
+    /// экспортируются всегда, независимо от того, что пришло в request.Columns.
+    /// </summary>
+    public async Task<byte[]> ExportActualizationPlanAsync(VndActualizationExportRequest request, string languageCode)
+    {
+        var rows = await SearchAsync(request.Filter, languageCode);
+
+        // См. VndActualizationExportRequest.NeverActualizedOnly — то же пересечение, что
+        // displayRows на странице (фильтр не по оси поиска, а по числу редакций документа).
+        if (request.NeverActualizedOnly)
+            rows = rows.Where(r => r.RedactionIds.Count == 1).ToList();
+
+        return await BuildActualizationPlanExcelAsync(rows, request.Columns);
+    }
+
+    /// <summary>
+    /// Собственно сборка Excel-файла плана актуализации из уже отфильтрованного набора строк —
+    /// общая часть для кнопки "Экспорт плана в Excel" (ExportActualizationPlanAsync, строки из
+    /// SearchAsync по фильтрам пользователя) и ежемесячной сводки по СП
+    /// (ActualizationNotificationService, строки уже отобраны по разработчику/ответственным
+    /// исполнителям конкретного подразделения). Набор и подпись колонок, ширины и цвета —
+    /// в одном месте, чтобы вложение к письму визуально не разъезжалось с обычным экспортом.
+    /// </summary>
+    public async Task<byte[]> BuildActualizationPlanExcelAsync(List<VndResponse> rows, List<string> columns)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var keywordNames = await _db.Keywords.ToDictionaryAsync(k => k.Id, k => k.TitleRu);
+        var rubricNames = await _db.Rubrics.ToDictionaryAsync(r => r.Id, r => r.TitleRu);
+        var userGroupNames = await _db.UserGroups.ToDictionaryAsync(g => g.Id, g => g.TitleRu);
+        var secrecyLevelNames = await _db.SecurityLevels.ToDictionaryAsync(s => s.Id, s => s.TitleRu);
+        var orgUnitNames = await _db.OrganizationUnits.ToDictionaryAsync(u => u.Id, u => u.TitleRu);
+
+        string Join(List<int> ids, Dictionary<int, string> names) =>
+            ids.Count == 0 ? "—" : string.Join(", ", ids.Select(id => names.GetValueOrDefault(id, "—")));
+
+        string FormatDate(DateOnly? d) => d?.ToString("dd.MM.yyyy") ?? "—";
+
+        string DueDateCell(VndResponse r)
+        {
+            if (r.DueActualizationDate is null) return "—";
+            var days = r.DueActualizationDate.Value.DayNumber - today.DayNumber;
+            var suffix = days < 0 ? $" (просрочено на {-days} дн.)" : $" (осталось {days} дн.)";
+            return FormatDate(r.DueActualizationDate) + suffix;
+        }
+
+        // Как в ActualizationTable на фронте: если актуализации ещё не было — вместо неё
+        // показывается дата создания документа (с пометкой в отдельной колонке там, здесь —
+        // просто дата, колонка статуса актуализации ниже покажет "—").
+        string LastActualizationDateCell(VndResponse r) =>
+            r.LastActualizationDate is not null
+                ? FormatDate(r.LastActualizationDate)
+                : FormatDate(DateOnly.FromDateTime(r.CreatedAt));
+
+        string LastActualizationStatusCell(VndResponse r) =>
+            r.LastActualizationDate is null ? "—" : (r.LastActualizationHadChanges ? "С изменениями" : "Без изменений");
+
+        var columnDefs = new (string Key, string Header, bool Fixed, Func<VndResponse, string> Value)[]
+        {
+            ("code", "Код", true, r => r.Code),
+            ("name", "Наименование", true, r => r.Name),
+            ("status", "Статус последней редакции", true, r => ExportStatusLabel(r.Status)),
+            ("dueActualizationDate", "Срок актуализации", true, DueDateCell),
+            ("lastActualizationDate", "Последняя актуализация", true, LastActualizationDateCell),
+            ("lastActualizationStatus", "Статус посл. актуализации", true, LastActualizationStatusCell),
+            ("actualizationBucket", "Статус срока", true, r => ExportBucketLabel(r.ActualizationBucket)),
+            ("type", "Вид", false, r => r.TypeName),
+            ("developer", "Разработчик", false, r => r.DeveloperName),
+            ("organ", "Орган утв.", false, r => r.OrganName),
+            ("responsibleExecutors", "Ответственные исполнители", false,
+                r => Join(r.ResponsibleExecutorIds, orgUnitNames)),
+            ("adoptionDate", "Дата принятия", false, r => FormatDate(r.AdoptionDate)),
+            ("adoptionCode", "№ принятия", false, r => r.AdoptionCode ?? "—"),
+            ("effectiveDate", "Дата вступления в силу", false, r => FormatDate(r.EffectiveDate)),
+            ("requisitesChangedDate", "Изменение реквизитов", false, r => FormatDate(r.RequisitesChangedDate)),
+            ("revisionChangedDate", "Изменение редакции", false, r => FormatDate(r.RevisionChangedDate)),
+            ("keywords", "Ключевые слова", false, r => Join(r.KeywordIds, keywordNames)),
+            ("rubric", "Рубрика", false, r => Join(r.RubricIds, rubricNames)),
+            ("secrecyLevel", "Уровень секретности", false,
+                r => secrecyLevelNames.GetValueOrDefault(r.SecrecyLevelId, "—")),
+            ("userGroups", "Группы доступа", false, r => Join(r.UserGroupIds, userGroupNames)),
+        };
+
+        var selected = columns.ToHashSet();
+        var chosen = columnDefs.Where(c => c.Fixed || selected.Contains(c.Key)).ToList();
+
+        // Пустой/бессмысленный выбор колонок (например, фронт прислал только неизвестные ключи) —
+        // не отдаём книгу вовсе без колонок, а откатываемся к обязательному набору.
+        if (chosen.Count == 0) chosen = columnDefs.Where(c => c.Fixed).ToList();
+
+        // "Статус срока" всегда среди обязательных колонок — раскрашиваем в ней текст
+        // теми же цветами, что и бейдж этого статуса на странице (см. ExportBucketColorHex).
+        var bucketColumnIndex = chosen.FindIndex(c => c.Key == "actualizationBucket");
+
+        return XlsxWorkbook.Build(new XlsxSheet
+        {
+            Name = "Планирование актуализации",
+            Header = chosen.Select(c => c.Header).ToArray(),
+            Widths = chosen.Select(c => ExportColumnWidth(c.Key)).ToArray(),
+            Rows = rows.Select(r => chosen.Select(c => c.Value(r)).ToArray()).ToList(),
+            AllBorders = true,
+            HeaderFillHex = "1C7A4D",
+            CellFontColor = bucketColumnIndex < 0
+                ? null
+                : (rowIndex, colIndex) => colIndex == bucketColumnIndex
+                    ? ExportBucketColorHex(rows[rowIndex].ActualizationBucket)
+                    : null,
+        });
+    }
+
+    private static string ExportStatusLabel(string status) => status switch
+    {
+        "active" => "Актуальная",
+        "onact" => "На актуализации",
+        "review" => "На согласовании",
+        "consol" => "Консолидация",
+        "arch" => "В архиве",
+        "draft" => "Черновик",
+        _ => status,
+    };
+
+    private static string ExportBucketLabel(string? bucket) => bucket switch
+    {
+        "normal" => "В норме",
+        "approaching" => "Приближается срок",
+        "critical" => "Критичный срок",
+        "overdue" => "Просрочено",
+        _ => "—",
+    };
+
+    // Те же цвета, что ACTUALIZATION_BUCKET_META/ACTUALIZATION_BUCKET_STYLE на фронте
+    // (src/constants/vndStatus.ts) — чтобы цвет статуса в Excel совпадал с бейджем на странице.
+    private static string? ExportBucketColorHex(string? bucket) => bucket switch
+    {
+        "normal" => "1C7A4D",
+        "approaching" => "2957C3",
+        "critical" => "B3730A",
+        "overdue" => "C0392B",
+        _ => null,
+    };
+
+    private static int ExportColumnWidth(string key) => key switch
+    {
+        "name" => 55,
+        "responsibleExecutors" or "keywords" or "userGroups" => 40,
+        "developer" or "organ" or "rubric" => 30,
+        "status" or "dueActualizationDate" or "lastActualizationDate" or "lastActualizationStatus"
+            or "actualizationBucket" or "secrecyLevel" or "type" => 24,
+        "code" => 12,
+        _ => 20,
+    };
 
     /// <summary>Для каждого документа из <paramref name="entities"/> — список видов связи
     /// текущего пользователя с ним (см. VndResponse.LinkedToMeRelations и ApplyLinkedToMeFilter

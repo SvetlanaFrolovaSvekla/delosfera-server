@@ -23,6 +23,11 @@ public static class VndServiceExtensions
         // справочник в разделе ВНД, настраивается администратором
         builder.Services.AddScoped<IActualizationBucketSettingsService, ActualizationBucketSettingsService>();
 
+        // Раздел "Уведомления" → "Настройки рассылок" → "Нормотворчество": ответственные
+        // сотрудники СП за актуализацию и ежемесячная сводка им 1-го числа
+        builder.Services.AddScoped<IActualizationNotificationService, ActualizationNotificationService>();
+        builder.Services.AddHostedService<ActualizationNotificationWorker>();
+
         return builder;
     }
 }

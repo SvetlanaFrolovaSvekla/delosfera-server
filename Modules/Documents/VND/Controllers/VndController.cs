@@ -1,4 +1,4 @@
-﻿using delosfera_server.Common.Authorization;
+using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.VND.Services;
@@ -68,6 +68,24 @@ public class VndController : ControllerBase
     public async Task<ActionResult<VndActualizationSummaryResponse>> GetActualizationSummary()
     {
         return Ok(await _service.GetActualizationSummaryAsync());
+    }
+
+    /// <summary>Экспорт таблицы страницы "Планирование актуализации" в Excel — кнопка "Экспорт
+    /// плана в Excel". Модалка на фронте даёт донастроить те же фильтры, что и на странице
+    /// (request.Filter), и выбрать нужные колонки (request.Columns); обязательные колонки
+    /// экспортируются всегда. Право доступа — то же самое, что и у обычного поиска (Search
+    /// выше), а не ViewVndActualizationPage: экспорт отдаёт те же строки ВНД, что вернул бы
+    /// поиск с тем же фильтром, и не должен требовать меньших прав, чем сам поиск.</summary>
+    [HttpPost("actualization/export")]
+    [RequirePermission(PermissionCode.ViewVnd)]
+    public async Task<IActionResult> ExportActualizationPlan([FromBody] VndActualizationExportRequest request)
+    {
+        var language = _languageResolver.Resolve(Request);
+        var bytes = await _service.ExportActualizationPlanAsync(request, language);
+
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "Планирование актуализации.xlsx");
     }
 
     /// <summary>Получить один ВНД по id</summary>
@@ -147,7 +165,7 @@ public class VndController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
-    
+
     /// <summary>Получить список редакций ВНД</summary>
     [HttpGet("{vndId:int}/redactions")]
     [RequirePermission(PermissionCode.ViewVnd)]
@@ -213,7 +231,7 @@ public class VndController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
-    
+
     /// <summary>Связи ВНД: ссылки на другие документы и документы, ссылающиеся на этот</summary>
     [HttpGet("{vndId:int}/links")]
     [RequirePermission(PermissionCode.ViewVnd)]
