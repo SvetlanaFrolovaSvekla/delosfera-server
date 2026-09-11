@@ -23,6 +23,13 @@ public class OrganizationUnitConfiguration : IEntityTypeConfiguration<Organizati
             .HasForeignKey(x => x.CuratorUserId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Индексы под обход дерева и подбор руководителей: маршруты СЗ/ВНД и пикеры
+        // резолвят руководителя подразделения и родителя вверх по дереву на каждый
+        // запрос. Без индексов это был seq scan оргструктуры (перф-замечание П1).
+        builder.HasIndex(x => x.HeadUserId);
+        builder.HasIndex(x => x.ParentId);
+        builder.HasIndex(x => x.CuratorUserId);
+
         var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         // Реальная оргструктура банка, выгруженная с AD/портала (тестовый сервер

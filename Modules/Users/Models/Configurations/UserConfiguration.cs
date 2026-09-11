@@ -58,6 +58,15 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasForeignKey(x => x.BlockedByUserId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        // Индексы под рабочие выборки: пользователей и оргструктуру дёргает почти
+        // каждый экран (пикеры согласующих, карточки, реестры, оргструктура). Без
+        // них фильтры/join по этим колонкам шли seq scan'ом на всей таблице —
+        // фоновый «налог» на любую страницу (перф-замечание П1/П2).
+        builder.HasIndex(x => x.OrgUnitId);
+        builder.HasIndex(x => x.PositionId);
+        builder.HasIndex(x => x.IsActive);
+        builder.HasIndex(x => x.FullName);
+
         var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         // Пароль каждого пользователя = его логин (до @). Хеши вычислены заранее

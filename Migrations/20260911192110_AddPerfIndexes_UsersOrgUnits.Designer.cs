@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911192110_AddPerfIndexes_UsersOrgUnits")]
+    partial class AddPerfIndexes_UsersOrgUnits
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -6317,93 +6320,6 @@ namespace delosfera_server.Migrations
                         });
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.ActualizationNotificationResponsible", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("OrgUnitId")
-                        .HasColumnType("integer")
-                        .HasColumnName("org_unit_id");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_actualization_notification_responsible");
-
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("ix_vnd_actualization_notification_responsible_user_id");
-
-                    b.HasIndex("OrgUnitId", "UserId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_actualization_notification_responsible_org_unit_id_user");
-
-                    b.ToTable("vnd_actualization_notification_responsible", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.ActualizationNotificationSettings", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CriticalReminderDaysCsv")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("critical_reminder_days_csv");
-
-                    b.Property<bool>("CriticalRemindersEnabled")
-                        .HasColumnType("boolean")
-                        .HasColumnName("critical_reminders_enabled");
-
-                    b.Property<string>("MonthlyDigestColumnsCsv")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("monthly_digest_columns_csv");
-
-                    b.Property<bool>("MonthlyDigestEnabled")
-                        .HasColumnType("boolean")
-                        .HasColumnName("monthly_digest_enabled");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_actualization_notification_settings");
-
-                    b.ToTable("vnd_actualization_notification_settings", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CriticalReminderDaysCsv = "",
-                            CriticalRemindersEnabled = false,
-                            MonthlyDigestColumnsCsv = "",
-                            MonthlyDigestEnabled = false,
-                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
-                        });
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.ActualizationPlan", b =>
                 {
                     b.Property<int>("Id")
@@ -8536,18 +8452,6 @@ namespace delosfera_server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<byte[]>("AttachmentBytes")
-                        .HasColumnType("bytea")
-                        .HasColumnName("attachment_bytes");
-
-                    b.Property<string>("AttachmentContentType")
-                        .HasColumnType("text")
-                        .HasColumnName("attachment_content_type");
-
-                    b.Property<string>("AttachmentFileName")
-                        .HasColumnType("text")
-                        .HasColumnName("attachment_file_name");
-
                     b.Property<int>("Attempts")
                         .HasColumnType("integer")
                         .HasColumnName("attempts");
@@ -9190,10 +9094,6 @@ namespace delosfera_server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("AttachmentFileId")
-                        .HasColumnType("integer")
-                        .HasColumnName("attachment_file_id");
-
                     b.Property<string>("BodyEn")
                         .HasColumnType("text")
                         .HasColumnName("body_en");
@@ -9254,9 +9154,6 @@ namespace delosfera_server.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_notification");
-
-                    b.HasIndex("AttachmentFileId")
-                        .HasDatabaseName("ix_notification_attachment_file_id");
 
                     b.HasIndex("Category")
                         .HasDatabaseName("ix_notification_category");
@@ -14360,27 +14257,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.ActualizationNotificationResponsible", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.OrganizationUnit", "OrgUnit")
-                        .WithMany()
-                        .HasForeignKey("OrgUnitId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_notification_responsible_dictionary_organ");
-
-                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_actualization_notification_responsible_users_user_id");
-
-                    b.Navigation("OrgUnit");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.ActualizationPlanItem", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Dictionaries.Models.ApprovalBody", "ApprovalBody")
@@ -15179,19 +15055,11 @@ namespace delosfera_server.Migrations
 
             modelBuilder.Entity("delosfera_server.Modules.Notifications.Models.Notification", b =>
                 {
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "AttachmentFile")
-                        .WithMany()
-                        .HasForeignKey("AttachmentFileId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_notification_file_attachments_attachment_file_id");
-
                     b.HasOne("delosfera_server.Modules.Users.Models.User", "CreatedByUser")
                         .WithMany()
                         .HasForeignKey("CreatedByUserId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_notification_users_created_by_user_id");
-
-                    b.Navigation("AttachmentFile");
 
                     b.Navigation("CreatedByUser");
                 });

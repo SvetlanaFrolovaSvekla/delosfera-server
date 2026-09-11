@@ -74,7 +74,11 @@ public class UserService : IUserService
         page = page < 1 ? 1 : page;
         pageSize = pageSize is < 1 or > MaxPageSize ? 20 : pageSize;
 
+        // Список только читается (пагинация, никакого сохранения) — снимаем
+        // change-tracking, чтобы EF не строил его для каждой сущности и всех
+        // Include-навигаций (перф-замечание П4).
         IQueryable<User> query = _db.Users
+            .AsNoTracking()
             .Include(x => x.Position)
             .Include(x => x.OrgUnit)
             .Include(x => x.Roles)
