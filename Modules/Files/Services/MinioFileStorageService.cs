@@ -138,8 +138,8 @@ public class MinioFileStorageService : IFileStorageService
         if (!AllowedExtensions.Contains(ext))
             throw new InvalidOperationException($"Недопустимый формат файла: {ext}");
 
-        if (file.Length > 50 * 1024 * 1024) // 50 МБ
-            throw new InvalidOperationException("Файл превышает допустимый размер (50 МБ)");
+        if (file.Length > 100L * 1024 * 1024) // 100 МБ
+            throw new InvalidOperationException("Файл превышает допустимый размер (100 МБ)");
 
         return ext;
     }

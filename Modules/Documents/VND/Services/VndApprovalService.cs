@@ -34,7 +34,7 @@ public class VndApprovalService : IVndApprovalService
     // совпадать с MAX_RESOLUTION_ATTACHMENTS и MAX_RESOLUTION_ATTACHMENT_SIZE_BYTES на
     // клиенте (src/constants/coordinationParams.ts).
     private const int MaxResolutionAttachments = 5;
-    private const long MaxResolutionAttachmentSizeBytes = 50L * 1024 * 1024;
+    private const long MaxResolutionAttachmentSizeBytes = 100L * 1024 * 1024;
 
     // Цитаты из текста редакции, на которые согласующий сослался в резолюции (см.
     // "+ Сослаться на текст редакции" на клиенте). Лимит по количеству — защита от абьюза

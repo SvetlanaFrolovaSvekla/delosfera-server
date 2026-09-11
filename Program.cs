@@ -179,9 +179,19 @@ builder.Services.AddSingleton<IMinioClient>(_ =>
         .WithSSL(builder.Configuration.GetValue<bool>("Minio:UseSSL"))
         .Build());
 
+// Лимит вложения — 100 МБ (проверяется по файлу в хранилище и на клиенте).
+// Транспортные лимиты держим с запасом на накладные multipart (границы частей,
+// прочие поля формы): иначе файл ровно в 100 МБ не пройдёт.
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o =>
 {
-    o.MultipartBodyLengthLimit = 50 * 1024 * 1024; 
+    o.MultipartBodyLengthLimit = 110L * 1024 * 1024;
+});
+
+// Kestrel по умолчанию режет тело запроса ~28 МБ — без этого вложения крупнее
+// не дойдут до контроллера, какой бы ни был FormOptions.
+builder.Services.Configure<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>(o =>
+{
+    o.Limits.MaxRequestBodySize = 110L * 1024 * 1024;
 });
 
 builder.AddUserServices();
