@@ -130,48 +130,64 @@ public class UserController : ControllerBase
     /// </summary>
     /// <response code="200">Список получен</response>
     [HttpGet("lookup")]
-    public async Task<IActionResult> Lookup(CancellationToken ct) =>
-        Ok(await _db.Users
+    public async Task<IActionResult> Lookup(CancellationToken ct)
+    {
+        // Старшинство (председатель → члены Правления → руководители → прочие) раньше
+        // считалось коррелированными EXISTS-подзапросами на КАЖДУЮ строку — и в сортировке,
+        // и в проекции, до семи под-запросов на пользователя. На пятистах сотрудниках это
+        // сотни под-EXISTS и заметный «фриз» при первом открытии любой формы с выбором
+        // человека. Теперь три плоских запроса, а флаги и сортировка — в памяти.
+
+        // Состав Правления одним запросом: и председатель, и остальные члены.
+        var правление = await _db.BodyMembers
+            .AsNoTracking()
+            .Where(m => m.Body == Meetings.Models.MeetingBody.Board)
+            .Select(m => new { m.UserId, m.Role })
+            .ToListAsync(ct);
+
+        var председатели = правление
+            .Where(m => m.Role == Meetings.Models.BodyRole.Chairman)
+            .Select(m => m.UserId).ToHashSet();
+        var членыПравления = правление.Select(m => m.UserId).ToHashSet();
+
+        // Руководители подразделений одним запросом.
+        var руководители = (await _db.OrganizationUnits
+            .AsNoTracking()
+            .Where(o => o.HeadUserId != null)
+            .Select(o => o.HeadUserId!.Value)
+            .ToListAsync(ct)).ToHashSet();
+
+        // Плоский список активных незаблокированных — без подзапросов.
+        var пользователи = await _db.Users
             .AsNoTracking()
             .Where(u => u.IsActive && u.BlockedAt == null)
-            // Порядок повторяет старшинство: председатель, затем остальные члены
-            // Правления, затем руководители подразделений, затем все прочие —
-            // внутри каждой ступени по алфавиту. Один алфавит на всех ставил
-            // председателя между рядовыми сотрудниками, и в списке «Кому» его
-            // приходилось искать глазами.
-            //
-            // Старшинство берётся из состава органа, а не из прав: право
-            // «выносить вопрос на орган» по работе есть и у администратора
-            // системы, и он оказывался первым в списке впереди председателя.
-            .OrderByDescending(u => _db.BodyMembers.Any(m =>
-                m.UserId == u.Id
-                && m.Body == Meetings.Models.MeetingBody.Board
-                && m.Role == Meetings.Models.BodyRole.Chairman))
-            .ThenByDescending(u => _db.BodyMembers.Any(m =>
-                m.UserId == u.Id && m.Body == Meetings.Models.MeetingBody.Board))
-            .ThenByDescending(u => _db.OrganizationUnits.Any(o => o.HeadUserId == u.Id))
-            .ThenBy(u => u.FullName)
             .Select(u => new
             {
                 u.Id,
                 u.FullName,
                 position = u.Position != null ? u.Position.TitleRu : null,
                 orgUnit = u.OrgUnit != null ? u.OrgUnit.TitleRu : null,
-                // Не только название: по выбранному человеку подставляется его
-                // подразделение, а для этого нужен идентификатор, а не строка.
                 orgUnitId = u.OrgUnitId,
-                // Председатель Правления — первый в любом подборе.
-                isChairman = _db.BodyMembers.Any(m =>
-                    m.UserId == u.Id
-                    && m.Body == Meetings.Models.MeetingBody.Board
-                    && m.Role == Meetings.Models.BodyRole.Chairman),
-                // Член Правления — такие идут следом.
-                isBoardMember = _db.BodyMembers.Any(m =>
-                    m.UserId == u.Id && m.Body == Meetings.Models.MeetingBody.Board),
-                // Руководит подразделением — третий по старшинству в том же подборе.
-                isUnitHead = _db.OrganizationUnits.Any(o => o.HeadUserId == u.Id),
             })
-            .ToListAsync(ct));
+            .ToListAsync(ct);
+
+        var ru = StringComparer.Create(System.Globalization.CultureInfo.GetCultureInfo("ru-RU"), ignoreCase: true);
+        var result = пользователи
+            .Select(u => new
+            {
+                u.Id, u.FullName, u.position, u.orgUnit, u.orgUnitId,
+                isChairman = председатели.Contains(u.Id),
+                isBoardMember = членыПравления.Contains(u.Id),
+                isUnitHead = руководители.Contains(u.Id),
+            })
+            .OrderByDescending(u => u.isChairman)
+            .ThenByDescending(u => u.isBoardMember)
+            .ThenByDescending(u => u.isUnitHead)
+            .ThenBy(u => u.FullName, ru)
+            .ToList();
+
+        return Ok(result);
+    }
 
     /// <summary>
     /// Список пользователей, которым разрешено выступать согласующими (право ActAsApprover) —
