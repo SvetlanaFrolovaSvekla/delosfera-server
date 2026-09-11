@@ -3,9 +3,9 @@ using delosfera_server.Common.Models;
 namespace delosfera_server.Modules.Documents.VND.Models;
 
 /// <summary>
-/// Настройки ежемесячной сводки по актуализации ВНД — раздел "Уведомления" → "Настройки
-/// рассылок" → "Нормотворчество" → "Ежемесячное уведомление — 1-го числа". Запись одна на
-/// всю систему, как и ActualizationBucketSettings.
+/// Настройки ежемесячной сводки и критических напоминаний по актуализации ВНД — раздел
+/// "Уведомления" → "Настройки рассылок" → "Нормотворчество". Запись одна на всю систему, как и
+/// ActualizationBucketSettings.
 /// </summary>
 public class ActualizationNotificationSettings : IAuditableEntity
 {
@@ -25,6 +25,24 @@ public class ActualizationNotificationSettings : IAuditableEntity
     /// Пусто — во вложении только обязательные (fixed) колонки.
     /// </summary>
     public string MonthlyDigestColumnsCsv { get; set; } = "";
+
+    /// <summary>
+    /// Раздел "Критические напоминания" — рассылать ли их вообще. Выключено по умолчанию,
+    /// как и MonthlyDigestEnabled: администратор включает осознанно, после того как заданы
+    /// пороги в CriticalReminderDaysCsv.
+    /// </summary>
+    public bool CriticalRemindersEnabled { get; set; }
+
+    /// <summary>
+    /// Пороги критических напоминаний — количество дней ДО наступления просрочки актуализации,
+    /// за которое отправляется уведомление, через запятую (например "30,14,7,3,1,0"). Хранится
+    /// строкой по тому же принципу, что и MonthlyDigestColumnsCsv (см. её комментарий) — набор
+    /// небольшой, порядок значения не имеет, конвертация в List/из List — в сервисе (см.
+    /// ActualizationNotificationService.ParseThresholdDays/FormatThresholdDays).
+    /// Пусто — критические напоминания фактически не за что слать, даже если
+    /// CriticalRemindersEnabled = true.
+    /// </summary>
+    public string CriticalReminderDaysCsv { get; set; } = "";
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

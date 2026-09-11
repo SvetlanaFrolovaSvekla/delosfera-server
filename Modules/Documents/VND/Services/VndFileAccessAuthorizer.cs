@@ -12,7 +12,10 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 /// Правила доступа к файлам ВНД. Пользователь может получить файл, если:
 /// он его загрузил, либо файл привязан к редакции ВНД, который пользователю виден
 /// (опубликованные документы видны всем; чужие черновики — только с правом
-/// <see cref="PermissionCode.ViewOtherUsersDrafts"/>).
+/// <see cref="PermissionCode.ViewOtherUsersDrafts"/>), либо файл приложен к системному
+/// уведомлению (см. Notification.AttachmentFileId), которое адресовано этому пользователю —
+/// например, Excel-план единоразовой рассылки (см.
+/// ActualizationNotificationService.SendOneTimeMailingAsync).
 /// Закрывает IDOR: раньше любой аутентифицированный пользователь мог скачать любой
 /// файл по порядковому id.
 /// </summary>
@@ -54,10 +57,18 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
         // им нужно видеть, что именно приложили друг другу. Как только редакция становится
         // согласованной, вложения физически удаляются (см. VndApprovalService.CleanupStageAttachmentsAsync),
         // так что этот доступ актуален лишь на время самого согласования.
-        return await _db.Set<VndApprovalStageAttachment>()
+        var canAccessApprovalAttachment = await _db.Set<VndApprovalStageAttachment>()
             .Where(a => a.FileAttachmentId == fileId)
             .AnyAsync(a => a.VndApprovalStage!.ApprovalProcess!.InitiatorUserId == userId
                            || a.VndApprovalStage.ApprovalProcess.Stages.Any(s => s.ApproverUserId == userId)
                            || canViewOtherDrafts, ct);
+        if (canAccessApprovalAttachment) return true;
+
+        // Файл приложен к системному уведомлению (Notification.AttachmentFileId) — например,
+        // Excel-план единоразовой рассылки актуализации. Доступ только фактическим получателям
+        // этого уведомления (через UserNotification), не всем подряд.
+        return await _db.UserNotifications
+            .Where(un => un.UserId == userId)
+            .AnyAsync(un => un.Notification!.AttachmentFileId == fileId, ct);
     }
 }

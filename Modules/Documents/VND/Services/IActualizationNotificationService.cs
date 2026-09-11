@@ -31,4 +31,26 @@ public interface IActualizationNotificationService
     /// ручном вызове (например, из будущего "отправить сейчас" в интерфейсе).
     /// </summary>
     Task<int> SendMonthlyDigestAsync(DateOnly today, CancellationToken ct = default);
+
+    /// <summary>
+    /// Раздел "Критические напоминания": для каждого ВНД, у которого сегодня число дней до
+    /// DueActualizationDate совпадает с одним из настроенных порогов (settings.CriticalReminderDaysCsv),
+    /// отправить напоминание ответственным сотрудникам и куратору соответствующего СП (см.
+    /// ActualizationNotificationWorker). Ничего не делает и возвращает 0, если рассылка выключена
+    /// в настройках или пороги не заданы — те же соображения, что у SendMonthlyDigestAsync.
+    /// </summary>
+    Task<int> SendCriticalRemindersAsync(DateOnly today, CancellationToken ct = default);
+
+    /// <summary>
+    /// Раздел "Создать единоразовую рассылку плана актуализации" — разовое системное уведомление
+    /// внутри Делосферы, не связанное с настройками выше. Почта не участвует (см.
+    /// CreateNotificationRequest.SkipEmail) и кнопки "Перейти к задаче" нет (Url = null).
+    /// Получатели — объединение состава ответственных выбранных СП и произвольных отдельных
+    /// пользователей (см. SendActualizationOneTimeMailingRequest). При IncludePlan = true план
+    /// собирается по PlanExport (та же сборка, что и у кнопки "Экспорт плана в Excel", см.
+    /// IVndService.ExportActualizationPlanAsync) и сохраняется как файл системы, видимый прямо в
+    /// карточке уведомления (см. Notification.AttachmentFileId, IFileStorageService).
+    /// </summary>
+    Task<SendActualizationOneTimeMailingResponse> SendOneTimeMailingAsync(
+        SendActualizationOneTimeMailingRequest request, int? currentUserId, string languageCode);
 }

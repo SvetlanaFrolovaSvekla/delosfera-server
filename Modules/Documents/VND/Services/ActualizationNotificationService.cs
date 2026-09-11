@@ -4,6 +4,7 @@ using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
+using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Integrations.Mail;
 using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.Models;
@@ -13,8 +14,9 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 
 /// <summary>
 /// Раздел "Уведомления" → "Настройки рассылок" → "Нормотворчество" (см. ManagementPage/
-/// NotificationMailingSettingsPage на фронте): ответственные сотрудники СП за актуализацию ВНД
-/// и ежемесячная сводка им 1-го числа.
+/// NotificationMailingSettingsPage на фронте): ответственные сотрудники СП за актуализацию ВНД,
+/// ежемесячная сводка им 1-го числа, критические напоминания по настраиваемым порогам и
+/// единоразовая рассылка плана актуализации.
 ///
 /// "Относится к СП" — тот же критерий, что колонки "Разработчик" и "Ответственные исполнители"
 /// на странице "Планирование актуализации": документ учитывается для подразделения, если оно
@@ -33,17 +35,20 @@ public class ActualizationNotificationService : IActualizationNotificationServic
     private readonly DelosferaDbContext _db;
     private readonly IVndService _vndService;
     private readonly INotificationService _notifications;
+    private readonly IFileStorageService _fileStorage;
     private readonly ILogger<ActualizationNotificationService> _logger;
 
     public ActualizationNotificationService(
         DelosferaDbContext db,
         IVndService vndService,
         INotificationService notifications,
+        IFileStorageService fileStorage,
         ILogger<ActualizationNotificationService> logger)
     {
         _db = db;
         _vndService = vndService;
         _notifications = notifications;
+        _fileStorage = fileStorage;
         _logger = logger;
     }
 
@@ -106,10 +111,16 @@ public class ActualizationNotificationService : IActualizationNotificationServic
     public async Task<ActualizationNotificationSettingsResponse> UpdateSettingsAsync(
         UpdateActualizationNotificationSettingsRequest request)
     {
+        if (request.CriticalReminderDays.Any(d => d < 0))
+            throw new InvalidOperationException(
+                "Критические напоминания задаются в днях до просрочки и не бывают отрицательными");
+
         var settings = await LoadSettingsEntityAsync();
 
         settings.MonthlyDigestEnabled = request.MonthlyDigestEnabled;
         settings.MonthlyDigestColumnsCsv = FormatColumns(request.MonthlyDigestColumns);
+        settings.CriticalRemindersEnabled = request.CriticalRemindersEnabled;
+        settings.CriticalReminderDaysCsv = FormatThresholdDays(request.CriticalReminderDays);
         settings.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -211,6 +222,183 @@ public class ActualizationNotificationService : IActualizationNotificationServic
         return sent;
     }
 
+    public async Task<int> SendCriticalRemindersAsync(DateOnly today, CancellationToken ct = default)
+    {
+        var settings = await LoadSettingsEntityAsync();
+        if (!settings.CriticalRemindersEnabled) return 0;
+
+        var thresholds = ParseThresholdDays(settings.CriticalReminderDaysCsv);
+        if (thresholds.Count == 0) return 0;
+
+        var allRows = await LoadInvolvedRowsAsync("ru");
+
+        // Только документы, у которых сегодня число дней до срока актуализации совпадает
+        // ровно с одним из настроенных порогов — "до наступления просрочки", просроченные
+        // (отрицательный остаток) сюда не попадают: это уже случившийся факт, а не напоминание.
+        var due = allRows
+            .Where(r => r.DueActualizationDate.HasValue)
+            .Select(r => (Row: r, DaysLeft: r.DueActualizationDate!.Value.DayNumber - today.DayNumber))
+            .Where(x => x.DaysLeft >= 0 && thresholds.Contains(x.DaysLeft))
+            .ToList();
+
+        if (due.Count == 0) return 0;
+
+        // СП, которым сегодня есть о чём напомнить — либо как разработчику, либо как
+        // ответственному исполнителю документа (тот же критерий, что и у месячной сводки).
+        var byOrgUnit = new Dictionary<int, List<(VndResponse Row, int DaysLeft)>>();
+        foreach (var (row, daysLeft) in due)
+        {
+            var orgUnitIds = new List<int> {row.DeveloperId};
+            orgUnitIds.AddRange(row.ResponsibleExecutorIds);
+
+            foreach (var orgUnitId in orgUnitIds.Distinct())
+            {
+                if (!byOrgUnit.TryGetValue(orgUnitId, out var list))
+                {
+                    list = [];
+                    byOrgUnit[orgUnitId] = list;
+                }
+                list.Add((row, daysLeft));
+            }
+        }
+
+        var relevantOrgUnitIds = byOrgUnit.Keys.ToList();
+
+        var orgUnits = await _db.OrganizationUnits
+            .Where(o => relevantOrgUnitIds.Contains(o.Id))
+            .Select(o => new {o.Id, o.TitleRu, o.CuratorUserId})
+            .ToListAsync(ct);
+
+        var responsibleUserIdsByOrgUnit = await _db.Set<ActualizationNotificationResponsible>()
+            .Where(x => relevantOrgUnitIds.Contains(x.OrgUnitId))
+            .Select(x => new {x.OrgUnitId, x.UserId})
+            .ToListAsync(ct);
+
+        var sent = 0;
+
+        foreach (var (orgUnitId, rows) in byOrgUnit)
+        {
+            var orgUnit = orgUnits.FirstOrDefault(o => o.Id == orgUnitId);
+            var orgUnitName = orgUnit?.TitleRu ?? "—";
+
+            var userIds = responsibleUserIdsByOrgUnit
+                .Where(x => x.OrgUnitId == orgUnitId)
+                .Select(x => x.UserId)
+                .ToList();
+
+            // Куратор СП получает то же напоминание, что и ответственные сотрудники — он не
+            // обязательно входит в их состав (см. OrganizationUnit.CuratorUserId).
+            if (orgUnit?.CuratorUserId is { } curatorId)
+                userIds.Add(curatorId);
+
+            userIds = userIds.Distinct().ToList();
+
+            // Ответственных и куратора для этого СП ещё не назначили — уведомлять некого,
+            // молча пропускаем (та же логика, что у "нечего сообщать" в месячной сводке).
+            if (userIds.Count == 0) continue;
+
+            var (subject, body) = BuildCriticalReminderText(orgUnitName, today, rows);
+
+            await _notifications.CreateAsync(new CreateNotificationRequest
+            {
+                TitleRu = subject,
+                BodyRu = body,
+                Category = NotificationCategory.Vnd,
+                Severity = rows.Any(x => x.DaysLeft == 0) ? NotificationSeverity.Urgent : NotificationSeverity.Warning,
+                EntityType = nameof(OrganizationUnit),
+                EntityId = orgUnitId,
+                Url = "/actualization/plan",
+                UserIds = userIds,
+            }, null);
+
+            sent++;
+        }
+
+        if (sent > 0)
+            _logger.LogInformation("Критических напоминаний по актуализации ВНД разослано: {Count}", sent);
+
+        return sent;
+    }
+
+    public async Task<SendActualizationOneTimeMailingResponse> SendOneTimeMailingAsync(
+        SendActualizationOneTimeMailingRequest request, int? currentUserId, string languageCode)
+    {
+        if (string.IsNullOrWhiteSpace(request.Subject))
+            throw new InvalidOperationException("Укажите тему письма");
+
+        if (string.IsNullOrWhiteSpace(request.Message))
+            throw new InvalidOperationException("Укажите текст сообщения");
+
+        if (request.IncludePlan && request.PlanExport is null)
+            throw new InvalidOperationException(
+                "Включён план актуализации, но не заданы его настройки (фильтр и колонки)");
+
+        var orgUnitIds = request.ResponsibleOrgUnitIds.Distinct().ToList();
+
+        var fromResponsibles = new List<int>();
+        if (orgUnitIds.Count > 0)
+        {
+            fromResponsibles = await _db.Set<ActualizationNotificationResponsible>()
+                .Where(x => orgUnitIds.Contains(x.OrgUnitId))
+                .Select(x => x.UserId)
+                .Distinct()
+                .ToListAsync();
+        }
+
+        var recipientIds = fromResponsibles.Concat(request.UserIds).Distinct().ToList();
+
+        if (recipientIds.Count == 0)
+            throw new InvalidOperationException(
+                "Получателей не найдено — выберите СП с назначенными ответственными сотрудниками либо отдельных пользователей");
+
+        var recipients = await _db.Users
+            .Where(u => recipientIds.Contains(u.Id))
+            .OrderBy(u => u.FullName)
+            .ToListAsync();
+
+        var missing = recipientIds.Except(recipients.Select(u => u.Id)).ToList();
+        if (missing.Count > 0)
+            throw new KeyNotFoundException($"Пользователи с id={string.Join(", ", missing)} не найдены");
+
+        // Единоразовая рассылка — только системное уведомление внутри Делосферы, без почты
+        // (SkipEmail: true) и без кнопки "Перейти к задаче" (Url: null) — так требуется явно,
+        // в отличие от ежемесячной сводки и критических напоминаний выше. План, если включён,
+        // сохраняется как обычный файл системы (см. IFileStorageService) и виден получателю
+        // прямо в карточке уведомления (см. Notification.AttachmentFileId), а не как вложение
+        // письма — почта тут вообще не участвует.
+        int? attachmentFileId = null;
+        if (request.IncludePlan)
+        {
+            var ownerId = currentUserId
+                ?? throw new InvalidOperationException("Не удалось определить пользователя для сохранения файла плана");
+
+            var excelBytes = await _vndService.ExportActualizationPlanAsync(request.PlanExport!, languageCode);
+            var fileName = $"План актуализации ({DateTime.UtcNow:dd.MM.yyyy}).xlsx";
+            const string contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+            var fileAttachment = await _fileStorage.SaveGeneratedAsync(excelBytes, fileName, contentType, ownerId);
+            attachmentFileId = fileAttachment.Id;
+        }
+
+        await _notifications.CreateAsync(new CreateNotificationRequest
+        {
+            TitleRu = request.Subject.Trim(),
+            BodyRu = request.Message.Trim(),
+            Category = NotificationCategory.Vnd,
+            Severity = NotificationSeverity.Info,
+            Url = null,
+            UserIds = recipientIds,
+            AttachmentFileId = attachmentFileId,
+            SkipEmail = true,
+        }, currentUserId);
+
+        return new SendActualizationOneTimeMailingResponse
+        {
+            RecipientCount = recipients.Count,
+            RecipientNames = recipients.Select(u => u.FullName).ToList(),
+        };
+    }
+
     // ── внутреннее ───────────────────────────────────────────────────────────
 
     private async Task<List<ActualizationNotificationResponsibleResponse>> LoadResponsiblesAsync()
@@ -258,12 +446,30 @@ public class ActualizationNotificationService : IActualizationNotificationServic
     {
         MonthlyDigestEnabled = s.MonthlyDigestEnabled,
         MonthlyDigestColumns = ParseColumns(s.MonthlyDigestColumnsCsv),
+        CriticalRemindersEnabled = s.CriticalRemindersEnabled,
+        CriticalReminderDays = ParseThresholdDays(s.CriticalReminderDaysCsv),
     };
 
     private static List<string> ParseColumns(string csv) =>
         string.IsNullOrWhiteSpace(csv) ? [] : csv.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
 
     private static string FormatColumns(List<string> columns) => string.Join(",", columns.Distinct());
+
+    private static List<int> ParseThresholdDays(string csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv)) return [];
+
+        return csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => int.TryParse(s.Trim(), out var value) ? value : (int?)null)
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .Distinct()
+            .OrderBy(value => value)
+            .ToList();
+    }
+
+    private static string FormatThresholdDays(List<int> days) =>
+        string.Join(",", days.Where(d => d >= 0).Distinct().OrderBy(d => d));
 
     private async Task<List<VndResponse>> LoadInvolvedRowsAsync(string languageCode)
     {
@@ -307,6 +513,34 @@ public class ActualizationNotificationService : IActualizationNotificationServic
 
         return (subject, body);
     }
+
+    private static (string Subject, string Body) BuildCriticalReminderText(
+        string orgUnitName, DateOnly today, List<(VndResponse Row, int DaysLeft)> rows)
+    {
+        var subject = $"Критическое напоминание об актуализации ВНД — {orgUnitName}";
+
+        var lines = rows
+            .OrderBy(x => x.DaysLeft)
+            .Select(x => $"«{x.Row.Name}» ({x.Row.Code}) — {DaysLeftLabel(x.DaysLeft)}")
+            .ToList();
+
+        var body = $"""
+            Напоминание о приближающемся сроке актуализации ВНД для подразделения «{orgUnitName}» на {today:dd.MM.yyyy}.
+
+            {string.Join("\n", lines)}
+
+            Перейдите в раздел «Планирование актуализации», чтобы начать актуализацию.
+            """;
+
+        return (subject, body);
+    }
+
+    private static string DaysLeftLabel(int daysLeft) => daysLeft switch
+    {
+        0 => "срок сегодня",
+        1 => "срок завтра",
+        _ => $"срок через {daysLeft} дн.",
+    };
 
     private static string AttachmentFileName(string orgUnitName, DateOnly today) =>
         $"План актуализации — {SanitizeFileNamePart(orgUnitName)} ({today:MM.yyyy}).xlsx";

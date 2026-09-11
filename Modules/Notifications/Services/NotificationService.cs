@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Extensions;
 using delosfera_server.Data;
 using delosfera_server.Modules.Notifications.DTO.Request;
@@ -55,6 +55,7 @@ public class NotificationService : INotificationService
             EntityType = request.EntityType,
             EntityId = request.EntityId,
             Url = request.Url,
+            AttachmentFileId = request.AttachmentFileId,
             CreatedByUserId = currentUserId,
             Recipients = recipientIds.Select(uid => new UserNotification
             {
@@ -68,10 +69,15 @@ public class NotificationService : INotificationService
         _db.Notifications.Add(notification);
         await _db.SaveChangesAsync();
 
-        // Копия уведомления уходит на корпоративную почту (INT-02). Ставим в очередь,
-        // а не отправляем здесь: иначе согласование ждало бы почтовый сервер.
-        await _mail.EnqueueAsync(
-            recipientIds, request.TitleRu, request.BodyRu, request.Url, notification.Id, request.Attachment);
+        // Копия уведомления уходит на корпоративную почту (INT-02), кроме случаев, когда вызывающий
+        // явно просит только системное уведомление внутри Делосферы (SkipEmail — например,
+        // единоразовая рассылка плана актуализации, см. ActualizationNotificationService). Ставим в
+        // очередь, а не отправляем здесь: иначе согласование ждало бы почтовый сервер.
+        if (!request.SkipEmail)
+        {
+            await _mail.EnqueueAsync(
+                recipientIds, request.TitleRu, request.BodyRu, request.Url, notification.Id, request.Attachment);
+        }
 
         return notification.Id;
     }
@@ -81,6 +87,7 @@ public class NotificationService : INotificationService
     {
         IQueryable<UserNotification> query = _db.UserNotifications
             .Include(x => x.Notification!).ThenInclude(n => n.CreatedByUser)
+            .Include(x => x.Notification!).ThenInclude(n => n.AttachmentFile)
             .Where(x => x.UserId == currentUserId && !x.IsDeleted);
 
         if (request.Categories.Count > 0)
@@ -94,7 +101,7 @@ public class NotificationService : INotificationService
 
         if (request.Severities.Count > 0)
             query = query.Where(x => request.Severities.Contains(x.Notification!.Severity));
-        
+
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
             var term = request.Search.Trim();
@@ -219,6 +226,7 @@ public class NotificationService : INotificationService
     {
         var entity = await _db.UserNotifications
             .Include(x => x.Notification!).ThenInclude(n => n.CreatedByUser)
+            .Include(x => x.Notification!).ThenInclude(n => n.AttachmentFile)
             .FirstOrDefaultAsync(x => x.Id == userNotificationId && !x.IsDeleted)
             ?? throw new KeyNotFoundException($"Уведомление с id={userNotificationId} не найдено");
 
@@ -243,6 +251,8 @@ public class NotificationService : INotificationService
             EntityType = n.EntityType,
             EntityId = n.EntityId,
             Url = n.Url,
+            AttachmentFileId = n.AttachmentFileId,
+            AttachmentFileName = n.AttachmentFile?.OriginalFileName,
             CreatedByUserId = n.CreatedByUserId,
             CreatedByName = n.CreatedByUser?.FullName,
             IsRead = x.IsRead,

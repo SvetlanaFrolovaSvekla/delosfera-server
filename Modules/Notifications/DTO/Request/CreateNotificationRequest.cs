@@ -1,4 +1,4 @@
-﻿using delosfera_server.Modules.Integrations.Mail;
+using delosfera_server.Modules.Integrations.Mail;
 using delosfera_server.Modules.Notifications.Models;
 
 namespace delosfera_server.Modules.Notifications.DTO.Request;
@@ -14,7 +14,7 @@ public class CreateNotificationRequest
     public string? BodyKg { get; set; }
 
     public required NotificationCategory Category { get; set; }
-    
+
     public NotificationSeverity Severity { get; set; } = NotificationSeverity.Info;
 
     public string? EntityType { get; set; }
@@ -28,6 +28,20 @@ public class CreateNotificationRequest
     public bool ToAllUsers { get; set; }
 
     /// <summary>Вложение к письму (не к внутреннему уведомлению — там файлов нет). Например,
-    /// Excel-план актуализации к ежемесячной сводке (ActualizationNotificationService).</summary>
+    /// Excel-план актуализации к ежемесячной сводке (ActualizationNotificationService).
+    /// Игнорируется, если SkipEmail = true.</summary>
     public MailAttachment? Attachment { get; set; }
+
+    /// <summary>
+    /// Уже сохранённый в системе файл (см. IFileStorageService.SaveGeneratedAsync) — в отличие
+    /// от Attachment выше, виден получателю прямо в карточке уведомления внутри Делосферы (см.
+    /// Notification.AttachmentFileId), без почты. Например, Excel-план актуализации к
+    /// единоразовой рассылке (см. ActualizationNotificationService.SendOneTimeMailingAsync).
+    /// </summary>
+    public int? AttachmentFileId { get; set; }
+
+    /// <summary>Не ставить копию в очередь на корпоративную почту (INT-02) — только системное
+    /// уведомление внутри Делосферы. По умолчанию false: поведение существующих вызовов не
+    /// меняется.</summary>
+    public bool SkipEmail { get; set; }
 }

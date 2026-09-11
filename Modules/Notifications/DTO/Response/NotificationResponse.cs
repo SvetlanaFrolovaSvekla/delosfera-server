@@ -1,4 +1,4 @@
-﻿namespace delosfera_server.Modules.Notifications.DTO.Response;
+namespace delosfera_server.Modules.Notifications.DTO.Response;
 
 public class NotificationResponse
 {
@@ -11,12 +11,18 @@ public class NotificationResponse
     public required string Body { get; set; }
 
     public required string Category { get; set; }
-    
+
     public required string Severity { get; set; }
 
     public string? EntityType { get; set; }
     public int? EntityId { get; set; }
     public string? Url { get; set; }
+
+    /// <summary>Файл, приложенный к уведомлению (см. Notification.AttachmentFileId) — скачивается
+    /// через GET /api/files/{id}, доступ только получателям уведомления (см.
+    /// VndFileAccessAuthorizer). Null, если к уведомлению ничего не приложено.</summary>
+    public int? AttachmentFileId { get; set; }
+    public string? AttachmentFileName { get; set; }
 
     public int? CreatedByUserId { get; set; }
     public string? CreatedByName { get; set; }

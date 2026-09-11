@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911095505_AddActualizationCriticalRemindersAndOneTimeMailing")]
+    partial class AddActualizationCriticalRemindersAndOneTimeMailing
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -9190,10 +9193,6 @@ namespace delosfera_server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("AttachmentFileId")
-                        .HasColumnType("integer")
-                        .HasColumnName("attachment_file_id");
-
                     b.Property<string>("BodyEn")
                         .HasColumnType("text")
                         .HasColumnName("body_en");
@@ -9254,9 +9253,6 @@ namespace delosfera_server.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_notification");
-
-                    b.HasIndex("AttachmentFileId")
-                        .HasDatabaseName("ix_notification_attachment_file_id");
 
                     b.HasIndex("Category")
                         .HasDatabaseName("ix_notification_category");
@@ -15173,19 +15169,11 @@ namespace delosfera_server.Migrations
 
             modelBuilder.Entity("delosfera_server.Modules.Notifications.Models.Notification", b =>
                 {
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "AttachmentFile")
-                        .WithMany()
-                        .HasForeignKey("AttachmentFileId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_notification_file_attachments_attachment_file_id");
-
                     b.HasOne("delosfera_server.Modules.Users.Models.User", "CreatedByUser")
                         .WithMany()
                         .HasForeignKey("CreatedByUserId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_notification_users_created_by_user_id");
-
-                    b.Navigation("AttachmentFile");
 
                     b.Navigation("CreatedByUser");
                 });
