@@ -113,6 +113,14 @@ public class VndAnalyticsController : ControllerBase
     public async Task<ActionResult<List<VndActualizationTrendPoint>>> GetActualizationTrend([FromBody] AnalyticsPeriodRequest request)
         => Ok(await _service.GetActualizationTrendAsync(request));
 
+    /// <summary>Сводка для вкладки "Актуализация": распределение по бакетам сроков (норма/приближается/
+    /// критично/просрочено), открытые циклы и их длительность, заявки на доступ к актуализации,
+    /// топ подразделений с наибольшим числом критичных и просроченных ВНД</summary>
+    [HttpGet("actualization-overview")]
+    [ProducesResponseType(typeof(VndActualizationOverviewResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndActualizationOverviewResponse>> GetActualizationOverview()
+        => Ok(await _service.GetActualizationOverviewAsync(_languageResolver.Resolve(Request)));
+
     /// <summary>Эффективность процесса согласования: доля успешных, доля с доработками,
     /// средняя и медианная длительность, тренд средней длительности по периодам</summary>
     [HttpPost("approval-performance")]

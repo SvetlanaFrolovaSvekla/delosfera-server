@@ -360,6 +360,113 @@ public class VndAnalyticsService : IVndAnalyticsService
         }).ToList();
     }
 
+    public async Task<VndActualizationOverviewResponse> GetActualizationOverviewAsync(string language)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // Индикация бакетов считается только по действующим ВНД со сроком актуализации -
+        // ровно тот же критерий, что и Overdue/RequiresAttention в GetOverviewAsync
+        var tracked = await _db.VndDocuments
+            .Where(v => v.DueActualizationDate != null && v.Status == VndStatus.Active)
+            .Select(v => new { v.DueActualizationDate, v.DeveloperId })
+            .ToListAsync();
+
+        int normal = 0, approaching = 0, critical = 0, overdue = 0;
+        var overdueByDeveloper = new Dictionary<int, int>();
+
+        foreach (var doc in tracked)
+        {
+            switch (ActualizationThresholds.Resolve(doc.DueActualizationDate, today))
+            {
+                case ActualizationBucket.Normal:
+                    normal++;
+                    break;
+                case ActualizationBucket.Approaching:
+                    approaching++;
+                    break;
+                case ActualizationBucket.Critical:
+                    critical++;
+                    overdueByDeveloper[doc.DeveloperId] = overdueByDeveloper.GetValueOrDefault(doc.DeveloperId) + 1;
+                    break;
+                case ActualizationBucket.Overdue:
+                    overdue++;
+                    overdueByDeveloper[doc.DeveloperId] = overdueByDeveloper.GetValueOrDefault(doc.DeveloperId) + 1;
+                    break;
+            }
+        }
+
+        var openCycles = await _db.Set<VndActualizationRecord>().CountAsync(r => r.PublishedAt == null);
+
+        var completedRecords = await _db.Set<VndActualizationRecord>()
+            .Where(r => r.PublishedAt != null)
+            .Select(r => new { r.StartedAt, PublishedAt = r.PublishedAt!.Value, r.HadChanges, r.RequiresApproval })
+            .ToListAsync();
+
+        var durations = completedRecords
+            .Select(r => (r.PublishedAt - r.StartedAt).TotalDays)
+            .OrderBy(d => d)
+            .ToList();
+
+        var avgDuration = durations.Count > 0 ? Math.Round(durations.Average(), 1) : 0;
+        var medianDuration = durations.Count > 0 ? Math.Round(Median(durations), 1) : 0;
+
+        var changesRate = completedRecords.Count > 0
+            ? Math.Round(completedRecords.Count(r => r.HadChanges == true) * 100.0 / completedRecords.Count, 1)
+            : 0;
+
+        var approvalRate = completedRecords.Count > 0
+            ? Math.Round(completedRecords.Count(r => r.RequiresApproval) * 100.0 / completedRecords.Count, 1)
+            : 0;
+
+        var pendingRequests = await _db.Set<VndActualizationRequest>()
+            .CountAsync(r => r.Status == ActualizationAccessStatus.Pending);
+        var approvedRequests = await _db.Set<VndActualizationRequest>()
+            .CountAsync(r => r.Status == ActualizationAccessStatus.Approved);
+        var rejectedRequests = await _db.Set<VndActualizationRequest>()
+            .CountAsync(r => r.Status == ActualizationAccessStatus.Rejected);
+
+        var topDeveloperIds = overdueByDeveloper
+            .OrderByDescending(kv => kv.Value)
+            .Take(10)
+            .Select(kv => kv.Key)
+            .ToList();
+        var developerOrgUnits = await _db.OrganizationUnits.Where(o => topDeveloperIds.Contains(o.Id)).ToListAsync();
+        var overdueTotal = overdueByDeveloper.Values.Sum();
+
+        var topOverdueDevelopers = topDeveloperIds
+            .Select(id =>
+            {
+                var org = developerOrgUnits.FirstOrDefault(o => o.Id == id);
+                var count = overdueByDeveloper[id];
+                return new ChartCategoryPoint
+                {
+                    Id = id,
+                    Label = org != null ? org.ResolveTitle(language) : $"#{id}",
+                    Value = count,
+                    Percent = overdueTotal > 0 ? Math.Round(count * 100.0 / overdueTotal, 1) : 0
+                };
+            })
+            .ToList();
+
+        return new VndActualizationOverviewResponse
+        {
+            TrackedTotal = tracked.Count,
+            Normal = normal,
+            Approaching = approaching,
+            Critical = critical,
+            Overdue = overdue,
+            OpenCycles = openCycles,
+            AverageCycleDurationDays = avgDuration,
+            MedianCycleDurationDays = medianDuration,
+            CyclesWithChangesRatePercent = changesRate,
+            CyclesRequiringApprovalRatePercent = approvalRate,
+            PendingRequests = pendingRequests,
+            ApprovedRequests = approvedRequests,
+            RejectedRequests = rejectedRequests,
+            TopOverdueDevelopers = topOverdueDevelopers
+        };
+    }
+
     public async Task<VndApprovalPerformanceResponse> GetApprovalPerformanceAsync(AnalyticsPeriodRequest? request)
     {
         var granularity = request?.Granularity ?? AnalyticsGranularity.Month;

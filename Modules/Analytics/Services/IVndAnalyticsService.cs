@@ -36,6 +36,10 @@ public interface IVndAnalyticsService
     /// доля с реальными изменениями, средняя длительность</summary>
     Task<List<VndActualizationTrendPoint>> GetActualizationTrendAsync(AnalyticsPeriodRequest request);
 
+    /// <summary>Сводка для вкладки "Актуализация": распределение по бакетам сроков, открытые
+    /// циклы и их длительность, заявки на доступ к актуализации, топ подразделений с просрочками</summary>
+    Task<VndActualizationOverviewResponse> GetActualizationOverviewAsync(string language);
+
     /// <summary>Эффективность процесса согласования: доля успешных, доля с доработками,
     /// средняя/медианная длительность и тренд по периодам</summary>
     Task<VndApprovalPerformanceResponse> GetApprovalPerformanceAsync(AnalyticsPeriodRequest? request);
