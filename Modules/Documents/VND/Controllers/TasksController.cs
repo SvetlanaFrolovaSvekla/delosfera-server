@@ -81,4 +81,12 @@ public class TasksController : ControllerBase
     [ProducesResponseType(typeof(VndHomeSummaryResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<VndHomeSummaryResponse>> GetHomeSummary() =>
         Ok(await _service.GetHomeSummaryAsync(_currentUser.UserId));
+
+    /// <summary>Подробная сводка по просрочкам согласования текущего пользователя (месяц/год/
+    /// всего + список конкретных ВНД) — для блока "Мои показатели" в Аналитике
+    /// (ВНД → Актуализация).</summary>
+    [HttpGet("my-timeout-approvals")]
+    [ProducesResponseType(typeof(VndMyTimeoutApprovalsResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndMyTimeoutApprovalsResponse>> GetMyTimeoutApprovals() =>
+        Ok(await _service.GetMyTimeoutApprovalsAsync(_currentUser.UserId));
 }

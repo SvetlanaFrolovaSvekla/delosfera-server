@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
@@ -8,10 +9,12 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 public class TasksService : ITasksService
 {
     private readonly DelosferaDbContext _db;
+    private readonly IBankClock _clock;
 
-    public TasksService(DelosferaDbContext db)
+    public TasksService(DelosferaDbContext db, IBankClock clock)
     {
         _db = db;
+        _clock = clock;
     }
 
     /// <summary>Задачи вкладки "Ждущие моего согласования" — все три фазы, на которых
@@ -676,8 +679,12 @@ public class TasksService : ITasksService
     /// <summary>Сводка персональных KPI для карточек на главной странице</summary>
     public async Task<VndHomeSummaryResponse> GetHomeSummaryAsync(int userId)
     {
-        var now = DateTime.UtcNow;
-        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Начало месяца — по календарю банка (Бишкек), а не по UTC: иначе первые ~6 часов
+        // каждого месяца решения по тайм-ауту засчитывались бы ещё за предыдущий месяц
+        // (см. IBankClock — та же причина, по которой сроки и периоды замещения считаются
+        // по местной дате, а не по UTC).
+        var monthStartLocal = new DateTime(_clock.Today.Year, _clock.Today.Month, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var monthStart = TimeZoneInfo.ConvertTimeToUtc(monthStartLocal, _clock.Zone);
 
         // Карточка 1: открытые циклы актуализации под моей ответственностью
         var myResponsibleActualizations = await _db.Set<VndActualizationRecord>()
@@ -722,6 +729,74 @@ public class TasksService : ITasksService
             MyTimeoutApprovalsThisMonth = myTimeoutApprovalsThisMonth,
             MyVndAwaitingApproval = myVndAwaitingApproval,
             PendingMyApproval = pendingMyApproval.Count
+        };
+    }
+
+    /// <summary>Подробная сводка по просрочкам согласования текущего пользователя — для блока
+    /// "Мои показатели" в Аналитике (ВНД → Актуализация). В отличие от карточки "просрочки в
+    /// этом месяце" на главной (см. GetHomeSummaryAsync), здесь три среза (месяц/год/всего) и
+    /// список конкретных ВНД с указанием, на какой именно фазе решение было зачтено по
+    /// тайм-ауту.</summary>
+    public async Task<VndMyTimeoutApprovalsResponse> GetMyTimeoutApprovalsAsync(int userId)
+    {
+        // Границы месяца и года — по календарю банка (Бишкек), а не по UTC (см. комментарий в
+        // GetHomeSummaryAsync — та же причина).
+        var monthStartLocal = new DateTime(_clock.Today.Year, _clock.Today.Month, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var monthStart = TimeZoneInfo.ConvertTimeToUtc(monthStartLocal, _clock.Zone);
+
+        var yearStartLocal = new DateTime(_clock.Today.Year, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var yearStart = TimeZoneInfo.ConvertTimeToUtc(yearStartLocal, _clock.Zone);
+
+        var stages = await _db.Set<VndApprovalStage>()
+            .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Vnd)
+            .Where(s => s.ApproverUserId == userId
+                && (s.PrimaryDecision == ApprovalStageDecision.AutoApprovedByTimeout
+                    || s.RepeatDecision == ApprovalStageDecision.AutoApprovedByTimeout
+                    || s.FinalHoldDecision == ApprovalStageDecision.AutoApprovedByTimeout))
+            .ToListAsync();
+
+        // Одна просрочка — одно (ВНД, фаза): у одного этапа теоретически могут быть просрочены
+        // сразу и первичное, и повторное согласование — это два отдельных события.
+        var items = new List<VndTimeoutApprovalItemResponse>();
+        foreach (var s in stages)
+        {
+            var process = s.ApprovalProcess!;
+            var vnd = process.Vnd!;
+
+            if (s.PrimaryDecision == ApprovalStageDecision.AutoApprovedByTimeout && s.PrimaryDecidedAt.HasValue)
+            {
+                items.Add(new VndTimeoutApprovalItemResponse
+                {
+                    VndId = process.VndId, VndCode = vnd.Code, VndTitle = vnd.TitleRu,
+                    Phase = "primary", DecidedAt = s.PrimaryDecidedAt.Value
+                });
+            }
+            if (s.RepeatDecision == ApprovalStageDecision.AutoApprovedByTimeout && s.RepeatDecidedAt.HasValue)
+            {
+                items.Add(new VndTimeoutApprovalItemResponse
+                {
+                    VndId = process.VndId, VndCode = vnd.Code, VndTitle = vnd.TitleRu,
+                    Phase = "repeat", DecidedAt = s.RepeatDecidedAt.Value
+                });
+            }
+            if (s.FinalHoldDecision == ApprovalStageDecision.AutoApprovedByTimeout && s.FinalHoldDecidedAt.HasValue)
+            {
+                items.Add(new VndTimeoutApprovalItemResponse
+                {
+                    VndId = process.VndId, VndCode = vnd.Code, VndTitle = vnd.TitleRu,
+                    Phase = "final", DecidedAt = s.FinalHoldDecidedAt.Value
+                });
+            }
+        }
+
+        items = items.OrderByDescending(i => i.DecidedAt).ToList();
+
+        return new VndMyTimeoutApprovalsResponse
+        {
+            ThisMonthCount = items.Count(i => i.DecidedAt >= monthStart),
+            ThisYearCount = items.Count(i => i.DecidedAt >= yearStart),
+            TotalCount = items.Count,
+            Items = items
         };
     }
 

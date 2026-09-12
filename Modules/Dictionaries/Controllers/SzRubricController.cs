@@ -1,4 +1,4 @@
-﻿using delosfera_server.Common.Authorization;
+using delosfera_server.Common.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Common.Services;
 using delosfera_server.Modules.Dictionaries.DTO.Request;
@@ -10,33 +10,34 @@ using Microsoft.AspNetCore.Authorization;
 namespace delosfera_server.Modules.Dictionaries.Controllers;
 
 /// <summary>
-/// Справочник рубрик ВНД (иерархический) — отдельный от Рубрикатора СЗ (SzRubricController)
+/// Справочник рубрик служебных записок (иерархический) — отдельный от Рубрикатора ВНД
+/// (RubricController), ведётся и используется независимо
 /// </summary>
 [ApiController]
-[Route("api/dictionaries/rubric")]
-[Tags("Справочники — Рубрикатор ВНД")]
+[Route("api/dictionaries/sz-rubric")]
+[Tags("Справочники — Рубрикатор СЗ")]
 [Authorize]
-public class RubricController : ControllerBase
+public class SzRubricController : ControllerBase
 {
-    private readonly IRubricService _service;
+    private readonly ISzRubricService _service;
     private readonly ILanguageResolver _languageResolver;
 
-    public RubricController(IRubricService service, ILanguageResolver languageResolver)
+    public SzRubricController(ISzRubricService service, ILanguageResolver languageResolver)
     {
         _service = service;
         _languageResolver = languageResolver;
     }
 
     /// <summary>
-    /// Получить список всех рубрик
+    /// Получить список всех рубрик СЗ
     /// </summary>
     /// <param name="sortBy">Способ сортировки результата</param>
     /// <param name="search">Поиск по названию на любом из трёх языков (регистронезависимый)</param>
     /// <response code="200">Список рубрик получен успешно</response>
     [HttpGet]
-    [ProducesResponseType(typeof(List<RubricResponse>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<RubricResponse>>> GetAll(
-        [FromQuery] RubricSortBy sortBy = RubricSortBy.CreatedAtAsc,
+    [ProducesResponseType(typeof(List<SzRubricResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<SzRubricResponse>>> GetAll(
+        [FromQuery] SzRubricSortBy sortBy = SzRubricSortBy.CreatedAtAsc,
         [FromQuery] string? search = null)
     {
         var language = _languageResolver.Resolve(Request);
@@ -45,18 +46,18 @@ public class RubricController : ControllerBase
     }
 
     /// <summary>
-    /// Создать новую рубрику
+    /// Создать новую рубрику СЗ
     /// </summary>
     /// <param name="request">Данные новой рубрики</param>
     /// <response code="201">Рубрика успешно создана</response>
     /// <response code="404">Указанная родительская рубрика не найдена</response>
     /// <response code="409">Превышена максимальная глубина вложенности</response>
     [HttpPost]
-    [RequirePermission(PermissionCode.ManageVndDictionaries)]
-    [ProducesResponseType(typeof(RubricResponse), StatusCodes.Status201Created)]
+    [RequirePermission(PermissionCode.ManageSzDictionaries)]
+    [ProducesResponseType(typeof(SzRubricResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<RubricResponse>> Create([FromBody] CreateRubricRequest request)
+    public async Task<ActionResult<SzRubricResponse>> Create([FromBody] CreateSzRubricRequest request)
     {
         var language = _languageResolver.Resolve(Request);
 
@@ -76,7 +77,7 @@ public class RubricController : ControllerBase
     }
 
     /// <summary>
-    /// Обновить существующую рубрику
+    /// Обновить существующую рубрику СЗ
     /// </summary>
     /// <param name="id">Идентификатор рубрики</param>
     /// <param name="request">Новые данные рубрики</param>
@@ -84,11 +85,11 @@ public class RubricController : ControllerBase
     /// <response code="404">Рубрика или родитель не найдены</response>
     /// <response code="409">Циклическая ссылка или превышена глубина вложенности</response>
     [HttpPut("{id:int}")]
-    [RequirePermission(PermissionCode.ManageVndDictionaries)]
-    [ProducesResponseType(typeof(RubricResponse), StatusCodes.Status200OK)]
+    [RequirePermission(PermissionCode.ManageSzDictionaries)]
+    [ProducesResponseType(typeof(SzRubricResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<RubricResponse>> Update(int id, [FromBody] UpdateRubricRequest request)
+    public async Task<ActionResult<SzRubricResponse>> Update(int id, [FromBody] UpdateSzRubricRequest request)
     {
         var language = _languageResolver.Resolve(Request);
 
@@ -108,14 +109,14 @@ public class RubricController : ControllerBase
     }
 
     /// <summary>
-    /// Удалить рубрику
+    /// Удалить рубрику СЗ
     /// </summary>
     /// <param name="id">Идентификатор рубрики</param>
     /// <response code="204">Рубрика успешно удалена</response>
     /// <response code="404">Рубрика не найдена</response>
     /// <response code="409">Есть дочерние записи или ссылки в других документах</response>
     [HttpDelete("{id:int}")]
-    [RequirePermission(PermissionCode.ManageVndDictionaries)]
+    [RequirePermission(PermissionCode.ManageSzDictionaries)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

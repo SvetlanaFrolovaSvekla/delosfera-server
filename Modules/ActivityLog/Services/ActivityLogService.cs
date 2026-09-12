@@ -30,8 +30,8 @@ public class ActivityLogService : IActivityLogService
     }
 
     /// <summary>Иконки, которые понимает виджет «Последняя активность»; прочие
-    /// (напр. "edit" из аудита) сводятся к нейтральной.</summary>
-    private static readonly HashSet<string> WidgetIcons = ["check", "x", "doc", "clock", "info"];
+    /// сводятся к нейтральной.</summary>
+    private static readonly HashSet<string> WidgetIcons = ["check", "x", "doc", "clock", "edit", "info"];
 
     /// <summary>Какие типы аудита относятся к какому разделу дашборда. Берём только
     /// корневую запись контура: её id совпадает с id карточки в интерфейсе, поэтому
@@ -164,6 +164,10 @@ public class ActivityLogService : IActivityLogService
             or ActivityEventKind.ItemAdded
             or ActivityEventKind.ProcessStarted => "doc",
         ActivityEventKind.HoldStarted => "clock",
+        // Смена реквизитов и повторная отправка исправленной редакции — это
+        // правка документа, как и "edit" у СЗ/закупок из технического аудита.
+        ActivityEventKind.RequisitesUpdated
+            or ActivityEventKind.Resubmitted => "edit",
         _ => "info"
     };
 }
