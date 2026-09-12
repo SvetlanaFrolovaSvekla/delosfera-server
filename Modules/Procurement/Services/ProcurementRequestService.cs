@@ -22,6 +22,9 @@ public interface IProcurementRequestService
     /// <summary>Править заявку, пока она черновик или вернулась на доработку.</summary>
     Task<ProcurementCardDto> UpdateAsync(int id, ProcurementCreateRequest request, int actorUserId);
 
+    /// <summary>Приложить/заменить/снять ТЗ (спецификацию) — одиночный файл заявки.</summary>
+    Task<ProcurementCardDto> SetSpecificationAsync(int id, int? attachmentId, int actorUserId);
+
     /// <summary>Удалить черновик заявки — только автору и только до отправки.</summary>
     Task DeleteAsync(int id, int actorUserId);
     Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId, IReadOnlyList<int>? extraApproverUserIds = null);
@@ -438,6 +441,27 @@ public class ProcurementRequestService : IProcurementRequestService
         await _db.SaveChangesAsync();
         await _audit.LogAsync("ProcurementRequest", entity.Id, "Updated", actorUserId,
             new {entity.Subject, entity.Amount, method = method.ShortTitleRu});
+
+        return await BuildCardAsync(await LoadAsync(id));
+    }
+
+    public async Task<ProcurementCardDto> SetSpecificationAsync(int id, int? attachmentId, int actorUserId)
+    {
+        var entity = await LoadAsync(id);
+
+        if (entity.Document!.AuthorId != actorUserId)
+            throw new UnauthorizedAccessException("Менять ТЗ может только автор заявки");
+
+        if (entity.Document.StatusCode is not (ProcurementStatus.Draft or ProcurementStatus.OnRevision))
+            throw new InvalidOperationException(
+                "ТЗ прикладывается к черновику или заявке, возвращённой на доработку");
+
+        entity.SpecificationAttachmentId = attachmentId;
+        entity.HasSpecification = attachmentId is not null;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("ProcurementRequest", entity.Id, "SpecificationSet", actorUserId,
+            new {attachmentId});
 
         return await BuildCardAsync(await LoadAsync(id));
     }

@@ -5,6 +5,9 @@ using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Workflow.Services;
 
+// RouteContext есть и в ASP.NET (Microsoft.AspNetCore.Routing) — берём наш, из контура маршрутов.
+using RouteContext = delosfera_server.Modules.Workflow.Services.RouteContext;
+
 namespace delosfera_server.Modules.Sz.Services;
 
 /// <summary>

@@ -13,6 +13,9 @@ public record WithdrawRequest(string Reason);
 /// <summary>Отправка на согласование. extraApproverUserIds — доп. согласующие сверх автоцепочки.</summary>
 public record SubmitProcurementRequest(List<int>? ExtraApproverUserIds = null);
 
+/// <summary>ТЗ (спецификация): id вложения-файла, либо null — снять ТЗ.</summary>
+public record SetSpecificationRequest(int? AttachmentId);
+
 /// <summary>
 /// Реестр заявок на закупку (PRC-01/03): поиск, счётчики, создание мастером,
 /// отправка на согласование.
@@ -79,6 +82,11 @@ public class ProcurementRequestController : ControllerBase
         catch (UnauthorizedAccessException ex) { return StatusCode(403, new {message = ex.Message}); }
         catch (InvalidOperationException ex) { return BadRequest(new {message = ex.Message}); }
     }
+
+    /// <summary>Приложить, заменить или снять ТЗ (спецификацию) заявки.</summary>
+    [HttpPost("requests/{id:int}/specification")]
+    public async Task<IActionResult> SetSpecification(int id, [FromBody] SetSpecificationRequest request) =>
+        await Run(() => _requests.SetSpecificationAsync(id, request.AttachmentId, _currentUser.UserId));
 
     [HttpPost("requests/{id:int}/submit")]
     public async Task<IActionResult> Submit(int id, [FromBody] SubmitProcurementRequest? request = null) =>
