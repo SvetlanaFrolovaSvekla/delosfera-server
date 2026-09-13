@@ -16,6 +16,7 @@ public enum ActivityEventKind
     Finalized = 10,         // Процесс завершён
     Published = 11, // Редакция становится действующей
     RequisitesUpdated = 12, // Смена реквизитов ВНД
+    DraftDeleted = 13, // Удаление черновика ВНД (см. VndService.DeleteAsync)
     Other = 99 // Другое событие (разное)
     
     // TODO: когда появятся СЗ: добавить для них типы событий

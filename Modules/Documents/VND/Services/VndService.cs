@@ -1418,16 +1418,29 @@ public class VndService : IVndService
             _db.Set<VndRedactionAttachment>().RemoveRange(r.Attachments);
         _db.VndRedactions.RemoveRange(vnd.Redactions);
         _db.VndDocuments.Remove(vnd);
-        await _db.SaveChangesAsync();
 
+        // ⚠ Запись в журнал добавляется в контекст ДО SaveChangesAsync (как и везде в этом
+        // сервисе, см. CreateAsync/AddRedactionAsync выше) - раньше Log() вызывался ПОСЛЕ уже
+        // выполненного SaveChangesAsync и без повторного сохранения, поэтому запись оставалась
+        // висеть в контексте и никогда не попадала в БД: удаление черновика не отображалось в
+        // "Последней активности". EntityId ссылается на уже удалённый id ВНД - это ок, у
+        // ActivityLogEntry нет FK на VndDocument (см. ActivityLogEntryConfiguration).
         _activityLog.Log(
-            ActivityModules.Vnd, ActivityEventKind.Other, id, vndCode,
+            // DraftDeleted, а не Other — чтобы виджет "Последняя активность" рисовал для
+            // этой строки красную иконку-мусорку (см. ActivityLogService.MapIcon), а не
+            // нейтральную "info", в которую сводится Other.
+            ActivityModules.Vnd, ActivityEventKind.DraftDeleted, id, vndCode,
             currentUserId,
             new ActivityText(
                 $"{actorName} удалил(а) черновик ВНД {vndCode} «{vndTitle}»",
                 $"{actorName} deleted draft VND {vndCode} \"{vndTitle}\"",
                 $"{actorName} {vndCode} «{vndTitle}» ВНДисинин черновигин өчүрдү"),
-            null);
+            // Документ уже удалён, ссылка на конкретную карточку вела бы на 404 —
+            // ведём на реестр ВНД. Url в ActivityLogEntry NOT NULL, поэтому здесь
+            // обязательно нужна непустая строка (баг: раньше передавался null).
+            "/base-vnd");
+
+        await _db.SaveChangesAsync();
 
         // Файлы удаляем после метаданных, best-effort — недоступность хранилища не должна
         // откатывать уже выполненное удаление документа.
@@ -1546,6 +1559,22 @@ public class VndService : IVndService
               ?? throw new KeyNotFoundException($"Редакция с id={targetRedactionId} не найдена")
             : null;
 
+        // --- Снимок значений ДО изменения — нужен, чтобы записать в журнал аудита и
+        // "Последнюю активность", какие именно реквизиты поменялись (см. changedFields ниже
+        // и вызов _activityLog.Log перед финальным SaveChangesAsync). Общие на весь документ
+        // поля снимаем здесь же, ещё до их перезаписи в блоке "Общие на весь документ" ниже;
+        // реквизиты редакции/документа снимаются чуть позже, непосредственно перед ApplyTo,
+        // когда уже гарантированно загружены нужные коллекции (ResponsibleExecutors/Keywords/
+        // Rubrics — либо у targetRedaction, либо у docForMirror).
+        var beforeDueActualizationDate = entity.DueActualizationDate;
+        var beforeLastActualizationDate = entity.LastActualizationDate;
+        var beforeLastActualizationHadChanges = entity.LastActualizationHadChanges;
+        var beforeCancelDate = entity.CancelDate;
+        var beforeCancelCode = entity.CancelCode;
+        var beforeCancelReason = entity.CancelReason;
+        var beforeArchivedDate = entity.ArchivedDate;
+        var beforeUserGroupIds = entity.UserGroups.Select(g => g.Id).OrderBy(x => x).ToList();
+
         var typeExists = await _db.TypesVnd.AnyAsync(x => x.Id == request.TypeId);
         if (!typeExists) throw new KeyNotFoundException($"Вид ВНД с id={request.TypeId} не найден");
 
@@ -1662,6 +1691,91 @@ public class VndService : IVndService
             }
         }
 
+        // Разрешение id → человекочитаемое название для диффа реквизитов ниже. Названия берём
+        // только на русском (как и подписи полей) — сама строка изменений в журнале аудита
+        // исторически не полностью локализована (см. fieldsList ниже, встраиваемый как есть и в
+        // англ./кирг. варианты ActivityText), заводить для неё отдельную локализацию не стали.
+        static string FormatDate(DateOnly? d) => d?.ToString("dd.MM.yyyy") ?? "—";
+        static string JoinNames(List<string> names) => names.Count > 0 ? string.Join(", ", names) : "—";
+
+        async Task<string> TypeNameAsync(int typeId) =>
+            await _db.TypesVnd.Where(t => t.Id == typeId).Select(t => t.TitleRu).FirstOrDefaultAsync() ?? $"#{typeId}";
+
+        async Task<string> OrganNameAsync(int organId) =>
+            await _db.ApprovalBodies.Where(o => o.Id == organId).Select(o => o.TitleRu).FirstOrDefaultAsync() ?? $"#{organId}";
+
+        async Task<string> OrgUnitNameAsync(int unitId) =>
+            await _db.OrganizationUnits.Where(u => u.Id == unitId).Select(u => u.TitleRu).FirstOrDefaultAsync() ?? $"#{unitId}";
+
+        async Task<string> UserNameAsync(int? userId) =>
+            userId is null ? "—" : await _db.Users.Where(u => u.Id == userId).Select(u => u.FullName).FirstOrDefaultAsync() ?? $"#{userId}";
+
+        async Task<string> SecrecyNameAsync(int? levelId) =>
+            levelId is null ? "—" : await _db.SecurityLevels.Where(s => s.Id == levelId).Select(s => s.TitleRu).FirstOrDefaultAsync() ?? $"#{levelId}";
+
+        async Task<List<string>> OrgUnitNamesAsync(List<int> ids) =>
+            ids.Count == 0 ? [] : await _db.OrganizationUnits.Where(u => ids.Contains(u.Id)).Select(u => u.TitleRu).OrderBy(x => x).ToListAsync();
+
+        async Task<List<string>> KeywordNamesAsync(List<int> ids) =>
+            ids.Count == 0 ? [] : await _db.Keywords.Where(k => ids.Contains(k.Id)).Select(k => k.TitleRu).OrderBy(x => x).ToListAsync();
+
+        async Task<List<string>> RubricNamesAsync(List<int> ids) =>
+            ids.Count == 0 ? [] : await _db.Rubrics.Where(r => ids.Contains(r.Id)).Select(r => r.TitleRu).OrderBy(x => x).ToListAsync();
+
+        // Сравнивает значения реквизитов ДО изменения (переданы явно — источник до правки: либо
+        // targetRedaction, либо docForMirror, см. вызовы ниже) с тем, что сейчас пришло в запросе,
+        // и возвращает человекочитаемый список изменившихся реквизитов вида "Поле: «было» →
+        // «стало»" — для строки в журнале аудита/"Последней активности" (см.
+        // ActivityEventKind.RequisitesUpdated ниже). Id-шные поля (вид, орган, разработчик,
+        // куратор, гриф, исполнители/слова/рубрики) резолвятся в названия отдельными запросами —
+        // такое действие происходит нечасто, оптимизировать под один batch-запрос не стали.
+        async Task<List<string>> BuildChangedFieldsList(
+            string beforeTitleRu, string? beforeTitleEn, string? beforeTitleKg,
+            int beforeTypeId, int beforeOrganId, int beforeDeveloperId, int? beforeCuratorDeveloperId,
+            DateOnly? beforeAdoptionDate, string? beforeAdoptionCode, DateOnly? beforeEffectiveDate,
+            int? beforeSecrecyLevelId, List<int> beforeExecutorIds, List<int> beforeKeywordIds,
+            List<int> beforeRubricIds)
+        {
+            var changed = new List<string>();
+
+            if (beforeTitleRu != request.TitleRu)
+                changed.Add($"Заголовок (рус): «{beforeTitleRu}» → «{request.TitleRu}»");
+            if (beforeTitleEn != request.TitleEn)
+                changed.Add($"Заголовок (англ): «{beforeTitleEn ?? "—"}» → «{request.TitleEn ?? "—"}»");
+            if (beforeTitleKg != request.TitleKg)
+                changed.Add($"Заголовок (кырг): «{beforeTitleKg ?? "—"}» → «{request.TitleKg ?? "—"}»");
+
+            if (beforeTypeId != request.TypeId)
+                changed.Add($"Вид документа: «{await TypeNameAsync(beforeTypeId)}» → «{await TypeNameAsync(request.TypeId)}»");
+            if (beforeOrganId != request.OrganId)
+                changed.Add($"Орган утверждения: «{await OrganNameAsync(beforeOrganId)}» → «{await OrganNameAsync(request.OrganId)}»");
+            if (beforeDeveloperId != developerId)
+                changed.Add($"Разработчик (СП): «{await OrgUnitNameAsync(beforeDeveloperId)}» → «{await OrgUnitNameAsync(developerId)}»");
+            if (beforeCuratorDeveloperId != request.CuratorDeveloperId)
+                changed.Add($"Куратор разработчика: «{await UserNameAsync(beforeCuratorDeveloperId)}» → «{await UserNameAsync(request.CuratorDeveloperId)}»");
+            if (beforeAdoptionDate != request.AdoptionDate)
+                changed.Add($"Дата принятия: «{FormatDate(beforeAdoptionDate)}» → «{FormatDate(request.AdoptionDate)}»");
+            if (beforeAdoptionCode != request.AdoptionCode)
+                changed.Add($"№ принятия: «{beforeAdoptionCode ?? "—"}» → «{request.AdoptionCode ?? "—"}»");
+            if (beforeEffectiveDate != request.EffectiveDate)
+                changed.Add($"Дата вступления в силу: «{FormatDate(beforeEffectiveDate)}» → «{FormatDate(request.EffectiveDate)}»");
+
+            var afterSecrecyLevelId = request.SecrecyLevelId ?? beforeSecrecyLevelId;
+            if (beforeSecrecyLevelId != afterSecrecyLevelId)
+                changed.Add($"Уровень секретности: «{await SecrecyNameAsync(beforeSecrecyLevelId)}» → «{await SecrecyNameAsync(afterSecrecyLevelId)}»");
+
+            if (!beforeExecutorIds.OrderBy(x => x).SequenceEqual(responsibleExecutorIds.OrderBy(x => x)))
+                changed.Add($"Ответственные исполнители: «{JoinNames(await OrgUnitNamesAsync(beforeExecutorIds))}» → «{JoinNames(await OrgUnitNamesAsync(responsibleExecutorIds))}»");
+            if (!beforeKeywordIds.OrderBy(x => x).SequenceEqual(request.KeywordIds.OrderBy(x => x)))
+                changed.Add($"Ключевые слова: «{JoinNames(await KeywordNamesAsync(beforeKeywordIds))}» → «{JoinNames(await KeywordNamesAsync(request.KeywordIds))}»");
+            if (!beforeRubricIds.OrderBy(x => x).SequenceEqual(request.RubricIds.OrderBy(x => x)))
+                changed.Add($"Рубрикатор: «{JoinNames(await RubricNamesAsync(beforeRubricIds))}» → «{JoinNames(await RubricNamesAsync(request.RubricIds))}»");
+
+            return changed;
+        }
+
+        List<string> changedFields;
+
         if (targetRedaction is not null)
         {
             // Doc.ResponsibleExecutors/Keywords/Rubrics не загружены в этом запросе (Include не
@@ -1677,6 +1791,15 @@ public class VndService : IVndService
                     .FirstAsync(x => x.Id == id);
             }
 
+            changedFields = await BuildChangedFieldsList(
+                targetRedaction.TitleRu, targetRedaction.TitleEn, targetRedaction.TitleKg,
+                targetRedaction.TypeId, targetRedaction.OrganId, targetRedaction.DeveloperId,
+                targetRedaction.CuratorDeveloperId, targetRedaction.AdoptionDate, targetRedaction.AdoptionCode,
+                targetRedaction.EffectiveDate, targetRedaction.SecrecyLevelId,
+                targetRedaction.ResponsibleExecutors.Select(x => x.Id).ToList(),
+                targetRedaction.Keywords.Select(x => x.Id).ToList(),
+                targetRedaction.Rubrics.Select(x => x.Id).ToList());
+
             ApplyTo(docForMirror, targetRedaction);
         }
         else
@@ -1686,11 +1809,79 @@ public class VndService : IVndService
                 .Include(x => x.Keywords)
                 .Include(x => x.Rubrics)
                 .FirstAsync(x => x.Id == id);
+
+            changedFields = await BuildChangedFieldsList(
+                docForMirror.TitleRu, docForMirror.TitleEn, docForMirror.TitleKg,
+                docForMirror.TypeId, docForMirror.OrganId, docForMirror.DeveloperId,
+                docForMirror.CuratorDeveloperId, docForMirror.AdoptionDate, docForMirror.AdoptionCode,
+                docForMirror.EffectiveDate, docForMirror.SecrecyLevelId,
+                docForMirror.ResponsibleExecutors.Select(x => x.Id).ToList(),
+                docForMirror.Keywords.Select(x => x.Id).ToList(),
+                docForMirror.Rubrics.Select(x => x.Id).ToList());
+
             ApplyTo(docForMirror, null);
+        }
+
+        // Общие на весь документ реквизиты, снятые ДО правки в самом начале метода (см.
+        // beforeDueActualizationDate и соседние переменные выше) — сравниваем с уже применёнными
+        // выше значениями (entity.* переписаны в блоке "Общие на весь документ").
+        if (beforeDueActualizationDate != entity.DueActualizationDate)
+            changedFields.Add($"Срок актуализации: «{FormatDate(beforeDueActualizationDate)}» → «{FormatDate(entity.DueActualizationDate)}»");
+        if (beforeLastActualizationDate != entity.LastActualizationDate)
+            changedFields.Add($"Дата посл. актуализации: «{FormatDate(beforeLastActualizationDate)}» → «{FormatDate(entity.LastActualizationDate)}»");
+        if (beforeLastActualizationHadChanges != entity.LastActualizationHadChanges)
+            changedFields.Add($"Последняя актуализация с изменениями: «{(beforeLastActualizationHadChanges ? "Да" : "Нет")}» → «{(entity.LastActualizationHadChanges ? "Да" : "Нет")}»");
+        if (beforeCancelDate != entity.CancelDate)
+            changedFields.Add($"Дата отмены: «{FormatDate(beforeCancelDate)}» → «{FormatDate(entity.CancelDate)}»");
+        if (beforeCancelCode != entity.CancelCode)
+            changedFields.Add($"№ отмены: «{beforeCancelCode ?? "—"}» → «{entity.CancelCode ?? "—"}»");
+        if (beforeCancelReason != entity.CancelReason)
+            changedFields.Add($"Причина отмены: «{beforeCancelReason ?? "—"}» → «{entity.CancelReason ?? "—"}»");
+        if (beforeArchivedDate != entity.ArchivedDate)
+            changedFields.Add($"Архивация: «{FormatDate(beforeArchivedDate)}» → «{FormatDate(entity.ArchivedDate)}»");
+        var afterUserGroupIds = entity.UserGroups.Select(g => g.Id).OrderBy(x => x).ToList();
+        if (!beforeUserGroupIds.SequenceEqual(afterUserGroupIds))
+        {
+            List<string> beforeGroupNames = beforeUserGroupIds.Count == 0
+                ? []
+                : await _db.UserGroups.Where(g => beforeUserGroupIds.Contains(g.Id)).Select(g => g.TitleRu).OrderBy(x => x).ToListAsync();
+            List<string> afterGroupNames = afterUserGroupIds.Count == 0
+                ? []
+                : await _db.UserGroups.Where(g => afterUserGroupIds.Contains(g.Id)).Select(g => g.TitleRu).OrderBy(x => x).ToListAsync();
+            changedFields.Add($"Группы доступа: «{JoinNames(beforeGroupNames)}» → «{JoinNames(afterGroupNames)}»");
         }
 
         // "Изменение реквизитов" проставляется автоматически, руками эту дату задать нельзя
         entity.RequisitesChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // Журнал аудита / "Последняя активность" — только если реально что-то изменилось (форма
+        // реквизитов сохраняется и без правок, например по кнопке "Сохранить" без изменений —
+        // такое сохранение не должно засорять журнал пустой записью).
+        if (changedFields.Count > 0)
+        {
+            var currentUserId = _currentUser.UserId;
+            var actor = await _db.Users.FindAsync(currentUserId);
+            var actorName = actor?.FullName ?? "—";
+            // Когда правок несколько, сплошная строка через запятую плохо читается (особенно
+            // если среди правок есть длинные списки вроде рубрикатора) — разносим каждое
+            // изменённое поле на свою строку, с маркером. Одно изменение по-прежнему остаётся
+            // на одной строке со вступлением, как раньше. Перевод строки (\n) здесь понимают
+            // все места, где показывается этот текст — RecentActivityCard/ActivityFeedPage
+            // (виджет и лента "Последняя активность") и VndHistoryTab ("Журнал аудита" на
+            // карточке документа) — у них у всех для этого div'а стоит whitespace-pre-line.
+            var fieldsList = changedFields.Count > 1
+                ? "\n" + string.Join("\n", changedFields.Select(f => $"• {f}"))
+                : " " + string.Join(", ", changedFields);
+
+            _activityLog.Log(
+                ActivityModules.Vnd, ActivityEventKind.RequisitesUpdated, id, entity.Code,
+                currentUserId,
+                new ActivityText(
+                    $"{actorName} изменил(а) реквизиты ВНД {entity.Code} «{entity.TitleRu}»:{fieldsList}",
+                    $"{actorName} updated requisites of VND {entity.Code} \"{entity.TitleRu}\":{fieldsList}",
+                    $"{actorName} {entity.Code} «{entity.TitleRu}» ВНДисинин реквизиттерин өзгөрттү:{fieldsList}"),
+                $"/base-vnd/{id}");
+        }
 
         await _db.SaveChangesAsync();
 

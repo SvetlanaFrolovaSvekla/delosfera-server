@@ -168,6 +168,8 @@ public class ActivityLogService : IActivityLogService
         // правка документа, как и "edit" у СЗ/закупок из технического аудита.
         ActivityEventKind.RequisitesUpdated
             or ActivityEventKind.Resubmitted => "edit",
+        // Удаление черновика — красная иконка-мусорка, чтобы отличать от простой "правки".
+        ActivityEventKind.DraftDeleted => "trash",
         _ => "info"
     };
 }
