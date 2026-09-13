@@ -56,7 +56,8 @@ public class ActivityLogService : IActivityLogService
         if (module is null || module == ActivityModules.Vnd)
         {
             var entries = await _db.Set<ActivityLogEntry>()
-                .Where(x => x.Module == ActivityModules.Vnd)
+                .Where(x => x.Module == ActivityModules.Vnd
+                            && x.Kind != ActivityEventKind.ActualizationReminderSent)
                 .OrderByDescending(x => x.CreatedAt)
                 .Take(limit)
                 .ToListAsync();
@@ -126,7 +127,8 @@ public class ActivityLogService : IActivityLogService
         string module, int entityId, string languageCode)
     {
         var entries = await _db.Set<ActivityLogEntry>()
-            .Where(x => x.Module == module && x.EntityId == entityId)
+            .Where(x => x.Module == module && x.EntityId == entityId
+                        && x.Kind != ActivityEventKind.ActualizationReminderSent)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
 
@@ -167,7 +169,8 @@ public class ActivityLogService : IActivityLogService
         // Смена реквизитов и повторная отправка исправленной редакции — это
         // правка документа, как и "edit" у СЗ/закупок из технического аудита.
         ActivityEventKind.RequisitesUpdated
-            or ActivityEventKind.Resubmitted => "edit",
+            or ActivityEventKind.Resubmitted
+            or ActivityEventKind.RedactionEdited => "edit",
         // Удаление черновика — красная иконка-мусорка, чтобы отличать от простой "правки".
         ActivityEventKind.DraftDeleted => "trash",
         _ => "info"

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Modules.ActivityLog.Models;
 using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
@@ -232,14 +233,44 @@ public class ActualizationNotificationService : IActualizationNotificationServic
 
         var allRows = await LoadInvolvedRowsAsync("ru");
 
-        // Только документы, у которых сегодня число дней до срока актуализации совпадает
-        // ровно с одним из настроенных порогов — "до наступления просрочки", просроченные
-        // (отрицательный остаток) сюда не попадают: это уже случившийся факт, а не напоминание.
-        var due = allRows
+        // Документы, у которых срок актуализации сегодня попадает в один из настроенных
+        // порогов (или уже прошёл его, но ещё не наступила просрочка — отрицательный остаток
+        // сюда не попадает, это уже случившийся факт, а не напоминание).
+        //
+        // Раньше здесь стояло точное совпадение (DaysLeft == порог): если ровно в нужный день
+        // воркер не отработал (простой/деплой), напоминание для этого порога терялось навсегда —
+        // на следующий день DaysLeft уже меньше порога и условие никогда больше не срабатывает.
+        // Теперь берём "порог достигнут или пройден" (DaysLeft <= порог) и дополнительно
+        // проверяем по ActivityLogEntry (см. ниже), что именно для ЭТОГО порога и ЭТОГО срока
+        // актуализации напоминание ещё не отправлялось — иначе оно уходило бы каждый день,
+        // пока остаток не станет отрицательным.
+        var candidates = allRows
             .Where(r => r.DueActualizationDate.HasValue)
             .Select(r => (Row: r, DaysLeft: r.DueActualizationDate!.Value.DayNumber - today.DayNumber))
-            .Where(x => x.DaysLeft >= 0 && thresholds.Contains(x.DaysLeft))
+            .Where(x => x.DaysLeft >= 0 && thresholds.Any(t => x.DaysLeft <= t))
             .ToList();
+
+        if (candidates.Count == 0) return 0;
+
+        var candidateIds = candidates.Select(x => x.Row.Id).Distinct().ToList();
+        var alreadySent = await LoadSentReminderMarkersAsync(candidateIds, ct);
+
+        var due = new List<(VndResponse Row, int DaysLeft)>();
+        var newlyCoveredThresholds = new Dictionary<int, List<int>>();
+
+        foreach (var (row, daysLeft) in candidates)
+        {
+            var crossedThresholds = thresholds.Where(t => daysLeft <= t).ToList();
+            var sentForThisDueDate = alreadySent.TryGetValue(row.Id, out var sent)
+                ? sent.Where(x => x.DueDate == row.DueActualizationDate!.Value).Select(x => x.Threshold).ToHashSet()
+                : [];
+
+            var newThresholds = crossedThresholds.Where(t => !sentForThisDueDate.Contains(t)).ToList();
+            if (newThresholds.Count == 0) continue; // все пороги для этого срока уже отправлялись
+
+            due.Add((row, daysLeft));
+            newlyCoveredThresholds[row.Id] = newThresholds;
+        }
 
         if (due.Count == 0) return 0;
 
@@ -314,10 +345,76 @@ public class ActualizationNotificationService : IActualizationNotificationServic
             sent++;
         }
 
+        // --- Отмечаем, для каких порогов по каждому документу напоминание отправлено в рамках
+        // ЭТОГО срока актуализации (DueActualizationDate) — см. комментарий выше и
+        // LoadSentReminderMarkersAsync. Отмечаем оптимистично, после рассылки по всем СП: если
+        // документ относится к нескольким СП, порог помечается один раз, а не по разу на каждое.
+        foreach (var (vndId, thresholdsCovered) in newlyCoveredThresholds)
+        {
+            var row = due.First(x => x.Row.Id == vndId).Row;
+            foreach (var threshold in thresholdsCovered)
+            {
+                _db.Set<ActivityLogEntry>().Add(new ActivityLogEntry
+                {
+                    Module = ActivityModules.Vnd,
+                    EntityId = vndId,
+                    EntityCode = row.Code,
+                    Kind = ActivityEventKind.ActualizationReminderSent,
+                    ActorUserId = null,
+                    // Служебный формат, не для показа пользователю (см. ActivityEventKind.
+                    // ActualizationReminderSent) — разбирается в LoadSentReminderMarkersAsync.
+                    TextRu = $"threshold={threshold};due={row.DueActualizationDate:yyyy-MM-dd}",
+                    Url = "/base-vnd/" + vndId,
+                });
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+
         if (sent > 0)
             _logger.LogInformation("Критических напоминаний по актуализации ВНД разослано: {Count}", sent);
 
         return sent;
+    }
+
+    /// <summary>Пороги критических напоминаний, уже отправленные по каждому документу, вместе со
+    /// сроком актуализации, для которого они отправлялись — см. комментарий в
+    /// SendCriticalRemindersAsync. Срок нужен, чтобы новый цикл актуализации (с новым
+    /// DueActualizationDate) не считался "уже уведомлённым" по меткам прошлого цикла.</summary>
+    private async Task<Dictionary<int, List<(int Threshold, DateOnly DueDate)>>> LoadSentReminderMarkersAsync(
+        List<int> vndIds, CancellationToken ct)
+    {
+        var markers = await _db.Set<ActivityLogEntry>()
+            .Where(x => x.Module == ActivityModules.Vnd
+                        && x.Kind == ActivityEventKind.ActualizationReminderSent
+                        && vndIds.Contains(x.EntityId))
+            .Select(x => new {x.EntityId, x.TextRu})
+            .ToListAsync(ct);
+
+        var result = new Dictionary<int, List<(int, DateOnly)>>();
+
+        foreach (var marker in markers)
+        {
+            // Формат "threshold=N;due=yyyy-MM-dd", см. запись в SendCriticalRemindersAsync.
+            var parts = marker.TextRu.Split(';');
+            if (parts.Length != 2) continue;
+
+            var thresholdPart = parts[0].Split('=');
+            var duePart = parts[1].Split('=');
+            if (thresholdPart.Length != 2 || duePart.Length != 2) continue;
+            if (!int.TryParse(thresholdPart[1], out var threshold)) continue;
+            if (!DateOnly.TryParse(duePart[1], out var dueDate)) continue;
+
+            if (!result.TryGetValue(marker.EntityId, out var list))
+            {
+                list = [];
+                result[marker.EntityId] = list;
+            }
+
+            list.Add((threshold, dueDate));
+        }
+
+        return result;
     }
 
     public async Task<SendActualizationOneTimeMailingResponse> SendOneTimeMailingAsync(

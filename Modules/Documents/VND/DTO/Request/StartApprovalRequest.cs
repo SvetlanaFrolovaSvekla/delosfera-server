@@ -13,6 +13,15 @@ public class StartApprovalRequest
     public required int RepeatDeadlineMinutes { get; set; }
     // Норматив финальной выдержки, в минутах
     public required int FinalHoldDeadlineMinutes { get; set; }
+
+    /// <summary>Кто будет указан инициатором согласования - имеет смысл только когда действие
+    /// выполняет НЕ автор черновика (главный редактор запускает согласование чужого черновика,
+    /// см. IsChiefEditor/VndApprovalService.StartAsync): выбор между собой (currentUserId) и
+    /// автором черновика (VndDocument.CreatedByUserId). Любое другое значение отклоняется.
+    /// null (по умолчанию) равносилен указанию currentUserId - как было раньше, когда выбора
+    /// не было вовсе. Игнорируется (currentUserId в любом случае), если действие выполняет сам
+    /// автор черновика - выбирать в этом случае не из чего.</summary>
+    public int? InitiatorUserId { get; set; }
 }
 
 public class ApprovalStageRequest

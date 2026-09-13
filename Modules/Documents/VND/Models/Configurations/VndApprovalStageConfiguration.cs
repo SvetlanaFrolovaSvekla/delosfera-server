@@ -9,6 +9,16 @@ public class VndApprovalStageConfiguration : IEntityTypeConfiguration<VndApprova
     {
         builder.ToTable("vnd_approval_stage");
 
+        // Токен конкурентности на системном столбце Postgres xmin — не требует миграции/нового
+        // столбца. Без него фоновая обработка таймаутов (VndApprovalService.ProcessTimeoutsAsync)
+        // могла молча перезаписать решение, которое согласующий только что принял сам
+        // (POST .../decide) параллельно с этим же проходом: она читает этап как Pending и в
+        // конце сохраняет автоакцепт по таймауту безусловным UPDATE, не заметив, что решение уже
+        // изменилось. С xmin-токеном такое сохранение вместо этого провалится с
+        // DbUpdateConcurrencyException (см. TrySaveTimeoutBatchAsync), и решение пользователя не
+        // теряется.
+        builder.UseXminAsConcurrencyToken();
+
         builder.HasOne(x => x.OrgUnit)
             .WithMany()
             .HasForeignKey(x => x.OrgUnitId)

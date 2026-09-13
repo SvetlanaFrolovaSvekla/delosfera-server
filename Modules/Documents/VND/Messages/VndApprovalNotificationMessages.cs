@@ -141,6 +141,25 @@ public static class VndApprovalNotificationMessages
         BodyKg: $"Сиздин «{vndTitle}» документинин {redactionCode} редакцияңыз макулдашууга жиберилди.",
         Severity: NotificationSeverity.Info);
 
+    /// <summary>Главный редактор сделал ЧУЖОЙ черновик действующим напрямую, минуя согласование
+    /// (см. VndService.PublishRedactionWithoutApprovalAsync) - автор черновика раньше об этом
+    /// вообще не узнавал. В отличие от SentToApproval выше, здесь адресат всегда автор черновика
+    /// (не сам действующий пользователь), поэтому имя того, кто это сделал, явно указано в
+    /// тексте - иначе "ваша редакция стала действующей" выглядело бы как будто это сделал сам
+    /// получатель.</summary>
+    public static NotificationText PublishedWithoutApprovalByOther(
+        string actorName, string redactionCode, string vndTitle) => new(
+        TitleRu: "Ваша редакция стала действующей без согласования",
+        TitleEn: "Your revision became active without approval",
+        TitleKg: "Сиздин редакцияңыз макулдашуусуз колдонуудагы болду",
+        BodyRu: $"{actorName} сделал(а) редакцию {redactionCode} документа «{vndTitle}» действующей " +
+                "напрямую, минуя согласование.",
+        BodyEn: $"{actorName} made revision {redactionCode} of the document \"{vndTitle}\" active " +
+                "directly, bypassing approval.",
+        BodyKg: $"{actorName} «{vndTitle}» документинин {redactionCode} редакциясын макулдашуусуз, " +
+                "түз эле колдонуудагы кылды.",
+        Severity: NotificationSeverity.Info);
+
     public static NotificationText RevisionNeeded(string redactionCode, string vndTitle) => new(
         TitleRu: "Редакция требует доработки",
         TitleEn: "Revision requires changes",

@@ -1,4 +1,6 @@
+using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Services;
+using delosfera_server.Data;
 
 namespace delosfera_server.Modules.Documents.VND.Services;
 
@@ -12,14 +14,20 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 /// 2. Критические напоминания — каждый день, по порогам из настроек (SendCriticalRemindersAsync
 ///    сама ничего не делает, если рассылка выключена или пороги не заданы).
 ///
-/// Повторный запуск в тот же день безопасен — оба метода сервиса сами проверяют свои условия;
-/// отметки последнего запуска здесь только чтобы не дёргать сервис зря каждые 15 минут после
-/// 9:00.
+/// Повторный запуск в тот же день на ОДНОМ процессе безопасен — отметки последнего запуска
+/// здесь только чтобы не дёргать сервис зря каждые 15 минут после 9:00. При НЕСКОЛЬКИХ репликах
+/// этой in-memory защиты недостаточно — см. подробный комментарий у PlanReminderWorker.
+/// AdvisoryLockKey сериализует тик между репликами тем же способом (pg_try_advisory_lock,
+/// без миграций), закрывая практический случай (реплики подняты одновременно).
 /// </summary>
 public class ActualizationNotificationWorker : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
     private static readonly TimeOnly SendAt = new(9, 0);
+
+    // Отдельный ключ от PlanReminderWorker.AdvisoryLockKey (727_001) — иначе воркеры блокировали
+    // бы друг друга без необходимости.
+    private const long AdvisoryLockKey = 727_002;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<ActualizationNotificationWorker> _logger;
@@ -44,21 +52,35 @@ public class ActualizationNotificationWorker : BackgroundService
                 var clock = scope.ServiceProvider.GetRequiredService<IBankClock>();
                 var today = clock.Today;
 
-                if (TimeOnly.FromDateTime(clock.Now) >= SendAt)
+                if (TimeOnly.FromDateTime(clock.Now) >= SendAt
+                    && (_lastMonthlyDigestRunOn != today || _lastCriticalRemindersRunOn != today))
                 {
-                    var notifications = scope.ServiceProvider.GetRequiredService<IActualizationNotificationService>();
+                    var db = scope.ServiceProvider.GetRequiredService<DelosferaDbContext>();
 
-                    if (_lastMonthlyDigestRunOn != today)
+                    var gotLock = await TryAcquireLockAsync(db, stoppingToken);
+                    if (gotLock)
                     {
-                        await notifications.SendMonthlyDigestAsync(today, stoppingToken);
-                        _lastMonthlyDigestRunOn = today;
+                        try
+                        {
+                            var notifications =
+                                scope.ServiceProvider.GetRequiredService<IActualizationNotificationService>();
+
+                            if (_lastMonthlyDigestRunOn != today)
+                                await notifications.SendMonthlyDigestAsync(today, stoppingToken);
+
+                            if (_lastCriticalRemindersRunOn != today)
+                                await notifications.SendCriticalRemindersAsync(today, stoppingToken);
+                        }
+                        finally
+                        {
+                            await ReleaseLockAsync(db, CancellationToken.None);
+                        }
                     }
 
-                    if (_lastCriticalRemindersRunOn != today)
-                    {
-                        await notifications.SendCriticalRemindersAsync(today, stoppingToken);
-                        _lastCriticalRemindersRunOn = today;
-                    }
+                    // Отмечаем день обработанным даже без лока — см. подробное объяснение этого
+                    // компромисса у одноимённой строки в PlanReminderWorker.
+                    _lastMonthlyDigestRunOn = today;
+                    _lastCriticalRemindersRunOn = today;
                 }
             }
             catch (Exception ex)
@@ -67,6 +89,34 @@ public class ActualizationNotificationWorker : BackgroundService
             }
 
             await Task.Delay(Interval, stoppingToken);
+        }
+    }
+
+    /// <summary>См. подробный комментарий у одноимённого метода в PlanReminderWorker.</summary>
+    private static async Task<bool> TryAcquireLockAsync(DelosferaDbContext db, CancellationToken ct)
+    {
+        await db.Database.OpenConnectionAsync(ct);
+
+        var results = await db.Database
+            .SqlQueryRaw<bool>("SELECT pg_try_advisory_lock({0}) AS \"Value\"", AdvisoryLockKey)
+            .ToListAsync(ct);
+
+        var acquired = results.Count > 0 && results[0];
+        if (!acquired)
+            await db.Database.CloseConnectionAsync();
+
+        return acquired;
+    }
+
+    private static async Task ReleaseLockAsync(DelosferaDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_unlock({AdvisoryLockKey})", ct);
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync();
         }
     }
 }

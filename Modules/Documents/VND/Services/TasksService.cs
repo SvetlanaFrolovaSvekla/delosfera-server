@@ -10,11 +10,13 @@ public class TasksService : ITasksService
 {
     private readonly DelosferaDbContext _db;
     private readonly IBankClock _clock;
+    private readonly ILogger<TasksService> _logger;
 
-    public TasksService(DelosferaDbContext db, IBankClock clock)
+    public TasksService(DelosferaDbContext db, IBankClock clock, ILogger<TasksService> logger)
     {
         _db = db;
         _clock = clock;
+        _logger = logger;
     }
 
     /// <summary>Задачи вкладки "Ждущие моего согласования" — все три фазы, на которых
@@ -169,6 +171,12 @@ public class TasksService : ITasksService
                     .Take(1)
                     .SelectMany(r => _db.VndApprovalProcesses
                         .Where(p => p.RedactionId == r.Id)
+                        // Редакция может пройти через несколько процессов согласования
+                        // (отклонили → доработали → отправили заново, возможно другим
+                        // инициатором) — без сортировки по дате FirstOrDefault() возвращал
+                        // произвольную строку, и задача могла достаться уже неактуальному
+                        // инициатору. Нужен именно последний по времени процесс.
+                        .OrderByDescending(p => p.CreatedAt)
                         .Select(p => (int?)p.InitiatorUserId))
                     .FirstOrDefault(),
             })
@@ -220,9 +228,18 @@ public class TasksService : ITasksService
             var isRelevant = process.InitiatorUserId == userId || vnd.ActualizationResponsibleUserId == userId;
             if (!isRelevant) continue;
 
-            var statusLabel = openActualizationVndIds.Contains(vnd.Id)
-                ? "В процессе согласования по актуализации ВНД"
-                : "В процессе согласования первой редакции ВНД";
+            // На доработке у самого инициатора (замечания согласующего устраняются) - это
+            // принципиально другое состояние, чем "ждём решения согласующих": мяч сейчас на
+            // стороне инициатора, а не согласования. Раньше карточка выглядела так же, как
+            // обычное "в процессе согласования", и по ней нельзя было понять, что делать -
+            // ждать или самому вносить правки (уведомление приходило, а в самой задаче
+            // отображения не было).
+            var isRevisionNeeded = process.Status == ApprovalProcessStatus.RevisionNeeded;
+            var statusLabel = isRevisionNeeded
+                ? "ВНД на доработке"
+                : openActualizationVndIds.Contains(vnd.Id)
+                    ? "В процессе согласования по актуализации ВНД"
+                    : "В процессе согласования первой редакции ВНД";
 
             result.Add(new VndTaskResponse
             {
@@ -239,6 +256,7 @@ public class TasksService : ITasksService
                 // трёх согласованных значений — фильтр по этапу её не подхватит, "Все этапы" покажет.
                 StagePhase = MapProcessPhase(process.Status),
                 StatusLabel = statusLabel,
+                IsRevisionNeeded = isRevisionNeeded,
                 ActualizationPlannedNoChanges = vnd.ActualizationPlannedNoChanges,
                 CreatedAt = vnd.UpdatedAt
             });
@@ -647,7 +665,12 @@ public class TasksService : ITasksService
 
     public async Task<VndTaskCountsResponse> GetCountsAsync(int userId)
     {
-        var coordinationCount = await _db.Set<VndApprovalStage>()
+        // Раньше один упавший источник (например, GetActualizationTasksAsync) ронял ВЕСЬ метод -
+        // остальные четыре счётчика, которые реально посчитались бы без проблем, вообще не
+        // доходили до ответа: контроллер вернул бы 500, а useVndTaskCounts на фронте по любой
+        // ошибке молча подставляет нули везде (см. её комментарий). Считаем каждый счётчик
+        // независимо — отказ одного не должен обнулять остальные, которые ни при чём.
+        var coordinationCount = await CountSafeAsync("coordination", () => _db.Set<VndApprovalStage>()
             .Where(s => s.ApproverUserId == userId)
             .Where(s =>
                 (s.ApprovalProcess!.Status == ApprovalProcessStatus.Primary
@@ -659,12 +682,16 @@ public class TasksService : ITasksService
                 ||
                 (s.ApprovalProcess!.Status == ApprovalProcessStatus.FinalHold
                  && (s.FinalHoldDecision == null || s.FinalHoldDecision == ApprovalStageDecision.Pending)))
-            .CountAsync();
+            .CountAsync());
 
-        var actualizationCount = (await GetActualizationTasksAsync(userId)).Count;
-        var consolidationCount = (await GetConsolidationTasksAsync(userId)).Count;
-        var myVndApprovalCount = (await GetMyVndApprovalTasksAsync(userId)).Count;
-        var rejectedCount = (await GetRejectedTasksAsync(userId)).Count;
+        var actualizationCount = await CountSafeAsync("actualization",
+            async () => (await GetActualizationTasksAsync(userId)).Count);
+        var consolidationCount = await CountSafeAsync("consolidation",
+            async () => (await GetConsolidationTasksAsync(userId)).Count);
+        var myVndApprovalCount = await CountSafeAsync("myVndApproval",
+            async () => (await GetMyVndApprovalTasksAsync(userId)).Count);
+        var rejectedCount = await CountSafeAsync("rejected",
+            async () => (await GetRejectedTasksAsync(userId)).Count);
 
         return new VndTaskCountsResponse
         {
@@ -674,6 +701,24 @@ public class TasksService : ITasksService
             MyVndApproval = myVndApprovalCount,
             Rejected = rejectedCount
         };
+    }
+
+    /// <summary>Считает один независимый источник для GetCountsAsync/GetHomeSummaryAsync,
+    /// подставляя 0 и логируя предупреждение при отказе — вместо того чтобы ронять весь ответ
+    /// целиком из-за одного проблемного среза (см. комментарий в GetCountsAsync).</summary>
+    private async Task<int> CountSafeAsync(string sourceName, Func<Task<int>> countAsync)
+    {
+        try
+        {
+            return await countAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "TasksService: не удалось посчитать источник задач «{Source}» для сводки/счётчиков — " +
+                "подставлен 0, остальные источники не затронуты", sourceName);
+            return 0;
+        }
     }
 
     /// <summary>Сводка персональных KPI для карточек на главной странице</summary>
@@ -686,49 +731,60 @@ public class TasksService : ITasksService
         var monthStartLocal = new DateTime(_clock.Today.Year, _clock.Today.Month, 1, 0, 0, 0, DateTimeKind.Unspecified);
         var monthStart = TimeZoneInfo.ConvertTimeToUtc(monthStartLocal, _clock.Zone);
 
+        // Каждая карточка независима от остальных трёх — см. CountSafeAsync/комментарий в
+        // GetCountsAsync: отказ одной (например, из-за проблемных данных только в одном срезе)
+        // раньше ронял всю сводку разом, и все четыре карточки на главной показывали бы 0/ошибку
+        // одновременно, включая те три, что сами по себе посчитались бы нормально.
+
         // Карточка 1: открытые циклы актуализации под моей ответственностью
-        var myResponsibleActualizations = await _db.Set<VndActualizationRecord>()
-            .CountAsync(r => r.ResponsibleUserId == userId && r.PublishedAt == null);
+        var myResponsibleActualizations = await CountSafeAsync("myResponsibleActualizations", () =>
+            _db.Set<VndActualizationRecord>()
+                .CountAsync(r => r.ResponsibleUserId == userId && r.PublishedAt == null));
 
         // Карточка 2: решения, зачтённые мне по тайм-ауту, в текущем месяце
         // (Primary/Repeat/FinalHold — любая из трёх фаз, где я был согласующим)
-        var myStages = await _db.Set<VndApprovalStage>()
-            .Where(s => s.ApproverUserId == userId)
-            .Select(s => new
-            {
-                s.PrimaryDecision, s.PrimaryDecidedAt,
-                s.RepeatDecision, s.RepeatDecidedAt,
-                s.FinalHoldDecision, s.FinalHoldDecidedAt
-            })
-            .ToListAsync();
+        var myTimeoutApprovalsThisMonth = await CountSafeAsync("myTimeoutApprovalsThisMonth", async () =>
+        {
+            var myStages = await _db.Set<VndApprovalStage>()
+                .Where(s => s.ApproverUserId == userId)
+                .Select(s => new
+                {
+                    s.PrimaryDecision, s.PrimaryDecidedAt,
+                    s.RepeatDecision, s.RepeatDecidedAt,
+                    s.FinalHoldDecision, s.FinalHoldDecidedAt
+                })
+                .ToListAsync();
 
-        var myTimeoutApprovalsThisMonth = myStages.Count(s =>
-            (s.PrimaryDecision == ApprovalStageDecision.AutoApprovedByTimeout
-                && s.PrimaryDecidedAt.HasValue && s.PrimaryDecidedAt.Value >= monthStart)
-            || (s.RepeatDecision == ApprovalStageDecision.AutoApprovedByTimeout
-                && s.RepeatDecidedAt.HasValue && s.RepeatDecidedAt.Value >= monthStart)
-            || (s.FinalHoldDecision == ApprovalStageDecision.AutoApprovedByTimeout
-                && s.FinalHoldDecidedAt.HasValue && s.FinalHoldDecidedAt.Value >= monthStart));
+            return myStages.Count(s =>
+                (s.PrimaryDecision == ApprovalStageDecision.AutoApprovedByTimeout
+                    && s.PrimaryDecidedAt.HasValue && s.PrimaryDecidedAt.Value >= monthStart)
+                || (s.RepeatDecision == ApprovalStageDecision.AutoApprovedByTimeout
+                    && s.RepeatDecidedAt.HasValue && s.RepeatDecidedAt.Value >= monthStart)
+                || (s.FinalHoldDecision == ApprovalStageDecision.AutoApprovedByTimeout
+                    && s.FinalHoldDecidedAt.HasValue && s.FinalHoldDecidedAt.Value >= monthStart));
+        });
 
         // Карточка 3: мои ВНД (я — инициатор согласования), процесс ещё не завершён
-        var myVndAwaitingApproval = await _db.VndApprovalProcesses
-            .CountAsync(p => p.InitiatorUserId == userId &&
-                (p.Status == ApprovalProcessStatus.Primary
-                 || p.Status == ApprovalProcessStatus.Repeated
-                 || p.Status == ApprovalProcessStatus.RevisionNeeded
-                 || p.Status == ApprovalProcessStatus.FinalHold));
+        var myVndAwaitingApproval = await CountSafeAsync("myVndAwaitingApproval", () =>
+            _db.VndApprovalProcesses
+                .CountAsync(p => p.InitiatorUserId == userId &&
+                    (p.Status == ApprovalProcessStatus.Primary
+                     || p.Status == ApprovalProcessStatus.Repeated
+                     || p.Status == ApprovalProcessStatus.RevisionNeeded
+                     || p.Status == ApprovalProcessStatus.FinalHold)));
 
         // Карточка 4: этапы, ожидающие решения именно меня прямо сейчас
         // (первичное/повторное согласование + финальная выдержка — все три уже внутри
         // GetCoordinationTasksAsync)
-        var pendingMyApproval = await GetCoordinationTasksAsync(userId);
+        var pendingMyApprovalCount = await CountSafeAsync("pendingMyApproval",
+            async () => (await GetCoordinationTasksAsync(userId)).Count);
 
         return new VndHomeSummaryResponse
         {
             MyResponsibleActualizations = myResponsibleActualizations,
             MyTimeoutApprovalsThisMonth = myTimeoutApprovalsThisMonth,
             MyVndAwaitingApproval = myVndAwaitingApproval,
-            PendingMyApproval = pendingMyApproval.Count
+            PendingMyApproval = pendingMyApprovalCount
         };
     }
 

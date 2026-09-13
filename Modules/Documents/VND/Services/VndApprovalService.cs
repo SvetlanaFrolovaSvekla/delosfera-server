@@ -84,6 +84,14 @@ public class VndApprovalService : IVndApprovalService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
+        // Архивация необратима (см. VndService.CancelAsync) - у архивированного документа может
+        // остаться редакция в статусе "черновик" (например, она была не отправлена на согласование
+        // на момент архивации), но отправить её на согласование, "вытащив" ВНД тем самым обратно
+        // из архива, всё равно нельзя.
+        if (vnd.Status == VndStatus.Archived)
+            throw new InvalidOperationException(
+                "ВНД архивирован — архивация необратима, отправить на согласование нельзя");
+
         if (!IsChiefEditor() && !await IsLinkedToVndAsync(vnd, currentUserId))
             throw new UnauthorizedAccessException(
                 "Запустить согласование может только разработчик, куратор, ответственный исполнитель, " +
@@ -91,6 +99,30 @@ public class VndApprovalService : IVndApprovalService
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
+
+        // Кто станет инициатором согласования. По умолчанию - сам действующий пользователь, как
+        // было раньше. Но если запускает НЕ автор черновика (обычно - главный редактор запускает
+        // согласование чужого черновика, см. IsChiefEditor() выше), это должен быть явный выбор,
+        // а не всегда молчаливо currentUserId: настоящий автор черновика иначе не мог стать
+        // инициатором своей же работы, даже когда фактически именно он её написал - согласование
+        // просто нажатием чужой кнопки "приписывалось" не ему. См. VndSelectApproverModal/
+        // VndStartApprovalModal на фронте - там же теперь и уведомление автору (SentToApproval
+        // ниже, получатель расширен на CreatedByUserId).
+        var draftOwnerId = vnd.CreatedByUserId;
+        var actingOnSomeoneElsesDraft = draftOwnerId.HasValue && draftOwnerId.Value != currentUserId;
+
+        if (!actingOnSomeoneElsesDraft && request.InitiatorUserId.HasValue &&
+            request.InitiatorUserId.Value != currentUserId)
+            throw new InvalidOperationException(
+                "Выбор инициатора согласования доступен только при запуске согласования чужого черновика");
+
+        if (actingOnSomeoneElsesDraft && request.InitiatorUserId.HasValue &&
+            request.InitiatorUserId.Value != currentUserId && request.InitiatorUserId.Value != draftOwnerId!.Value)
+            throw new InvalidOperationException("Инициатором можно указать только себя или автора черновика");
+
+        var initiatorUserId = actingOnSomeoneElsesDraft && request.InitiatorUserId == draftOwnerId
+            ? draftOwnerId!.Value
+            : currentUserId;
 
         var lastRedaction = await _db.VndRedactions
                                 .Where(r => r.VndId == vndId)
@@ -165,7 +197,7 @@ public class VndApprovalService : IVndApprovalService
         {
             VndId = vndId,
             RedactionId = lastRedaction.Id,
-            InitiatorUserId = currentUserId,
+            InitiatorUserId = initiatorUserId,
             Status = ApprovalProcessStatus.Primary,
             PrimaryDeadlineMinutes = request.PrimaryDeadlineMinutes,
             RepeatDeadlineMinutes = request.RepeatDeadlineMinutes,
@@ -204,10 +236,17 @@ public class VndApprovalService : IVndApprovalService
                 NotificationCategory.Approval, vndId, currentUserId, pendingApproverIds);
 
         // --- Уведомление инициатору (и ответственному за актуализацию, если согласование запущено
-        // в рамках открытого цикла актуализации): редакция отправлена на согласование
+        // в рамках открытого цикла актуализации): редакция отправлена на согласование.
+        // Плюс автор самого черновика (vnd.CreatedByUserId) - раньше не уведомлялся вовсе, если
+        // согласование запускал кто-то другой (см. actingOnSomeoneElsesDraft выше): "Ваша
+        // редакция... отправлена на согласование" уходило только тому, кто нажал кнопку, даже
+        // если редакция не его. NotifyAsync сам убирает дубликаты (Distinct() на UserIds), так
+        // что если это один и тот же человек - лишнего уведомления не будет.
         var sentToApprovalRecipients = new List<int> { currentUserId };
         if (vnd.ActualizationResponsibleUserId.HasValue)
             sentToApprovalRecipients.Add(vnd.ActualizationResponsibleUserId.Value);
+        if (draftOwnerId.HasValue)
+            sentToApprovalRecipients.Add(draftOwnerId.Value);
 
         await NotifyAsync(
             VndApprovalNotificationMessages.SentToApproval(lastRedaction.Code, vnd.TitleRu),
@@ -299,6 +338,8 @@ public class VndApprovalService : IVndApprovalService
             _ => throw new InvalidOperationException("Неизвестный тип решения")
         };
 
+        try
+        {
         switch (process.Status)
         {
             case ApprovalProcessStatus.Primary:
@@ -398,6 +439,19 @@ public class VndApprovalService : IVndApprovalService
                 throw new InvalidOperationException(
                     "В текущем статусе процесса принятие решений недоступно");
         }
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Этап сверяется по xmin (см. UseXminAsConcurrencyToken в
+            // VndApprovalStageConfiguration) - сюда попадаем, если состояние этапа успело
+            // измениться (чаще всего: сработал фоновый автоакцепт по таймауту,
+            // см. ProcessTimeoutsAsync/TrySaveTimeoutBatchAsync) в промежутке между тем, как
+            // была открыта эта страница, и нажатием кнопки решения. Без этой проверки решение
+            // согласующего могло молча перезаписать уже свершившийся автоакцепт (или наоборот).
+            throw new InvalidOperationException(
+                "Не удалось сохранить решение — статус этапа согласования уже изменился " +
+                "(например, истёк срок и применён автоакцепт по таймауту). Обновите страницу.");
+        }
 
         // --- Уведомление инициатору о конкретном решении согласующего
         // (общее для первичного, повторного и финального этапов - decision уже посчитан выше)
@@ -414,17 +468,32 @@ public class VndApprovalService : IVndApprovalService
             _ => ActivityEventKind.Other
         };
 
+        // Текст замечания/причины отклонения кладём ПРЯМО в ActivityLog (а не только в
+        // stage.RepeatComment/FinalHoldComment) - эти поля на этапе не хранят историю, а
+        // перезатираются на каждом новом круге согласования (см. ClearPreviousRoundArtifactsAsync/
+        // ResubmitAfterRevisionAsync, ResetFinalHoldDecisionsAsync) - раньше замечания круга,
+        // который уже устранили и прошли повторно, было НЕВОЗМОЖНО увидеть нигде, кроме как в
+        // момент между кругами. ActivityLog же (лента "Последняя активность"/"История" ВНД)
+        // никогда не перезаписывается - это единственное постоянное место, где остаётся текст
+        // каждого конкретного замечания/отклонения по каждому кругу согласования.
+        var commentSuffix = !string.IsNullOrWhiteSpace(request.Comment)
+            ? new ActivityText(
+                $": «{request.Comment}»",
+                $": \"{request.Comment}\"",
+                $": «{request.Comment}»")
+            : new ActivityText(string.Empty, string.Empty, string.Empty);
+
         _activityLog.Log(
             ActivityModules.Vnd, logKind, vndId, process.Vnd!.Code, currentUserId,
             decision == ApprovalStageDecision.Rejected
                 ? new ActivityText(
-                    $"{approverName} отклонил(а) редакцию {redactionCode} ВНД «{vndTitle}»",
-                    $"{approverName} rejected revision {redactionCode} of VND \"{vndTitle}\"",
-                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын четке какты")
+                    $"{approverName} отклонил(а) редакцию {redactionCode} ВНД «{vndTitle}»{commentSuffix.Ru}",
+                    $"{approverName} rejected revision {redactionCode} of VND \"{vndTitle}\"{commentSuffix.En}",
+                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын четке какты{commentSuffix.Kg}")
                 : new ActivityText(
-                    $"{approverName} согласовал(а) редакцию {redactionCode} ВНД «{vndTitle}»",
-                    $"{approverName} approved revision {redactionCode} of VND \"{vndTitle}\"",
-                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын макулдады"),
+                    $"{approverName} согласовал(а) редакцию {redactionCode} ВНД «{vndTitle}»{commentSuffix.Ru}",
+                    $"{approverName} approved revision {redactionCode} of VND \"{vndTitle}\"{commentSuffix.En}",
+                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын макулдады{commentSuffix.Kg}"),
             $"/base-vnd/{vndId}");
         await _db.SaveChangesAsync();
 
@@ -672,6 +741,12 @@ public class VndApprovalService : IVndApprovalService
             // Замечания исправлены - обычное повторное согласование (только с теми, кто участвует в repeat)
             foreach (var stage in process.Stages.Where(s => s.ParticipatesInRepeat))
             {
+                // Вложения/цитаты предыдущего круга повторного согласования этого этапа больше
+                // не относятся к решению, которое согласующий сейчас примет заново - без этой
+                // очистки они оставались привязанными к той же фазе (Repeat) и отображались
+                // рядом с текстом НОВОГО решения, как будто были приложены к нему.
+                await ClearPreviousRoundArtifactsAsync(stage, ApprovalStagePhase.Repeat);
+
                 stage.RepeatDecision = ApprovalStageDecision.Pending;
                 stage.RepeatComment = null;
                 stage.RepeatDecidedAt = null;
@@ -708,10 +783,10 @@ public class VndApprovalService : IVndApprovalService
             // PartiallyAgree или FullyDisagree - в обоих случаях составлена матрица разногласий,
             // повторное согласование пропускаем, сразу идём на финальную выдержку (решение
             // по-прежнему требуется только от тех, кто ещё не давал чистого согласования этой
-            // редакции - см. ResetFinalHoldDecisions). При PartiallyAgree редакция при этом могла
+            // редакции - см. ResetFinalHoldDecisionsAsync). При PartiallyAgree редакция при этом могла
             // быть обновлена файлами выше - по маршруту согласования разницы с FullyDisagree нет.
             process.Status = ApprovalProcessStatus.FinalHold;
-            ResetFinalHoldDecisions(process);
+            await ResetFinalHoldDecisionsAsync(process);
             process.FinalHoldStartedAt = DateTime.UtcNow;
 
             // См. комментарий выше - тот же самообход для финальной выдержки.
@@ -825,6 +900,8 @@ public class VndApprovalService : IVndApprovalService
 
         foreach (var process in primaryProcesses.Where(p => p.PrimaryDeadlineAt <= now))
         {
+            var trackedBefore = SnapshotTrackedEntities();
+
             foreach (var stage in process.Stages.Where(s => s.PrimaryDecision == ApprovalStageDecision.Pending))
             {
                 stage.PrimaryDecision = ApprovalStageDecision.AutoApprovedByTimeout;
@@ -841,6 +918,7 @@ public class VndApprovalService : IVndApprovalService
             }
 
             await CompletePrimaryPhaseAsync(process, save: false);
+            await TrySaveTimeoutBatchAsync(process.Id, trackedBefore);
         }
 
         // --- Повторный этап
@@ -854,6 +932,8 @@ public class VndApprovalService : IVndApprovalService
         foreach (var process in
                  repeatedProcesses.Where(p => p.RepeatDeadlineAt is not null && p.RepeatDeadlineAt <= now))
         {
+            var trackedBefore = SnapshotTrackedEntities();
+
             foreach (var stage in process.Stages.Where(s =>
                          s.ParticipatesInRepeat &&
                          (s.RepeatDecision is null || s.RepeatDecision == ApprovalStageDecision.Pending)))
@@ -872,6 +952,7 @@ public class VndApprovalService : IVndApprovalService
             }
 
             await CompleteRepeatPhaseAsync(process, save: false);
+            await TrySaveTimeoutBatchAsync(process.Id, trackedBefore);
         }
 
         // --- Финальная выдержка
@@ -885,6 +966,8 @@ public class VndApprovalService : IVndApprovalService
         foreach (var process in finalHoldProcesses.Where(p =>
                      p.FinalHoldDeadlineAt is not null && p.FinalHoldDeadlineAt <= now))
         {
+            var trackedBefore = SnapshotTrackedEntities();
+
             foreach (var stage in process.Stages.Where(s =>
                          s.FinalHoldDecision is null || s.FinalHoldDecision == ApprovalStageDecision.Pending))
             {
@@ -904,9 +987,55 @@ public class VndApprovalService : IVndApprovalService
             // Никто не оставил замечаний до дедлайна - завершаем (afterRevision: true,
             // т.к. финальная выдержка бывает только после цикла с замечаниями)
             await FinalizeApprovalAsync(process, afterRevision: true);
+            await TrySaveTimeoutBatchAsync(process.Id, trackedBefore);
         }
+    }
 
-        await _db.SaveChangesAsync();
+    /// <summary>Снимок сущностей, уже отслеживаемых контекстом ДО обработки одного процесса в
+    /// ProcessTimeoutsAsync — см. TrySaveTimeoutBatchAsync, которому этот снимок нужен, чтобы
+    /// откатить именно то, что добавила обработка ЭТОГО процесса, и не задеть уже накопленные
+    /// (или ещё не сохранённые) изменения других процессов в том же проходе.</summary>
+    private HashSet<object> SnapshotTrackedEntities() =>
+        new(_db.ChangeTracker.Entries().Select(e => e.Entity), ReferenceEqualityComparer.Instance);
+
+    /// <summary>Сохраняет автоакцепт по таймауту для ОДНОГО процесса отдельным
+    /// SaveChangesAsync — раньше весь пакет процессов сохранялся одним общим вызовом в конце
+    /// ProcessTimeoutsAsync, и конфликт по одному документу откатил бы (в рамках одной
+    /// EF-транзакции) автоакцепт и для всех остальных, уже корректно обработанных в этом же
+    /// проходе.
+    ///
+    /// VndApprovalStage сверяется по xmin (см. UseXminAsConcurrencyToken в
+    /// VndApprovalStageConfiguration) — конкурентного контроля версий тут раньше не было вовсе.
+    /// Если пользователь успел принять РЕАЛЬНОЕ решение по одному из этапов этого процесса
+    /// (POST .../decide) параллельно с этим фоновым проходом, который уже прочитал этап как
+    /// Pending, — сохранение здесь провалится с DbUpdateConcurrencyException вместо того чтобы
+    /// молча перезаписать это решение автоакцептом по таймауту. Пользовательское решение при
+    /// этом уже сохранено им самим и никуда не девается; мы лишь откатываем то, что успела
+    /// НАКОПИТЬ В ПАМЯТИ обработка этого процесса в фоновой джобе (новые записи журнала,
+    /// изменения статуса документа/редакции и т.п. — см. SnapshotTrackedEntities), чтобы это
+    /// не просочилось в сохранение следующего процесса в этом же проходе. Следующий плановый
+    /// запуск ProcessTimeoutsAsync пересчитает этот процесс заново, уже по актуальным
+    /// данным.</summary>
+    private async Task TrySaveTimeoutBatchAsync(int processId, HashSet<object> trackedBefore)
+    {
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _logger.LogInformation(ex,
+                "Автоакцепт по таймауту пропущен для процесса {ProcessId} — по одному из этапов " +
+                "уже принято решение параллельно; следующий проход обработает его по актуальным данным",
+                processId);
+
+            foreach (var entry in _db.ChangeTracker.Entries()
+                         .Where(e => !trackedBefore.Contains(e.Entity))
+                         .ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
     }
 
     private async Task CompletePrimaryPhaseAsync(VndApprovalProcess process, bool save = true)
@@ -957,7 +1086,7 @@ public class VndApprovalService : IVndApprovalService
         process.Status = ApprovalProcessStatus.FinalHold;
         process.FinalHoldStartedAt = DateTime.UtcNow;
 
-        ResetFinalHoldDecisions(process);
+        await ResetFinalHoldDecisionsAsync(process);
 
         // Инициатор мог быть согласующим на одном из этапов - на финальной выдержке
         // его решение тоже проставляется автоматически, иначе оно "висит" до просрочки.
@@ -1222,7 +1351,7 @@ public class VndApprovalService : IVndApprovalService
     /// автоматически, и жать "Согласовать" ещё раз ему не нужно. Формального решения снова ждём
     /// только от тех, кто на этой редакции ранее оставлял замечания или отклонял её.
     /// Вызывать сразу после назначения process.Status = FinalHold, до SaveChangesAsync.</summary>
-    private static void ResetFinalHoldDecisions(VndApprovalProcess process)
+    private async Task ResetFinalHoldDecisionsAsync(VndApprovalProcess process)
     {
         const string comment = "Согласовано автоматически — вы уже согласовали эту редакцию без замечаний ранее";
         var now = DateTime.UtcNow;
@@ -1240,11 +1369,51 @@ public class VndApprovalService : IVndApprovalService
             }
             else
             {
+                // Новый круг финальной выдержки для этого этапа - вложения/цитаты предыдущего
+                // круга (Phase здесь не различает круги) иначе остались бы привязаны к той же
+                // фазе FinalHold и отображались бы рядом с текстом решения, которое согласующий
+                // ещё не принял.
+                await ClearPreviousRoundArtifactsAsync(stage, ApprovalStagePhase.FinalHold);
+
                 stage.FinalHoldDecision = ApprovalStageDecision.Pending;
                 stage.FinalHoldComment = null;
                 stage.FinalHoldDecidedAt = null;
             }
         }
+    }
+
+    /// <summary>Удаляет файлы и цитаты, приложенные к решению этапа в предыдущем круге
+    /// указанной фазы (Repeat/FinalHold), перед тем как круг перезапускается для этого этапа.
+    /// VndApprovalStageAttachment/VndApprovalStageQuote различают только Phase, без номера
+    /// круга внутри неё - без этой очистки при повторных кругах доработки в одной и той же
+    /// фазе старые файлы/цитаты накапливались и отображались рядом с текстом решения из
+    /// совсем другого, более позднего круга (см. AttachDecisionFilesAsync/AttachDecisionQuotes
+    /// выше - тем же способом кладутся новые).</summary>
+    private async Task ClearPreviousRoundArtifactsAsync(VndApprovalStage stage, ApprovalStagePhase phase)
+    {
+        var oldAttachments = await _db.Set<VndApprovalStageAttachment>()
+            .Where(a => a.VndApprovalStageId == stage.Id && a.Phase == phase)
+            .ToListAsync();
+
+        foreach (var old in oldAttachments)
+        {
+            try
+            {
+                await _fileService.DeleteAsync(old.FileAttachmentId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Не удалось удалить файл {FileId} предыдущего круга согласования этапа {StageId}",
+                    old.FileAttachmentId, stage.Id);
+            }
+        }
+        _db.Set<VndApprovalStageAttachment>().RemoveRange(oldAttachments);
+
+        var oldQuotes = await _db.Set<VndApprovalStageQuote>()
+            .Where(q => q.VndApprovalStageId == stage.Id && q.Phase == phase)
+            .ToListAsync();
+        _db.Set<VndApprovalStageQuote>().RemoveRange(oldQuotes);
     }
 
     /// <summary>Сохраняет файлы, приложенные согласующим к резолюции конкретной фазы, и

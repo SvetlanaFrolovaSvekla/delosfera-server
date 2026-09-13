@@ -91,6 +91,12 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
             .Select(v => new {v.Id, v.Code, v.TitleRu})
             .ToListAsync();
 
+        // Обе группы изменений ниже (сохранение позиций плана и запись журнала импорта по ним)
+        // должны попасть в БД одной транзакцией — иначе при сбое между двумя SaveChangesAsync
+        // (строки создались/обновились, а PlanItemEvent на них — нет) в плане остаются позиции
+        // без единой записи в истории о том, что их вообще создал/обновил именно этот импорт.
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
         var result = new PlanImportResultDto {PlanId = plan.Id, Year = year};
         var order = plan.Items.Count == 0 ? 0 : plan.Items.Max(i => i.Order);
 
@@ -162,8 +168,24 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
             if (vnd is null) result.Unmatched.Add($"строка {line}: «{title}»");
             else result.Matched++;
 
-            var existing = plan.Items.FirstOrDefault(i =>
-                i.Title.Equals(title, StringComparison.OrdinalIgnoreCase));
+            // Раньше позиция ищущаяся исключительно по точному совпадению текста Title — если
+            // в плане ДВЕ РАЗНЫЕ позиции (например, одноимённые типовые положения разных
+            // подразделений, или просто совпадение) назывались одинаково, вторая при импорте
+            // тихо схлопывалась в обновление первой вместо создания своей записи, и одна из
+            // позиций пропадала из плана. Когда строка сопоставилась с документом базы ВНД
+            // (vnd не null) — используем более надёжный признак идентичности: ссылку на тот же
+            // VndDocumentId, а не текст названия (это заодно чинит и обратный случай — сам ВНД
+            // мог быть просто переименован между импортами, и по старому тексту его больше не
+            // нашли бы вовсе, получив дубль). Только для НЕсопоставленных строк (единственный
+            // доступный признак — сам текст) сверяем текст названия, дополнительно сузив
+            // совпадение подразделением — так одноимённые позиции РАЗНЫХ подразделений не
+            // схлопываются друг в друга.
+            var existing = vnd is not null
+                ? plan.Items.FirstOrDefault(i => i.VndDocumentId == vnd.Id)
+                : plan.Items.FirstOrDefault(i =>
+                    i.VndDocumentId == null &&
+                    i.Title.Equals(title, StringComparison.OrdinalIgnoreCase) &&
+                    i.ResponsibleUnitId == unit?.Id);
 
             if (existing is null)
             {
@@ -224,6 +246,7 @@ public class ActualizationPlanImportService : IActualizationPlanImportService
         }
 
         await _db.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return result;
     }

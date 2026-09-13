@@ -17,6 +17,20 @@ public enum ActivityEventKind
     Published = 11, // Редакция становится действующей
     RequisitesUpdated = 12, // Смена реквизитов ВНД
     DraftDeleted = 13, // Удаление черновика ВНД (см. VndService.DeleteAsync)
+
+    /// <summary>Прямое редактирование уже загруженной редакции главным редактором (замена
+    /// файлов/описания, без согласования и без создания новой редакции) — см.
+    /// VndService.EditRedactionDirectlyCoreAsync.</summary>
+    RedactionEdited = 15,
+
+    /// <summary>Служебная метка "критическое напоминание по актуализации отправлено для такого-то
+    /// порога/срока" (см. ActualizationNotificationService.SendCriticalRemindersAsync) — нужна
+    /// только чтобы не потерять напоминание навсегда, если ровно нужный день был пропущен
+    /// (простой сервиса/деплой), и не разослать его повторно на следующий день после этого.
+    /// TextRu у таких записей — служебный, не для показа: см. ActivityLogService.GetRecentAsync/
+    /// GetByEntityAsync, которые сознательно исключают этот тип из пользовательской ленты.</summary>
+    ActualizationReminderSent = 14,
+
     Other = 99 // Другое событие (разное)
     
     // TODO: когда появятся СЗ: добавить для них типы событий
