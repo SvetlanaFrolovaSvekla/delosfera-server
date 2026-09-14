@@ -219,3 +219,13 @@ public class StepSignatureLevelRequest
     /// <summary>Пусто — снять требование подписи с этапа.</summary>
     public Signing.Models.SignatureLevel? Level { get; set; }
 }
+
+/// <summary>Делегирование задачи коллеге (СК-3).</summary>
+public class DelegateTaskRequest
+{
+    /// <summary>Кому передаётся задача.</summary>
+    public int ToUserId { get; set; }
+
+    /// <summary>Необязательная причина/пояснение — попадает в историю.</summary>
+    public string? Comment { get; set; }
+}

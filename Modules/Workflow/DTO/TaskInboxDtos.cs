@@ -45,6 +45,12 @@ public class InboxTaskDto
     /// </summary>
     public string? OnBehalfOf { get; set; }
 
+    /// <summary>
+    /// Задача делегирована текущему исполнителю — от кого (СК-3). Пусто, если не
+    /// делегировалась. В отличие от замещения, это разовая передача одной задачи.
+    /// </summary>
+    public string? DelegatedBy { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }
 

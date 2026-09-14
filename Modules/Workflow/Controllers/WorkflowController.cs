@@ -29,16 +29,18 @@ public class WorkflowController : ControllerBase
     private readonly ICurrentUserService _currentUser;
     private readonly IAuditService _audit;
     private readonly ITaskInboxService _inbox;
+    private readonly ITaskDelegationService _delegation;
 
     public WorkflowController(
         DelosferaDbContext db, IRouteEngine engine, ICurrentUserService currentUser, ITaskInboxService inbox,
-        IAuditService audit)
+        IAuditService audit, ITaskDelegationService delegation)
     {
         _db = db;
         _engine = engine;
         _currentUser = currentUser;
         _audit = audit;
         _inbox = inbox;
+        _delegation = delegation;
     }
 
     /// <summary>
@@ -48,6 +50,22 @@ public class WorkflowController : ControllerBase
     [HttpGet("inbox")]
     public async Task<IActionResult> Inbox([FromQuery] string? documentType = null) =>
         Ok(await _inbox.GetAsync(_currentUser.UserId, documentType));
+
+    /// <summary>
+    /// Делегировать задачу коллеге (СК-3): разовая передача одной задачи, в отличие
+    /// от замещения. Пока поддержаны задачи согласования.
+    /// </summary>
+    [HttpPost("tasks/{taskId:int}/delegate")]
+    public async Task<IActionResult> DelegateTask(int taskId, [FromBody] DelegateTaskRequest req)
+    {
+        try
+        {
+            await _delegation.DelegateAsync(taskId, req.ToUserId, req.Comment, _currentUser.UserId);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
 
     /// <summary>Список шаблонов маршрутов (опц. фильтр по типу документа) — для выбора при отправке.</summary>
     [HttpGet("templates")]

@@ -67,6 +67,7 @@ public class TaskInboxService : ITaskInboxService
                 RegNumber = d.RegNumber,
                 Title = d.Title,
                 DocType = d.Type,
+                DelegatedByUserId = t.DelegatedByUserId,
             }).ToListAsync();
 
         // Задачи контура — решение адресата, поручение: маршрута за ними нет, документ
@@ -92,6 +93,7 @@ public class TaskInboxService : ITaskInboxService
                 RegNumber = d.RegNumber,
                 Title = d.Title,
                 DocType = d.Type,
+                DelegatedByUserId = t.DelegatedByUserId,
             }).ToListAsync();
 
         // Ознакомление: лист ознакомления живёт вне движка задач — своя таблица без
@@ -135,6 +137,19 @@ public class TaskInboxService : ITaskInboxService
             .ToListAsync();
 
         var rows = routeRows.Concat(directRows).ToList();
+
+        // Имена тех, кто делегировал задачи (СК-3): в реестре у делегата стоит «от кого».
+        var delegatedByIds = rows
+            .Where(r => r.DelegatedByUserId is not null)
+            .Select(r => r.DelegatedByUserId!.Value)
+            .Distinct()
+            .ToList();
+
+        var delegatedByNames = delegatedByIds.Count == 0
+            ? new Dictionary<int, string>()
+            : await _db.Users
+                .Where(u => delegatedByIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.FullName);
 
         // Карточки контуров открываются по своему идентификатору, а не по документу:
         // /sz/{szId}, /prc/{requestId}. Без этой подстановки задача уводила на чужую
@@ -230,6 +245,10 @@ public class TaskInboxService : ITaskInboxService
                 OnBehalfOf = r.AssigneeUserId != userId && names.TryGetValue(r.AssigneeUserId, out var name)
                     ? name
                     : null,
+                DelegatedBy = r.DelegatedByUserId is { } delegId
+                              && delegatedByNames.TryGetValue(delegId, out var delegName)
+                    ? delegName
+                    : null,
                 CreatedAt = r.CreatedAt,
             })
             .Concat(ackTasks)
@@ -287,5 +306,6 @@ public class TaskInboxService : ITaskInboxService
         public string? RegNumber { get; init; }
         public required string Title { get; init; }
         public DocumentType DocType { get; init; }
+        public int? DelegatedByUserId { get; init; }
     }
 }
