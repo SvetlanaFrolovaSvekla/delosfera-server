@@ -61,7 +61,9 @@ public class DigestEmailService : IDigestEmailService
             var digest = await _digest.GetAsync(uid);
             if (digest.Total == 0) continue;
 
-            await _mail.EnqueueAsync([uid], "Ваш дайджест на сегодня", BuildBody(digest), "/digest", null, ct);
+            // Именованный ct: чтобы вызов совпадал и с 6-, и с 7-параметровой версией
+            // EnqueueAsync (у неё между notificationId и ct есть опциональное вложение).
+            await _mail.EnqueueAsync([uid], "Ваш дайджест на сегодня", BuildBody(digest), "/digest", null, ct: ct);
             sent++;
         }
 
