@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Documents.VND.Models;
 using delosfera_server.Modules.Users.Services;
 using delosfera_server.Modules.Workflow.DTO;
 using delosfera_server.Modules.Workflow.Models;
@@ -113,6 +114,26 @@ public class TaskInboxService : ITaskInboxService
                 DocTitle = s.Document != null ? s.Document.Title : null,
             }).ToListAsync();
 
+        // ВНД-согласование: у нормативки свой контур согласования (VndApprovalProcess/
+        // Stage), не движок задач. В единый список берём только этапы, где решение сейчас
+        // за пользователем — все три фазы: первичная, повторная, финальная выдержка.
+        // Актуализация и консолидация остаются в своей вкладке: там логика цикла, а не
+        // одна задача согласования (см. VND TasksService).
+        var vndStages = await _db.VndApprovalStages
+            .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Vnd)
+            .Where(s => assignees.Contains(s.ApproverUserId))
+            .Where(s =>
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.Primary
+                 && s.PrimaryDecision == ApprovalStageDecision.Pending)
+                ||
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.Repeated
+                 && s.ParticipatesInRepeat
+                 && (s.RepeatDecision == null || s.RepeatDecision == ApprovalStageDecision.Pending))
+                ||
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.FinalHold
+                 && (s.FinalHoldDecision == null || s.FinalHoldDecision == ApprovalStageDecision.Pending)))
+            .ToListAsync();
+
         var rows = routeRows.Concat(directRows).ToList();
 
         // Карточки контуров открываются по своему идентификатору, а не по документу:
@@ -157,6 +178,39 @@ public class TaskInboxService : ITaskInboxService
             CreatedAt = a.CreatedAt,
         });
 
+        var vndTasks = vndStages.Select(s =>
+        {
+            var p = s.ApprovalProcess!;
+            // Срок берём по текущей фазе: у повторной и финальной он свой, и показать
+            // срок первичной на финальной выдержке — сбить с толку.
+            DateTime? due = p.Status switch
+            {
+                ApprovalProcessStatus.Primary => p.PrimaryDeadlineAt,
+                ApprovalProcessStatus.Repeated => p.RepeatDeadlineAt,
+                ApprovalProcessStatus.FinalHold => p.FinalHoldDeadlineAt,
+                _ => null,
+            };
+            return new InboxTaskDto
+            {
+                TaskId = s.Id,
+                ParticipantId = null,
+                // Карточка ВНД открывается по своему id: /base-vnd/{vndId} (см. taskLink).
+                DocumentId = 0,
+                EntityId = p.VndId,
+                RegNumber = p.Vnd!.Code,
+                DocumentTitle = p.Vnd!.TitleRu,
+                DocumentType = "Vnd",
+                DocumentTypeTitle = "ВНД",
+                TaskType = "Согласование",
+                StepOrder = null,
+                StepKind = null,
+                DueAt = due,
+                IsOverdue = due is { } d && d < now,
+                OnBehalfOf = s.ApproverUserId != userId && names.TryGetValue(s.ApproverUserId, out var vn) ? vn : null,
+                CreatedAt = p.PrimaryStartedAt,
+            };
+        });
+
         var tasks = rows
             .Select(r => new InboxTaskDto
             {
@@ -179,6 +233,7 @@ public class TaskInboxService : ITaskInboxService
                 CreatedAt = r.CreatedAt,
             })
             .Concat(ackTasks)
+            .Concat(vndTasks)
             .Where(t => documentType is null || t.DocumentType == documentType)
             // Просроченные наверх, затем по сроку: реестр должен начинаться с того,
             // что горит, а не с того, что пришло первым.
