@@ -64,11 +64,14 @@ builder.Services.AddScoped<ILdapDirectoryService, LdapDirectoryService>();
 builder.Services.AddScoped<LdapUserSyncService>();
 
 
-// Чтобы не засорять логи и не гонять фоновые попытки конекта с LDAP
-if (builder.Configuration.GetValue<bool>("Ldap:Enabled"))
-{
-    builder.Services.AddHostedService<LdapSyncBackgroundService>();
-}
+// Фоновая синхронизация каталога регистрируется всегда: включена интеграция или нет
+// решает БД-настройка (directory_settings.enabled), которой управляет администратор из
+// интерфейса. Сам воркер при выключенной интеграции только просыпается раз в 5 минут и
+// проверяет настройки — к LDAP не обращается и логи не засоряет, — поэтому включение в
+// UI начинает синхронизацию само, без правки конфигурации и перезапуска сервера.
+// Раньше воркер регистрировался лишь при Ldap:Enabled=true в конфиге, и на стендах, где
+// в конфиге false, автосинхронизация не запускалась, сколько бы её ни включали в UI.
+builder.Services.AddHostedService<LdapSyncBackgroundService>();
 
 
 builder.Services.AddScoped<ILdapAuthenticator, LdapAuthenticator>();
