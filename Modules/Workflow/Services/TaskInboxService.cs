@@ -93,6 +93,26 @@ public class TaskInboxService : ITaskInboxService
                 DocType = d.Type,
             }).ToListAsync();
 
+        // Ознакомление: лист ознакомления живёт вне движка задач — своя таблица без
+        // маршрута. Без него сотрудник видит поручения и согласования, но не листы, с
+        // которыми обязан расписаться, и «я этого не видел» ловится только вручную.
+        var ackRows = await (
+            from e in _db.AcknowledgementEntries
+            join s in _db.AcknowledgementSheets on e.SheetId equals s.Id
+            where assignees.Contains(e.UserId)
+               && e.State == AcknowledgementState.Pending
+               && s.ClosedAt == null
+            select new
+            {
+                e.Id,
+                e.UserId,
+                e.CreatedAt,
+                Instruction = s.Instruction,
+                s.DueDate,
+                s.DocumentId,
+                DocTitle = s.Document != null ? s.Document.Title : null,
+            }).ToListAsync();
+
         var rows = routeRows.Concat(directRows).ToList();
 
         // Карточки контуров открываются по своему идентификатору, а не по документу:
@@ -111,6 +131,31 @@ public class TaskInboxService : ITaskInboxService
             .ToDictionary(x => x.DocumentId, x => x.EntityId);
 
         var now = DateTime.UtcNow;
+
+        // Срок листа задан датой без времени: считаем просроченным после конца дня,
+        // а не с полуночи — иначе «до 14-го» гасло бы утром 14-го.
+        static DateTime? AckDue(DateOnly? d) => d?.ToDateTime(new TimeOnly(23, 59, 59));
+
+        var ackTasks = ackRows.Select(a => new InboxTaskDto
+        {
+            TaskId = a.Id,
+            ParticipantId = null,
+            // Лист открывается на общей странице ознакомления, не по своей карточке:
+            // отдельного экрана листа нет, ссылка ведёт в раздел (см. taskLink).
+            DocumentId = a.DocumentId ?? 0,
+            EntityId = null,
+            RegNumber = null,
+            DocumentTitle = a.DocTitle ?? a.Instruction ?? "Ознакомление с документом",
+            DocumentType = "Acknowledgement",
+            DocumentTypeTitle = "Ознакомление",
+            TaskType = "Ознакомление",
+            StepOrder = null,
+            StepKind = null,
+            DueAt = AckDue(a.DueDate),
+            IsOverdue = AckDue(a.DueDate) is { } due && due < now,
+            OnBehalfOf = a.UserId != userId && names.TryGetValue(a.UserId, out var an) ? an : null,
+            CreatedAt = a.CreatedAt,
+        });
 
         var tasks = rows
             .Select(r => new InboxTaskDto
@@ -133,6 +178,7 @@ public class TaskInboxService : ITaskInboxService
                     : null,
                 CreatedAt = r.CreatedAt,
             })
+            .Concat(ackTasks)
             .Where(t => documentType is null || t.DocumentType == documentType)
             // Просроченные наверх, затем по сроку: реестр должен начинаться с того,
             // что горит, а не с того, что пришло первым.
