@@ -15,6 +15,9 @@ public interface ISzArchiveService
     /// <summary>Подшить записку в дело номенклатуры и перевести в архив (SZ-07, GEN-09).</summary>
     Task<SzArchiveResponse> ArchiveAsync(int szId, SzArchiveRequest req, int actorUserId);
 
+    /// <summary>Сдать пачку записок в одно дело (СЗ-7), с отчётом по непрошедшим.</summary>
+    Task<SzBulkResult> BulkArchiveAsync(SzBulkArchiveRequest req, int actorUserId);
+
     /// <summary>Вернуть записку из архива: подшили не в то дело либо документ понадобился в работе.</summary>
     Task<SzArchiveResponse> RestoreAsync(int szId, int actorUserId);
 
@@ -101,6 +104,48 @@ public class SzArchiveService : ISzArchiveService
             new { caseIndex = nomenclatureCase.Index, term = term.Code, destroyAfter = doc.DestroyAfterYear });
 
         return await GetAsync(szId);
+    }
+
+    public async Task<SzBulkResult> BulkArchiveAsync(SzBulkArchiveRequest req, int actorUserId)
+    {
+        var ids = req.Ids.Distinct().ToList();
+
+        // Номера прогружаем заранее: если запись не пройдёт, в отчёте нужен её номер,
+        // а не голый id — иначе делопроизводителю не понять, какую записку смотреть.
+        var regNumbers = await _db.SzDocuments
+            .Where(s => ids.Contains(s.Id))
+            .Select(s => new {s.Id, s.Document!.RegNumber})
+            .ToDictionaryAsync(x => x.Id, x => x.RegNumber);
+
+        var result = new SzBulkResult {Requested = ids.Count};
+
+        // Пачку подшиваем по одной записке: у каждой своя проверка (статус, оригинал
+        // на руках, доступ), и одна непрошедшая не должна отменять остальные. Ошибки
+        // валидации бросаются до изменения записи, поэтому tracker остаётся чистым.
+        foreach (var id in ids)
+        {
+            try
+            {
+                await ArchiveAsync(id, new SzArchiveRequest
+                {
+                    NomenclatureCaseId = req.NomenclatureCaseId,
+                    StorageTermId = req.StorageTermId,
+                }, actorUserId);
+                result.Succeeded++;
+            }
+            catch (Exception ex) when (
+                ex is InvalidOperationException or KeyNotFoundException or UnauthorizedAccessException)
+            {
+                result.Failed.Add(new SzBulkFailure
+                {
+                    SzId = id,
+                    RegNumber = regNumbers.GetValueOrDefault(id),
+                    Message = ex.Message,
+                });
+            }
+        }
+
+        return result;
     }
 
     public async Task<SzArchiveResponse> RestoreAsync(int szId, int actorUserId)

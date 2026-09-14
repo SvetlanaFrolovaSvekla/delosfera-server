@@ -189,6 +189,11 @@ public class SzService : ISzService
                 (x.Body != null && EF.Functions.ILike(x.Body, $"%{q}%")));
         }
 
+        // Ручной выбор (СЗ-7) сужает выборку до отмеченных строк — для массового
+        // экспорта именно отмеченных записок, а не всего отфильтрованного реестра.
+        if (request.Ids.Count > 0)
+            query = query.Where(x => request.Ids.Contains(x.Id));
+
         if (request.KindIds.Count > 0)
             query = query.Where(x => request.KindIds.Contains(x.KindId));
 

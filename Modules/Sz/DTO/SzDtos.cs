@@ -83,6 +83,13 @@ public class SzSearchRequest
     /// <summary>Коды статусов; пусто — неархивные (реестр по умолчанию).</summary>
     public List<string> Statuses { get; set; } = [];
 
+    /// <summary>
+    /// Отобранные вручную записки (СЗ-7): непустой список сужает выгрузку до
+    /// отмеченных строк, минуя прочие фильтры по составу. Для страничного поиска
+    /// не используется — только массовые операции над выбором.
+    /// </summary>
+    public List<int> Ids { get; set; } = [];
+
     public List<int> KindIds { get; set; } = [];
     public int? AuthorId { get; set; }
     public int? CorrespondentUnitId { get; set; }

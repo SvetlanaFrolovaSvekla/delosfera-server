@@ -35,6 +35,11 @@ public class SzArchiveController : ControllerBase
     public async Task<IActionResult> Archive(int id, [FromBody] SzArchiveRequest req) =>
         await Run(() => _archive.ArchiveAsync(id, req, _currentUser.UserId));
 
+    /// <summary>Сдать пачку отобранных записок в одно дело (СЗ-7).</summary>
+    [HttpPost("archive/bulk")]
+    public async Task<IActionResult> BulkArchive([FromBody] SzBulkArchiveRequest req) =>
+        await Run(() => _archive.BulkArchiveAsync(req, _currentUser.UserId));
+
     /// <summary>Вернуть записку из архива.</summary>
     [HttpPost("{id:int}/archive/restore")]
     public async Task<IActionResult> Restore(int id) =>
