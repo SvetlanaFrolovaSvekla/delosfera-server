@@ -16,6 +16,9 @@ public static class SzServiceExtensions
         // Личные шаблоны записок (СЗ-6)
         builder.Services.AddScoped<ISzTemplateService, SzTemplateService>();
 
+        // Доска записок по стадиям (РС-4)
+        builder.Services.AddScoped<ISzTrackerService, SzTrackerService>();
+
         // Предпросмотр согласующих по виду записки (автоподстановка в форму)
         builder.Services.AddScoped<ISzApproverPreviewService, SzApproverPreviewService>();
 
