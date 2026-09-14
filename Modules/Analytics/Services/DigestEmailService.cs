@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Integrations.Mail;
+using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Workflow.Models;
 
 namespace delosfera_server.Modules.Analytics.Services;
@@ -23,14 +24,17 @@ public class DigestEmailService : IDigestEmailService
     private readonly DelosferaDbContext _db;
     private readonly IDigestService _digest;
     private readonly IMailQueue _mail;
+    private readonly INotificationSettingService _settings;
     private readonly ILogger<DigestEmailService> _logger;
 
     public DigestEmailService(
-        DelosferaDbContext db, IDigestService digest, IMailQueue mail, ILogger<DigestEmailService> logger)
+        DelosferaDbContext db, IDigestService digest, IMailQueue mail,
+        INotificationSettingService settings, ILogger<DigestEmailService> logger)
     {
         _db = db;
         _digest = digest;
         _mail = mail;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -53,9 +57,14 @@ public class DigestEmailService : IDigestEmailService
 
         var recipients = wfUsers.Concat(ackUsers).Distinct().ToList();
 
+        // Кто отключил дайджест в настройках (УВ-16) — тех пропускаем.
+        var optOut = await _settings.DigestOptOutAsync(recipients);
+
         var sent = 0;
         foreach (var uid in recipients)
         {
+            if (optOut.Contains(uid)) continue;
+
             ct.ThrowIfCancellationRequested();
 
             var digest = await _digest.GetAsync(uid);

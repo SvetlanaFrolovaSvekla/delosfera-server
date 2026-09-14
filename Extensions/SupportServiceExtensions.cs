@@ -34,6 +34,7 @@ public static class SupportServiceExtensions
     public static WebApplicationBuilder AddNotificationServices(this WebApplicationBuilder builder)
     {
         builder.Services.AddScoped<INotificationService, NotificationService>();
+        builder.Services.AddScoped<INotificationSettingService, NotificationSettingService>();
         return builder;
     }
 }

@@ -15,6 +15,9 @@ namespace delosfera_server.Modules.Procurement.Services;
 public interface IProcurementRequestService
 {
     Task<PagedResult<ProcurementListItemDto>> SearchAsync(ProcurementSearchRequest request, int currentUserId);
+
+    /// <summary>Выгрузка реестра закупок в Excel; Ids сужают до отобранных (РС-2).</summary>
+    Task<byte[]> ExportAsync(ProcurementSearchRequest request, int currentUserId);
     Task<ProcurementCountersDto> CountersAsync(int currentUserId);
     Task<ProcurementCardDto> GetAsync(int id);
     Task<ProcurementCardDto> CreateAsync(ProcurementCreateRequest request, int actorUserId);
@@ -88,30 +91,7 @@ public class ProcurementRequestService : IProcurementRequestService
     {
         // Реестр заявок закрыт: без права ViewAllProcurements видны только свои — раньше
         // Search отдавал все заявки банка любому вошедшему.
-        var q = RestrictVisibility(BaseQuery(), currentUserId);
-
-        if (!string.IsNullOrWhiteSpace(request.Query))
-        {
-            var term = $"%{request.Query.Trim()}%";
-            q = q.Where(r =>
-                EF.Functions.ILike(r.Subject, term) ||
-                (r.Document!.RegNumber != null && EF.Functions.ILike(r.Document.RegNumber, term)));
-        }
-
-        if (request.Statuses is {Count: > 0})
-            q = q.Where(r => request.Statuses.Contains(r.Document!.StatusCode));
-
-        if (request.MethodId is { } methodId)
-            q = q.Where(r => r.MethodId == methodId);
-
-        if (request.MineOnly == true)
-            q = q.Where(r => r.Document!.AuthorId == currentUserId);
-
-        if (request.AmountFrom is { } from)
-            q = q.Where(r => r.Amount >= from);
-
-        if (request.AmountTo is { } to)
-            q = q.Where(r => r.Amount <= to);
+        var q = FilteredQuery(request, currentUserId);
 
         var total = await q.CountAsync();
         var page = Math.Max(1, request.Page);
@@ -148,6 +128,92 @@ public class ProcurementRequestService : IProcurementRequestService
             PageSize = size,
         };
     }
+
+    /// <summary>Фильтр реестра — общий для страничного поиска и выгрузки (РС-2).</summary>
+    private IQueryable<Models.ProcurementRequest> FilteredQuery(ProcurementSearchRequest request, int currentUserId)
+    {
+        var q = RestrictVisibility(BaseQuery(), currentUserId);
+
+        // Ручной выбор (РС-2) сужает выборку до отмеченных заявок.
+        if (request.Ids.Count > 0)
+            q = q.Where(r => request.Ids.Contains(r.Id));
+
+        if (!string.IsNullOrWhiteSpace(request.Query))
+        {
+            var term = $"%{request.Query.Trim()}%";
+            q = q.Where(r =>
+                EF.Functions.ILike(r.Subject, term) ||
+                (r.Document!.RegNumber != null && EF.Functions.ILike(r.Document.RegNumber, term)));
+        }
+
+        if (request.Statuses is {Count: > 0})
+            q = q.Where(r => request.Statuses.Contains(r.Document!.StatusCode));
+
+        if (request.MethodId is { } methodId)
+            q = q.Where(r => r.MethodId == methodId);
+
+        if (request.MineOnly == true)
+            q = q.Where(r => r.Document!.AuthorId == currentUserId);
+
+        if (request.AmountFrom is { } from)
+            q = q.Where(r => r.Amount >= from);
+
+        if (request.AmountTo is { } to)
+            q = q.Where(r => r.Amount <= to);
+
+        return q;
+    }
+
+    public async Task<byte[]> ExportAsync(ProcurementSearchRequest request, int currentUserId)
+    {
+        var rows = await FilteredQuery(request, currentUserId)
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new
+            {
+                RegNumber = r.Document!.RegNumber,
+                r.Document.StatusCode,
+                r.Subject,
+                Method = r.Method!.ShortTitleRu,
+                r.Amount,
+                Author = r.Document.Author!.FullName,
+                Unit = r.InitiatorUnit!.TitleRu,
+                r.CreatedAt,
+            })
+            .ToListAsync();
+
+        var sheet = new Common.Export.XlsxSheet
+        {
+            Name = "Реестр закупок",
+            Header = ["Рег. номер", "Дата", "Предмет", "Способ", "Сумма", "Инициатор", "Подразделение", "Статус"],
+            Widths = [18, 12, 50, 26, 16, 28, 30, 20],
+            Rows = rows.Select(i => new[]
+            {
+                i.RegNumber ?? "—",
+                i.CreatedAt.ToString("dd.MM.yyyy"),
+                i.Subject,
+                i.Method,
+                i.Amount.ToString("N0"),
+                i.Author,
+                i.Unit,
+                ProcStatusTitle(i.StatusCode),
+            }).ToList(),
+        };
+
+        return Common.Export.XlsxWorkbook.Build(sheet);
+    }
+
+    private static string ProcStatusTitle(string code) => code switch
+    {
+        Models.ProcurementStatus.Draft => "Черновик",
+        Models.ProcurementStatus.OnApproval => "На согласовании",
+        Models.ProcurementStatus.Approved => "Согласована",
+        Models.ProcurementStatus.InProcurement => "В процедуре",
+        Models.ProcurementStatus.Completed => "Завершена",
+        Models.ProcurementStatus.OnRevision => "На доработке",
+        Models.ProcurementStatus.Rejected => "Отклонена",
+        Models.ProcurementStatus.Cancelled => "Отменена",
+        _ => code,
+    };
 
     public async Task<ProcurementCountersDto> CountersAsync(int currentUserId)
     {

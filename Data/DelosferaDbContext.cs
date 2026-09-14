@@ -81,6 +81,7 @@ public class DelosferaDbContext : DbContext
 
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
+    public DbSet<NotificationSetting> NotificationSettings => Set<NotificationSetting>(); // персональные настройки (УВ-16)
 
     // --- Контур СЗ: справочники архивного хранения (SZ-07 / GEN-09) ---
     public DbSet<StorageTerm> StorageTerms => Set<StorageTerm>(); // Справочник: Сроки хранения

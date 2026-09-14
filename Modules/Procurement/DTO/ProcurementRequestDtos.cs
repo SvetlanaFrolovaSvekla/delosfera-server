@@ -27,6 +27,9 @@ public class ProcurementSearchRequest
 {
     public string? Query { get; set; }
     public List<string>? Statuses { get; set; }
+
+    /// <summary>Ручной выбор строк (РС-2): сужает выгрузку до отмеченных заявок.</summary>
+    public List<int> Ids { get; set; } = [];
     public int? MethodId { get; set; }
     public bool? MineOnly { get; set; }
     public decimal? AmountFrom { get; set; }

@@ -40,6 +40,17 @@ public class ProcurementRequestController : ControllerBase
     public async Task<IActionResult> Search([FromBody] ProcurementSearchRequest request) =>
         await Run(() => _requests.SearchAsync(request, _currentUser.UserId));
 
+    /// <summary>Выгрузка реестра закупок в Excel; в теле Ids — отобранные заявки (РС-2).</summary>
+    [HttpPost("requests/export")]
+    public async Task<IActionResult> Export([FromBody] ProcurementSearchRequest request)
+    {
+        var bytes = await _requests.ExportAsync(request, _currentUser.UserId);
+        var stamp = DateTime.Now.ToString("dd.MM.yyyy");
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"Реестр закупок {stamp}.xlsx");
+    }
+
     /// <summary>Счётчики вкладок реестра.</summary>
     [HttpGet("requests/counters")]
     public async Task<IActionResult> Counters() =>
