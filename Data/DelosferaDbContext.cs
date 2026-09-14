@@ -50,6 +50,7 @@ public class DelosferaDbContext : DbContext
     public DbSet<SzRubric> SzRubrics => Set<SzRubric>(); // Справочник: Рубрикатор СЗ (отдельный от рубрикатора ВНД)
     public DbSet<Role> Roles => Set<Role>(); // Роли пользователей
     public DbSet<User> Users => Set<User>(); // Пользователи
+    public DbSet<SavedFilter> SavedFilters => Set<SavedFilter>(); // личные сохранённые фильтры реестров (БП-16)
     public DbSet<Token> Tokens => Set<Token>(); // Токены
     public DbSet<Substitution> Substitutions => Set<Substitution>(); // Замещение на период отсутствия (GEN-14)
     
