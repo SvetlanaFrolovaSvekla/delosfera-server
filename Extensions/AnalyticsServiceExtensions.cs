@@ -15,6 +15,7 @@ public static class AnalyticsServiceExtensions
         builder.Services.AddScoped<ISlaAnalyticsService, SlaAnalyticsService>();
         builder.Services.AddScoped<IDigestService, DigestService>();
         builder.Services.AddScoped<ICalendarService, CalendarService>();
+        builder.Services.AddScoped<IContourReportsService, ContourReportsService>();
         return builder;
     }
 }
