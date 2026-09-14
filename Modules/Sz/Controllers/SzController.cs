@@ -81,6 +81,14 @@ public class SzController : ControllerBase
         return Ok(entries.Select(e => new { e.Id, e.At, e.Action, e.UserId, payload = e.PayloadJson }));
     }
 
+    /// <summary>Путь записки по статусам с длительностью каждого этапа (СЗ-8).</summary>
+    [HttpGet("{id:int}/trace")]
+    public async Task<IActionResult> Trace(int id)
+    {
+        var trace = await _sz.GetTraceAsync(id);
+        return trace is null ? NotFound(new { message = "Служебная записка не найдена" }) : Ok(trace);
+    }
+
     /// <summary>Создать черновик.</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SzSaveRequest request)

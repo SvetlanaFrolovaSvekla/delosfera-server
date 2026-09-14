@@ -24,6 +24,9 @@ public interface ISzService
     Task<byte[]> ExportAsync(SzSearchRequest request, int currentUserId);
 
     Task<SzDetails?> GetAsync(int id);
+
+    /// <summary>Путь записки по статусам с длительностью каждого этапа (СЗ-8).</summary>
+    Task<List<SzTraceStep>?> GetTraceAsync(int id);
     Task<SzDetails> CreateDraftAsync(SzSaveRequest request, int authorId);
     Task<SzDetails> UpdateDraftAsync(int id, SzSaveRequest request, int actorUserId);
     Task DeleteDraftAsync(int id, int actorUserId);
@@ -253,6 +256,82 @@ public class SzService : ISzService
             query, _db, currentUserId,
             canSeeAll: _currentUser.HasPermission(PermissionCode.ViewAllSz),
             canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
+
+    public async Task<List<SzTraceStep>?> GetTraceAsync(int id)
+    {
+        var doc = await _db.SzDocuments
+            .Where(x => x.Id == id)
+            .Select(x => new {x.Document!.Id, x.Document.CreatedAt, x.Document.AuthorId, x.Document.StatusCode})
+            .FirstOrDefaultAsync();
+        if (doc is null) return null;
+
+        var entries = await _documents.GetAuditAsync(doc.Id);
+
+        // Из журнала берём только смену статуса — движение записки, а не правки полей.
+        var changes = new List<(DateTime At, int? UserId, string From, string To)>();
+        foreach (var e in entries.Where(e => e.Action == "StatusChanged" && e.PayloadJson is not null))
+        {
+            try
+            {
+                var root = JsonDocument.Parse(e.PayloadJson!).RootElement;
+                var from = root.TryGetProperty("from", out var f) ? f.GetString() : null;
+                var to = root.TryGetProperty("to", out var t) ? t.GetString() : null;
+                if (!string.IsNullOrEmpty(to)) changes.Add((e.At, e.UserId, from ?? "", to));
+            }
+            catch (JsonException)
+            {
+                // Запись журнала со сломанным payload не должна рвать весь путь.
+            }
+        }
+        changes = changes.OrderBy(c => c.At).ToList();
+
+        var steps = new List<SzTraceStep>();
+
+        // Стартовая веха — создание черновика: статус, с которого пошла первая смена
+        // (или текущий, если смен не было), в момент создания записки.
+        var startStatus = changes.Count > 0 ? changes[0].From : doc.StatusCode;
+        if (string.IsNullOrEmpty(startStatus)) startStatus = SzStatus.Draft;
+        steps.Add(new SzTraceStep
+        {
+            Status = startStatus,
+            StatusTitle = SzStatusTitles.Title(startStatus),
+            At = doc.CreatedAt,
+            ActorUserId = doc.AuthorId,
+        });
+
+        foreach (var c in changes)
+            steps.Add(new SzTraceStep
+            {
+                Status = c.To,
+                StatusTitle = SzStatusTitles.Title(c.To),
+                At = c.At,
+                ActorUserId = c.UserId,
+            });
+
+        var userIds = steps.Where(s => s.ActorUserId is not null)
+            .Select(s => s.ActorUserId!.Value).Distinct().ToList();
+        var names = await _db.Users
+            .Where(u => userIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+        foreach (var s in steps)
+            if (s.ActorUserId is {} uid && names.TryGetValue(uid, out var nm)) s.ActorName = nm;
+
+        // Длительность в статусе = до следующей вехи; у последней — до текущего момента,
+        // если статус не финальный (исполнена/забракована/отозвана/в архиве).
+        var terminal = new HashSet<string>
+            {SzStatus.Executed, SzStatus.Rejected, SzStatus.Withdrawn, SzStatus.Archived};
+        var now = DateTime.UtcNow;
+        for (var i = 0; i < steps.Count; i++)
+        {
+            DateTime? end = i + 1 < steps.Count
+                ? steps[i + 1].At
+                : terminal.Contains(steps[i].Status) ? null : now;
+            if (end is {} e2) steps[i].DurationHours = Math.Round((e2 - steps[i].At).TotalHours, 1);
+        }
+        if (steps.Count > 0) steps[^1].IsCurrent = !terminal.Contains(steps[^1].Status);
+
+        return steps;
+    }
 
     public async Task<SzDetails?> GetAsync(int id)
     {
