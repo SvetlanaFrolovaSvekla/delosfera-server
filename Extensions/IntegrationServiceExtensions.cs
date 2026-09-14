@@ -27,8 +27,14 @@ public static class IntegrationServiceExtensions
         // Оргструктура приходит из портала банка. Обращение идёт по сети к чужой
         // системе, поэтому у клиента свой срок ожидания: обход сотрудников
         // страницами дольше обычного запроса, а висеть бесконечно он не должен.
+        //
+        // Эндпоинт портала /employees отвечает ~130 c (замерено на hub.keremetbank.kg:
+        // 397 сотрудников за один ответ), из-за чего срок в 120 c обрывал проход и
+        // синхронизация падала по времени. Даём запас до 300 c (столько же держит и
+        // обратный прокси). Настоящее решение — ускорить /employees на стороне hub;
+        // до этого терпим медленный ответ, а не роняем проход.
         builder.Services.AddHttpClient<delosfera_server.Modules.Integrations.OrgStructure.PortalOrgClient>(
-            client => client.Timeout = TimeSpan.FromSeconds(120));
+            client => client.Timeout = TimeSpan.FromSeconds(300));
 
         builder.Services.AddScoped<
             delosfera_server.Modules.Integrations.OrgStructure.IOrgSyncService,
