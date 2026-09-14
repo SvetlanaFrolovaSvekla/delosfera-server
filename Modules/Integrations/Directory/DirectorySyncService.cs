@@ -194,6 +194,26 @@ public class DirectorySyncService : IDirectorySyncService
             result.TotalInDirectory, result.Created.Count, result.Updated.Count,
             result.Deactivated.Count, result.Skipped.Count);
 
+        // Разбивка пропусков по причине: без неё по одному числу «пропущено N» не понять,
+        // почему сотрудников не завели. Первые три причины — «жёсткие» (человека вообще не
+        // обработали: нет почты в каталоге, заведение новых выключено, локальная учётка),
+        // остальные — «мягкие» (человека обработали, но без должности/подразделения).
+        if (result.Skipped.Count > 0)
+        {
+            var noEmail = result.Skipped.Count(s => s.Contains("не заполнен адрес почты"));
+            var createOff = result.Skipped.Count(s => s.Contains("заведение новых"));
+            var local = result.Skipped.Count(s => s.Contains("локальная учётная запись"));
+            var noPosition = result.Skipped.Count(s => s.Contains("должность"));
+            var noUnit = result.Skipped.Count(s => s.Contains("подразделение"));
+            var other = result.Skipped.Count - noEmail - createOff - local - noPosition - noUnit;
+
+            _logger.LogInformation(
+                "Пропущено по причинам: без почты {NoEmail}, создание выключено {CreateOff}, " +
+                "локальная учётка {Local}, должность не в справочнике {NoPosition}, " +
+                "подразделение не в справочнике {NoUnit}, прочее {Other}",
+                noEmail, createOff, local, noPosition, noUnit, other);
+        }
+
         return result;
     }
 
