@@ -38,6 +38,12 @@ public class VndApprovalProcess : IAuditableEntity
 
     public ICollection<VndApprovalStage> Stages { get; set; } = new List<VndApprovalStage>();
 
+    /// <summary>Снимки завершённых кругов "Повторного согласования"/"Финальной выдержки" -
+    /// см. <see cref="VndApprovalPhaseRound"/>. Текущий (ещё не перезаписанный) круг в этой
+    /// коллекции не участвует - он всегда виден напрямую через Repeat*/FinalHold* поля
+    /// Stages.</summary>
+    public ICollection<VndApprovalPhaseRound> PhaseRounds { get; set; } = new List<VndApprovalPhaseRound>();
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

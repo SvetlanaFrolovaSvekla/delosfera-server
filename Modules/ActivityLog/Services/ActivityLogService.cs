@@ -1,14 +1,23 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.ActivityLog.DTO.Response;
 using delosfera_server.Modules.ActivityLog.Models;
+using delosfera_server.Modules.Documents.VND.Models;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.ActivityLog.Services;
 
 public class ActivityLogService : IActivityLogService
 {
     private readonly DelosferaDbContext _db;
-    public ActivityLogService(DelosferaDbContext db) => _db = db;
+    private readonly ICurrentUserService _currentUser;
+
+    public ActivityLogService(DelosferaDbContext db, ICurrentUserService currentUser)
+    {
+        _db = db;
+        _currentUser = currentUser;
+    }
 
     /// <summary>Добавляет запись в контекст без SaveChanges - вызывающий сервис сохраняет её
     /// вместе со своими изменениями, одной транзакцией</summary>
@@ -30,8 +39,8 @@ public class ActivityLogService : IActivityLogService
     }
 
     /// <summary>Иконки, которые понимает виджет «Последняя активность»; прочие
-    /// (напр. "edit" из аудита) сводятся к нейтральной.</summary>
-    private static readonly HashSet<string> WidgetIcons = ["check", "x", "doc", "clock", "info"];
+    /// сводятся к нейтральной.</summary>
+    private static readonly HashSet<string> WidgetIcons = ["check", "x", "doc", "clock", "edit", "info"];
 
     /// <summary>Какие типы аудита относятся к какому разделу дашборда. Берём только
     /// корневую запись контура: её id совпадает с id карточки в интерфейсе, поэтому
@@ -56,11 +65,14 @@ public class ActivityLogService : IActivityLogService
         if (module is null || module == ActivityModules.Vnd)
         {
             var entries = await _db.Set<ActivityLogEntry>()
-                .Where(x => x.Module == ActivityModules.Vnd)
+                .Where(x => x.Module == ActivityModules.Vnd
+                            && x.Kind != ActivityEventKind.ActualizationReminderSent)
                 .OrderByDescending(x => x.CreatedAt)
                 .Take(limit)
                 .ToListAsync();
-            result.AddRange(entries.Select(x => ToResponse(x, languageCode)));
+
+            var draftVisibility = await LoadDraftVisibilityAsync(entries.Select(x => x.EntityId));
+            result.AddRange(entries.Select(x => ToResponse(x, languageCode, CanOpenVndEntry(x.EntityId, draftVisibility))));
         }
 
         foreach (var (mod, entityTypes) in AuditSlices)
@@ -125,15 +137,48 @@ public class ActivityLogService : IActivityLogService
     public async Task<List<ActivityLogEntryResponse>> GetByEntityAsync(
         string module, int entityId, string languageCode)
     {
+        // Сюда попадают только через уже открытую карточку документа (вкладка "История") —
+        // право на неё (в т.ч. видимость чужого черновика) уже проверено при её открытии
+        // (см. VndService.GetByIdAsync), поэтому здесь CanOpen не пересчитываем - остаётся
+        // true по умолчанию (см. GetRecentAsync выше, где это как раз нужно).
         var entries = await _db.Set<ActivityLogEntry>()
-            .Where(x => x.Module == module && x.EntityId == entityId)
+            .Where(x => x.Module == module && x.EntityId == entityId
+                        && x.Kind != ActivityEventKind.ActualizationReminderSent)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
 
         return entries.Select(x => ToResponse(x, languageCode)).ToList();
     }
 
-    private static ActivityLogEntryResponse ToResponse(ActivityLogEntry x, string languageCode) => new()
+    /// <summary>Статус и автор ВНД по id — только то, что нужно для проверки видимости
+    /// черновика (см. CanOpenVndEntry), одним запросом на все записи разом.</summary>
+    private async Task<Dictionary<int, (VndStatus Status, int? CreatedByUserId)>> LoadDraftVisibilityAsync(
+        IEnumerable<int> vndIds)
+    {
+        var ids = vndIds.Distinct().ToList();
+        if (ids.Count == 0) return new Dictionary<int, (VndStatus, int?)>();
+
+        return await _db.VndDocuments
+            .Where(v => ids.Contains(v.Id))
+            .Select(v => new {v.Id, v.Status, v.CreatedByUserId})
+            .ToDictionaryAsync(v => v.Id, v => (v.Status, v.CreatedByUserId));
+    }
+
+    /// <summary>Тот же критерий видимости черновика, что и в VndService.GetByIdAsync (см.
+    /// подробный комментарий там): свой черновик, право ViewOtherUsersDrafts, либо ВНД уже
+    /// не черновик - открыть можно. Запись о ВНД, которого не нашли (например, черновик с тех
+    /// пор удалили) - тоже true: тогда переход по ссылке упрётся в обычное "не найдено", а не
+    /// в ошибку доступа, так что скрывать её незачем.</summary>
+    private bool CanOpenVndEntry(int vndId, Dictionary<int, (VndStatus Status, int? CreatedByUserId)> draftVisibility)
+    {
+        if (!draftVisibility.TryGetValue(vndId, out var info)) return true;
+
+        return info.Status != VndStatus.Draft
+               || info.CreatedByUserId == _currentUser.UserId
+               || _currentUser.HasPermission(PermissionCode.ViewOtherUsersDrafts);
+    }
+
+    private static ActivityLogEntryResponse ToResponse(ActivityLogEntry x, string languageCode, bool canOpen = true) => new()
     {
         Id = x.Id,
         Module = x.Module,
@@ -147,7 +192,8 @@ public class ActivityLogService : IActivityLogService
             _ => x.TextRu
         },
         Url = x.Url,
-        CreatedAt = x.CreatedAt
+        CreatedAt = x.CreatedAt,
+        CanOpen = canOpen
     };
 
     // Вспомогательный метод для маппинга иконок
@@ -164,6 +210,13 @@ public class ActivityLogService : IActivityLogService
             or ActivityEventKind.ItemAdded
             or ActivityEventKind.ProcessStarted => "doc",
         ActivityEventKind.HoldStarted => "clock",
+        // Смена реквизитов и повторная отправка исправленной редакции — это
+        // правка документа, как и "edit" у СЗ/закупок из технического аудита.
+        ActivityEventKind.RequisitesUpdated
+            or ActivityEventKind.Resubmitted
+            or ActivityEventKind.RedactionEdited => "edit",
+        // Удаление черновика — красная иконка-мусорка, чтобы отличать от простой "правки".
+        ActivityEventKind.DraftDeleted => "trash",
         _ => "info"
     };
 }

@@ -6,7 +6,9 @@ public class VndTaskResponse
     public required string VndCode { get; set; }
     public required string VndTitle { get; set; }
 
-    /// <summary>"coordination" | "actualization" | "consolidation" | "myVndApproval" | "rejected"</summary>
+    /// <summary>"coordination" | "actualization" | "consolidation" | "myVndApproval" | "rejected" |
+    /// "actualizationRequest" (заявка на доступ к актуализации ждёт решения главного редактора) |
+    /// "actualizationApproved" (заявка одобрена, заявитель ещё не начал сам цикл)</summary>
     public required string Scope { get; set; }
 
     /// <summary>Человекочитаемый статус процесса (например, "В процессе согласования первой редакции ВНД").
@@ -45,6 +47,13 @@ public class VndTaskResponse
     /// <summary>Комментарий инициатора к повторному кругу/финальной выдержке — контекст,
     /// зачем документ снова пришёл на согласование.</summary>
     public string? InitiatorComment { get; set; }
+
+    /// <summary>true, если процесс согласования сейчас в статусе RevisionNeeded (редакцию
+    /// отправили инициатору на доработку по замечаниям) — только для myVndApproval. Раньше
+    /// такая карточка ничем не отличалась от обычной "в процессе согласования" (StatusLabel
+    /// оставался общим), и было не видно, что мяч сейчас на стороне инициатора, а не
+    /// согласующих - см. VndTaskCard, бейдж "ВНД на доработке".</summary>
+    public bool IsRevisionNeeded { get; set; }
 
     // --- Только для actualization/consolidation ---
     public DateOnly? DueActualizationDate { get; set; }

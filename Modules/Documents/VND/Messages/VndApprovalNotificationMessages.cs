@@ -141,6 +141,25 @@ public static class VndApprovalNotificationMessages
         BodyKg: $"Сиздин «{vndTitle}» документинин {redactionCode} редакцияңыз макулдашууга жиберилди.",
         Severity: NotificationSeverity.Info);
 
+    /// <summary>Главный редактор сделал ЧУЖОЙ черновик действующим напрямую, минуя согласование
+    /// (см. VndService.PublishRedactionWithoutApprovalAsync) - автор черновика раньше об этом
+    /// вообще не узнавал. В отличие от SentToApproval выше, здесь адресат всегда автор черновика
+    /// (не сам действующий пользователь), поэтому имя того, кто это сделал, явно указано в
+    /// тексте - иначе "ваша редакция стала действующей" выглядело бы как будто это сделал сам
+    /// получатель.</summary>
+    public static NotificationText PublishedWithoutApprovalByOther(
+        string actorName, string redactionCode, string vndTitle) => new(
+        TitleRu: "Ваша редакция стала действующей без согласования",
+        TitleEn: "Your revision became active without approval",
+        TitleKg: "Сиздин редакцияңыз макулдашуусуз колдонуудагы болду",
+        BodyRu: $"{actorName} сделал(а) редакцию {redactionCode} документа «{vndTitle}» действующей " +
+                "напрямую, минуя согласование.",
+        BodyEn: $"{actorName} made revision {redactionCode} of the document \"{vndTitle}\" active " +
+                "directly, bypassing approval.",
+        BodyKg: $"{actorName} «{vndTitle}» документинин {redactionCode} редакциясын макулдашуусуз, " +
+                "түз эле колдонуудагы кылды.",
+        Severity: NotificationSeverity.Info);
+
     public static NotificationText RevisionNeeded(string redactionCode, string vndTitle) => new(
         TitleRu: "Редакция требует доработки",
         TitleEn: "Revision requires changes",
@@ -164,4 +183,23 @@ public static class VndApprovalNotificationMessages
         BodyKg: $"Демилгечи «{vndTitle}» документинин {redactionCode} редакциясынын макулдашуусун артка алды. " +
                 "Макулдашуу тапшырмасы мындан ары актуалдуу эмес.",
         Severity: NotificationSeverity.Info);
+
+    /// <summary>Отзыв согласования ГЛАВНЫМ РЕДАКТОРОМ (правом CancelAnyVndApproval), а не самим
+    /// инициатором - см. VndApprovalService.CancelInternalAsync. Cancelled(...) выше уходит
+    /// согласующим ("ваша задача снята"), но не самому инициатору - раньше он вообще не узнавал,
+    /// что его согласование отозвали не он сам. Как и PublishedWithoutApprovalByOther, имя того,
+    /// кто это сделал, явно указано в тексте.</summary>
+    public static NotificationText CancelledByOther(
+        string actorName, string redactionCode, string vndTitle) => new(
+        TitleRu: "Ваше согласование отозвано",
+        TitleEn: "Your approval was withdrawn",
+        TitleKg: "Сиздин макулдашууңуз артка алынды",
+        BodyRu: $"{actorName} отозвал(а) согласование редакции {redactionCode} документа «{vndTitle}», " +
+                "инициированное вами. Редакция возвращена в черновик — при необходимости запустите " +
+                "согласование заново.",
+        BodyEn: $"{actorName} withdrew the approval of revision {redactionCode} of the document \"{vndTitle}\" " +
+                "that you initiated. The revision has been returned to draft.",
+        BodyKg: $"{actorName} сиз баштаган «{vndTitle}» документинин {redactionCode} редакциясынын " +
+                "макулдашуусун артка алды. Редакция долбоорго кайтарылды.",
+        Severity: NotificationSeverity.Warning);
 }

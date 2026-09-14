@@ -230,6 +230,7 @@ public class VndController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
     /// <summary>Связи ВНД: ссылки на другие документы и документы, ссылающиеся на этот</summary>

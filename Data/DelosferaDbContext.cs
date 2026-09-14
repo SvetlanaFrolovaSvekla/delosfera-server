@@ -46,7 +46,8 @@ public class DelosferaDbContext : DbContext
     public DbSet<OrganizationUnitHistory> OrganizationUnitHistory => Set<OrganizationUnitHistory>(); // Историчность оргструктуры (GEN-08)
     public DbSet<UserGroup> UserGroups => Set<UserGroup>(); // Справочник: Группы пользователей
     
-    public DbSet<Rubric> Rubrics => Set<Rubric>(); // Справочник: Рубрикатор
+    public DbSet<Rubric> Rubrics => Set<Rubric>(); // Справочник: Рубрикатор ВНД
+    public DbSet<SzRubric> SzRubrics => Set<SzRubric>(); // Справочник: Рубрикатор СЗ (отдельный от рубрикатора ВНД)
     public DbSet<Role> Roles => Set<Role>(); // Роли пользователей
     public DbSet<User> Users => Set<User>(); // Пользователи
     public DbSet<Token> Tokens => Set<Token>(); // Токены
@@ -72,6 +73,10 @@ public class DelosferaDbContext : DbContext
     public DbSet<VndApprovalStage> VndApprovalStages => Set<VndApprovalStage>();
     public DbSet<VndApprovalStageAttachment> VndApprovalStageAttachments => Set<VndApprovalStageAttachment>();
     public DbSet<VndRepeatCommentAttachment> VndRepeatCommentAttachments => Set<VndRepeatCommentAttachment>();
+    // Снимки завершённых кругов "Повторного согласования"/"Финальной выдержки" - см.
+    // VndApprovalPhaseRound (история "Маршрута согласования" на вкладке "История" ВНД).
+    public DbSet<VndApprovalPhaseRound> VndApprovalPhaseRounds => Set<VndApprovalPhaseRound>();
+    public DbSet<VndApprovalPhaseRoundStageDecision> VndApprovalPhaseRoundStageDecisions => Set<VndApprovalPhaseRoundStageDecision>();
 
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();

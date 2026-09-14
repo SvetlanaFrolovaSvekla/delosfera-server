@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260912213204_AddSzRubric")]
+    partial class AddSzRubric
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -6966,95 +6969,6 @@ namespace delosfera_server.Migrations
                     b.ToTable("vnd_actualization_request", (string)null);
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalPhaseRound", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ApprovalProcessId")
-                        .HasColumnType("integer")
-                        .HasColumnName("approval_process_id");
-
-                    b.Property<DateTime>("CompletedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("completed_at");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("InitiatorComment")
-                        .HasColumnType("text")
-                        .HasColumnName("initiator_comment");
-
-                    b.Property<int>("Phase")
-                        .HasColumnType("integer")
-                        .HasColumnName("phase");
-
-                    b.Property<int>("RoundNumber")
-                        .HasColumnType("integer")
-                        .HasColumnName("round_number");
-
-                    b.Property<DateTime?>("StartedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("started_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_approval_phase_round");
-
-                    b.HasIndex("ApprovalProcessId", "Phase", "RoundNumber")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_approval_phase_round_approval_process_id_phase_round_nu");
-
-                    b.ToTable("vnd_approval_phase_round", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalPhaseRoundStageDecision", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Comment")
-                        .HasColumnType("text")
-                        .HasColumnName("comment");
-
-                    b.Property<DateTime?>("DecidedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("decided_at");
-
-                    b.Property<int>("Decision")
-                        .HasColumnType("integer")
-                        .HasColumnName("decision");
-
-                    b.Property<int>("VndApprovalPhaseRoundId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_approval_phase_round_id");
-
-                    b.Property<int>("VndApprovalStageId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_approval_stage_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_approval_phase_round_stage_decision");
-
-                    b.HasIndex("VndApprovalStageId")
-                        .HasDatabaseName("ix_vnd_approval_phase_round_stage_decision_vnd_approval_stage_");
-
-                    b.HasIndex("VndApprovalPhaseRoundId", "VndApprovalStageId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_approval_phase_round_stage_decision_vnd_approval_phase_");
-
-                    b.ToTable("vnd_approval_phase_round_stage_decision", (string)null);
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", b =>
                 {
                     b.Property<int>("Id")
@@ -7218,12 +7132,6 @@ namespace delosfera_server.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
-
-                    b.Property<uint>("xmin")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
 
                     b.HasKey("Id")
                         .HasName("pk_vnd_approval_stage");
@@ -13134,12 +13042,6 @@ namespace delosfera_server.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_user_email");
 
-                    b.HasIndex("FullName")
-                        .HasDatabaseName("ix_user_full_name");
-
-                    b.HasIndex("IsActive")
-                        .HasDatabaseName("ix_user_is_active");
-
                     b.HasIndex("LdapObjectId")
                         .IsUnique()
                         .HasDatabaseName("ix_user_ldap_object_id")
@@ -14716,39 +14618,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("RequestedByUser");
 
                     b.Navigation("Vnd");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalPhaseRound", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", "ApprovalProcess")
-                        .WithMany("PhaseRounds")
-                        .HasForeignKey("ApprovalProcessId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_approval_phase_round_vnd_approval_processes_approval_pr");
-
-                    b.Navigation("ApprovalProcess");
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalPhaseRoundStageDecision", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalPhaseRound", "VndApprovalPhaseRound")
-                        .WithMany("StageDecisions")
-                        .HasForeignKey("VndApprovalPhaseRoundId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_approval_phase_round_stage_decision_vnd_approval_phase_");
-
-                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalStage", "VndApprovalStage")
-                        .WithMany()
-                        .HasForeignKey("VndApprovalStageId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_approval_phase_round_stage_decision_vnd_approval_stages");
-
-                    b.Navigation("VndApprovalPhaseRound");
-
-                    b.Navigation("VndApprovalStage");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", b =>
@@ -16565,16 +16434,9 @@ namespace delosfera_server.Migrations
                     b.Navigation("Events");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalPhaseRound", b =>
-                {
-                    b.Navigation("StageDecisions");
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", b =>
                 {
                     b.Navigation("DisagreementMatrixRows");
-
-                    b.Navigation("PhaseRounds");
 
                     b.Navigation("RepeatInitiatorCommentAttachments");
 

@@ -61,47 +61,105 @@ public class PlanReminderService : IPlanReminderService
         if (settings.MonthlyDigestEnabled && today.Day == 1)
             sent += await SendMonthlyDigestAsync(items, today, ct);
 
+        // Метки "уже отправлено" по каждой позиции — см. CriticalReminderKind/OverdueReminderKind
+        // ниже. Без них сравнение
+        // "daysLeft == порог"/"daysLeft == 0" ниже теряло бы напоминание навсегда, если ровно
+        // в нужный день воркер не отработал (простой/деплой): на следующий день daysLeft уже
+        // не равен порогу, и условие больше никогда не сработает для этого цикла.
+        var itemIds = items.Select(i => i.Id).ToList();
+        var sentKinds = await _db.Set<PlanItemEvent>()
+            .Where(e => itemIds.Contains(e.PlanItemId)
+                        && (e.Kind.StartsWith(CriticalReminderKindPrefix)
+                            || e.Kind.StartsWith(OverdueReminderKindPrefix)))
+            .Select(e => new {e.PlanItemId, e.Kind})
+            .ToListAsync(ct);
+
+        var sentKindsByItem = sentKinds
+            .GroupBy(x => x.PlanItemId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Kind).ToHashSet());
+
         foreach (var item in items)
         {
             var daysLeft = item.DueDate.DayNumber - today.DayNumber;
+            var alreadySent = sentKindsByItem.TryGetValue(item.Id, out var kinds) ? kinds : [];
 
-            if (daysLeft == settings.CriticalReminderDays)
+            // "Порог достигнут или пройден" (было: точное совпадение) — см. комментарий выше.
+            if (daysLeft <= settings.CriticalReminderDays && daysLeft >= 0)
             {
-                if (await SendAsync(item,
-                    $"Критический срок актуализации: {item.Title}",
-                    $"До плановой даты актуализации «{item.Title}» осталось {daysLeft} дн. " +
-                    $"(срок {item.DueDate:dd.MM.yyyy}). Ответственное подразделение: " +
-                    $"{item.ResponsibleUnit?.TitleRu ?? "не назначено"}.",
-                    NotificationSeverity.Warning, includeCurator: true, ct))
+                var kind = CriticalReminderKind(item.DueDate);
+                if (!alreadySent.Contains(kind))
                 {
-                    sent++;
+                    if (await SendAsync(item,
+                        $"Критический срок актуализации: {item.Title}",
+                        $"До плановой даты актуализации «{item.Title}» осталось {daysLeft} дн. " +
+                        $"(срок {item.DueDate:dd.MM.yyyy}). Ответственное подразделение: " +
+                        $"{item.ResponsibleUnit?.TitleRu ?? "не назначено"}.",
+                        NotificationSeverity.Warning, includeCurator: true, ct))
+                    {
+                        sent++;
+                        LogReminderSent(item.Id, kind);
+                    }
                 }
 
                 continue;
             }
 
-            // В день срока — просрочка, но только если работа не начата: если цикл
+            // Наступила или прошла просрочка — но только если работа не начата: если цикл
             // актуализации уже идёт, писать «вы ничего не сделали» неверно.
-            if (daysLeft == 0 && item.Status == PlanItemStatus.Planned)
+            if (daysLeft <= 0 && item.Status == PlanItemStatus.Planned)
             {
-                if (await SendAsync(item,
-                    $"Наступил срок актуализации: {item.Title}",
-                    $"Сегодня наступила плановая дата актуализации «{item.Title}», " +
-                    "но работа по документу не начата.",
-                    NotificationSeverity.Urgent, includeCurator: true, ct))
+                var kind = OverdueReminderKind(item.DueDate);
+                if (!alreadySent.Contains(kind))
                 {
-                    sent++;
+                    if (await SendAsync(item,
+                        $"Наступил срок актуализации: {item.Title}",
+                        $"Сегодня наступила плановая дата актуализации «{item.Title}», " +
+                        "но работа по документу не начата.",
+                        NotificationSeverity.Urgent, includeCurator: true, ct))
+                    {
+                        sent++;
+                        LogReminderSent(item.Id, kind);
+                    }
                 }
             }
         }
 
         if (sent > 0)
+        {
+            await _db.SaveChangesAsync(ct);
             _logger.LogInformation("Напоминаний по плану актуализации разослано: {Count}", sent);
+        }
 
         return sent;
     }
 
     // ── внутреннее ───────────────────────────────────────────────────────────
+
+    // Метки в PlanItemEvent.Kind (не текст для пользователя — см. Description там же), по
+    // которым SendAsync выше проверяет "уже отправлено для этого срока актуализации". Срок
+    // входит в метку, чтобы новый цикл (с новым DueDate) не считался уже уведомлённым.
+    private const string CriticalReminderKindPrefix = "CriticalReminderSent:";
+    private const string OverdueReminderKindPrefix = "OverdueReminderSent:";
+
+    private static string CriticalReminderKind(DateOnly dueDate) =>
+        $"{CriticalReminderKindPrefix}{dueDate:yyyy-MM-dd}";
+
+    private static string OverdueReminderKind(DateOnly dueDate) =>
+        $"{OverdueReminderKindPrefix}{dueDate:yyyy-MM-dd}";
+
+    private void LogReminderSent(int itemId, string kind)
+    {
+        _db.Set<PlanItemEvent>().Add(new PlanItemEvent
+        {
+            PlanItemId = itemId,
+            Kind = kind,
+            Description = kind.StartsWith(CriticalReminderKindPrefix)
+                ? "Отправлено критическое напоминание о приближении срока актуализации"
+                : "Отправлено уведомление о наступлении срока актуализации",
+            UserId = null,
+            At = DateTime.UtcNow,
+        });
+    }
 
     private async Task<int> SendMonthlyDigestAsync(
         List<ActualizationPlanItem> items, DateOnly today, CancellationToken ct)

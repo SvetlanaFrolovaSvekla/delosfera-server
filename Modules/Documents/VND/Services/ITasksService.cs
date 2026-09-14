@@ -11,6 +11,19 @@ public interface ITasksService
     Task<List<VndTaskResponse>> GetConsolidationTasksAsync(int userId);
     Task<List<VndTaskResponse>> GetMyVndApprovalTasksAsync(int userId);
 
+    /// <summary>"Заявки на доступ к актуализации" — для главного редактора: заявки, ожидающие
+    /// его решения (см. VndActualizationService.RequestAccessAsync). Раньше по новой заявке
+    /// уходило только уведомление (NotifyAsync) — самой задачи в "Мои задачи" не было, и
+    /// главный редактор мог её попросту пропустить, если не заметил уведомление.</summary>
+    Task<List<VndTaskResponse>> GetActualizationRequestTasksAsync(int userId);
+
+    /// <summary>"Заявка одобрена" — для заявителя: его заявка на доступ к актуализации уже
+    /// одобрена главным редактором, но сам цикл актуализации ещё не подтверждён/начат (см.
+    /// VndActualizationService.ConfirmStartAfterRequestAsync, VndActualizationRequest.ConsumedAt).
+    /// Раньше по одобрению тоже уходило только уведомление — начать актуализацию можно было,
+    /// только вспомнив об этом самому, без напоминания в "Мои задачи".</summary>
+    Task<List<VndTaskResponse>> GetActualizationApprovedTasksAsync(int userId);
+
     /// <summary>"Отклонено" — для инициатора: последний процесс согласования по документу
     /// завершился отклонением, и новый цикл согласования по нему ещё не запускался. Раньше
     /// после отклонения инициатор не получал отдельной задачи — документ просто возвращался в
@@ -22,6 +35,11 @@ public interface ITasksService
     /// <summary>Сводка персональных KPI для карточек на главной странице</summary>
     Task<VndHomeSummaryResponse> GetHomeSummaryAsync(int userId);
 
+    /// <summary>Подробная сводка по просрочкам согласования текущего пользователя (месяц/год/
+    /// всего + список конкретных ВНД) — для блока "Мои показатели" в Аналитике
+    /// (ВНД → Актуализация).</summary>
+    Task<VndMyTimeoutApprovalsResponse> GetMyTimeoutApprovalsAsync(int userId);
+
     // --- История "Выполнено" по каждому разделу — с пагинацией, т.к. список может расти
     // без ограничения по времени (см. TasksService для точного критерия "выполнено" в каждом
     // случае: решение принято / актуализация выполнена / документ опубликован / отправлено
@@ -31,4 +49,6 @@ public interface ITasksService
     Task<PagedResult<VndTaskResponse>> GetActualizationDoneTasksAsync(int userId, int page, int pageSize);
     Task<PagedResult<VndTaskResponse>> GetConsolidationDoneTasksAsync(int userId, int page, int pageSize);
     Task<PagedResult<VndTaskResponse>> GetRejectedDoneTasksAsync(int userId, int page, int pageSize);
+    Task<PagedResult<VndTaskResponse>> GetActualizationRequestDoneTasksAsync(int userId, int page, int pageSize);
+    Task<PagedResult<VndTaskResponse>> GetActualizationApprovedDoneTasksAsync(int userId, int page, int pageSize);
 }

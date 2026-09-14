@@ -3,6 +3,7 @@ using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Analytics.DTO;
 using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Documents.VND.Models;
 using delosfera_server.Modules.Procurement.Models;
 using delosfera_server.Modules.Sz.Models;
 using delosfera_server.Modules.Workflow.Models;
@@ -60,6 +61,26 @@ public class DashboardService : IDashboardService
 
         var overdueTasks = openTasks.Count(t => t.DueAt is { } due && due < now);
 
+        // ВНД ведёт согласование по своему движку (VndApprovalStage/VndApprovalProcess), а не
+        // через общий RouteEngine/WorkflowTask, как СЗ и закупки — поэтому его сюда не считает
+        // openTasks выше, и без отдельного запроса плитка "Мои задачи" тихо теряла бы самый
+        // частый контур. Тот же фильтр, что и в TasksService.GetCoordinationTasksAsync (карточка
+        // "ВНД, которые мне необходимо согласовать"), только без замещения → с ним.
+        var vndCoordinationCount = await _db.Set<VndApprovalStage>()
+            .Include(s => s.ApprovalProcess)
+            .Where(s => assignees.Contains(s.ApproverUserId))
+            .Where(s =>
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.Primary
+                 && s.PrimaryDecision == ApprovalStageDecision.Pending)
+                ||
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.Repeated
+                 && s.ParticipatesInRepeat
+                 && (s.RepeatDecision == null || s.RepeatDecision == ApprovalStageDecision.Pending))
+                ||
+                (s.ApprovalProcess!.Status == ApprovalProcessStatus.FinalHold
+                 && (s.FinalHoldDecision == null || s.FinalHoldDecision == ApprovalStageDecision.Pending)))
+            .CountAsync();
+
         // Записки, где пользователь — активный согласующий: связь идёт через маршрут,
         // у задачи собственной ссылки на документ нет.
         var szInbox = await (
@@ -111,7 +132,11 @@ public class DashboardService : IDashboardService
         {
             Code = "tasks",
             Label = "Мои задачи",
-            Value = openTasks.Count,
+            // openTasks — СЗ/закупки/прочее через WorkflowTask, vndCoordinationCount — ВНД
+            // отдельным запросом (см. выше). "Из них просрочено" пока считает только по
+            // WorkflowTask.DueAt — у этапов ВНД свой дедлайн (Primary/Repeat/FinalHold
+            // DeadlineAt), в просрочку здесь не подмешан.
+            Value = openTasks.Count + vndCoordinationCount,
             Note = overdueTasks > 0 ? $"из них просрочено: {overdueTasks}" : null,
             Tone = overdueTasks > 0 ? "danger" : "normal",
         });

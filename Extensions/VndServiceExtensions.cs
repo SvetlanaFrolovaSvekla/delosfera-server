@@ -20,8 +20,12 @@ public static class VndServiceExtensions
         builder.Services.AddHostedService<PlanReminderWorker>();
 
         // Пороги индикации сроков актуализации (Normal/Approaching/Critical) —
-        // справочник в разделе ВНД, настраивается администратором
+        // справочник в разделе ВНД, настраивается администратором. Воркер держит
+        // статический in-memory кэш порогов (ActualizationThresholds) актуальным после
+        // рестарта процесса и на репликах, где справочник ни разу не открывали — см.
+        // ActualizationThresholdsRefreshWorker.
         builder.Services.AddScoped<IActualizationBucketSettingsService, ActualizationBucketSettingsService>();
+        builder.Services.AddHostedService<ActualizationThresholdsRefreshWorker>();
 
         // Раздел "Уведомления" → "Настройки рассылок" → "Нормотворчество": ответственные
         // сотрудники СП за актуализацию и ежемесячная сводка им 1-го числа

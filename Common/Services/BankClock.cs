@@ -15,6 +15,13 @@ public interface IBankClock
 
     /// <summary>Текущий момент по времени банка.</summary>
     DateTime Now { get; }
+
+    /// <summary>
+    /// Часовой пояс банка — для случаев, когда вызывающему коду нужно самому пересчитать
+    /// локальную границу (начало месяца, начало дня) в UTC для сравнения с датами из БД,
+    /// а не только спросить "сейчас"/"сегодня".
+    /// </summary>
+    TimeZoneInfo Zone { get; }
 }
 
 public class BankClock : IBankClock
@@ -25,11 +32,13 @@ public class BankClock : IBankClock
     /// </summary>
     private const string TimeZoneId = "Asia/Bishkek";
 
-    private static readonly TimeZoneInfo Zone = Resolve();
+    private static readonly TimeZoneInfo ResolvedZone = Resolve();
+
+    public TimeZoneInfo Zone => ResolvedZone;
 
     public DateOnly Today => DateOnly.FromDateTime(Now);
 
-    public DateTime Now => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Zone);
+    public DateTime Now => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ResolvedZone);
 
     private static TimeZoneInfo Resolve()
     {

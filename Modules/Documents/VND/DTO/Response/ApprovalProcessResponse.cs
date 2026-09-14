@@ -31,11 +31,52 @@ public class ApprovalProcessResponse
     public DateTime? CompletedAt { get; set; }
 
     public List<DisagreementMatrixRowResponse> DisagreementMatrixRows { get; set; } = [];
-    
+
     public List<ApprovalStageResponse> Stages { get; set; } = [];
+
+    /// <summary>История ЗАВЕРШЁННЫХ (уже перезаписанных следующим) кругов фаз "Повторное
+    /// согласование"/"Финальная выдержка" - см. VndApprovalPhaseRound. Текущий/последний круг
+    /// сюда не входит, он виден напрямую через Repeat*/FinalHold* поля на Stages выше. Нужно
+    /// клиенту, чтобы построить полную "Историю маршрута согласования" (карусель схем по
+    /// каждому кругу) - без этого при нескольких кругах доработки подряд в одном и том же
+    /// процессе согласования видно было бы только решения последнего круга.</summary>
+    public List<ApprovalPhaseRoundResponse> PhaseRounds { get; set; } = [];
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>Один завершённый круг фазы "Повторное согласование" (Phase == "repeat") или
+/// "Финальная выдержка" (Phase == "finalHold") - см. VndApprovalPhaseRound.</summary>
+public class ApprovalPhaseRoundResponse
+{
+    public int Id { get; set; }
+
+    /// <summary>"repeat"/"finalHold"</summary>
+    public required string Phase { get; set; }
+
+    /// <summary>Номер круга внутри этой фазы этого процесса, начиная с 1.</summary>
+    public int RoundNumber { get; set; }
+
+    public DateTime? StartedAt { get; set; }
+    public DateTime CompletedAt { get; set; }
+
+    /// <summary>Комментарий инициатора об исправлениях на этом круге - заполнен только для
+    /// Phase == "repeat".</summary>
+    public string? InitiatorComment { get; set; }
+
+    public List<ApprovalPhaseRoundStageDecisionResponse> StageDecisions { get; set; } = [];
+}
+
+/// <summary>Решение одного согласующего в рамках одного завершённого круга.</summary>
+public class ApprovalPhaseRoundStageDecisionResponse
+{
+    /// <summary>Id этапа (ApprovalStageResponse.Id), к которому относится это решение.</summary>
+    public int StageId { get; set; }
+
+    public required string Decision { get; set; }
+    public string? Comment { get; set; }
+    public DateTime? DecidedAt { get; set; }
 }
 
 public class ApprovalStageResponse

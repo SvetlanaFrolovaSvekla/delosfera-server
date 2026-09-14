@@ -23,7 +23,8 @@ public class VndServiceTests
                 NullLogger<VndApprovalService>.Instance, new FakeActivityLog(),
                 new ApprovalSheetGenerator(), new FixedApprovalUnitResolver(db)),
             new delosfera_server.Modules.Documents.Services.NumeratorService(db),
-            new delosfera_server.Modules.Documents.VND.Services.DocxLegacyLinkExtractor());
+            new delosfera_server.Modules.Documents.VND.Services.DocxLegacyLinkExtractor(),
+            new NoopNotificationService(), NullLogger<VndService>.Instance);
 
     private static VndDocument SeedVnd(DelosferaDbContext db, VndStatus status) =>
         TestSupport.SeedVnd(db, status, Creator);

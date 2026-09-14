@@ -22,13 +22,15 @@ public class VndActualizationService : IVndActualizationService
     private readonly INotificationService _notifications;
     private readonly ILogger<VndActualizationService> _logger;
     private readonly IActivityLogService _activityLog;
+    private readonly IPlanItemSync _planItemSync;
 
     public VndActualizationService(
         DelosferaDbContext db,
         ICurrentUserService currentUser,
         INotificationService notifications,
         ILogger<VndActualizationService> logger,
-        IActivityLogService activityLog
+        IActivityLogService activityLog,
+        IPlanItemSync planItemSync
     )
     {
         _db = db;
@@ -36,6 +38,7 @@ public class VndActualizationService : IVndActualizationService
         _notifications = notifications;
         _logger = logger;
         _activityLog = activityLog;
+        _planItemSync = planItemSync;
     }
 
     /// <summary>Единое определение "главный редактор" для всей актуализации — умышленно шире,
@@ -57,7 +60,18 @@ public class VndActualizationService : IVndActualizationService
     public async Task<VndActualizationStateResponse> StartAsync(
         int vndId, StartActualizationRequest request, int currentUserId)
     {
-        var vnd = await _db.VndDocuments.FindAsync(vndId)
+        // Блокируем строку документа на время проверки-и-изменения статуса (SELECT ... FOR
+        // UPDATE) — без этого два одновременных старта актуализации одного и того же ВНД оба
+        // читают Status == Active, оба проходят проверку ниже и оба создают свою запись
+        // VndActualizationRecord: в истории остаются два "открытых" цикла на один документ, хотя
+        // реально стартовал только один. Блокировка строки заставляет второй запрос дождаться
+        // завершения первого (COMMIT снимает блокировку сразу после SaveChangesAsync ниже) и
+        // увидеть уже изменённый статус — второй запрос корректно упадёт в проверку ниже.
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
+        var vnd = await _db.VndDocuments
+                      .FromSqlInterpolated($"SELECT * FROM vnd_document WHERE id = {vndId} FOR UPDATE")
+                      .FirstOrDefaultAsync()
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         if (vnd.Status != VndStatus.Active)
@@ -134,6 +148,12 @@ public class VndActualizationService : IVndActualizationService
         }
 
         await _db.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        // --- Позиция плана (если ВНД сопоставлена с ней) переходит в «На актуализации» —
+        // см. PlanItemLifecycleService.PlanItemSyncService: без этого вызова план продолжал
+        // показывать позицию как «Запланировано», даже когда актуализация уже идёт.
+        await _planItemSync.OnVndActualizationStartedAsync(vndId, currentUserId);
 
         // --- Уведомления заявителям о закрытых заявках
         foreach (var pending in pendingRequests)
@@ -422,7 +442,14 @@ public class VndActualizationService : IVndActualizationService
     public async Task<VndActualizationStateResponse> ConfirmStartAfterRequestAsync(
         int vndId, ConfirmActualizationStartRequest request, int currentUserId)
     {
-        var vnd = await _db.VndDocuments.FindAsync(vndId)
+        // См. комментарий в StartAsync — та же гонка "Active -> OnActualization" возможна и
+        // здесь (например, если у одного и того же ВНД одновременно подтверждают старт по
+        // заявке двое, или это происходит параллельно с прямым стартом StartAsync).
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
+        var vnd = await _db.VndDocuments
+                      .FromSqlInterpolated($"SELECT * FROM vnd_document WHERE id = {vndId} FOR UPDATE")
+                      .FirstOrDefaultAsync()
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
         if (vnd.Status != VndStatus.Active)
@@ -481,6 +508,11 @@ public class VndActualizationService : IVndActualizationService
             $"/base-vnd/{vndId}");
 
         await _db.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        // --- Позиция плана (если ВНД сопоставлена с ней) переходит в «На актуализации» —
+        // см. StartAsync выше и PlanItemLifecycleService.PlanItemSyncService.
+        await _planItemSync.OnVndActualizationStartedAsync(vndId, currentUserId);
 
         return await BuildStateResponseAsync(vnd);
     }
@@ -675,6 +707,12 @@ public class VndActualizationService : IVndActualizationService
         vnd.ActualizationPerformed = false;
 
         await _db.SaveChangesAsync();
+
+        // --- Позиция плана (если ВНД сопоставлена с ней) закрывается и получает новый срок —
+        // см. PlanItemLifecycleService.PlanItemSyncService. Вызов безопасен и для публикации вне
+        // цикла актуализации (обычное согласование): при отсутствии открытых позиций плана по
+        // этому ВНД метод — no-op.
+        await _planItemSync.OnVndActualizationPublishedAsync(vndId, currentUserId);
 
         var developerHeadId = await _db.OrganizationUnits
             .Where(x => x.Id == vnd.DeveloperId)
