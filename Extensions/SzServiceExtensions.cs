@@ -13,6 +13,9 @@ public static class SzServiceExtensions
         builder.Services.AddScoped<ISzArchiveService, SzArchiveService>();
         builder.Services.AddScoped<ISzProcurementService, SzProcurementService>();
 
+        // Личные шаблоны записок (СЗ-6)
+        builder.Services.AddScoped<ISzTemplateService, SzTemplateService>();
+
         // Предпросмотр согласующих по виду записки (автоподстановка в форму)
         builder.Services.AddScoped<ISzApproverPreviewService, SzApproverPreviewService>();
 
