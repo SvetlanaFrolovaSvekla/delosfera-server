@@ -32,6 +32,8 @@ public enum ActivityEventKind
     ActualizationReminderSent = 14,
 
     Other = 99 // Другое событие (разное)
-    
-    // TODO: когда появятся СЗ: добавить для них типы событий
+
+    // СЗ отдельных типов событий не требуют: журнал активности выводит их из аудита
+    // (ActivityLogService.AuditSlices содержит "Sz"), а не из этого enum, который
+    // остался у явного потока ВНД. См. AuditActivityText.
 }

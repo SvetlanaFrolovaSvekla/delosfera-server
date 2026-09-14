@@ -118,4 +118,24 @@ public class PoaController : ControllerBase
         catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
         catch (InvalidOperationException ex) { return Conflict(new {message = ex.Message}); }
     }
+
+    /// <summary>Выдать бумажный оригинал на руки представителю (ЗВ-1).</summary>
+    [HttpPost("{id:int}/original/handover")]
+    [RequirePermission(PermissionCode.ManagePowersOfAttorney)]
+    public async Task<IActionResult> HandoverOriginal(int id, [FromBody] PoaHandoverRequest? request, CancellationToken ct)
+    {
+        try { return Ok(await _poa.HandoverOriginalAsync(id, request?.Location, _currentUser.UserId, ct)); }
+        catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
+        catch (InvalidOperationException ex) { return Conflict(new {message = ex.Message}); }
+    }
+
+    /// <summary>Принять бумажный оригинал обратно (ЗВ-1).</summary>
+    [HttpPost("{id:int}/original/return")]
+    [RequirePermission(PermissionCode.ManagePowersOfAttorney)]
+    public async Task<IActionResult> ReturnOriginal(int id, CancellationToken ct)
+    {
+        try { return Ok(await _poa.ReturnOriginalAsync(id, _currentUser.UserId, ct)); }
+        catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
+        catch (InvalidOperationException ex) { return Conflict(new {message = ex.Message}); }
+    }
 }

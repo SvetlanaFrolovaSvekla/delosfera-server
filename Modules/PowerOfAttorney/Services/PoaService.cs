@@ -17,6 +17,12 @@ public interface IPoaService
     Task<PoaDto> IssueAsync(int id, int currentUserId, CancellationToken ct = default);
     Task<PoaDto> RevokeAsync(int id, string reason, DateOnly? on, int currentUserId, CancellationToken ct = default);
 
+    /// <summary>Выдать бумажный оригинал на руки (ЗВ-1).</summary>
+    Task<PoaDto> HandoverOriginalAsync(int id, string? location, int currentUserId, CancellationToken ct = default);
+
+    /// <summary>Принять бумажный оригинал обратно (ЗВ-1).</summary>
+    Task<PoaDto> ReturnOriginalAsync(int id, int currentUserId, CancellationToken ct = default);
+
     Task<List<PoaDto>> ValidForUserAsync(int userId, DateOnly onDay, CancellationToken ct = default);
     Task<List<PoaDto>> ExpiringAsync(int days, CancellationToken ct = default);
 
@@ -255,6 +261,43 @@ public class PoaService : IPoaService
             await _audit.LogAsync("PowerOfAttorney", child.Id, "Revoked", currentUserId,
                 new { number = child.RegNumber, reason = child.RevokeReason, revokedOn = child.RevokedOn, parentPoaId = id });
         }
+
+        return await GetAsync(id, ct);
+    }
+
+    public async Task<PoaDto> HandoverOriginalAsync(int id, string? location, int currentUserId, CancellationToken ct = default)
+    {
+        var poa = await LoadAsync(id, ct);
+
+        // Оригинал уже на руках, если его выдали и ещё не вернули.
+        if (poa.OriginalHandedAt != null && poa.OriginalReturnedAt == null)
+            throw new InvalidOperationException("Оригинал уже выдан на руки.");
+
+        poa.OriginalHandedAt = DateTime.UtcNow;
+        poa.OriginalReturnedAt = null;
+        poa.OriginalLocation = string.IsNullOrWhiteSpace(location) ? poa.OriginalLocation : location.Trim();
+        poa.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("PowerOfAttorney", poa.Id, "OriginalHandedOver", currentUserId,
+            new { number = poa.RegNumber, location = poa.OriginalLocation });
+
+        return await GetAsync(id, ct);
+    }
+
+    public async Task<PoaDto> ReturnOriginalAsync(int id, int currentUserId, CancellationToken ct = default)
+    {
+        var poa = await LoadAsync(id, ct);
+
+        if (poa.OriginalHandedAt == null || poa.OriginalReturnedAt != null)
+            throw new InvalidOperationException("Оригинал не на руках — возвращать нечего.");
+
+        poa.OriginalReturnedAt = DateTime.UtcNow;
+        poa.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("PowerOfAttorney", poa.Id, "OriginalReturned", currentUserId,
+            new { number = poa.RegNumber });
 
         return await GetAsync(id, ct);
     }

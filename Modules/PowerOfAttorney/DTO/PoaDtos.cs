@@ -108,6 +108,13 @@ public class PoaListResult
     public List<PoaDto> Items { get; set; } = [];
 }
 
+/// <summary>Выдача бумажного оригинала на руки (ЗВ-1).</summary>
+public class PoaHandoverRequest
+{
+    /// <summary>Где будет находиться оригинал / у кого. Необязательно.</summary>
+    public string? Location { get; set; }
+}
+
 public class PoaRevokeRequest
 {
     public string Reason { get; set; } = "";
