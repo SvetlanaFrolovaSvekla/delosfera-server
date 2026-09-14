@@ -81,6 +81,15 @@ public class SzController : ControllerBase
         return Ok(entries.Select(e => new { e.Id, e.At, e.Action, e.UserId, payload = e.PayloadJson }));
     }
 
+    /// <summary>
+    /// Возможные дубликаты создаваемой записки (СК-5): похожие записки текущего автора
+    /// по виду и теме за последние 30 дней. excludeId — id текущего черновика.
+    /// </summary>
+    [HttpGet("duplicates")]
+    public async Task<IActionResult> Duplicates(
+        [FromQuery] int kindId, [FromQuery] string? title, [FromQuery] int? excludeId) =>
+        Ok(await _sz.FindDuplicatesAsync(kindId, title, _currentUser.UserId, excludeId));
+
     /// <summary>Путь записки по статусам с длительностью каждого этапа (СЗ-8).</summary>
     [HttpGet("{id:int}/trace")]
     public async Task<IActionResult> Trace(int id)

@@ -27,6 +27,9 @@ public interface ISzService
 
     /// <summary>Путь записки по статусам с длительностью каждого этапа (СЗ-8).</summary>
     Task<List<SzTraceStep>?> GetTraceAsync(int id);
+
+    /// <summary>Возможные дубликаты записки автора по виду и теме (СК-5).</summary>
+    Task<List<SzDuplicateDto>> FindDuplicatesAsync(int kindId, string? title, int authorId, int? excludeId);
     Task<SzDetails> CreateDraftAsync(SzSaveRequest request, int authorId);
     Task<SzDetails> UpdateDraftAsync(int id, SzSaveRequest request, int actorUserId);
     Task DeleteDraftAsync(int id, int actorUserId);
@@ -256,6 +259,78 @@ public class SzService : ISzService
             query, _db, currentUserId,
             canSeeAll: _currentUser.HasPermission(PermissionCode.ViewAllSz),
             canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
+
+    public async Task<List<SzDuplicateDto>> FindDuplicatesAsync(int kindId, string? title, int authorId, int? excludeId)
+    {
+        if (kindId <= 0 || string.IsNullOrWhiteSpace(title)) return [];
+
+        var wanted = TitleTokens(title);
+        if (wanted.Count == 0) return [];
+
+        // Смотрим недавние записки того же автора и вида: дубликат — это когда человек
+        // заводит по сути ту же записку ещё раз, а не любые похожие темы по банку.
+        var since = DateTime.UtcNow.AddDays(-30);
+        var candidates = await _db.SzDocuments
+            .Where(x => x.KindId == kindId
+                        && x.Document!.AuthorId == authorId
+                        && x.Document.CreatedAt >= since
+                        && (excludeId == null || x.Id != excludeId)
+                        && x.Document.StatusCode != SzStatus.Withdrawn
+                        && x.Document.StatusCode != SzStatus.Rejected)
+            .Select(x => new
+            {
+                x.Id,
+                x.Document!.RegNumber,
+                x.Document.Title,
+                x.Document.StatusCode,
+                x.Document.CreatedAt,
+            })
+            .ToListAsync();
+
+        var result = new List<SzDuplicateDto>();
+        foreach (var c in candidates)
+        {
+            var other = TitleTokens(c.Title);
+            if (other.Count == 0) continue;
+
+            // Совпадение тем по словам (Жаккар): доля общих слов от объединения. Порог
+            // 0.5 отсекает случайное пересечение, но ловит перефраз одной и той же темы.
+            var intersect = wanted.Count(w => other.Contains(w));
+            var union = wanted.Union(other).Count();
+            var sim = union == 0 ? 0d : (double)intersect / union;
+            if (sim < 0.5) continue;
+
+            result.Add(new SzDuplicateDto
+            {
+                Id = c.Id,
+                RegNumber = c.RegNumber,
+                Title = c.Title,
+                StatusTitle = SzStatusTitles.Title(c.StatusCode),
+                CreatedAt = c.CreatedAt,
+                SimilarityPercent = (int)Math.Round(sim * 100),
+            });
+        }
+
+        return result
+            .OrderByDescending(r => r.SimilarityPercent)
+            .ThenByDescending(r => r.CreatedAt)
+            .Take(5)
+            .ToList();
+    }
+
+    // Значимые слова темы: в нижний регистр, режем по знакам, отбрасываем короткие
+    // (предлоги, номера), чтобы сравнение шло по сути, а не по «на», «в», «о».
+    private static HashSet<string> TitleTokens(string s) => s
+        .ToLowerInvariant()
+        .Split(
+            new[]
+            {
+                ' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '"', '\'',
+                '(', ')', '[', ']', '-', '–', '—', '/', '\\', '№', '#',
+            },
+            StringSplitOptions.RemoveEmptyEntries)
+        .Where(w => w.Length >= 3)
+        .ToHashSet();
 
     public async Task<List<SzTraceStep>?> GetTraceAsync(int id)
     {
