@@ -13,6 +13,8 @@ public static class AnalyticsServiceExtensions
         builder.Services.AddScoped<IUserAnalyticsService, UserAnalyticsService>();
         builder.Services.AddScoped<IDashboardService, DashboardService>();
         builder.Services.AddScoped<ISlaAnalyticsService, SlaAnalyticsService>();
+        builder.Services.AddScoped<IDigestService, DigestService>();
+        builder.Services.AddScoped<ICalendarService, CalendarService>();
         return builder;
     }
 }
