@@ -16,6 +16,10 @@ public static class AnalyticsServiceExtensions
         builder.Services.AddScoped<IDigestService, DigestService>();
         builder.Services.AddScoped<ICalendarService, CalendarService>();
         builder.Services.AddScoped<IContourReportsService, ContourReportsService>();
+
+        // Утренняя email-рассылка дайджеста (УВ-15)
+        builder.Services.AddScoped<IDigestEmailService, DigestEmailService>();
+        builder.Services.AddHostedService<DigestEmailWorker>();
         return builder;
     }
 }
