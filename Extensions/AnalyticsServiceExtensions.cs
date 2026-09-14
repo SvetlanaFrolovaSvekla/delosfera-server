@@ -12,6 +12,7 @@ public static class AnalyticsServiceExtensions
         builder.Services.AddScoped<IVndAnalyticsExportService, VndAnalyticsExportService>();
         builder.Services.AddScoped<IUserAnalyticsService, UserAnalyticsService>();
         builder.Services.AddScoped<IDashboardService, DashboardService>();
+        builder.Services.AddScoped<ISlaAnalyticsService, SlaAnalyticsService>();
         return builder;
     }
 }
