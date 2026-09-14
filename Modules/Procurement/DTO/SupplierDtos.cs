@@ -24,6 +24,12 @@ public class SupplierDto
 
     /// <summary>Срок ограничения истёк — запись осталась, но допуск восстановлен.</summary>
     public bool BlacklistExpired { get; set; }
+
+    /// <summary>Средний балл по оценкам работы (ЗК-9). Null — оценок ещё нет.</summary>
+    public double? AverageRating { get; set; }
+
+    /// <summary>Сколько оценок выставлено.</summary>
+    public int RatingCount { get; set; }
 }
 
 public class SupplierUpsertRequest

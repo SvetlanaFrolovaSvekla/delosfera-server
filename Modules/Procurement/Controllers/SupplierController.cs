@@ -48,6 +48,16 @@ public class SupplierController : ControllerBase
     public async Task<IActionResult> RemoveFromBlacklist(int id) =>
         await Run(() => _suppliers.RemoveFromBlacklistAsync(id, _currentUser.UserId));
 
+    /// <summary>Оценки работы поставщика со средним баллом (ЗК-9).</summary>
+    [HttpGet("{id:int}/ratings")]
+    public async Task<IActionResult> Ratings(int id) =>
+        await Run(() => _suppliers.ListRatingsAsync(id));
+
+    /// <summary>Поставить оценку поставщику по итогам закупки/договора (ЗК-9).</summary>
+    [HttpPost("{id:int}/ratings")]
+    public async Task<IActionResult> AddRating(int id, [FromBody] AddSupplierRatingRequest request) =>
+        await Run(() => _suppliers.AddRatingAsync(id, request, _currentUser.UserId));
+
     /// <summary>Зафиксировать заключение ДБ о благонадёжности.</summary>
     [HttpPost("{id:int}/reliability")]
     [RequirePermission(PermissionCode.ManageSuppliers)]

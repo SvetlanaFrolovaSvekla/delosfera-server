@@ -224,6 +224,7 @@ public class DelosferaDbContext : DbContext
     public DbSet<ProcurementParameter> ProcurementParameters => Set<ProcurementParameter>();
     public DbSet<ProcurementRequest> ProcurementRequests => Set<ProcurementRequest>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<SupplierRating> SupplierRatings => Set<SupplierRating>(); // оценки работы поставщика (ЗК-9)
     public DbSet<CommercialProposal> CommercialProposals => Set<CommercialProposal>();
     public DbSet<ProposalFile> ProposalFiles => Set<ProposalFile>();
     public DbSet<ProcurementProtocol> ProcurementProtocols => Set<ProcurementProtocol>();

@@ -14,6 +14,12 @@ public interface ISupplierService
     Task<SupplierDto> BlacklistAsync(int id, BlacklistRequest request, int actorUserId);
     Task<SupplierDto> RemoveFromBlacklistAsync(int id, int actorUserId);
     Task<SupplierDto> SetReliabilityAsync(int id, ReliabilityRequest request, int actorUserId);
+
+    /// <summary>Оценки работы поставщика со средним баллом (ЗК-9).</summary>
+    Task<SupplierRatingsResponse> ListRatingsAsync(int supplierId);
+
+    /// <summary>Поставить оценку поставщику (ЗК-9).</summary>
+    Task<SupplierRatingDto> AddRatingAsync(int supplierId, AddSupplierRatingRequest request, int actorUserId);
 }
 
 /// <summary>
@@ -51,7 +57,98 @@ public class SupplierService : ISupplierService
             q = q.Where(s => s.IsBlacklisted);
 
         var rows = await q.OrderBy(s => s.Title).ToListAsync();
-        return rows.Select(Map).ToList();
+        var dtos = rows.Select(Map).ToList();
+
+        // Средний балл одним сгруппированным запросом, а не по строке на поставщика:
+        // реестр показывает рейтинг сразу у всех.
+        var ids = rows.Select(s => s.Id).ToList();
+        var agg = await _db.SupplierRatings
+            .Where(r => ids.Contains(r.SupplierId))
+            .GroupBy(r => r.SupplierId)
+            .Select(g => new {SupplierId = g.Key, Avg = g.Average(x => (double)x.Score), Count = g.Count()})
+            .ToDictionaryAsync(x => x.SupplierId, x => x);
+
+        foreach (var d in dtos)
+        {
+            if (!agg.TryGetValue(d.Id, out var a)) continue;
+            d.AverageRating = Math.Round(a.Avg, 1);
+            d.RatingCount = a.Count;
+        }
+
+        return dtos;
+    }
+
+    public async Task<SupplierRatingsResponse> ListRatingsAsync(int supplierId)
+    {
+        var ratings = await _db.SupplierRatings
+            .Where(r => r.SupplierId == supplierId)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync();
+
+        var authorIds = ratings.Select(r => r.AuthorUserId).Distinct().ToList();
+        var names = await _db.Users
+            .Where(u => authorIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        var items = ratings.Select(r => new SupplierRatingDto
+        {
+            Id = r.Id,
+            AuthorUserId = r.AuthorUserId,
+            AuthorName = names.GetValueOrDefault(r.AuthorUserId),
+            ContractId = r.ContractId,
+            Score = r.Score,
+            Comment = r.Comment,
+            CreatedAt = r.CreatedAt,
+        }).ToList();
+
+        return new SupplierRatingsResponse
+        {
+            Count = items.Count,
+            Average = items.Count > 0 ? Math.Round(items.Average(i => (double)i.Score), 1) : null,
+            Items = items,
+        };
+    }
+
+    public async Task<SupplierRatingDto> AddRatingAsync(int supplierId, AddSupplierRatingRequest request, int actorUserId)
+    {
+        if (request.Score < 1 || request.Score > 5)
+            throw new ArgumentException("Оценка должна быть от 1 до 5");
+
+        var supplier = await LoadAsync(supplierId);
+
+        if (request.ContractId is { } contractId
+            && !await _db.Set<ProcurementContract>().AnyAsync(c => c.Id == contractId))
+            throw new ArgumentException("Договор не найден");
+
+        var rating = new SupplierRating
+        {
+            SupplierId = supplier.Id,
+            AuthorUserId = actorUserId,
+            ContractId = request.ContractId,
+            Score = request.Score,
+            Comment = string.IsNullOrWhiteSpace(request.Comment) ? null : request.Comment.Trim(),
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        _db.SupplierRatings.Add(rating);
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("Supplier", supplier.Id, "Rated", actorUserId, new {rating.Score, rating.ContractId});
+
+        var authorName = await _db.Users
+            .Where(u => u.Id == actorUserId)
+            .Select(u => u.FullName)
+            .FirstOrDefaultAsync();
+
+        return new SupplierRatingDto
+        {
+            Id = rating.Id,
+            AuthorUserId = rating.AuthorUserId,
+            AuthorName = authorName,
+            ContractId = rating.ContractId,
+            Score = rating.Score,
+            Comment = rating.Comment,
+            CreatedAt = rating.CreatedAt,
+        };
     }
 
     public async Task<SupplierDto> UpsertAsync(SupplierUpsertRequest request, int actorUserId)
