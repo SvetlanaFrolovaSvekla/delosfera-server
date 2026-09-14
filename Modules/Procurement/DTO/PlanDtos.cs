@@ -18,6 +18,12 @@ public class PlanItemDto
     public int RequestCount { get; set; }
     public decimal ActualAmount { get; set; }
 
+    /// <summary>
+    /// Сколько по позиции реально законтрактовано договорами (ЗК-10). Заявлено — это
+    /// намерение, законтрактовано — обязательство банка: именно оно расходует бюджет.
+    /// </summary>
+    public decimal ContractedAmount { get; set; }
+
     /// <summary>Отклонение факта от плана в процентах; null — заявок не было.</summary>
     public decimal? DeviationPercent { get; set; }
 
@@ -66,6 +72,9 @@ public class PlanDto
 
     public decimal PlannedTotal { get; set; }
     public decimal ActualTotal { get; set; }
+
+    /// <summary>Всего законтрактовано договорами по позициям плана (ЗК-10).</summary>
+    public decimal ContractedTotal { get; set; }
 
     /// <summary>Закупки года, не привязанные к плану (PRC-03).</summary>
     public int UnplannedRequestCount { get; set; }

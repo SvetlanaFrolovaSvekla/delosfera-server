@@ -176,6 +176,13 @@ public class PlanService : IPlanService
             .Select(r => new {r.Id, r.PlanItemId, r.PlanItem, r.Amount})
             .ToListAsync();
 
+        // Договоры года — по ним считается законтрактовано (ЗК-10): позицию плана
+        // берём с заявки договора, той же логикой связи, что и для заявок.
+        var contracts = await _db.ProcurementContracts
+            .Where(c => c.Request!.CreatedAt.Year == plan.Year)
+            .Select(c => new {c.Amount, c.Request!.PlanItemId, c.Request!.PlanItem})
+            .ToListAsync();
+
         var dto = new PlanDto
         {
             Id = plan.Id,
@@ -206,6 +213,13 @@ public class PlanService : IPlanService
 
             var actual = linked.Sum(r => r.Amount);
 
+            var contracted = contracts
+                .Where(c => c.PlanItemId == item.Id
+                            || (c.PlanItemId is null
+                                && c.PlanItem is not null
+                                && c.PlanItem.Contains(item.Code, StringComparison.OrdinalIgnoreCase)))
+                .Sum(c => c.Amount);
+
             dto.Items.Add(new PlanItemDto
             {
                 Id = item.Id,
@@ -218,6 +232,7 @@ public class PlanService : IPlanService
                 Note = item.Note,
                 RequestCount = linked.Count,
                 ActualAmount = actual,
+                ContractedAmount = contracted,
                 DeviationPercent = linked.Count == 0 || item.PlannedAmount <= 0
                     ? null
                     : Math.Round((actual - item.PlannedAmount) / item.PlannedAmount * 100m, 1),
@@ -226,6 +241,7 @@ public class PlanService : IPlanService
         }
 
         dto.ActualTotal = dto.Items.Sum(i => i.ActualAmount);
+        dto.ContractedTotal = dto.Items.Sum(i => i.ContractedAmount);
 
         var unplanned = requests.Where(r => !matchedRequestIds.Contains(r.Id)).ToList();
         dto.UnplannedRequestCount = unplanned.Count;
