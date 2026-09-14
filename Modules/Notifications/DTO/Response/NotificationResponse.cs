@@ -18,6 +18,12 @@ public class NotificationResponse
     public int? EntityId { get; set; }
     public string? Url { get; set; }
 
+    /// <summary>Код и название ВНД, если уведомление о ВНД (EntityType == "Vnd") - чтобы показывать
+    /// их прямо в списке уведомлений, не открывая уведомление. Null для остальных уведомлений
+    /// или если сама ВНД была удалена.</summary>
+    public string? VndCode { get; set; }
+    public string? VndTitle { get; set; }
+
     /// <summary>Файл, приложенный к уведомлению (см. Notification.AttachmentFileId) — скачивается
     /// через GET /api/files/{id}, доступ только получателям уведомления (см.
     /// VndFileAccessAuthorizer). Null, если к уведомлению ничего не приложено.</summary>

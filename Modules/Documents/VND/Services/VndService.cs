@@ -1252,6 +1252,26 @@ public class VndService : IVndService
             if (enteringConsolidation)
                 await StampConsolidationStartedAsync(vndId);
 
+            // Этот переход возможен только благодаря праву CanPublishWithoutApproval (см.
+            // effectiveRequiresApproval выше - без этого права редакция всегда уходит на
+            // согласование) - по сути то же самое действие "сделать действующей без
+            // согласования", что и явная кнопка (PublishRedactionWithoutApprovalAsync) или
+            // более поздняя приложение ТИД (UploadTidForLastRedactionAsync), только сделанное
+            // за один шаг прямо при загрузке. Раньше в этом случае в "Последнюю активность"/
+            // историю ВНД попадала только запись "добавил(а) редакцию" выше, без отдельной
+            // "сделал(а) действующей без согласования" - хотя по факту это тот же результат.
+            // Логируем так же, как в двух других местах.
+            _activityLog.Log(
+                ActivityModules.Vnd, ActivityEventKind.Other, vndId, vnd.Code, currentUserId,
+                new ActivityText(
+                    $"{actorName} загрузил(а) редакцию {redaction.Code} ВНД «{vnd.TitleRu}» сразу " +
+                    "действующей, без согласования",
+                    $"{actorName} uploaded revision {redaction.Code} of VND \"{vnd.TitleRu}\" " +
+                    "directly as active, without approval",
+                    $"{actorName} «{vnd.TitleRu}» ВНДисинин {redaction.Code} редакциясын макулдашуусуз " +
+                    "түздөн-түз колдонуудагы кылып жүктөдү"),
+                $"/base-vnd/{vndId}");
+
             await _db.SaveChangesAsync();
         }
 

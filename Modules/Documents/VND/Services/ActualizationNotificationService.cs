@@ -261,8 +261,8 @@ public class ActualizationNotificationService : IActualizationNotificationServic
         foreach (var (row, daysLeft) in candidates)
         {
             var crossedThresholds = thresholds.Where(t => daysLeft <= t).ToList();
-            var sentForThisDueDate = alreadySent.TryGetValue(row.Id, out var sent)
-                ? sent.Where(x => x.DueDate == row.DueActualizationDate!.Value).Select(x => x.Threshold).ToHashSet()
+            var sentForThisDueDate = alreadySent.TryGetValue(row.Id, out var sentMarkers)
+                ? sentMarkers.Where(x => x.DueDate == row.DueActualizationDate!.Value).Select(x => x.Threshold).ToHashSet()
                 : [];
 
             var newThresholds = crossedThresholds.Where(t => !sentForThisDueDate.Contains(t)).ToList();

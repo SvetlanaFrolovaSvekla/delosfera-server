@@ -6,7 +6,9 @@ public class VndTaskResponse
     public required string VndCode { get; set; }
     public required string VndTitle { get; set; }
 
-    /// <summary>"coordination" | "actualization" | "consolidation" | "myVndApproval" | "rejected"</summary>
+    /// <summary>"coordination" | "actualization" | "consolidation" | "myVndApproval" | "rejected" |
+    /// "actualizationRequest" (заявка на доступ к актуализации ждёт решения главного редактора) |
+    /// "actualizationApproved" (заявка одобрена, заявитель ещё не начал сам цикл)</summary>
     public required string Scope { get; set; }
 
     /// <summary>Человекочитаемый статус процесса (например, "В процессе согласования первой редакции ВНД").

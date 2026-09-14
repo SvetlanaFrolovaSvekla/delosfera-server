@@ -88,9 +88,16 @@ public static class RolePermissionDefaults
             PermissionCode.ConsolidateAnyVnd,
         ]),
 
+        // CancelAnyVndApproval - право отозвать чужое согласование ВНД (см.
+        // PermissionCode.CancelAnyVndApproval) - тоже заведено отдельно от широкого набора
+        // прав "главного редактора" (см. VndApprovalService.IsChiefEditor) по той же причине,
+        // что и ConsolidateAnyVnd у методолога выше: широкий набор практически есть у любого
+        // автора ВНД, а отзыв чужого согласования должен доставаться только настоящему
+        // главному редактору.
         ("Главный редактор ВНД", [
             PermissionCode.ViewCorrespondence,
             PermissionCode.ViewPowersOfAttorney,
+            PermissionCode.CancelAnyVndApproval,
         ]),
 
         // ── Закупки ──────────────────────────────────────────────────────────

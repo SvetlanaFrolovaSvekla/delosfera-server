@@ -5,6 +5,7 @@ using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.DTO.Response;
 using delosfera_server.Modules.Integrations.Mail;
 using delosfera_server.Modules.Notifications.Models;
+using delosfera_server.Modules.Documents.VND.Models;
 
 namespace delosfera_server.Modules.Notifications.Services;
 
@@ -123,9 +124,28 @@ public class NotificationService : INotificationService
             .Take(pageSize)
             .ToListAsync();
 
+        // Уведомления о ВНД (EntityType == "Vnd") - подтягиваем код и название документа одним
+        // запросом на всю страницу, чтобы показать их прямо в списке уведомлений, не открывая
+        // каждое (см. Notification.EntityType, выставляется в VndApprovalService.NotifyAsync).
+        var vndIds = items
+            .Where(x => x.Notification!.EntityType == "Vnd" && x.Notification.EntityId.HasValue)
+            .Select(x => x.Notification!.EntityId!.Value)
+            .Distinct()
+            .ToList();
+
+        var vndById = vndIds.Count == 0
+            ? new Dictionary<int, VndDocument>()
+            : await _db.VndDocuments
+                .Where(v => vndIds.Contains(v.Id))
+                .ToDictionaryAsync(v => v.Id);
+
         return new PagedNotificationResponse
         {
-            Items = items.Select(x => ToResponse(x, languageCode)).ToList(),
+            Items = items.Select(x => ToResponse(x, languageCode,
+                x.Notification!.EntityType == "Vnd" && x.Notification.EntityId.HasValue
+                    && vndById.TryGetValue(x.Notification.EntityId.Value, out var vnd)
+                    ? vnd
+                    : null)).ToList(),
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize
@@ -135,7 +155,7 @@ public class NotificationService : INotificationService
     public async Task<NotificationResponse> GetByIdAsync(int userNotificationId, int currentUserId, string languageCode)
     {
         var entity = await LoadOwnedAsync(userNotificationId, currentUserId);
-        return ToResponse(entity, languageCode);
+        return ToResponse(entity, languageCode, await LoadVndAsync(entity.Notification!));
     }
 
     public async Task<NotificationResponse> MarkAsReadAsync(int userNotificationId, int currentUserId, string languageCode)
@@ -149,7 +169,7 @@ public class NotificationService : INotificationService
             await _db.SaveChangesAsync();
         }
 
-        return ToResponse(entity, languageCode);
+        return ToResponse(entity, languageCode, await LoadVndAsync(entity.Notification!));
     }
 
     public async Task<NotificationResponse> MarkAsUnreadAsync(int userNotificationId, int currentUserId, string languageCode)
@@ -160,7 +180,7 @@ public class NotificationService : INotificationService
         entity.ReadAt = null;
         await _db.SaveChangesAsync();
 
-        return ToResponse(entity, languageCode);
+        return ToResponse(entity, languageCode, await LoadVndAsync(entity.Notification!));
     }
 
     public async Task<int> MarkAllAsReadAsync(int currentUserId, NotificationCategory? category)
@@ -189,7 +209,7 @@ public class NotificationService : INotificationService
         entity.FavoritedAt = entity.IsFavorite ? DateTime.UtcNow : null;
         await _db.SaveChangesAsync();
 
-        return ToResponse(entity, languageCode);
+        return ToResponse(entity, languageCode, await LoadVndAsync(entity.Notification!));
     }
 
     public async Task DeleteForUserAsync(int userNotificationId, int currentUserId)
@@ -236,7 +256,16 @@ public class NotificationService : INotificationService
         return entity;
     }
 
-    private static NotificationResponse ToResponse(UserNotification x, string languageCode)
+    /// <summary>Для одиночных методов (GetById/MarkAsRead/MarkAsUnread/ToggleFavorite) - тянет ВНД
+    /// одним запросом, если уведомление о ней (см. SearchAsync - там та же логика, но пачкой на
+    /// всю страницу сразу).</summary>
+    private async Task<VndDocument?> LoadVndAsync(Notification n)
+    {
+        if (n.EntityType != "Vnd" || !n.EntityId.HasValue) return null;
+        return await _db.VndDocuments.FirstOrDefaultAsync(v => v.Id == n.EntityId.Value);
+    }
+
+    private static NotificationResponse ToResponse(UserNotification x, string languageCode, VndDocument? vnd = null)
     {
         var n = x.Notification!;
 
@@ -251,6 +280,8 @@ public class NotificationService : INotificationService
             EntityType = n.EntityType,
             EntityId = n.EntityId,
             Url = n.Url,
+            VndCode = vnd?.Code,
+            VndTitle = vnd?.ResolveTitle(languageCode),
             AttachmentFileId = n.AttachmentFileId,
             AttachmentFileName = n.AttachmentFile?.OriginalFileName,
             CreatedByUserId = n.CreatedByUserId,

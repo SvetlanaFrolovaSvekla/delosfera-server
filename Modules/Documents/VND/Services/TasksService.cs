@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Documents.VND.Services;
 
@@ -10,14 +12,29 @@ public class TasksService : ITasksService
 {
     private readonly DelosferaDbContext _db;
     private readonly IBankClock _clock;
+    private readonly ICurrentUserService _currentUser;
     private readonly ILogger<TasksService> _logger;
 
-    public TasksService(DelosferaDbContext db, IBankClock clock, ILogger<TasksService> logger)
+    public TasksService(
+        DelosferaDbContext db, IBankClock clock, ICurrentUserService currentUser, ILogger<TasksService> logger)
     {
         _db = db;
         _clock = clock;
+        _currentUser = currentUser;
         _logger = logger;
     }
+
+    /// <summary>Тот же набор прав, что и VndActualizationService.IsChiefEditor — у заявок на
+    /// актуализацию нет персонального "владельца" среди главных редакторов: заявку видит и
+    /// решает любой пользователь с одним из этих прав, а не какой-то конкретно назначенный
+    /// человек. GetActualizationRequestTasksAsync/DoneTasksAsync всегда вызываются с userId,
+    /// совпадающим с текущим аутентифицированным пользователем (см. TasksController), поэтому
+    /// проверка прав ИМЕННО текущего пользователя (через ICurrentUserService) здесь корректна.</summary>
+    private bool IsChiefEditor() =>
+        _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
+        || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
 
     /// <summary>Задачи вкладки "Ждущие моего согласования" — все три фазы, на которых
     /// решение сейчас за текущим пользователем: первичное, повторное согласование и
@@ -206,6 +223,70 @@ public class TasksService : ITasksService
             })
             .OrderBy(t => t.DueActualizationDate)
             .ToList();
+    }
+
+    /// <summary>"Заявки на доступ к актуализации" — см. ITasksService.GetActualizationRequestTasksAsync.
+    /// Видит любой пользователь с правом решать за главного редактора (см. IsChiefEditor выше) —
+    /// та же аудитория, что и у VndActualizationService.GetPendingRequestsAsync/DecideRequestAsync,
+    /// иначе задача появлялась бы в "Мои задачи", а решить её было бы нельзя (403 при попытке).</summary>
+    public async Task<List<VndTaskResponse>> GetActualizationRequestTasksAsync(int userId)
+    {
+        if (!IsChiefEditor()) return new List<VndTaskResponse>();
+
+        var requests = await _db.VndActualizationRequests
+            .Include(x => x.Vnd)
+            .Include(x => x.RequestedByUser)
+            .Where(x => x.Status == ActualizationAccessStatus.Pending)
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync();
+
+        return requests.Select(x => new VndTaskResponse
+        {
+            VndId = x.VndId,
+            VndCode = x.Vnd!.Code,
+            VndTitle = x.Vnd!.TitleRu,
+            Scope = "actualizationRequest",
+            VndStatus = MapVndStatus(x.Vnd!.Status),
+            StatusLabel = "Заявка на доступ к актуализации",
+            InitiatorName = x.RequestedByUser?.FullName ?? "—",
+            ActualizationPlannedNoChanges = x.Vnd!.ActualizationPlannedNoChanges,
+            CreatedAt = x.CreatedAt,
+        })
+        .OrderBy(t => t.CreatedAt)
+        .ToList();
+    }
+
+    /// <summary>"Заявка одобрена" — см. ITasksService.GetActualizationApprovedTasksAsync. Только
+    /// у самого заявителя (RequestedByUserId == userId) — принять решение мог кто угодно из
+    /// главных редакторов, но начинать актуализацию по одобренной заявке должен именно тот, кто
+    /// её подавал (см. VndActualizationService.ConfirmStartAfterRequestAsync). Дополнительно
+    /// фильтруем по Vnd.Status == Active — как только цикл фактически стартовал (документ ушёл в
+    /// OnActualization), заявка "потрачена" (ConsumedAt проставляется в тот же момент) и не
+    /// должна больше висеть здесь напоминанием — работа уже видна в GetActualizationTasksAsync.</summary>
+    public async Task<List<VndTaskResponse>> GetActualizationApprovedTasksAsync(int userId)
+    {
+        var requests = await _db.VndActualizationRequests
+            .Include(x => x.Vnd)
+            .Where(x => x.RequestedByUserId == userId
+                        && x.Status == ActualizationAccessStatus.Approved
+                        && x.ConsumedAt == null
+                        && x.Vnd!.Status == VndStatus.Active)
+            .OrderByDescending(x => x.DecidedAt)
+            .ToListAsync();
+
+        return requests.Select(x => new VndTaskResponse
+        {
+            VndId = x.VndId,
+            VndCode = x.Vnd!.Code,
+            VndTitle = x.Vnd!.TitleRu,
+            Scope = "actualizationApproved",
+            VndStatus = MapVndStatus(x.Vnd!.Status),
+            StatusLabel = "Заявка одобрена — можно начать актуализацию",
+            ActualizationPlannedNoChanges = x.Vnd!.ActualizationPlannedNoChanges,
+            CreatedAt = x.DecidedAt ?? x.UpdatedAt,
+        })
+        .OrderByDescending(t => t.CreatedAt)
+        .ToList();
     }
 
     public async Task<List<VndTaskResponse>> GetMyVndApprovalTasksAsync(int userId)
@@ -581,6 +662,87 @@ public class TasksService : ITasksService
         return Paginate(items, page, pageSize);
     }
 
+    /// <summary>"Выполнено" для "Заявки на доступ к актуализации" — заявка, по которой уже
+    /// принято решение (не важно, кем именно из главных редакторов — см. комментарий у
+    /// GetActualizationRequestTasksAsync). Видимость та же, что и у активного списка.</summary>
+    public async Task<PagedResult<VndTaskResponse>> GetActualizationRequestDoneTasksAsync(int userId, int page, int pageSize)
+    {
+        if (!IsChiefEditor())
+            return new PagedResult<VndTaskResponse> {Page = Math.Max(1, page), PageSize = Math.Clamp(pageSize, 1, 100)};
+
+        var query = _db.VndActualizationRequests
+            .Include(x => x.Vnd)
+            .Include(x => x.RequestedByUser)
+            .Include(x => x.DecidedByUser)
+            .Where(x => x.Status != ActualizationAccessStatus.Pending)
+            .OrderByDescending(x => x.DecidedAt);
+
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        var totalCount = await query.CountAsync();
+        var requests = await query.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToListAsync();
+
+        return new PagedResult<VndTaskResponse>
+        {
+            Items = requests.Select(x => new VndTaskResponse
+            {
+                VndId = x.VndId,
+                VndCode = x.Vnd!.Code,
+                VndTitle = x.Vnd!.TitleRu,
+                Scope = "actualizationRequest",
+                VndStatus = MapVndStatus(x.Vnd!.Status),
+                StatusLabel = x.Status == ActualizationAccessStatus.Approved
+                    ? $"Заявка одобрена ({x.DecidedByUser?.FullName ?? "—"})"
+                    : $"Заявка отклонена ({x.DecidedByUser?.FullName ?? "—"})",
+                InitiatorName = x.RequestedByUser?.FullName ?? "—",
+                ActualizationPlannedNoChanges = x.Vnd!.ActualizationPlannedNoChanges,
+                IsCompleted = true,
+                CompletedAt = x.DecidedAt,
+                CreatedAt = x.DecidedAt ?? x.CreatedAt
+            }).ToList(),
+            TotalCount = totalCount,
+            Page = safePage,
+            PageSize = safePageSize
+        };
+    }
+
+    /// <summary>"Выполнено" для "Заявка одобрена" — заявитель уже подтвердил/начал цикл по
+    /// своей одобренной заявке (ConsumedAt проставлен, см. ConfirmStartAfterRequestAsync).</summary>
+    public async Task<PagedResult<VndTaskResponse>> GetActualizationApprovedDoneTasksAsync(int userId, int page, int pageSize)
+    {
+        var query = _db.VndActualizationRequests
+            .Include(x => x.Vnd)
+            .Where(x => x.RequestedByUserId == userId
+                        && x.Status == ActualizationAccessStatus.Approved
+                        && x.ConsumedAt != null)
+            .OrderByDescending(x => x.ConsumedAt);
+
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        var totalCount = await query.CountAsync();
+        var requests = await query.Skip((safePage - 1) * safePageSize).Take(safePageSize).ToListAsync();
+
+        return new PagedResult<VndTaskResponse>
+        {
+            Items = requests.Select(x => new VndTaskResponse
+            {
+                VndId = x.VndId,
+                VndCode = x.Vnd!.Code,
+                VndTitle = x.Vnd!.TitleRu,
+                Scope = "actualizationApproved",
+                VndStatus = MapVndStatus(x.Vnd!.Status),
+                StatusLabel = "Актуализация начата",
+                ActualizationPlannedNoChanges = x.Vnd!.ActualizationPlannedNoChanges,
+                IsCompleted = true,
+                CompletedAt = x.ConsumedAt,
+                CreatedAt = x.ConsumedAt ?? x.UpdatedAt
+            }).ToList(),
+            TotalCount = totalCount,
+            Page = safePage,
+            PageSize = safePageSize
+        };
+    }
+
     /// <summary>Последний (по CreatedAt) процесс согласования на каждый ВНД из числа тех, что
     /// сейчас закончился отклонением - т.е. документов, которые отклонение вернуло в
     /// "Черновик"/"На актуализации" (см. VndApprovalService.RejectApprovalAsync) и по которым
@@ -692,6 +854,10 @@ public class TasksService : ITasksService
             async () => (await GetMyVndApprovalTasksAsync(userId)).Count);
         var rejectedCount = await CountSafeAsync("rejected",
             async () => (await GetRejectedTasksAsync(userId)).Count);
+        var actualizationRequestCount = await CountSafeAsync("actualizationRequest",
+            async () => (await GetActualizationRequestTasksAsync(userId)).Count);
+        var actualizationApprovedCount = await CountSafeAsync("actualizationApproved",
+            async () => (await GetActualizationApprovedTasksAsync(userId)).Count);
 
         return new VndTaskCountsResponse
         {
@@ -699,7 +865,9 @@ public class TasksService : ITasksService
             Actualization = actualizationCount,
             Consolidation = consolidationCount,
             MyVndApproval = myVndApprovalCount,
-            Rejected = rejectedCount
+            Rejected = rejectedCount,
+            ActualizationRequests = actualizationRequestCount,
+            ActualizationApproved = actualizationApprovedCount
         };
     }
 

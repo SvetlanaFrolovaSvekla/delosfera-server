@@ -44,6 +44,19 @@ public class TasksController : ControllerBase
     public async Task<ActionResult<List<VndTaskResponse>>> GetRejected() =>
         Ok(await _service.GetRejectedTasksAsync(_currentUser.UserId));
 
+    /// <summary>"Заявки на доступ к актуализации" — для главного редактора, ждут его решения
+    /// (см. TasksService.GetActualizationRequestTasksAsync).</summary>
+    [HttpGet("actualization-requests")]
+    public async Task<ActionResult<List<VndTaskResponse>>> GetActualizationRequests() =>
+        Ok(await _service.GetActualizationRequestTasksAsync(_currentUser.UserId));
+
+    /// <summary>"Заявка одобрена" — для заявителя, чья заявка на доступ к актуализации уже
+    /// одобрена, но сам цикл ещё не подтверждён/начат (см.
+    /// TasksService.GetActualizationApprovedTasksAsync).</summary>
+    [HttpGet("actualization-approved")]
+    public async Task<ActionResult<List<VndTaskResponse>>> GetActualizationApproved() =>
+        Ok(await _service.GetActualizationApprovedTasksAsync(_currentUser.UserId));
+
     [HttpGet("counts")]
     public async Task<ActionResult<VndTaskCountsResponse>> GetCounts() =>
         Ok(await _service.GetCountsAsync(_currentUser.UserId));
@@ -75,6 +88,16 @@ public class TasksController : ControllerBase
     public async Task<ActionResult<PagedResult<VndTaskResponse>>> GetRejectedDone(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
         Ok(await _service.GetRejectedDoneTasksAsync(_currentUser.UserId, page, pageSize));
+
+    [HttpGet("actualization-requests/done")]
+    public async Task<ActionResult<PagedResult<VndTaskResponse>>> GetActualizationRequestsDone(
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
+        Ok(await _service.GetActualizationRequestDoneTasksAsync(_currentUser.UserId, page, pageSize));
+
+    [HttpGet("actualization-approved/done")]
+    public async Task<ActionResult<PagedResult<VndTaskResponse>>> GetActualizationApprovedDone(
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
+        Ok(await _service.GetActualizationApprovedDoneTasksAsync(_currentUser.UserId, page, pageSize));
 
     /// <summary>Персональные KPI для карточек на главной странице</summary>
     [HttpGet("home-summary")]

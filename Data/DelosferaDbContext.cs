@@ -73,6 +73,10 @@ public class DelosferaDbContext : DbContext
     public DbSet<VndApprovalStage> VndApprovalStages => Set<VndApprovalStage>();
     public DbSet<VndApprovalStageAttachment> VndApprovalStageAttachments => Set<VndApprovalStageAttachment>();
     public DbSet<VndRepeatCommentAttachment> VndRepeatCommentAttachments => Set<VndRepeatCommentAttachment>();
+    // Снимки завершённых кругов "Повторного согласования"/"Финальной выдержки" - см.
+    // VndApprovalPhaseRound (история "Маршрута согласования" на вкладке "История" ВНД).
+    public DbSet<VndApprovalPhaseRound> VndApprovalPhaseRounds => Set<VndApprovalPhaseRound>();
+    public DbSet<VndApprovalPhaseRoundStageDecision> VndApprovalPhaseRoundStageDecisions => Set<VndApprovalPhaseRoundStageDecision>();
 
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();

@@ -17,7 +17,17 @@ public class VndApprovalStageConfiguration : IEntityTypeConfiguration<VndApprova
         // изменилось. С xmin-токеном такое сохранение вместо этого провалится с
         // DbUpdateConcurrencyException (см. TrySaveTimeoutBatchAsync), и решение пользователя не
         // теряется.
-        builder.UseXminAsConcurrencyToken();
+        //
+        // Настроено вручную через теневое свойство, а не через .UseXminAsConcurrencyToken() —
+        // этот метод расширения Npgsql.EntityFrameworkCore.PostgreSQL (10.0.3) здесь не резолвится
+        // (CS1061), похоже на рассинхрон версий пакета с Microsoft.EntityFrameworkCore 10.0.10.
+        // Ниже — ровно то же самое, что делает сам провайдер под капотом, так что при желании
+        // после починки версий пакетов это можно будет заменить обратно на один вызов.
+        builder.Property<uint>("xmin")
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
 
         builder.HasOne(x => x.OrgUnit)
             .WithMany()
