@@ -111,6 +111,10 @@ public class DelosferaDbContext : DbContext
     public DbSet<RouteTemplate> RouteTemplates => Set<RouteTemplate>();
     public DbSet<delosfera_server.Modules.Sz.Models.HrRoutingSettings> HrRoutingSettings =>
         Set<delosfera_server.Modules.Sz.Models.HrRoutingSettings>();
+    public DbSet<delosfera_server.Modules.Substitutions.Models.SubstitutionRequest> SubstitutionRequests =>
+        Set<delosfera_server.Modules.Substitutions.Models.SubstitutionRequest>();
+    public DbSet<delosfera_server.Modules.Substitutions.Models.SubstitutionCommissionMember> SubstitutionCommissionMembers =>
+        Set<delosfera_server.Modules.Substitutions.Models.SubstitutionCommissionMember>();
     public DbSet<RouteTemplateStep> RouteTemplateSteps => Set<RouteTemplateStep>();
     public DbSet<RouteTemplateParticipant> RouteTemplateParticipants => Set<RouteTemplateParticipant>();
 
