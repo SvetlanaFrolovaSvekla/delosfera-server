@@ -51,6 +51,11 @@ public class WorkflowController : ControllerBase
     public async Task<IActionResult> Inbox([FromQuery] string? documentType = null) =>
         Ok(await _inbox.GetAsync(_currentUser.UserId, documentType));
 
+    /// <summary>Статистика по моим задачам: срез по контурам, типам и срокам (ЗД-1).</summary>
+    [HttpGet("inbox/stats")]
+    public async Task<IActionResult> InboxStats() =>
+        Ok(await _inbox.StatsAsync(_currentUser.UserId));
+
     /// <summary>
     /// Делегировать задачу коллеге (СК-3): разовая передача одной задачи, в отличие
     /// от замещения. Пока поддержаны задачи согласования.

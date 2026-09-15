@@ -13,6 +13,7 @@ public interface ILetterService
     Task<LetterDto> UpdateAsync(int id, LetterSaveRequest request, CancellationToken ct = default);
     Task<LetterDto> GetAsync(int id, CancellationToken ct = default);
     Task<LetterListResult> SearchAsync(LetterFilterRequest filter, CancellationToken ct = default);
+    Task<byte[]> ExportAsync(LetterFilterRequest filter, CancellationToken ct = default);
 
     Task<LetterDto> ResolveAsync(int id, ResolveLetterRequest request, int currentUserId, CancellationToken ct = default);
     Task<LetterDto> CloseAsync(int id, string? note, int currentUserId, CancellationToken ct = default);
@@ -394,8 +395,11 @@ public class LetterService : ILetterService
             .FirstOrDefaultAsync(ct)
         ?? throw new KeyNotFoundException("Письмо не найдено.");
 
-    public async Task<LetterListResult> SearchAsync(
-        LetterFilterRequest filter, CancellationToken ct = default)
+    /// <summary>
+    /// Реестр писем под фильтром, без страницы: общий отбор для поиска и выгрузки.
+    /// Видимость (банковская тайна) уже вшита — фильтр строится поверх неё.
+    /// </summary>
+    private IQueryable<CorrespondenceLetter> Filtered(LetterFilterRequest filter)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var query = Visible(_db.CorrespondenceLetters.AsNoTracking());
@@ -447,6 +451,14 @@ public class LetterService : ILetterService
                 || (l.TheirNumber != null && EF.Functions.ILike(l.TheirNumber, $"%{text}%")));
         }
 
+        return query;
+    }
+
+    public async Task<LetterListResult> SearchAsync(
+        LetterFilterRequest filter, CancellationToken ct = default)
+    {
+        var query = Filtered(filter);
+
         var total = await query.CountAsync(ct);
 
         var page = Math.Max(filter.Page, 1);
@@ -460,6 +472,48 @@ public class LetterService : ILetterService
 
         return new LetterListResult {Total = total, Page = page, PageSize = size, Items = items};
     }
+
+    public async Task<byte[]> ExportAsync(LetterFilterRequest filter, CancellationToken ct = default)
+    {
+        var rows = await Project(Filtered(filter)
+                .OrderByDescending(l => l.RegisteredOn).ThenByDescending(l => l.Id))
+            .ToListAsync(ct);
+
+        var sheet = new Common.Export.XlsxSheet
+        {
+            Name = "Реестр писем",
+            Header = ["Рег. номер", "Дата", "Направление", "Корреспондент", "Их №", "Тема", "Ответственный", "Подразделение", "Срок", "Статус"],
+            Widths = [18, 12, 14, 30, 16, 46, 26, 28, 12, 18],
+            Rows = rows.Select(l => new[]
+            {
+                l.RegNumber ?? "—",
+                l.RegisteredOn?.ToString("dd.MM.yyyy") ?? "—",
+                l.Direction == LetterDirection.Incoming.ToString() ? "Входящее" : "Исходящее",
+                l.CorrespondentTitle ?? "—",
+                l.TheirNumber ?? "—",
+                l.Subject,
+                l.ResponsibleName ?? "—",
+                l.ResponsibleUnit ?? "—",
+                l.DueDate?.ToString("dd.MM.yyyy") ?? "—",
+                LetterStatusTitle(l.Status),
+            }).ToList(),
+        };
+
+        return Common.Export.XlsxWorkbook.Build(sheet);
+    }
+
+    /// <summary>Русское название статуса письма для выгрузок.</summary>
+    private static string LetterStatusTitle(string status) => status switch
+    {
+        nameof(LetterStatus.Draft) => "Черновик",
+        nameof(LetterStatus.Registered) => "Зарегистрировано",
+        nameof(LetterStatus.OnResolution) => "На резолюции",
+        nameof(LetterStatus.OnExecution) => "Исполняется",
+        nameof(LetterStatus.Answered) => "Отвечено",
+        nameof(LetterStatus.Closed) => "Закрыто",
+        nameof(LetterStatus.Sent) => "Отправлено",
+        _ => status,
+    };
 
     /// <summary>Что просрочено — главный вопрос к книге регистрации.</summary>
     public async Task<List<LetterDto>> OverdueAsync(CancellationToken ct = default)

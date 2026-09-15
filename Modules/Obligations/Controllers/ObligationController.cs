@@ -33,6 +33,27 @@ public class FulfilRequest
     public string? Comment { get; set; }
 }
 
+/// <summary>Карточка обязательства на доске (ПР-1).</summary>
+public class ObligationBoardItem
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = "";
+    public string? Responsible { get; set; }
+    public string PeriodicityTitle { get; set; } = "";
+    public DateOnly? DueDate { get; set; }
+    public bool IsOverdue { get; set; }
+    public int MissedCount { get; set; }
+}
+
+/// <summary>Колонка доски: стадия текущего периода и обязательства на ней.</summary>
+public class ObligationBoardColumn
+{
+    public string Code { get; set; } = "";
+    public string Title { get; set; } = "";
+    public int Count { get; set; }
+    public List<ObligationBoardItem> Items { get; set; } = [];
+}
+
 public class WaiveRequest
 {
     public string Reason { get; set; } = "";
@@ -110,6 +131,171 @@ public class ObligationController : ControllerBase
 
         return Ok(rows);
     }
+
+    /// <summary>
+    /// Доска обязательств по стадии текущего периода (ПР-1): ожидает, просрочено,
+    /// исполнено, снято. Отвечает на вопрос «что горит», не открывая каждую карточку.
+    /// </summary>
+    [HttpGet("board")]
+    public async Task<IActionResult> Board(CancellationToken ct = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var rows = await _db.RecurringObligations.AsNoTracking()
+            .Where(o => o.IsActive)
+            .OrderBy(o => o.Title)
+            .Select(o => new
+            {
+                o.Id,
+                o.Title,
+                o.Periodicity,
+                Responsible = o.ResponsibleUser == null ? null : o.ResponsibleUser.FullName,
+                Current = o.Periods
+                    .Where(p => p.PeriodEnd >= today)
+                    .OrderBy(p => p.PeriodStart)
+                    .Select(p => new { p.DueDate, p.Status })
+                    .FirstOrDefault(),
+                MissedCount = o.Periods.Count(p => p.Status == ObligationPeriodStatus.Missed),
+            })
+            .ToListAsync(ct);
+
+        // Ключ колонки — стадия текущего периода. Без текущего периода считаем, что
+        // обязательство ждёт открытия следующего: место ему в «Ожидает».
+        var items = rows.Select(o =>
+        {
+            var status = o.Current?.Status ?? ObligationPeriodStatus.Pending;
+            return new
+            {
+                Status = status,
+                Item = new ObligationBoardItem
+                {
+                    Id = o.Id,
+                    Title = o.Title,
+                    Responsible = o.Responsible,
+                    PeriodicityTitle = PeriodicityTitle(o.Periodicity),
+                    DueDate = o.Current?.DueDate,
+                    IsOverdue = status == ObligationPeriodStatus.Pending
+                                && o.Current is { } c && c.DueDate < today,
+                    MissedCount = o.MissedCount,
+                },
+            };
+        }).ToList();
+
+        // Порядок колонок — от того, что требует действия, к закрытому.
+        var order = new[]
+        {
+            ObligationPeriodStatus.Pending,
+            ObligationPeriodStatus.Missed,
+            ObligationPeriodStatus.Fulfilled,
+            ObligationPeriodStatus.Waived,
+        };
+
+        var columns = order.Select(st =>
+        {
+            var group = items.Where(i => i.Status == st)
+                .Select(i => i.Item)
+                .OrderByDescending(i => i.IsOverdue)
+                .ThenBy(i => i.DueDate ?? DateOnly.MaxValue)
+                .ToList();
+            return new ObligationBoardColumn
+            {
+                Code = st.ToString(),
+                Title = PeriodStatusTitle(st),
+                Count = group.Count,
+                Items = group,
+            };
+        }).ToList();
+
+        return Ok(columns);
+    }
+
+    /// <summary>Выгрузка реестра обязательств в Excel с состоянием текущего периода (ЭК-3).</summary>
+    [HttpGet("export")]
+    public async Task<IActionResult> Export([FromQuery] bool includeInactive = false, CancellationToken ct = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var query = _db.RecurringObligations.AsNoTracking();
+        if (!includeInactive) query = query.Where(o => o.IsActive);
+
+        var rows = await query
+            .OrderBy(o => o.Title)
+            .Select(o => new
+            {
+                o.Title,
+                o.Kind,
+                o.Periodicity,
+                o.StartsOn,
+                o.EndsOn,
+                Responsible = o.ResponsibleUser == null ? null : o.ResponsibleUser.FullName,
+                ResponsibleUnit = o.ResponsibleUnit == null ? null : o.ResponsibleUnit.TitleRu,
+                CurrentDue = o.Periods
+                    .Where(p => p.PeriodEnd >= today)
+                    .OrderBy(p => p.PeriodStart)
+                    .Select(p => (DateOnly?)p.DueDate)
+                    .FirstOrDefault(),
+                CurrentStatus = o.Periods
+                    .Where(p => p.PeriodEnd >= today)
+                    .OrderBy(p => p.PeriodStart)
+                    .Select(p => (ObligationPeriodStatus?)p.Status)
+                    .FirstOrDefault(),
+                MissedCount = o.Periods.Count(p => p.Status == ObligationPeriodStatus.Missed),
+            })
+            .ToListAsync(ct);
+
+        var sheet = new Common.Export.XlsxSheet
+        {
+            Name = "Реестр обязательств",
+            Header = ["Обязательство", "Вид", "Периодичность", "Ответственный", "Подразделение", "Начало", "Окончание", "Текущий срок", "Статус периода", "Пропущено"],
+            Widths = [46, 24, 16, 26, 28, 12, 12, 14, 18, 12],
+            Rows = rows.Select(o => new[]
+            {
+                o.Title,
+                ObligationKindTitle(o.Kind),
+                PeriodicityTitle(o.Periodicity),
+                o.Responsible ?? "—",
+                o.ResponsibleUnit ?? "—",
+                o.StartsOn.ToString("dd.MM.yyyy"),
+                o.EndsOn?.ToString("dd.MM.yyyy") ?? "—",
+                o.CurrentDue?.ToString("dd.MM.yyyy") ?? "—",
+                o.CurrentStatus is { } st ? PeriodStatusTitle(st) : "—",
+                o.MissedCount.ToString(),
+            }).ToList(),
+        };
+
+        var bytes = Common.Export.XlsxWorkbook.Build(sheet);
+        var stamp = DateTime.Now.ToString("dd.MM.yyyy");
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"Реестр обязательств {stamp}.xlsx");
+    }
+
+    private static string ObligationKindTitle(ObligationKind kind) => kind switch
+    {
+        ObligationKind.MeetingHeld => "Проведение заседания",
+        ObligationKind.ReportSubmitted => "Сдача отчёта",
+        ObligationKind.DocumentReviewed => "Пересмотр документа",
+        _ => "Иное",
+    };
+
+    private static string PeriodicityTitle(Periodicity p) => p switch
+    {
+        Periodicity.Weekly => "Еженедельно",
+        Periodicity.Monthly => "Ежемесячно",
+        Periodicity.Quarterly => "Ежеквартально",
+        Periodicity.SemiAnnual => "Раз в полугодие",
+        Periodicity.Annual => "Ежегодно",
+        _ => p.ToString(),
+    };
+
+    private static string PeriodStatusTitle(ObligationPeriodStatus s) => s switch
+    {
+        ObligationPeriodStatus.Pending => "Ожидает",
+        ObligationPeriodStatus.Fulfilled => "Исполнено",
+        ObligationPeriodStatus.Missed => "Пропущено",
+        ObligationPeriodStatus.Waived => "Снято",
+        _ => s.ToString(),
+    };
 
     /// <summary>Периоды одного обязательства — история исполнения.</summary>
     [HttpGet("{id:int}/periods")]

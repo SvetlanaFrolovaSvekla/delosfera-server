@@ -120,6 +120,15 @@ public class HrOrderController : ControllerBase
         _ => "Иное",
     };
 
+    private static string StatusTitle(HrOrderStatus status) => status switch
+    {
+        HrOrderStatus.Draft => "Черновик",
+        HrOrderStatus.OnSigning => "На подписании",
+        HrOrderStatus.Signed => "Подписан",
+        HrOrderStatus.Cancelled => "Отменён",
+        _ => status.ToString(),
+    };
+
     /// <summary>Схема полей из справочника кадровых записок. Пусто — своих полей нет.</summary>
     private static string? SchemaKey(HrOrderKind kind) => kind switch
     {
@@ -193,6 +202,74 @@ public class HrOrderController : ControllerBase
             .ToListAsync(ct);
 
         return Ok(new { total, page, pageSize, items });
+    }
+
+    /// <summary>Выгрузка книги приказов в Excel под теми же фильтрами, что и список (ЭК-2).</summary>
+    [HttpGet("export")]
+    [RequirePermission(PermissionCode.ViewHrOrders)]
+    public async Task<IActionResult> Export(
+        [FromQuery] HrOrderKind? kind,
+        [FromQuery] HrOrderStatus? status,
+        [FromQuery] int? userId,
+        [FromQuery] int? year,
+        [FromQuery] string? text,
+        CancellationToken ct = default)
+    {
+        var query = _db.HrOrders.AsNoTracking().AsQueryable();
+
+        if (kind is { } k) query = query.Where(o => o.Kind == k);
+        if (status is { } s) query = query.Where(o => o.Status == s);
+        if (year is { } y) query = query.Where(o => o.Year == y);
+        if (userId is { } u) query = query.Where(o => o.Employees.Any(e => e.UserId == u));
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            var needle = text.Trim();
+            query = query.Where(o =>
+                EF.Functions.ILike(o.Title, $"%{needle}%")
+                || (o.RegNumber != null && EF.Functions.ILike(o.RegNumber, $"%{needle}%")));
+        }
+
+        var rows = await query
+            .OrderByDescending(o => o.OrderDate).ThenByDescending(o => o.Id)
+            .Select(o => new
+            {
+                o.Kind,
+                o.Status,
+                o.RegNumber,
+                o.OrderDate,
+                o.EffectiveFrom,
+                o.Title,
+                Signer = o.SignerUser == null ? null : o.SignerUser.FullName,
+                Employees = o.Employees
+                    .Select(e => e.FullNameSnapshot ?? (e.User == null ? null : e.User.FullName))
+                    .ToList(),
+            })
+            .ToListAsync(ct);
+
+        var sheet = new Common.Export.XlsxSheet
+        {
+            Name = "Реестр приказов",
+            Header = ["Рег. номер", "Дата", "Вид", "Статус", "Заголовок", "Действует с", "Подписал", "Сотрудники"],
+            Widths = [18, 12, 24, 16, 46, 14, 26, 40],
+            Rows = rows.Select(o => new[]
+            {
+                o.RegNumber ?? "—",
+                o.OrderDate?.ToString("dd.MM.yyyy") ?? "—",
+                KindTitle(o.Kind),
+                StatusTitle(o.Status),
+                o.Title,
+                o.EffectiveFrom?.ToString("dd.MM.yyyy") ?? "—",
+                o.Signer ?? "—",
+                string.Join(", ", o.Employees.Where(n => n != null)),
+            }).ToList(),
+        };
+
+        var bytes = Common.Export.XlsxWorkbook.Build(sheet);
+        var stamp = DateTime.Now.ToString("dd.MM.yyyy");
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"Реестр приказов {stamp}.xlsx");
     }
 
     [HttpGet("{id:int}")]

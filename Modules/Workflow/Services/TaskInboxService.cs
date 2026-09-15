@@ -13,6 +13,9 @@ public interface ITaskInboxService
 {
     /// <summary>Открытые задачи пользователя по всем контурам (GEN-11).</summary>
     Task<TaskInboxDto> GetAsync(int userId, string? documentType = null);
+
+    /// <summary>Статистика по открытым задачам пользователя (ЗД-1).</summary>
+    Task<TaskStatsDto> StatsAsync(int userId);
 }
 
 /// <summary>
@@ -266,6 +269,43 @@ public class TaskInboxService : ITaskInboxService
             Total = tasks.Count,
             Overdue = tasks.Count(t => t.IsOverdue),
             Delegated = tasks.Count(t => t.OnBehalfOf is not null),
+        };
+    }
+
+    public async Task<TaskStatsDto> StatsAsync(int userId)
+    {
+        var inbox = await GetAsync(userId);
+        var tasks = inbox.Tasks;
+
+        var now = DateTime.UtcNow;
+        var endOfToday = now.Date.AddDays(1);
+        var endOfWeek = now.Date.AddDays(7);
+
+        // Группы собираем по ключу контура/типа; заголовок берём из первой задачи,
+        // раз он у всех в группе одинаковый.
+        List<TaskStatGroupDto> Group(Func<InboxTaskDto, string> key, Func<InboxTaskDto, string> title) =>
+            tasks
+                .GroupBy(key)
+                .Select(g => new TaskStatGroupDto
+                {
+                    Key = g.Key,
+                    Title = title(g.First()),
+                    Count = g.Count(),
+                    Overdue = g.Count(t => t.IsOverdue),
+                })
+                .OrderByDescending(g => g.Count)
+                .ToList();
+
+        return new TaskStatsDto
+        {
+            Total = tasks.Count,
+            Overdue = tasks.Count(t => t.IsOverdue),
+            Delegated = tasks.Count(t => t.OnBehalfOf is not null),
+            DueToday = tasks.Count(t => !t.IsOverdue && t.DueAt is { } due && due < endOfToday),
+            DueThisWeek = tasks.Count(t => !t.IsOverdue && t.DueAt is { } due && due >= endOfToday && due < endOfWeek),
+            NoDue = tasks.Count(t => t.DueAt is null),
+            ByContour = Group(t => t.DocumentType, t => t.DocumentTypeTitle),
+            ByType = Group(t => t.TaskType, t => TaskTypeTitle(t.TaskType)),
         };
     }
 

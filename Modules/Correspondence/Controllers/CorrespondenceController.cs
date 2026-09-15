@@ -42,6 +42,18 @@ public class CorrespondenceController : ControllerBase
     public async Task<IActionResult> Search([FromBody] LetterFilterRequest filter, CancellationToken ct) =>
         Ok(await _letters.SearchAsync(filter, ct));
 
+    /// <summary>Выгрузка книги регистрации в Excel под тем же фильтром, что и поиск (ЭК-1).</summary>
+    [HttpPost("export")]
+    [RequirePermission(PermissionCode.ViewCorrespondence)]
+    public async Task<IActionResult> Export([FromBody] LetterFilterRequest filter, CancellationToken ct)
+    {
+        var bytes = await _letters.ExportAsync(filter, ct);
+        var stamp = DateTime.Now.ToString("dd.MM.yyyy");
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"Реестр писем {stamp}.xlsx");
+    }
+
     [HttpGet("{id:int}")]
     [RequirePermission(PermissionCode.ViewCorrespondence)]
     public async Task<IActionResult> Get(int id, CancellationToken ct)

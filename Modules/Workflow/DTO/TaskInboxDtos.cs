@@ -64,3 +64,32 @@ public class TaskInboxDto
     /// <summary>Сколько задач получено по замещению.</summary>
     public int Delegated { get; set; }
 }
+
+/// <summary>Группа в статистике задач: контур или тип задачи, со счётчиком и просрочкой.</summary>
+public class TaskStatGroupDto
+{
+    public required string Key { get; set; }
+    public required string Title { get; set; }
+    public int Count { get; set; }
+    public int Overdue { get; set; }
+}
+
+/// <summary>Статистика по моим задачам (ЗД-1): срез открытых задач под разными углами.</summary>
+public class TaskStatsDto
+{
+    public int Total { get; set; }
+    public int Overdue { get; set; }
+    public int Delegated { get; set; }
+
+    /// <summary>Срок сегодня или раньше, но ещё не просрочено по часам.</summary>
+    public int DueToday { get; set; }
+
+    /// <summary>Срок в ближайшие семь дней.</summary>
+    public int DueThisWeek { get; set; }
+
+    /// <summary>Без срока — контроль по дате невозможен.</summary>
+    public int NoDue { get; set; }
+
+    public List<TaskStatGroupDto> ByContour { get; set; } = [];
+    public List<TaskStatGroupDto> ByType { get; set; } = [];
+}
