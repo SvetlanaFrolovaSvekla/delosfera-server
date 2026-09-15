@@ -100,6 +100,7 @@ builder.Services.AddHostedService<VndApprovalTimeoutBackgroundService>();
 // раньше, чем человек снова придёт подписывать (Б-18).
 builder.Services.AddHostedService<delosfera_server.Modules.Signing.Services.CertificateRevocationWorker>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<INotificationSettingService, NotificationSettingService>();
 builder.Services.AddScoped<ITasksService, TasksService>();
 builder.Services.AddScoped<ICoordinationDefaultApproverService, CoordinationDefaultApproverService>();
 builder.Services.AddScoped<IVndActualizationService, VndActualizationService>();
