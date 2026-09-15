@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
+using delosfera_server.Modules.Notifications.DTO.Request;
+using delosfera_server.Modules.Notifications.Models;
+using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Obligations.Models;
 
 namespace delosfera_server.Modules.Obligations.Services;
@@ -35,11 +38,13 @@ public class ObligationService : IObligationService
 
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
+    private readonly INotificationService _notifications;
 
-    public ObligationService(DelosferaDbContext db, IAuditService audit)
+    public ObligationService(DelosferaDbContext db, IAuditService audit, INotificationService notifications)
     {
         _db = db;
         _audit = audit;
+        _notifications = notifications;
     }
 
     public async Task<(int Created, int AutoFulfilled, int Missed)> SyncAsync(CancellationToken ct = default)
@@ -147,12 +152,49 @@ public class ObligationService : IObligationService
         return closed;
     }
 
-    private async Task<int> MarkMissedAsync(DateOnly today, CancellationToken ct) =>
+    private async Task<int> MarkMissedAsync(DateOnly today, CancellationToken ct)
+    {
+        // Сначала собираем, что именно просрочено: уведомить ответственного нужно до
+        // массового обновления, иначе строки уже не отличить от прежних Missed. Переход
+        // Pending→Missed односторонний, поэтому уведомление отправится ровно один раз (ПР-2).
+        var newlyMissed = await _db.ObligationPeriods
+            .Where(p => p.Status == ObligationPeriodStatus.Pending && p.DueDate < today)
+            .Select(p => new
+            {
+                p.DueDate,
+                p.ObligationId,
+                Title = p.Obligation!.Title,
+                Responsible = p.Obligation.ResponsibleUserId,
+            })
+            .ToListAsync(ct);
+
+        if (newlyMissed.Count == 0) return 0;
+
         await _db.ObligationPeriods
             .Where(p => p.Status == ObligationPeriodStatus.Pending && p.DueDate < today)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(p => p.Status, ObligationPeriodStatus.Missed)
                 .SetProperty(p => p.UpdatedAt, DateTime.UtcNow), ct);
+
+        foreach (var m in newlyMissed)
+        {
+            if (m.Responsible is not { } uid) continue;
+
+            await _notifications.CreateAsync(new CreateNotificationRequest
+            {
+                TitleRu = "Обязательство просрочено",
+                BodyRu = $"Регулярное обязательство «{m.Title}» не исполнено в срок {m.DueDate:dd.MM.yyyy}.",
+                Category = NotificationCategory.Task,
+                Severity = NotificationSeverity.Urgent,
+                EntityType = "RecurringObligation",
+                EntityId = m.ObligationId,
+                Url = "/obligations",
+                UserIds = [uid],
+            }, null);
+        }
+
+        return newlyMissed.Count;
+    }
 
     public async Task FulfilAsync(int periodId, string? comment, int currentUserId, CancellationToken ct = default)
     {

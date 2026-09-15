@@ -154,6 +154,13 @@ builder.Services.AddHostedService<delosfera_server.Modules.Obligations.Services.
 builder.Services.AddScoped<
     delosfera_server.Modules.Correspondence.Services.ILetterService,
     delosfera_server.Modules.Correspondence.Services.LetterService>();
+// Напоминания по срокам исполнения писем (КР-1): контролируемые письма не попадают
+// в общий реестр задач, и без отдельной рассылки срок ответа НБКР виден только тому,
+// кто сам открыл книгу регистрации.
+builder.Services.AddScoped<
+    delosfera_server.Modules.Correspondence.Services.ILetterDeadlineNotifier,
+    delosfera_server.Modules.Correspondence.Services.LetterDeadlineNotifier>();
+builder.Services.AddHostedService<delosfera_server.Modules.Correspondence.Services.LetterDeadlineWorker>();
 
 
 // Адреса фронтенда задаются конфигурацией: на стенде это localhost, в банке —
