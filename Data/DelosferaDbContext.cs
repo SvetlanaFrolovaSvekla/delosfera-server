@@ -109,6 +109,8 @@ public class DelosferaDbContext : DbContext
     public DbSet<Remark> Remarks => Set<Remark>();
     public DbSet<WorkflowTask> WorkflowTasks => Set<WorkflowTask>();
     public DbSet<RouteTemplate> RouteTemplates => Set<RouteTemplate>();
+    public DbSet<delosfera_server.Modules.Sz.Models.HrRoutingSettings> HrRoutingSettings =>
+        Set<delosfera_server.Modules.Sz.Models.HrRoutingSettings>();
     public DbSet<RouteTemplateStep> RouteTemplateSteps => Set<RouteTemplateStep>();
     public DbSet<RouteTemplateParticipant> RouteTemplateParticipants => Set<RouteTemplateParticipant>();
 

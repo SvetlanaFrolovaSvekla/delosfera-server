@@ -6,6 +6,13 @@ using delosfera_server.Modules.Meetings.Models;
 namespace delosfera_server.Modules.Sz.DTO;
 
 /// <summary>Создание/правка черновика служебной записки.</summary>
+/// <summary>Настройки маршрутизации кадровых СЗ: кто кадровик УЧР по областям (КСЗ-04..06, КСЗ-12).</summary>
+public class HrRoutingSettingsDto
+{
+    public int? HeadOfficeHrUserId { get; set; }
+    public int? BranchHrUserId { get; set; }
+}
+
 /// <summary>Запрос кадровика УЧР: бюджет и позиция плана по СЗ на обучение (КСЗ-08).</summary>
 public class SzTrainingBudgetRequest
 {
