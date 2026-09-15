@@ -121,6 +121,21 @@ public class SzController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
+    /// <summary>
+    /// Кадровик УЧР проставляет «в бюджете/вне» и позицию плана закупок по СЗ на обучение (КСЗ-08).
+    /// </summary>
+    [HttpPost("{id:int}/training-budget")]
+    [RequirePermission(PermissionCode.ViewAllSz)]
+    public async Task<IActionResult> SetTrainingBudget(int id, [FromBody] SzTrainingBudgetRequest request)
+    {
+        try
+        {
+            return Ok(await _sz.SetTrainingBudgetAsync(id, request.HasBudget, request.PlanItemId, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
     /// <summary>Удалить черновик.</summary>
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)

@@ -219,6 +219,13 @@ public class SzDocument : IAuditableEntity
     public bool? TravelExpenses { get; set; }
 
     /// <summary>
+    /// Позиция плана закупок, к которой привязано обучение (КСЗ-08). Заполняет УЧР
+    /// на своём этапе маршрута вместе с признаком «в бюджете/вне» (HasBudget).
+    /// </summary>
+    public int? PlanItemId { get; set; }
+    public delosfera_server.Modules.Procurement.Models.ProcurementPlanItem? PlanItem { get; set; }
+
+    /// <summary>
     /// Поля видов, добавленных администратором после релиза. Типовые реквизиты из ТЗ
     /// лежат отдельными колонками — по ним идут фильтры и отчёты.
     /// </summary>
