@@ -29,26 +29,17 @@
         <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.11" />
     </ItemGroup>
 
-    <ItemGroup>
-      <Folder Include="Modules\Documents\SZ\" />
-      <Folder Include="Modules\Documents\Procurement\" />
-    </ItemGroup>
-
     <!--
       Шаблон "Лист согласования" (см. Modules\Documents\VND\Services\ApprovalSheetGenerator.cs) —
       встраивается в сборку, чтобы генерация не зависела от файлов на диске сервера в проде.
     -->
-    <ItemGroup>
-      <EmbeddedResource Include="Modules\Documents\VND\Resources\ApprovalSheetTemplate.docx">
-        <LogicalName>ApprovalSheetTemplate.docx</LogicalName>
-      </EmbeddedResource>
-    </ItemGroup>
 
     <!-- Тест-проект лежит внутри дерева веб-проекта — исключаем его из компиляции веба -->
     <ItemGroup>
       <Compile Remove="tests/**/*.cs" />
       <Content Remove="tests/**/*" />
       <EmbeddedResource Remove="tests/**/*" />
+      <EmbeddedResource Include="Modules\Documents\VND\Resources\ApprovalSheetTemplate.docx" LogicalName="ApprovalSheetTemplate.docx" />
       <None Remove="tests/**/*" />
     </ItemGroup>
 
