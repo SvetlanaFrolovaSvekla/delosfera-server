@@ -92,8 +92,12 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
         // (RouteEngine.AdvanceToNextStep), так что отдельный маршрут не реентрантен.
         // IRouteEngine достаём из провайдера: прямая зависимость замкнула бы кольцо,
         // ведь движок держит список обработчиков.
+        // Подписант: по умолчанию записку подписывает тот, кому она адресована. Но если
+        // автор явно назвал отдельного подписанта в форме, подписывает он — иначе поле
+        // «Подписант» в карточке не значило бы ничего. Адресат при этом остаётся адресатом
+        // (получает и исполняет), меняется лишь тот, кто ставит подпись.
         if (routeStatus == RouteInstanceStatus.Approved && !наПодписи
-            && (sz.AddresseeUserId ?? sz.SignerUserId) is { } signer)
+            && (sz.SignerUserId ?? sz.AddresseeUserId) is { } signer)
         {
             var engine = _serviceProvider.GetRequiredService<IRouteEngine>();
             var signing = await engine.InstantiateForSignerAsync(sz.DocumentId, signer);
