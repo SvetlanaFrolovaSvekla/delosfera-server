@@ -50,7 +50,7 @@ public class HelpController : ControllerBase
     private static readonly string[] AllowedKinds =
     [
         HelpBlockKind.Text, HelpBlockKind.Steps, HelpBlockKind.Note,
-        HelpBlockKind.Link, HelpBlockKind.Vnd, HelpBlockKind.Image,
+        HelpBlockKind.Link, HelpBlockKind.Vnd, HelpBlockKind.Image, HelpBlockKind.File,
     ];
 
     private readonly DelosferaDbContext _db;
@@ -158,7 +158,7 @@ public class HelpController : ControllerBase
         _db.HelpArticles.Add(article);
         await _db.SaveChangesAsync(ct);
 
-        await SyncImagesAsync(article, ct);
+        await SyncAttachedFilesAsync(article, ct);
 
         await _audit.LogAsync("HelpArticle", article.Id, "Created", _currentUser.UserId,
             new {article.TitleRu, section = article.Section.ToString(), article.IsPublished});
@@ -190,7 +190,7 @@ public class HelpController : ControllerBase
         article.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
-        await SyncImagesAsync(article, ct);
+        await SyncAttachedFilesAsync(article, ct);
 
         await _audit.LogAsync("HelpArticle", article.Id, "Updated", _currentUser.UserId, new
         {
@@ -218,10 +218,11 @@ public class HelpController : ControllerBase
         return Ok(new {ok = true});
     }
 
-    // ── снимки экрана ────────────────────────────────────────────────────────
+    // ── снимки экрана и приложенные файлы ───────────────────────────────────
 
-    /// <summary>Столько снимков в одной статье. Больше — значит статью надо делить.</summary>
-    private const int MaxImagesPerArticle = 20;
+    /// <summary>Столько вложений (снимков и файлов вместе) в одной статье за один сеанс
+    /// синхронизации. Больше — значит статью надо делить.</summary>
+    private const int MaxAttachmentsPerArticle = 20;
 
     /// <summary>
     /// Загрузить снимок экрана для статьи. Отдаёт идентификатор файла — его
@@ -243,6 +244,34 @@ public class HelpController : ControllerBase
         const long maxBytes = 8 * 1024 * 1024;
         if (file.Length > maxBytes)
             return BadRequest(new {message = "Снимок экрана больше 8 МБ — уменьшите его."});
+
+        var attachment = await _files.SaveAsync(file, _currentUser.UserId, ct);
+        return Ok(new {fileId = attachment.Id, fileName = attachment.OriginalFileName, size = attachment.SizeBytes});
+    }
+
+    /// <summary>
+    /// Загрузить файл для статьи (например, полную инструкцию в .docx) — блок
+    /// "file" отдаёт его читателю кнопками "Скачать" и "Просмотр". Отдаёт
+    /// идентификатор файла — его редактор кладёт в блок.
+    /// </summary>
+    [HttpPost("files")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> UploadFile(IFormFile file, CancellationToken ct)
+    {
+        if (file.Length == 0)
+            return BadRequest(new {message = "Файл пустой."});
+
+        var allowed = new[]
+        {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+            "application/pdf",
+        };
+        if (!allowed.Contains(file.ContentType))
+            return BadRequest(new {message = "Допустимы файлы формата .docx или .pdf."});
+
+        const long maxBytes = 30 * 1024 * 1024;
+        if (file.Length > maxBytes)
+            return BadRequest(new {message = "Файл больше 30 МБ — уменьшите его."});
 
         var attachment = await _files.SaveAsync(file, _currentUser.UserId, ct);
         return Ok(new {fileId = attachment.Id, fileName = attachment.OriginalFileName, size = attachment.SizeBytes});
@@ -276,15 +305,40 @@ public class HelpController : ControllerBase
     }
 
     /// <summary>
+    /// Выдать файл, приложенный к статье блоком "file" (например, .docx с полной
+    /// инструкцией). Проверка доступа та же, что у снимков — привязан ли файл к
+    /// опубликованной статье (см. HelpArticleImages, эта же таблица связей
+    /// используется и для файлов, не только изображений). В отличие от снимка
+    /// отдаётся с настоящим именем файла: и для скачивания, и для просмотра через
+    /// docx-preview на клиенте (см. useDocxPreview, fetchFileBlob) нужно оригинальное
+    /// имя и content-type документа, а не изображения.
+    /// </summary>
+    [HttpGet("files/{fileId:int}")]
+    public async Task<IActionResult> GetFile(int fileId, CancellationToken ct)
+    {
+        var mayEdit = _currentUser.HasPermission(PermissionCode.ManageSystemSettings);
+
+        var allowed = await _db.HelpArticleImages
+            .AnyAsync(i => i.FileId == fileId && (mayEdit || i.Article!.IsPublished), ct);
+
+        if (!allowed) return NotFound();
+
+        var (stream, contentType, fileName) = await _files.DownloadAsync(fileId, ct);
+        return File(stream, contentType, fileName);
+    }
+
+    /// <summary>
     /// Приводит список привязанных файлов в соответствие телу статьи: добавляет
-    /// появившиеся, убирает исчезнувшие.
+    /// появившиеся, убирает исчезнувшие. Общая для блоков "image" и "file" — обоим
+    /// нужна одна и та же запись в HelpArticleImages, чтобы GetImage/GetFile могли
+    /// проверить доступ одним запросом, не разбирая JSON тела статьи.
     ///
-    /// Без уборки удалённый из текста снимок остался бы доступен по прямой
+    /// Без уборки удалённый из текста снимок или файл остался бы доступен по прямой
     /// ссылке — а его могли удалить именно потому, что он показывал лишнее.
     /// </summary>
-    private async Task SyncImagesAsync(HelpArticle article, CancellationToken ct)
+    private async Task SyncAttachedFilesAsync(HelpArticle article, CancellationToken ct)
     {
-        var referenced = ExtractImageIds(article.BodyJson);
+        var referenced = ExtractAttachedFileIds(article.BodyJson);
 
         var existing = await _db.HelpArticleImages
             .Where(i => i.ArticleId == article.Id)
@@ -295,7 +349,7 @@ public class HelpController : ControllerBase
 
         var known = existing.Select(i => i.FileId).ToHashSet();
 
-        foreach (var fileId in referenced.Where(id => !known.Contains(id)).Take(MaxImagesPerArticle))
+        foreach (var fileId in referenced.Where(id => !known.Contains(id)).Take(MaxAttachmentsPerArticle))
         {
             _db.HelpArticleImages.Add(new HelpArticleImage
             {
@@ -310,8 +364,8 @@ public class HelpController : ControllerBase
             await _db.SaveChangesAsync(ct);
     }
 
-    /// <summary>Идентификаторы файлов из блоков изображения в теле статьи.</summary>
-    private static HashSet<int> ExtractImageIds(string bodyJson)
+    /// <summary>Идентификаторы файлов из блоков изображения и файла в теле статьи.</summary>
+    private static HashSet<int> ExtractAttachedFileIds(string bodyJson)
     {
         var ids = new HashSet<int>();
 
@@ -324,11 +378,12 @@ public class HelpController : ControllerBase
             {
                 if (block.ValueKind != JsonValueKind.Object) continue;
 
-                if (!block.TryGetProperty("kind", out var kind)
-                    || kind.GetString() != HelpBlockKind.Image)
-                {
+                if (!block.TryGetProperty("kind", out var kind))
                     continue;
-                }
+
+                var kindValue = kind.GetString();
+                if (kindValue != HelpBlockKind.Image && kindValue != HelpBlockKind.File)
+                    continue;
 
                 if (block.TryGetProperty("fileId", out var fileId)
                     && fileId.TryGetInt32(out var value)

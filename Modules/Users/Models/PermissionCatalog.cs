@@ -357,6 +357,20 @@ public static class PermissionCatalog
             TitleRu = "Выносить служебные записки на коллегиальный орган",
             TitleEn = "Submit internal memos to a collegial body",
             TitleKg = "Кызматтык каттарды коллегиалдуу органга чыгаруу"
+        },
+
+        // Актуализация ВНД — доп. права страницы планирования
+        [PermissionCode.ManageVndActualizationMailing] = new PermissionDescription
+        {
+            TitleRu = "Настраивать рассылки плана актуализации ВНД",
+            TitleEn = "Configure VND actualization plan mailings",
+            TitleKg = "ВНДди актуалдаштыруу планы боюнча жөнөтүүлөрдү тууралоо"
+        },
+        [PermissionCode.ViewVndActualizationOverdueBadge] = new PermissionDescription
+        {
+            TitleRu = "Видеть счётчик просроченных и критичных по сроку ВНД на сайдбаре",
+            TitleEn = "See the overdue/critical VND actualization counter in the sidebar",
+            TitleKg = "Панелде мөөнөтү өткөн жана сын мезгилдеги ВНДлердин санагын көрүү"
         }
     };
     

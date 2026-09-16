@@ -111,4 +111,11 @@ public static class HelpBlockKind
     /// с изображением.
     /// </summary>
     public const string Image = "image";
+
+    /// <summary>
+    /// Приложенный файл (например, .docx или .pdf) — карточка с именем, кнопкой
+    /// скачивания и просмотром. В отличие от Image, не картинка на странице, а
+    /// отдельный документ, который читают вне статьи.
+    /// </summary>
+    public const string File = "file";
 }
