@@ -1420,7 +1420,7 @@ public class VndApprovalService : IVndApprovalService
     /// Вызывать сразу после назначения process.Status = FinalHold, до SaveChangesAsync.</summary>
     private async Task ResetFinalHoldDecisionsAsync(VndApprovalProcess process)
     {
-        const string comment = "Согласовано автоматически — вы уже согласовали эту редакцию без замечаний ранее";
+        const string comment = "Согласовано автоматически";
         var now = DateTime.UtcNow;
 
         // Этапы, у которых сейчас реально начинается новый круг финальной выдержки (т.е. их
