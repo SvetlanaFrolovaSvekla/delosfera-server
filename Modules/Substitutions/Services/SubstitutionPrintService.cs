@@ -75,7 +75,7 @@ public class SubstitutionPrintService : ISubstitutionPrintService
     public byte[] Liability(SubstitutionRequest r)
     {
         var b = new Docx();
-        b.P("ДОГОВОР № МО", bold: true, center: true);
+        b.P($"ДОГОВОР № {Dash(r.RegNumber)}", bold: true, center: true);
         b.P("о полной индивидуальной материальной ответственности", bold: true, center: true);
         b.P($"{Dash(r.SubstituteBranch)}                                        {D(r.StartsOn)}");
         b.P("");
