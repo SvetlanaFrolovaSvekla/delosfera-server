@@ -884,7 +884,7 @@ public class VndActualizationService : IVndActualizationService
                 BodyRu = text.BodyRu,
                 BodyEn = text.BodyEn,
                 BodyKg = text.BodyKg,
-                Category = NotificationCategory.Approval,
+                Category = NotificationCategory.Vnd,
                 Severity = text.Severity,
                 EntityType = "Vnd",
                 EntityId = vndId,

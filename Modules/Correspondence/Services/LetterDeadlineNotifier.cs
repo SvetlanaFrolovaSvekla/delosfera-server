@@ -112,7 +112,7 @@ public class LetterDeadlineNotifier : ILetterDeadlineNotifier
             {
                 TitleRu = title,
                 BodyRu = body,
-                Category = NotificationCategory.Task,
+                Category = NotificationCategory.Other,
                 Severity = severity,
                 EntityType = Entity,
                 EntityId = letter.Id,

@@ -115,7 +115,7 @@ public class SzDeadlineNotifier : ISzDeadlineNotifier
             {
                 TitleRu = title,
                 BodyRu = body + $" Текст поручения: {assignment.Text}",
-                Category = NotificationCategory.Task,
+                Category = NotificationCategory.Sz,
                 Severity = severity,
                 EntityType = Entity,
                 EntityId = assignment.Id,

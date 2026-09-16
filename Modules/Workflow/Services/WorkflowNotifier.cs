@@ -205,7 +205,7 @@ public class WorkflowNotifier : IWorkflowNotifier
             {
                 TitleRu = title,
                 BodyRu = body,
-                Category = NotificationCategory.Approval,
+                Category = CategoryFor(document.Type),
                 Severity = severity,
                 EntityType = document.Type.ToString(),
                 EntityId = document.Id,
@@ -252,6 +252,17 @@ public class WorkflowNotifier : IWorkflowNotifier
         DocumentType.Procurement => "Заявка на закупку",
         DocumentType.Contract => "Договор",
         _ => "Документ",
+    };
+
+    /// <summary>Категория уведомления в общем списке (см. NotificationCategory) - по типу
+    /// документа, а не одна на все контуры, иначе ВНД/СЗ/закупки было бы не отличить друг
+    /// от друга во вкладках уведомлений.</summary>
+    private static NotificationCategory CategoryFor(DocumentType type) => type switch
+    {
+        DocumentType.Vnd or DocumentType.Tid => NotificationCategory.Vnd,
+        DocumentType.Sz => NotificationCategory.Sz,
+        DocumentType.Procurement or DocumentType.Contract => NotificationCategory.Procurement,
+        _ => NotificationCategory.Other,
     };
 
     /// <summary>

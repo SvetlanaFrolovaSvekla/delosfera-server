@@ -245,7 +245,7 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
             TitleKg = "Кызматтык кат чечимиңизди күтүүдө",
             BodyRu = $"«{sz.Document!.Title}» согласована. Вынесите решение по существу.",
             BodyKg = $"«{sz.Document.Title}» макулдашылды. Маңызы боюнча чечим чыгарыңыз.",
-            Category = NotificationCategory.Approval,
+            Category = NotificationCategory.Sz,
             EntityType = "Sz",
             EntityId = sz.Id,
             Url = $"/sz/{sz.Id}",

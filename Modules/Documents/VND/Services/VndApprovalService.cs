@@ -276,7 +276,7 @@ public class VndApprovalService : IVndApprovalService
         if (pendingApproverIds.Length > 0)
             await NotifyAsync(
                 VndApprovalNotificationMessages.TaskPrimaryApproval(lastRedaction.Code, vnd.TitleRu),
-                NotificationCategory.Approval, vndId, currentUserId, pendingApproverIds);
+                NotificationCategory.Vnd, vndId, currentUserId, pendingApproverIds);
 
         // --- Уведомление инициатору (и ответственному за актуализацию, если согласование запущено
         // в рамках открытого цикла актуализации): редакция отправлена на согласование.
@@ -293,7 +293,7 @@ public class VndApprovalService : IVndApprovalService
 
         await NotifyAsync(
             VndApprovalNotificationMessages.SentToApproval(lastRedaction.Code, vnd.TitleRu),
-            NotificationCategory.Approval, vndId, currentUserId,
+            NotificationCategory.Vnd, vndId, currentUserId,
             sentToApprovalRecipients.ToArray());
 
         // --- Если абсолютно все этапы оказались автоматически согласованы инициатором
@@ -546,7 +546,7 @@ public class VndApprovalService : IVndApprovalService
         };
 
         await NotifyAsync(
-            decisionNotice, NotificationCategory.Approval, vndId, currentUserId, process.InitiatorUserId);
+            decisionNotice, NotificationCategory.Vnd, vndId, currentUserId, process.InitiatorUserId);
 
         return await LoadResponseAsync(process.Id);
     }
@@ -629,7 +629,7 @@ public class VndApprovalService : IVndApprovalService
 
         await NotifyAsync(
             VndApprovalNotificationMessages.Cancelled(redaction.Code, vnd.TitleRu),
-            NotificationCategory.Approval, vndId, currentUserId, approverIds);
+            NotificationCategory.Vnd, vndId, currentUserId, approverIds);
 
         // Отзывает не сам инициатор, а кто-то другой (главный редактор с правом
         // CancelAnyVndApproval, см. CancelAsync выше) - инициатору отдельное уведомление:
@@ -639,7 +639,7 @@ public class VndApprovalService : IVndApprovalService
         if (process.InitiatorUserId != currentUserId)
             await NotifyAsync(
                 VndApprovalNotificationMessages.CancelledByOther(actorName, redaction.Code, vnd.TitleRu),
-                NotificationCategory.Approval, vndId, currentUserId, process.InitiatorUserId);
+                NotificationCategory.Vnd, vndId, currentUserId, process.InitiatorUserId);
     }
 
     public async Task<ApprovalProcessResponse> ResubmitAfterRevisionAsync(
@@ -830,7 +830,7 @@ public class VndApprovalService : IVndApprovalService
 
             await NotifyAsync(
                 VndApprovalNotificationMessages.TaskRepeatApproval(redaction.Code, process.Vnd!.TitleRu),
-                NotificationCategory.Approval, vndId, currentUserId, repeatApproverIds);
+                NotificationCategory.Vnd, vndId, currentUserId, repeatApproverIds);
 
             var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
             if (repeatStages.Count > 0 && repeatStages.All(s =>
@@ -860,11 +860,11 @@ public class VndApprovalService : IVndApprovalService
 
             await NotifyAsync(
                 VndApprovalNotificationMessages.FinalHoldForApprovers(redaction.Code, process.Vnd!.TitleRu),
-                NotificationCategory.Approval, vndId, currentUserId, stageApproverIds);
+                NotificationCategory.Vnd, vndId, currentUserId, stageApproverIds);
 
             await NotifyAsync(
                 VndApprovalNotificationMessages.SentToFinalHold(redaction.Code),
-                NotificationCategory.Approval, vndId, currentUserId, currentUserId);
+                NotificationCategory.Vnd, vndId, currentUserId, currentUserId);
 
             if (process.Stages.All(s =>
                     s.FinalHoldDecision is not null && s.FinalHoldDecision != ApprovalStageDecision.Pending))
@@ -1116,7 +1116,7 @@ public class VndApprovalService : IVndApprovalService
 
             await NotifyAsync(
                 VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
-                NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+                NotificationCategory.Vnd, process.VndId, null, process.InitiatorUserId);
         }
 
         if (save) await _db.SaveChangesAsync();
@@ -1139,7 +1139,7 @@ public class VndApprovalService : IVndApprovalService
 
             await NotifyAsync(
                 VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
-                NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+                NotificationCategory.Vnd, process.VndId, null, process.InitiatorUserId);
 
             if (save) await _db.SaveChangesAsync();
             return;
@@ -1164,12 +1164,12 @@ public class VndApprovalService : IVndApprovalService
         // --- Всем согласующим: документ ушёл на финальную выдержку
         await NotifyAsync(
             VndApprovalNotificationMessages.FinalHoldForApprovers(process.Redaction!.Code, process.Vnd!.TitleRu),
-            NotificationCategory.Approval, process.VndId, null, stageApproverIds);
+            NotificationCategory.Vnd, process.VndId, null, stageApproverIds);
 
         // --- Инициатору: его редакция отправлена на финальную выдержку
         await NotifyAsync(
             VndApprovalNotificationMessages.SentToFinalHold(process.Redaction!.Code),
-            NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+            NotificationCategory.Vnd, process.VndId, null, process.InitiatorUserId);
 
         // Если самообход инициатора уже закрыл все решения финальной выдержки (например,
         // маршрут состоит из одного этапа, и на нём согласующий - сам инициатор) - сразу
@@ -1193,7 +1193,7 @@ public class VndApprovalService : IVndApprovalService
 
         await NotifyAsync(
             VndApprovalNotificationMessages.RevisionNeeded(process.Redaction!.Code, process.Vnd!.TitleRu),
-            NotificationCategory.Approval, process.VndId, null, process.InitiatorUserId);
+            NotificationCategory.Vnd, process.VndId, null, process.InitiatorUserId);
     }
 
     /// <summary>Отклонение редакции одним из согласующих - жёсткое немедленное завершение
@@ -1247,7 +1247,7 @@ public class VndApprovalService : IVndApprovalService
             await NotifyAsync(
                 VndApprovalNotificationMessages.ProcessRejectedTaskCancelled(
                     rejecterName, redaction.Code, vnd.TitleRu, comment),
-                NotificationCategory.Approval, process.VndId, rejectedByUserId, pendingApproverIds);
+                NotificationCategory.Vnd, process.VndId, rejectedByUserId, pendingApproverIds);
     }
 
     private async Task FinalizeApprovalAsync(VndApprovalProcess process, bool afterRevision)
@@ -1310,7 +1310,7 @@ public class VndApprovalService : IVndApprovalService
             consolidationRecipients.Add(vnd.ActualizationResponsibleUserId.Value);
 
         await NotifyAsync(
-            notice, NotificationCategory.Approval, process.VndId, null, consolidationRecipients.ToArray());
+            notice, NotificationCategory.Vnd, process.VndId, null, consolidationRecipients.ToArray());
     }
 
     /// <summary>Формирует и сохраняет Лист согласования редакции (см. ApprovalSheetGenerator),

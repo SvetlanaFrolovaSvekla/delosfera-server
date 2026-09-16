@@ -184,7 +184,7 @@ public class ObligationService : IObligationService
             {
                 TitleRu = "Обязательство просрочено",
                 BodyRu = $"Регулярное обязательство «{m.Title}» не исполнено в срок {m.DueDate:dd.MM.yyyy}.",
-                Category = NotificationCategory.Task,
+                Category = NotificationCategory.Other,
                 Severity = NotificationSeverity.Urgent,
                 EntityType = "RecurringObligation",
                 EntityId = m.ObligationId,

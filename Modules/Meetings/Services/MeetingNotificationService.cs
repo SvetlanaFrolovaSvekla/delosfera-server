@@ -98,7 +98,7 @@ public class MeetingNotificationService : IMeetingNotificationService
         {
             TitleRu = subject,
             BodyRu = body,
-            Category = NotificationCategory.Task,
+            Category = NotificationCategory.Other,
             Severity = NotificationSeverity.Info,
             EntityType = nameof(Meeting),
             EntityId = meeting.Id,
@@ -169,7 +169,7 @@ public class MeetingNotificationService : IMeetingNotificationService
             {
                 TitleRu = $"Исполнение Протокола {MeetingTitles.BodyGenitive(meeting.Body)}",
                 BodyRu = ReminderBody(stage.Value, meeting, item, due),
-                Category = NotificationCategory.Task,
+                Category = NotificationCategory.Other,
                 Severity = stage == ReminderStage.Overdue
                     ? NotificationSeverity.Urgent
                     : NotificationSeverity.Warning,

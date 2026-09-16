@@ -13,6 +13,9 @@ public class NotificationCategoryDescription : ITranslatableEntity
 
 public static class NotificationCategoryCatalog
 {
+    // Порядок словаря - это порядок вкладок категорий на фронте (см. GetAll ниже).
+    // Approval и Task сюда сознательно не входят: своей вкладки у них больше нет,
+    // их уведомления теперь идут по ВНД/СЗ/закупкам либо в "Разное" (см. NotificationCategory).
     public static readonly Dictionary<NotificationCategory, NotificationCategoryDescription> Descriptions = new()
     {
         [NotificationCategory.System] = new NotificationCategoryDescription
@@ -23,13 +26,13 @@ public static class NotificationCategoryCatalog
         {
             TitleRu = "ВНД", TitleEn = "VND", TitleKg = "ВНД"
         },
-        [NotificationCategory.Approval] = new NotificationCategoryDescription
+        [NotificationCategory.Sz] = new NotificationCategoryDescription
         {
-            TitleRu = "Согласования", TitleEn = "Approvals", TitleKg = "Макулдашуулар"
+            TitleRu = "СЗ", TitleEn = "Memos", TitleKg = "Кызматтык каттар"
         },
-        [NotificationCategory.Task] = new NotificationCategoryDescription
+        [NotificationCategory.Procurement] = new NotificationCategoryDescription
         {
-            TitleRu = "Задачи", TitleEn = "Tasks", TitleKg = "Тапшырмалар"
+            TitleRu = "Закупки", TitleEn = "Procurement", TitleKg = "Сатып алуулар"
         },
         [NotificationCategory.Other] = new NotificationCategoryDescription
         {
