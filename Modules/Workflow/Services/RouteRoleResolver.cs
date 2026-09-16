@@ -34,6 +34,12 @@ public static class RouteRoles
     /// <summary>Куратор указанного подразделения: «unit-curator:44».</summary>
     public const string UnitCuratorPrefix = "unit-curator:";
 
+    /// <summary>
+    /// Кадровик УЧР по области автора: филиальная сеть или Головной офис (КСЗ-04..06).
+    /// Кто именно — из настроек маршрутизации кадровых СЗ.
+    /// </summary>
+    public const string HrOfficer = "hr-officer";
+
     /// <summary>Человеческие названия для экрана настройки.</summary>
     public static string Title(string roleRef) => roleRef switch
     {
@@ -44,6 +50,7 @@ public static class RouteRoles
         BoardChairman => "Председатель Правления",
         _ when roleRef.StartsWith(UnitHeadPrefix) => "Руководитель подразделения",
         _ when roleRef.StartsWith(UnitCuratorPrefix) => "Куратор подразделения",
+        HrOfficer => "Кадровик УЧР",
         _ => roleRef,
     };
 }
@@ -106,7 +113,43 @@ public class RouteRoleResolver : IRouteRoleResolver
         if (Unit(roleRef, RouteRoles.UnitCuratorPrefix) is { } curatorUnit)
             return await CuratorOfAsync(curatorUnit, ct);
 
+        if (roleRef == RouteRoles.HrOfficer)
+            return await HrOfficerAsync(context.AuthorUnitId, ct);
+
         return null;
+    }
+
+    /// <summary>
+    /// Кадровик УЧР для автора: если подразделение автора относится к филиальной сети —
+    /// УЧР по филиалам, иначе — УЧР по Головному офису. Принадлежность к филиалу
+    /// определяется подъёмом по дереву до узла-филиала.
+    /// </summary>
+    private async Task<int?> HrOfficerAsync(int? authorUnitId, CancellationToken ct)
+    {
+        var settings = await _db.Set<Sz.Models.HrRoutingSettings>().AsNoTracking().FirstOrDefaultAsync(ct);
+        if (settings is null) return null;
+
+        var isBranch = await IsBranchUnitAsync(authorUnitId, ct);
+        return isBranch ? settings.BranchHrUserId : settings.HeadOfficeHrUserId;
+    }
+
+    /// <summary>
+    /// Относится ли подразделение к филиальной сети — есть ли по пути вверх узел-филиал.
+    /// Филиалы в оргструктуре — узлы с «Филиал» в названии (отдельного признака нет).
+    /// </summary>
+    private async Task<bool> IsBranchUnitAsync(int? unitId, CancellationToken ct)
+    {
+        for (var guard = 0; unitId is { } id && guard < 20; guard++)
+        {
+            var unit = await _db.OrganizationUnits.AsNoTracking()
+                .Where(u => u.Id == id)
+                .Select(u => new { u.TitleRu, u.ParentId })
+                .FirstOrDefaultAsync(ct);
+            if (unit is null) break;
+            if (unit.TitleRu.Contains("Филиал", StringComparison.OrdinalIgnoreCase)) return true;
+            unitId = unit.ParentId;
+        }
+        return false;
     }
 
     public string Explain(string roleRef) => roleRef switch
@@ -125,6 +168,8 @@ public class RouteRoleResolver : IRouteRoleResolver
             "не заполнен руководитель подразделения",
         _ when roleRef.StartsWith(RouteRoles.UnitCuratorPrefix) =>
             "не заполнен куратор подразделения",
+        RouteRoles.HrOfficer =>
+            "не назначен кадровик УЧР для этой области — заполните настройки маршрутизации кадровых СЗ",
         _ => $"неизвестная роль «{roleRef}»",
     };
 

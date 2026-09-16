@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Common.Services.Authorization;
 
 namespace delosfera_server.Common.Services;
 
@@ -43,6 +44,15 @@ public class WarmupWorker : BackgroundService
             _logger.LogInformation(
                 "Прогрев доступа к данным занял {Ms} мс",
                 (int)(DateTime.UtcNow - started).TotalMilliseconds);
+
+            // Прогрев данных снимает только цену первого SQL. Открытие хаба выбора
+            // человека (GET /api/users/lookup) платило ~2.5 с и после него: львиную
+            // долю занимает разовая работа HTTP-конвейера — JIT контура авторизации,
+            // контроллера, сортировки со сравнением по ru-RU и сериализации ~1000
+            // объектов в JSON. Эту работу база не греет. Поэтому дергаем сам эндпоинт
+            // изнутри процесса: разовая компиляция достаётся фоновой задаче, а не
+            // первому сотруднику, открывшему форму после выкладки.
+            await WarmHttpAsync(scope.ServiceProvider, db, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -53,6 +63,63 @@ public class WarmupWorker : BackgroundService
             // Прогрев — удобство, а не условие работы. Если он не удался,
             // первый запрос просто окажется медленным, как раньше.
             _logger.LogWarning(ex, "Прогрев доступа к данным не удался");
+        }
+    }
+
+    /// <summary>
+    /// Разовый холостой вызов боевого HTTP-эндпоинта изнутри процесса. Kestrel к
+    /// моменту вызова уже слушает (прогрев данных до этого занял секунды), но на
+    /// всякий случай — короткий цикл повторов на отказ соединения. Токен выпускаем
+    /// первому активному пользователю: эндпоинт требует лишь [Authorize], без права.
+    /// </summary>
+    private async Task WarmHttpAsync(IServiceProvider sp, DelosferaDbContext db, CancellationToken ct)
+    {
+        var started = DateTime.UtcNow;
+        try
+        {
+            var user = await db.Users.AsNoTracking()
+                .Where(u => u.IsActive && u.BlockedAt == null && u.Email != null)
+                .OrderBy(u => u.Id)
+                .FirstOrDefaultAsync(ct);
+            if (user is null) return; // некому выпускать токен — греть нечего
+
+            var jwt = sp.GetRequiredService<IJwtTokenService>();
+            var config = sp.GetRequiredService<IConfiguration>();
+            var token = jwt.GenerateAccessToken(user, new List<int>());
+
+            // Внутри контейнера сервер слушает 8080 (EXPOSE 8080). Переопределяемо
+            // конфигом на случай иной привязки.
+            var baseUrl = config["SelfWarm:BaseUrl"] ?? "http://localhost:8080";
+
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+            for (var attempt = 1; attempt <= 10; attempt++)
+            {
+                try
+                {
+                    var resp = await http.GetAsync($"{baseUrl}/api/users/lookup", ct);
+                    // Читаем тело целиком — так греется и сериализация, и запись в поток.
+                    await resp.Content.ReadAsByteArrayAsync(ct);
+                    _logger.LogInformation(
+                        "Прогрев HTTP /api/users/lookup: {Status} за {Ms} мс",
+                        (int)resp.StatusCode, (int)(DateTime.UtcNow - started).TotalMilliseconds);
+                    return;
+                }
+                catch (HttpRequestException) when (attempt < 10)
+                {
+                    // Kestrel ещё поднимается — подождём и повторим.
+                    await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Прогрев HTTP /api/users/lookup не удался");
         }
     }
 
@@ -119,6 +186,36 @@ public class WarmupWorker : BackgroundService
             .Include(s => s.Participants)
             .OrderByDescending(s => s.Id)
             .Take(20)
+            .ToListAsync(ct);
+
+        // Список для выбора человека (GET /api/users/lookup) открывается в каждой форме
+        // с пикером, а его запрос отличается формой от прогретого выше (полный список с
+        // проекцией должности и подразделения, без ролей). Без прогрева именно этой формы
+        // первое открытие любой формы с выбором человека платило ~2.5 с на компиляцию плана
+        // и чтение страниц; греем точную форму — и флаги старшинства из тех же таблиц.
+        await db.Users
+            .AsNoTracking()
+            .Where(u => u.IsActive && u.BlockedAt == null)
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName,
+                position = u.Position != null ? u.Position.TitleRu : null,
+                orgUnit = u.OrgUnit != null ? u.OrgUnit.TitleRu : null,
+                u.OrgUnitId,
+            })
+            .ToListAsync(ct);
+
+        await db.BodyMembers
+            .AsNoTracking()
+            .Where(m => m.Body == delosfera_server.Modules.Meetings.Models.MeetingBody.Board)
+            .Select(m => new { m.UserId, m.Role })
+            .ToListAsync(ct);
+
+        await db.OrganizationUnits
+            .AsNoTracking()
+            .Where(o => o.HeadUserId != null)
+            .Select(o => o.HeadUserId)
             .ToListAsync(ct);
     }
 }

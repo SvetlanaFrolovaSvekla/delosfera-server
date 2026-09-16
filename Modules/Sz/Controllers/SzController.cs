@@ -121,6 +121,21 @@ public class SzController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
+    /// <summary>
+    /// Кадровик УЧР проставляет «в бюджете/вне» и позицию плана закупок по СЗ на обучение (КСЗ-08).
+    /// </summary>
+    [HttpPost("{id:int}/training-budget")]
+    [RequirePermission(PermissionCode.ViewAllSz)]
+    public async Task<IActionResult> SetTrainingBudget(int id, [FromBody] SzTrainingBudgetRequest request)
+    {
+        try
+        {
+            return Ok(await _sz.SetTrainingBudgetAsync(id, request.HasBudget, request.PlanItemId, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
     /// <summary>Удалить черновик.</summary>
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
@@ -323,6 +338,42 @@ public class SzController : ControllerBase
     /// прямо в карточке, и запрашивать форму на каждое переключение значило бы
     /// подвешивать интерфейс на сеть там, где данные уже в памяти.
     /// </summary>
+    /// <summary>Кто кадровик УЧР по областям (ГО / филиалы) для маршрута кадровых СЗ (КСЗ-12).</summary>
+    [HttpGet("hr-routing")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> GetHrRouting()
+    {
+        var s = await _db.HrRoutingSettings.AsNoTracking().FirstOrDefaultAsync();
+        return Ok(new HrRoutingSettingsDto
+        {
+            HeadOfficeHrUserId = s?.HeadOfficeHrUserId,
+            BranchHrUserId = s?.BranchHrUserId,
+        });
+    }
+
+    /// <summary>Назначить кадровиков УЧР по областям. Ведёт УЧР без участия разработчика (КСЗ-12).</summary>
+    [HttpPut("hr-routing")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> SetHrRouting([FromBody] HrRoutingSettingsDto req)
+    {
+        var now = DateTime.UtcNow;
+        var s = await _db.HrRoutingSettings.FirstOrDefaultAsync();
+        if (s is null)
+        {
+            s = new Models.HrRoutingSettings { CreatedAt = now };
+            _db.HrRoutingSettings.Add(s);
+        }
+        s.HeadOfficeHrUserId = req.HeadOfficeHrUserId;
+        s.BranchHrUserId = req.BranchHrUserId;
+        s.UpdatedAt = now;
+        await _db.SaveChangesAsync();
+        return Ok(new HrRoutingSettingsDto
+        {
+            HeadOfficeHrUserId = s.HeadOfficeHrUserId,
+            BranchHrUserId = s.BranchHrUserId,
+        });
+    }
+
     [HttpGet("hr-forms")]
     public IActionResult HrForms() =>
         Ok(Services.HrFormSchema.Forms.ToDictionary(

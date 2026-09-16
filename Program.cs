@@ -154,6 +154,14 @@ builder.Services.AddHostedService<delosfera_server.Modules.Obligations.Services.
 builder.Services.AddScoped<
     delosfera_server.Modules.Correspondence.Services.ILetterService,
     delosfera_server.Modules.Correspondence.Services.LetterService>();
+
+// Заявки на замещение (КСЗ-В9): комиссия приёма-передачи, УЧР исполняет приказом.
+builder.Services.AddScoped<
+    delosfera_server.Modules.Substitutions.Services.ISubstitutionService,
+    delosfera_server.Modules.Substitutions.Services.SubstitutionService>();
+builder.Services.AddSingleton<
+    delosfera_server.Modules.Substitutions.Services.ISubstitutionPrintService,
+    delosfera_server.Modules.Substitutions.Services.SubstitutionPrintService>();
 // Напоминания по срокам исполнения писем (КР-1): контролируемые письма не попадают
 // в общий реестр задач, и без отдельной рассылки срок ответа НБКР виден только тому,
 // кто сам открыл книгу регистрации.

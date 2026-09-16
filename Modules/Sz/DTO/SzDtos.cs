@@ -6,6 +6,20 @@ using delosfera_server.Modules.Meetings.Models;
 namespace delosfera_server.Modules.Sz.DTO;
 
 /// <summary>Создание/правка черновика служебной записки.</summary>
+/// <summary>Настройки маршрутизации кадровых СЗ: кто кадровик УЧР по областям (КСЗ-04..06, КСЗ-12).</summary>
+public class HrRoutingSettingsDto
+{
+    public int? HeadOfficeHrUserId { get; set; }
+    public int? BranchHrUserId { get; set; }
+}
+
+/// <summary>Запрос кадровика УЧР: бюджет и позиция плана по СЗ на обучение (КСЗ-08).</summary>
+public class SzTrainingBudgetRequest
+{
+    public bool? HasBudget { get; set; }
+    public int? PlanItemId { get; set; }
+}
+
 public class SzSaveRequest
 {
     public required string Title { get; set; }
@@ -42,6 +56,9 @@ public class SzSaveRequest
 
     // Поля СЗ на обучение
     public bool? TravelExpenses { get; set; }
+
+    /// <summary>Позиция плана закупок для обучения (КСЗ-08). Заполняет УЧР.</summary>
+    public int? PlanItemId { get; set; }
 
     /// <summary>Поля видов, добавленных администратором после релиза.</summary>
     public JsonElement? ExtraFields { get; set; }
@@ -201,6 +218,12 @@ public class SzDetails : SzListItem
     public bool? HasBudget { get; set; }
     public decimal? Amount { get; set; }
     public bool? TravelExpenses { get; set; }
+
+    /// <summary>Привязка обучения к позиции плана закупок (КСЗ-08).</summary>
+    public int? PlanItemId { get; set; }
+
+    /// <summary>«Код — предмет» позиции плана для показа в карточке.</summary>
+    public string? PlanItemLabel { get; set; }
 
     public JsonElement? ExtraFields { get; set; }
 

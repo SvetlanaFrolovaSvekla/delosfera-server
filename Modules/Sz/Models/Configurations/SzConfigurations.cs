@@ -84,6 +84,11 @@ public class SzDocumentConfiguration : IEntityTypeConfiguration<SzDocument>
         b.HasOne(x => x.TransferUnit).WithMany()
             .HasForeignKey(x => x.TransferUnitId).OnDelete(DeleteBehavior.Restrict);
 
+        // Обучение (КСЗ-08): привязка к позиции плана закупок. Restrict — удаление
+        // позиции плана не должно тянуть за собой записку.
+        b.HasOne(x => x.PlanItem).WithMany()
+            .HasForeignKey(x => x.PlanItemId).OnDelete(DeleteBehavior.Restrict);
+
         b.HasOne(x => x.SignerUser).WithMany()
             .HasForeignKey(x => x.SignerUserId).OnDelete(DeleteBehavior.Restrict);
 

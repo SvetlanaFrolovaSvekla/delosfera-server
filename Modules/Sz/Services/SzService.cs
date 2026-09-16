@@ -32,6 +32,12 @@ public interface ISzService
     Task<List<SzDuplicateDto>> FindDuplicatesAsync(int kindId, string? title, int authorId, int? excludeId);
     Task<SzDetails> CreateDraftAsync(SzSaveRequest request, int authorId);
     Task<SzDetails> UpdateDraftAsync(int id, SzSaveRequest request, int actorUserId);
+
+    /// <summary>
+    /// Проставить признак «в бюджете/вне» и позицию плана закупок по СЗ на обучение (КСЗ-08).
+    /// Выполняет кадровик УЧР на своём этапе маршрута — пока записка не завершена.
+    /// </summary>
+    Task<SzDetails> SetTrainingBudgetAsync(int id, bool? hasBudget, int? planItemId, int actorUserId);
     Task DeleteDraftAsync(int id, int actorUserId);
 
     /// <summary>Отправить записку: черновик уходит на регистрацию делопроизводством.</summary>
@@ -519,6 +525,32 @@ public class SzService : ISzService
         await _audit.LogAsync("Sz", sz.Id, "Updated", actorUserId);
 
         return (await GetAsync(sz.Id))!;
+    }
+
+    public async Task<SzDetails> SetTrainingBudgetAsync(int id, bool? hasBudget, int? planItemId, int actorUserId)
+    {
+        var sz = await _db.SzDocuments.Include(x => x.Document)
+            .FirstOrDefaultAsync(x => x.Id == id)
+            ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        // Бюджет и план проставляются, пока записка в работе: у завершённой их менять
+        // уже нечем — исполнение состоялось.
+        if (sz.Document!.StatusCode is SzStatus.Executed or SzStatus.Rejected
+            or SzStatus.Withdrawn or SzStatus.Archived)
+            throw new InvalidOperationException("Записка завершена — бюджет и позицию плана изменять нельзя");
+
+        if (planItemId is { } pid
+            && !await _db.Set<delosfera_server.Modules.Procurement.Models.ProcurementPlanItem>()
+                .AnyAsync(p => p.Id == pid))
+            throw new KeyNotFoundException("Позиция плана закупок не найдена");
+
+        sz.HasBudget = hasBudget;
+        sz.PlanItemId = planItemId;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", id, "TrainingBudgetSet", actorUserId, new { hasBudget, planItemId });
+
+        return (await GetAsync(id))!;
     }
 
     public async Task DeleteDraftAsync(int id, int actorUserId)
@@ -1051,6 +1083,7 @@ public class SzService : ISzService
             .Include(x => x.CorrespondentUnit)
             .Include(x => x.EmployeeUnit)
             .Include(x => x.TransferUnit)
+            .Include(x => x.PlanItem)
             .Include(x => x.SignerUser)
             .Include(x => x.AddresseeUser)
             .Include(x => x.Approvers).ThenInclude(a => a.User)
@@ -1077,6 +1110,7 @@ public class SzService : ISzService
         sz.HasBudget = r.HasBudget;
         sz.Amount = r.Amount;
         sz.TravelExpenses = r.TravelExpenses;
+        sz.PlanItemId = r.PlanItemId;
 
         sz.ExtraFields = r.ExtraFields is JsonElement extra
             ? JsonDocument.Parse(extra.GetRawText())
@@ -1248,6 +1282,8 @@ public class SzService : ISzService
         d.HasBudget = x.HasBudget;
         d.Amount = x.Amount;
         d.TravelExpenses = x.TravelExpenses;
+        d.PlanItemId = x.PlanItemId;
+        d.PlanItemLabel = x.PlanItem == null ? null : $"{x.PlanItem.Code} — {x.PlanItem.Subject}";
 
         d.ExtraFields = x.ExtraFields?.RootElement.Clone();
 
