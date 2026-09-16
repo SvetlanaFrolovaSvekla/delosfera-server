@@ -120,5 +120,35 @@ public class WarmupWorker : BackgroundService
             .OrderByDescending(s => s.Id)
             .Take(20)
             .ToListAsync(ct);
+
+        // Список для выбора человека (GET /api/users/lookup) открывается в каждой форме
+        // с пикером, а его запрос отличается формой от прогретого выше (полный список с
+        // проекцией должности и подразделения, без ролей). Без прогрева именно этой формы
+        // первое открытие любой формы с выбором человека платило ~2.5 с на компиляцию плана
+        // и чтение страниц; греем точную форму — и флаги старшинства из тех же таблиц.
+        await db.Users
+            .AsNoTracking()
+            .Where(u => u.IsActive && u.BlockedAt == null)
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName,
+                position = u.Position != null ? u.Position.TitleRu : null,
+                orgUnit = u.OrgUnit != null ? u.OrgUnit.TitleRu : null,
+                u.OrgUnitId,
+            })
+            .ToListAsync(ct);
+
+        await db.BodyMembers
+            .AsNoTracking()
+            .Where(m => m.Body == delosfera_server.Modules.Meetings.Models.MeetingBody.Board)
+            .Select(m => new { m.UserId, m.Role })
+            .ToListAsync(ct);
+
+        await db.OrganizationUnits
+            .AsNoTracking()
+            .Where(o => o.HeadUserId != null)
+            .Select(o => o.HeadUserId)
+            .ToListAsync(ct);
     }
 }
