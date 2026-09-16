@@ -87,6 +87,19 @@ public class SubstitutionController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
+    /// <summary>Печатная форма: form = order (приказ) или liability (договор МО).</summary>
+    [HttpGet("{id:int}/print/{form}")]
+    public async Task<IActionResult> Print(int id, string form, CancellationToken ct)
+    {
+        try
+        {
+            var (bytes, name) = await _service.PrintAsync(id, form, ct);
+            return File(bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", name);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {

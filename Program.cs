@@ -159,6 +159,9 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<
     delosfera_server.Modules.Substitutions.Services.ISubstitutionService,
     delosfera_server.Modules.Substitutions.Services.SubstitutionService>();
+builder.Services.AddSingleton<
+    delosfera_server.Modules.Substitutions.Services.ISubstitutionPrintService,
+    delosfera_server.Modules.Substitutions.Services.SubstitutionPrintService>();
 // Напоминания по срокам исполнения писем (КР-1): контролируемые письма не попадают
 // в общий реестр задач, и без отдельной рассылки срок ответа НБКР виден только тому,
 // кто сам открыл книгу регистрации.

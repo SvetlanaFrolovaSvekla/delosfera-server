@@ -19,6 +19,9 @@ public interface ISubstitutionService
     Task<SubstitutionDetails> ExecuteAsync(int id, int actorUserId, CancellationToken ct = default);
     Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, CancellationToken ct = default);
     Task DeleteAsync(int id, int actorUserId, CancellationToken ct = default);
+
+    /// <summary>Печатная форма: form = "order" (приказ) или "liability" (договор МО).</summary>
+    Task<(byte[] Bytes, string FileName)> PrintAsync(int id, string form, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -31,13 +34,32 @@ public class SubstitutionService : ISubstitutionService
     private readonly IAuditService _audit;
     private readonly INumeratorService _numerator;
     private readonly IBankClock _clock;
+    private readonly ISubstitutionPrintService _print;
 
-    public SubstitutionService(DelosferaDbContext db, IAuditService audit, INumeratorService numerator, IBankClock clock)
+    public SubstitutionService(DelosferaDbContext db, IAuditService audit, INumeratorService numerator,
+        IBankClock clock, ISubstitutionPrintService print)
     {
         _db = db;
         _audit = audit;
         _numerator = numerator;
         _clock = clock;
+        _print = print;
+    }
+
+    public async Task<(byte[] Bytes, string FileName)> PrintAsync(int id, string form, CancellationToken ct = default)
+    {
+        var entity = await _db.SubstitutionRequests
+            .Include(x => x.CommissionMembers)
+            .FirstOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
+
+        var stamp = entity.RegNumber ?? id.ToString();
+        return form switch
+        {
+            "order" => (_print.Order(entity), $"Приказ о возложении обязанностей {stamp}.docx"),
+            "liability" => (_print.Liability(entity), $"Договор о матответственности {stamp}.docx"),
+            _ => throw new InvalidOperationException("Неизвестная форма печати"),
+        };
     }
 
     private IQueryable<SubstitutionRequest> BaseQuery() =>
