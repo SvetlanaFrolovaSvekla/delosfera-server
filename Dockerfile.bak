@@ -57,7 +57,7 @@ ARG HTTPS_PROXY
 # со службой каталогов не устанавливается.
 COPY domain-ca.crt /usr/local/share/ca-certificates/domain-ca.crt
 RUN http_proxy=$HTTP_PROXY https_proxy=$HTTPS_PROXY apt-get update && \
-    http_proxy=$HTTP_PROXY https_proxy=$HTTPS_PROXY apt-get install -y --no-install-recommends libldap2 libsasl2-2 libgssapi-krb5-2 ca-certificates && \
+    http_proxy=$HTTP_PROXY https_proxy=$HTTPS_PROXY apt-get install -y --no-install-recommends libldap2 libsasl2-2 ca-certificates && \
     update-ca-certificates && \
     apt-get clean
 
