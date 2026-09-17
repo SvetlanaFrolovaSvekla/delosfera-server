@@ -16,6 +16,17 @@ public class ActualizationNotificationSettings : IAuditableEntity
     /// осознанно, после того как настроены ответственные сотрудники.</summary>
     public bool MonthlyDigestEnabled { get; set; }
 
+    /// <summary>Показывать ли сводку в уведомлениях внутри Делосферы. По умолчанию true — так
+    /// вела себя рассылка до появления выбора канала (см. UpdateSettingsAsync: хотя бы один из
+    /// MonthlyDigestNotifyInApp/MonthlyDigestNotifyEmail обязан остаться включённым, пока
+    /// MonthlyDigestEnabled = true).</summary>
+    public bool MonthlyDigestNotifyInApp { get; set; } = true;
+
+    /// <summary>Дублировать ли сводку на почту (с Excel-планом вложением). По умолчанию true —
+    /// как и MonthlyDigestNotifyInApp, сохраняет прежнее поведение для уже существующих
+    /// инсталляций.</summary>
+    public bool MonthlyDigestNotifyEmail { get; set; } = true;
+
     /// <summary>
     /// Ключи колонок Excel-вложения сводки, через запятую — те же ключи, что в
     /// ACTUALIZATION_COLUMNS на фронте / VndService.ExportActualizationPlanAsync. Хранится
@@ -43,6 +54,14 @@ public class ActualizationNotificationSettings : IAuditableEntity
     /// CriticalRemindersEnabled = true.
     /// </summary>
     public string CriticalReminderDaysCsv { get; set; } = "";
+
+    /// <summary>Показывать ли критические напоминания в уведомлениях внутри Делосферы. По
+    /// умолчанию true — прежнее поведение (см. MonthlyDigestNotifyInApp).</summary>
+    public bool CriticalRemindersNotifyInApp { get; set; } = true;
+
+    /// <summary>Дублировать ли критические напоминания на почту. По умолчанию true — прежнее
+    /// поведение (см. MonthlyDigestNotifyEmail).</summary>
+    public bool CriticalRemindersNotifyEmail { get; set; } = true;
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

@@ -28,4 +28,12 @@ public class SendActualizationOneTimeMailingRequest
     /// <summary>Фильтр и колонки плана для вложения. Обязателен, если IncludePlan = true —
     /// проверяется в ActualizationNotificationService.SendOneTimeMailingAsync.</summary>
     public VndActualizationExportRequest? PlanExport { get; set; }
+
+    /// <summary>Показать письмо в уведомлениях внутри Делосферы. Хотя бы один из
+    /// SendInApp/SendEmail обязан быть true — проверяется в SendOneTimeMailingAsync.</summary>
+    public bool SendInApp { get; set; } = true;
+
+    /// <summary>Также отправить копию на почту получателям. По умолчанию false — раньше
+    /// единоразовая рассылка почту не затрагивала вообще, выбор канала здесь новый.</summary>
+    public bool SendEmail { get; set; }
 }
