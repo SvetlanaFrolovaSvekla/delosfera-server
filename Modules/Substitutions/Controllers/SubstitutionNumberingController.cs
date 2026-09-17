@@ -48,7 +48,8 @@ public class SubstitutionNumberingController : ControllerBase
     public async Task<ActionResult<NumberingDto>> Save([FromBody] NumberingRequest req, CancellationToken ct)
     {
         var pattern = string.IsNullOrWhiteSpace(req.Pattern) ? DefaultPattern : req.Pattern.Trim();
-        if (!pattern.Contains("{seq}"))
+        // Допускаем и «{seq}», и форматную запись «{seq:D4}» (HR-0001).
+        if (!pattern.Contains("{seq"))
             return BadRequest(new { message = "Формат должен содержать {seq} — место порядкового номера" });
         if (req.NextSeq < 1)
             return BadRequest(new { message = "Счётчик не может быть меньше 1" });
