@@ -16,6 +16,8 @@ public interface ISubstitutionService
     Task<SubstitutionDetails> CreateAsync(SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default);
     Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default);
     Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, CancellationToken ct = default);
+    Task<SubstitutionDetails> ApproveAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
+    Task<SubstitutionDetails> RejectAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
     Task<SubstitutionDetails> ExecuteAsync(int id, int actorUserId, CancellationToken ct = default);
     Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, CancellationToken ct = default);
     Task DeleteAsync(int id, int actorUserId, CancellationToken ct = default);
@@ -67,7 +69,8 @@ public class SubstitutionService : ISubstitutionService
             .Include(x => x.InitiatorUser)
             .Include(x => x.AbsentUnit)
             .Include(x => x.SubstituteUnit)
-            .Include(x => x.CommissionMembers.OrderBy(m => m.SortOrder));
+            .Include(x => x.CommissionMembers.OrderBy(m => m.SortOrder))
+            .Include(x => x.Approvals).ThenInclude(a => a.User);
 
     public async Task<SubstitutionPage> SearchAsync(
         string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize, CancellationToken ct = default)
@@ -170,11 +173,28 @@ public class SubstitutionService : ISubstitutionService
             entity.RegNumber = await _numerator.NextAsync(
                 DocumentType.Custom, "Substitution", "Global", "HR-{seq}");
 
-        // По ТР §5.4 заявка после формирования направляется в УЧР на исполнение.
-        entity.Status = SubstitutionStatus.OnExecution;
+        // Маршрут согласования: директор филиала → Операционное управление → УЧР.
+        // Повторная отправка (после отклонения) пересобирает маршрут заново.
+        _db.SubstitutionApprovals.RemoveRange(
+            await _db.SubstitutionApprovals.Where(a => a.RequestId == id).ToListAsync(ct));
+        var steps = await BuildApprovalRouteAsync(entity, ct);
+
+        if (steps.Count > 0)
+        {
+            steps[0].State = SubstitutionApprovalState.Active;
+            foreach (var s in steps) _db.SubstitutionApprovals.Add(s);
+            entity.Status = SubstitutionStatus.OnApproval;
+        }
+        else
+        {
+            // Согласующих определить не удалось (например, замещение в ГО без Опер. управления
+            // и УЧР) — заявка идёт сразу в УЧР на исполнение, как раньше.
+            entity.Status = SubstitutionStatus.OnExecution;
+        }
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Submitted", actorUserId, new { regNumber = entity.RegNumber });
+        await _audit.LogAsync("Substitution", id, "Submitted", actorUserId,
+            new { regNumber = entity.RegNumber, steps = steps.Count });
 
         return (await GetAsync(id, ct))!;
     }
@@ -192,6 +212,135 @@ public class SubstitutionService : ISubstitutionService
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Substitution", id, "Executed", actorUserId);
 
+        return (await GetAsync(id, ct))!;
+    }
+
+    // ── Маршрут согласования: директор филиала → Операционное управление → УЧР ──
+
+    // Операционное управление согласует Касымов К.Т.; при его отсутствии — Ермакова Ю.А.
+    private const int OperationsApproverId = 141;   // Касымов Кубатбек (Операционное управление)
+    private const int OperationsFallbackId = 563;   // Ермакова Юлия (замена при отсутствии)
+
+    private async Task<List<SubstitutionApproval>> BuildApprovalRouteAsync(SubstitutionRequest entity, CancellationToken ct)
+    {
+        var steps = new List<SubstitutionApproval>();
+        var order = 1;
+
+        var directorId = await ResolveBranchDirectorAsync(entity.AbsentUnitId, ct);
+        if (directorId is { } dir)
+            steps.Add(new SubstitutionApproval { RequestId = entity.Id, Order = order++, RoleLabel = "Директор филиала", UserId = dir });
+
+        var opsId = await ResolveOperationsApproverAsync(ct);
+        if (opsId is { } ops)
+            steps.Add(new SubstitutionApproval { RequestId = entity.Id, Order = order++, RoleLabel = "Операционное управление", UserId = ops });
+
+        var hrId = await ResolveHrOfficerAsync(entity.AbsentUnitId, ct);
+        if (hrId is { } hr)
+            steps.Add(new SubstitutionApproval { RequestId = entity.Id, Order = order++, RoleLabel = "УЧР", UserId = hr });
+
+        return steps;
+    }
+
+    /// <summary>Директор филиала: поднимаемся по дереву от подразделения сотрудника до филиала и берём его начальника.</summary>
+    private async Task<int?> ResolveBranchDirectorAsync(int? unitId, CancellationToken ct)
+    {
+        var guard = 0;
+        var current = unitId;
+        while (current is { } id && guard++ < 20)
+        {
+            var u = await _db.OrganizationUnits.AsNoTracking().Where(x => x.Id == id)
+                .Select(x => new { x.TitleRu, x.HeadUserId, x.ParentId }).FirstOrDefaultAsync(ct);
+            if (u is null) return null;
+            if (u.TitleRu.Contains("Филиал", StringComparison.OrdinalIgnoreCase))
+                return u.HeadUserId;   // если начальник филиала не задан — этап пропускается
+            current = u.ParentId;
+        }
+        return null;
+    }
+
+    private async Task<int?> ResolveOperationsApproverAsync(CancellationToken ct)
+    {
+        if (await IsActiveAsync(OperationsApproverId, ct)) return OperationsApproverId;
+        if (await IsActiveAsync(OperationsFallbackId, ct)) return OperationsFallbackId;
+        return null;
+    }
+
+    /// <summary>УЧР: кадровик по области сотрудника (филиал → кадровик по филиалам, иначе по головному офису).</summary>
+    private async Task<int?> ResolveHrOfficerAsync(int? unitId, CancellationToken ct)
+    {
+        var settings = await _db.HrRoutingSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        if (settings is null) return null;
+        return await IsBranchUnitAsync(unitId, ct) ? settings.BranchHrUserId : settings.HeadOfficeHrUserId;
+    }
+
+    private async Task<bool> IsBranchUnitAsync(int? unitId, CancellationToken ct)
+    {
+        var guard = 0;
+        var current = unitId;
+        while (current is { } id && guard++ < 20)
+        {
+            var u = await _db.OrganizationUnits.AsNoTracking().Where(x => x.Id == id)
+                .Select(x => new { x.TitleRu, x.ParentId }).FirstOrDefaultAsync(ct);
+            if (u is null) return false;
+            if (u.TitleRu.Contains("Филиал", StringComparison.OrdinalIgnoreCase)) return true;
+            current = u.ParentId;
+        }
+        return false;
+    }
+
+    private Task<bool> IsActiveAsync(int userId, CancellationToken ct) =>
+        _db.Users.AsNoTracking().AnyAsync(u => u.Id == userId && u.IsActive && u.BlockedAt == null, ct);
+
+    public async Task<SubstitutionDetails> ApproveAsync(int id, int actorUserId, string? comment, CancellationToken ct = default)
+    {
+        var entity = await _db.SubstitutionRequests.Include(x => x.Approvals).FirstOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
+        if (entity.Status != SubstitutionStatus.OnApproval)
+            throw new InvalidOperationException("Согласовать можно только заявку на согласовании");
+
+        var step = entity.Approvals.FirstOrDefault(a => a.State == SubstitutionApprovalState.Active)
+            ?? throw new InvalidOperationException("Нет активного этапа согласования");
+        if (step.UserId != actorUserId)
+            throw new InvalidOperationException("Согласовать может только назначенный на этап сотрудник");
+
+        step.State = SubstitutionApprovalState.Approved;
+        step.Comment = comment;
+        step.DecidedAt = DateTime.UtcNow;
+        step.DecidedByUserId = actorUserId;
+
+        var next = entity.Approvals
+            .Where(a => a.State == SubstitutionApprovalState.Pending).OrderBy(a => a.Order).FirstOrDefault();
+        if (next is not null)
+            next.State = SubstitutionApprovalState.Active;
+        else
+            entity.Status = SubstitutionStatus.OnExecution;   // маршрут пройден — УЧР исполняет
+
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Substitution", id, "Approved", actorUserId, new { step = step.RoleLabel });
+        return (await GetAsync(id, ct))!;
+    }
+
+    public async Task<SubstitutionDetails> RejectAsync(int id, int actorUserId, string? comment, CancellationToken ct = default)
+    {
+        var entity = await _db.SubstitutionRequests.Include(x => x.Approvals).FirstOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
+        if (entity.Status != SubstitutionStatus.OnApproval)
+            throw new InvalidOperationException("Отклонить можно только заявку на согласовании");
+
+        var step = entity.Approvals.FirstOrDefault(a => a.State == SubstitutionApprovalState.Active)
+            ?? throw new InvalidOperationException("Нет активного этапа согласования");
+        if (step.UserId != actorUserId)
+            throw new InvalidOperationException("Отклонить может только назначенный на этап сотрудник");
+
+        step.State = SubstitutionApprovalState.Rejected;
+        step.Comment = comment;
+        step.DecidedAt = DateTime.UtcNow;
+        step.DecidedByUserId = actorUserId;
+        entity.Status = SubstitutionStatus.Rejected;
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Substitution", id, "Rejected", actorUserId, new { step = step.RoleLabel });
         return (await GetAsync(id, ct))!;
     }
 
@@ -352,6 +501,19 @@ public class SubstitutionService : ISubstitutionService
             CommissionMembers = x.CommissionMembers
                 .OrderBy(m => m.SortOrder)
                 .Select(m => new CommissionMemberDto { UserId = m.UserId, FullName = m.FullName, Position = m.Position })
+                .ToList(),
+            Approvals = x.Approvals
+                .OrderBy(a => a.Order)
+                .Select(a => new ApprovalStepDto
+                {
+                    Order = a.Order,
+                    RoleLabel = a.RoleLabel,
+                    UserId = a.UserId,
+                    UserName = a.User != null ? a.User.FullName : null,
+                    State = a.State.ToString(),
+                    Comment = a.Comment,
+                    DecidedAt = a.DecidedAt,
+                })
                 .ToList(),
         };
 

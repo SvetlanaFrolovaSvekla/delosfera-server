@@ -69,6 +69,26 @@ public class SubstitutionController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
+    public record DecisionRequest(string? Comment);
+
+    /// <summary>Согласовать текущий этап (директор филиала / Опер. управление / УЧР).</summary>
+    [HttpPost("{id:int}/approve")]
+    public async Task<IActionResult> Approve(int id, [FromBody] DecisionRequest? req, CancellationToken ct)
+    {
+        try { return Ok(await _service.ApproveAsync(id, _currentUser.UserId, req?.Comment, ct)); }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    /// <summary>Отклонить заявку на текущем этапе — возвращается инициатору.</summary>
+    [HttpPost("{id:int}/reject")]
+    public async Task<IActionResult> Reject(int id, [FromBody] DecisionRequest? req, CancellationToken ct)
+    {
+        try { return Ok(await _service.RejectAsync(id, _currentUser.UserId, req?.Comment, ct)); }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
     /// <summary>Исполнить заявку (УЧР): приказ оформлен.</summary>
     [HttpPost("{id:int}/execute")]
     [RequirePermission(PermissionCode.ViewAllSz)]

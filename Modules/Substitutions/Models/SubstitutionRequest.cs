@@ -95,6 +95,10 @@ public class SubstitutionRequest : IAuditableEntity
     public ICollection<SubstitutionCommissionMember> CommissionMembers { get; set; }
         = new List<SubstitutionCommissionMember>();
 
+    /// <summary>Этапы маршрута согласования (директор филиала → Опер. управление → УЧР).</summary>
+    public ICollection<SubstitutionApproval> Approvals { get; set; }
+        = new List<SubstitutionApproval>();
+
     // ── Блок 6. Прочее ──────────────────────────────────────────────────────
     public string? Description { get; set; }                     // КСЗ-ЗМ-29
 

@@ -3,6 +3,17 @@ using delosfera_server.Modules.Substitutions.Models;
 namespace delosfera_server.Modules.Substitutions.DTO;
 
 /// <summary>Член комиссии приёма-передачи в запросе/ответе.</summary>
+public class ApprovalStepDto
+{
+    public int Order { get; set; }
+    public string RoleLabel { get; set; } = "";
+    public int UserId { get; set; }
+    public string? UserName { get; set; }
+    public string State { get; set; } = "";
+    public string? Comment { get; set; }
+    public DateTime? DecidedAt { get; set; }
+}
+
 public class CommissionMemberDto
 {
     public int? UserId { get; set; }
@@ -111,6 +122,9 @@ public class SubstitutionDetails : SubstitutionListItem
 
     /// <summary>Предупреждение: паспорт истекает раньше окончания замещения (КСЗ-20).</summary>
     public bool PassportExpiresBeforeEnd { get; set; }
+
+    /// <summary>Маршрут согласования: директор филиала → Опер. управление → УЧР.</summary>
+    public List<ApprovalStepDto> Approvals { get; set; } = [];
 }
 
 public class SubstitutionPage
