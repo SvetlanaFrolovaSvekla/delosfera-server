@@ -55,7 +55,7 @@ public class SubstitutionController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] SubstitutionSaveRequest request, CancellationToken ct)
     {
-        try { return Ok(await _service.UpdateAsync(id, request, _currentUser.UserId, ct)); }
+        try { return Ok(await _service.UpdateAsync(id, request, _currentUser.UserId, _currentUser.HasPermission(PermissionCode.ViewAllSz), ct)); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }

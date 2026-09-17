@@ -11,6 +11,8 @@ public interface ISubstitutionPrintService
     byte[] Order(SubstitutionRequest r);
     /// <summary>Договор о полной индивидуальной материальной ответственности (форма 41-15-01/МО).</summary>
     byte[] Liability(SubstitutionRequest r);
+    /// <summary>Выгрузка карточки заявки со всеми полями (для передачи/архива).</summary>
+    byte[] Card(SubstitutionRequest r);
 }
 
 /// <summary>
@@ -97,6 +99,71 @@ public class SubstitutionPrintService : ISubstitutionPrintService
         b.P("Подпись ____________________                Подпись ____________________");
         return b.Build();
     }
+
+    public byte[] Card(SubstitutionRequest r)
+    {
+        var b = new Docx();
+        void L(string label, string? value) => b.P($"{label}: {Dash(value)}");
+
+        b.P("ЗАЯВКА НА ЗАМЕЩЕНИЕ", bold: true, center: true);
+        b.P($"№ {Dash(r.RegNumber)}", center: true);
+        b.P($"Статус: {StatusText(r.Status)}");
+        b.P("");
+        b.P("Общие сведения", bold: true);
+        L("Тема", r.Subject);
+        L("Причина замещения", ReasonText(r.Reason));
+        L("Период", $"{D(r.StartsOn)} — {D(r.EndsOn)}");
+        L("Дней", r.DaysCount?.ToString());
+        L("Передача дел", $"{HandoverPhrase(r.HandoverMoment)}, {D(r.HandoverOn)}");
+        b.P("");
+        b.P("Отсутствующий сотрудник", bold: true);
+        L("ФИО", r.AbsentName);
+        L("Должность", r.AbsentPosition);
+        L("Подразделение", r.AbsentBranch);
+        b.P("");
+        b.P("Замещающий сотрудник", bold: true);
+        L("ФИО", r.SubstituteName);
+        L("Должность", r.SubstitutePosition);
+        L("Подразделение", r.SubstituteBranch);
+        L("Паспорт серия/№", r.PassportSeriesNumber);
+        L("Кем выдан", r.PassportIssuedBy);
+        L("Дата выдачи", D(r.PassportIssuedOn));
+        L("Действителен до", D(r.PassportValidUntil));
+        L("ИНН", r.Inn);
+        L("Адрес прописки", r.AddressRegistration);
+        L("Адрес проживания", r.AddressResidence);
+        b.P("");
+        b.P("Комиссия приёма-передачи", bold: true);
+        L("Председатель", $"{Dash(r.CommissionChairName)}, {Dash(r.CommissionChairPosition)}");
+        foreach (var m in r.CommissionMembers.OrderBy(x => x.SortOrder))
+            b.P($"Член комиссии: {m.FullName}, {Dash(m.Position)}");
+        b.P("");
+        if (!string.IsNullOrWhiteSpace(r.Description))
+        {
+            b.P("Описание", bold: true);
+            b.P(r.Description!);
+        }
+        return b.Build();
+    }
+
+    private static string StatusText(SubstitutionStatus s) => s switch
+    {
+        SubstitutionStatus.Draft => "Черновик",
+        SubstitutionStatus.OnApproval => "На согласовании",
+        SubstitutionStatus.OnExecution => "На исполнении",
+        SubstitutionStatus.Executed => "Исполнено",
+        SubstitutionStatus.Rejected => "Отклонено",
+        SubstitutionStatus.Withdrawn => "Отозвано",
+        _ => s.ToString(),
+    };
+
+    private static string ReasonText(SubstitutionReason r) => r switch
+    {
+        SubstitutionReason.Sick => "Больничный",
+        SubstitutionReason.Vacation => "Отпуск",
+        SubstitutionReason.Dismissal => "Увольнение",
+        _ => "Другое",
+    };
 
     private static string Short(string? fullName)
     {

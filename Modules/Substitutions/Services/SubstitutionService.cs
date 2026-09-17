@@ -14,7 +14,7 @@ public interface ISubstitutionService
     Task<SubstitutionPage> SearchAsync(string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize, CancellationToken ct = default);
     Task<SubstitutionDetails?> GetAsync(int id, CancellationToken ct = default);
     Task<SubstitutionDetails> CreateAsync(SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default);
-    Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default);
+    Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, bool isHrEditor = false, CancellationToken ct = default);
     Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, CancellationToken ct = default);
     Task<SubstitutionDetails> ApproveAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
     Task<SubstitutionDetails> RejectAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
@@ -60,6 +60,7 @@ public class SubstitutionService : ISubstitutionService
         {
             "order" => (_print.Order(entity), $"Приказ о возложении обязанностей {stamp}.docx"),
             "liability" => (_print.Liability(entity), $"Договор о матответственности {stamp}.docx"),
+            "card" => (_print.Card(entity), $"Заявка на замещение {stamp}.docx"),
             _ => throw new InvalidOperationException("Неизвестная форма печати"),
         };
     }
@@ -137,24 +138,62 @@ public class SubstitutionService : ISubstitutionService
         return (await GetAsync(entity.Id, ct))!;
     }
 
-    public async Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default)
+    public async Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, bool isHrEditor = false, CancellationToken ct = default)
     {
         Validate(request);
 
-        var entity = await _db.SubstitutionRequests.Include(x => x.CommissionMembers)
+        var entity = await _db.SubstitutionRequests
+            .Include(x => x.CommissionMembers)
+            .Include(x => x.Approvals)
             .FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
 
-        if (entity.Status is not (SubstitutionStatus.Draft or SubstitutionStatus.Rejected))
-            throw new InvalidOperationException("Изменять можно только черновик или отклонённую заявку");
+        var editableByInitiator = entity.Status is SubstitutionStatus.Draft or SubstitutionStatus.Rejected;
 
+        // УЧР правит заявку после согласования Начальником операционного управления —
+        // то есть когда этап «Операционное управление» уже пройден (Approved).
+        var opsApproved = entity.Approvals.Any(a =>
+            a.RoleLabel == "Операционное управление" && a.State == SubstitutionApprovalState.Approved);
+        var editableByHr = isHrEditor && opsApproved
+            && entity.Status is SubstitutionStatus.OnApproval or SubstitutionStatus.OnExecution;
+
+        if (!editableByInitiator && !editableByHr)
+            throw new InvalidOperationException(
+                "Изменять можно черновик, отклонённую заявку, либо (УЧР) после согласования Операционным управлением");
+
+        // Лог изменений: снимок ключевых полей до и после для аудита.
+        var before = Snapshot(entity);
         Apply(entity, request);
+        var after = Snapshot(entity);
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Updated", actorUserId);
+
+        var changes = before.Where(kv => !Equals(kv.Value, after[kv.Key]))
+            .ToDictionary(kv => kv.Key, kv => new { was = kv.Value, now = after[kv.Key] });
+        await _audit.LogAsync("Substitution", id, editableByHr ? "UpdatedByHr" : "Updated", actorUserId,
+            new { byHr = editableByHr, changes });
 
         return (await GetAsync(id, ct))!;
     }
+
+    /// <summary>Снимок редактируемых полей заявки — для журнала изменений.</summary>
+    private static Dictionary<string, object?> Snapshot(SubstitutionRequest e) => new()
+    {
+        ["subject"] = e.Subject,
+        ["reason"] = e.Reason.ToString(),
+        ["absentName"] = e.AbsentName,
+        ["absentPosition"] = e.AbsentPosition,
+        ["absentUnitId"] = e.AbsentUnitId,
+        ["substituteName"] = e.SubstituteName,
+        ["substitutePosition"] = e.SubstitutePosition,
+        ["substituteUnitId"] = e.SubstituteUnitId,
+        ["passportSeriesNumber"] = e.PassportSeriesNumber,
+        ["inn"] = e.Inn,
+        ["startsOn"] = e.StartsOn?.ToString("yyyy-MM-dd"),
+        ["endsOn"] = e.EndsOn?.ToString("yyyy-MM-dd"),
+        ["handoverOn"] = e.HandoverOn?.ToString("yyyy-MM-dd"),
+        ["description"] = e.Description,
+    };
 
     public async Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, CancellationToken ct = default)
     {
