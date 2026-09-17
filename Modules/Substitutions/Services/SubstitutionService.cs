@@ -164,9 +164,11 @@ public class SubstitutionService : ISubstitutionService
         if (string.IsNullOrWhiteSpace(entity.SubstituteName) || entity.StartsOn is null || entity.EndsOn is null)
             throw new InvalidOperationException("Заполните замещающего и период замещения");
 
+        // Сквозная нумерация HR-1, HR-2, … без сброса по годам (scope Global).
+        // Формат и текущий счётчик правятся в настройках (SubstitutionNumberingController).
         if (string.IsNullOrWhiteSpace(entity.RegNumber))
             entity.RegNumber = await _numerator.NextAsync(
-                DocumentType.Custom, "Substitution", entity.Year.ToString(), "ЗМ-{seq}/{year}");
+                DocumentType.Custom, "Substitution", "Global", "HR-{seq}");
 
         // По ТР §5.4 заявка после формирования направляется в УЧР на исполнение.
         entity.Status = SubstitutionStatus.OnExecution;
