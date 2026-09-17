@@ -36,6 +36,7 @@ public class ActualizationNotificationService : IActualizationNotificationServic
     private readonly DelosferaDbContext _db;
     private readonly IVndService _vndService;
     private readonly INotificationService _notifications;
+    private readonly IMailQueue _mail;
     private readonly IFileStorageService _fileStorage;
     private readonly ILogger<ActualizationNotificationService> _logger;
 
@@ -43,12 +44,14 @@ public class ActualizationNotificationService : IActualizationNotificationServic
         DelosferaDbContext db,
         IVndService vndService,
         INotificationService notifications,
+        IMailQueue mail,
         IFileStorageService fileStorage,
         ILogger<ActualizationNotificationService> logger)
     {
         _db = db;
         _vndService = vndService;
         _notifications = notifications;
+        _mail = mail;
         _fileStorage = fileStorage;
         _logger = logger;
     }
@@ -116,12 +119,29 @@ public class ActualizationNotificationService : IActualizationNotificationServic
             throw new InvalidOperationException(
                 "Критические напоминания задаются в днях до просрочки и не бывают отрицательными");
 
+        // Включённая рассылка без единого канала доставки ничего не сообщает никому — это
+        // почти наверняка ошибка администратора (забыл отметить канал), а не осознанное решение
+        // "рассылать в никуда". Проверяем здесь, а не только в SendMonthlyDigestAsync/
+        // SendCriticalRemindersAsync — иначе сохранить такую комбинацию можно, а сама рассылка
+        // потом молча ничего не отправит, не дав об этом знать.
+        if (request.MonthlyDigestEnabled && !request.MonthlyDigestNotifyInApp && !request.MonthlyDigestNotifyEmail)
+            throw new InvalidOperationException(
+                "Для ежемесячной сводки выберите хотя бы один канал — в системе или по почте");
+
+        if (request.CriticalRemindersEnabled && !request.CriticalRemindersNotifyInApp && !request.CriticalRemindersNotifyEmail)
+            throw new InvalidOperationException(
+                "Для критических напоминаний выберите хотя бы один канал — в системе или по почте");
+
         var settings = await LoadSettingsEntityAsync();
 
         settings.MonthlyDigestEnabled = request.MonthlyDigestEnabled;
         settings.MonthlyDigestColumnsCsv = FormatColumns(request.MonthlyDigestColumns);
+        settings.MonthlyDigestNotifyInApp = request.MonthlyDigestNotifyInApp;
+        settings.MonthlyDigestNotifyEmail = request.MonthlyDigestNotifyEmail;
         settings.CriticalRemindersEnabled = request.CriticalRemindersEnabled;
         settings.CriticalReminderDaysCsv = FormatThresholdDays(request.CriticalReminderDays);
+        settings.CriticalRemindersNotifyInApp = request.CriticalRemindersNotifyInApp;
+        settings.CriticalRemindersNotifyEmail = request.CriticalRemindersNotifyEmail;
         settings.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -192,27 +212,48 @@ public class ActualizationNotificationService : IActualizationNotificationServic
             // Нечего сообщать — письмо "0 документов" не несёт пользы, молча пропускаем это СП.
             if (rows.Count == 0) continue;
 
+            // Оба канала выключены не должно долетать сюда — UpdateSettingsAsync не даёт
+            // сохранить такую комбинацию, пока MonthlyDigestEnabled = true. Проверяем всё равно:
+            // это дешевле, чем разбираться, почему сводка "ушла в никуда", если инвариант
+            // где-то всё же нарушится (например, старые данные без миграции значений по
+            // умолчанию).
+            if (!settings.MonthlyDigestNotifyInApp && !settings.MonthlyDigestNotifyEmail) continue;
+
             var counts = CountBuckets(rows);
             var (subject, body) = BuildDigestText(orgUnitName, today, counts);
             var excelBytes = await _vndService.BuildActualizationPlanExcelAsync(rows, columns);
-
-            await _notifications.CreateAsync(new CreateNotificationRequest
+            var attachment = new MailAttachment
             {
-                TitleRu = subject,
-                BodyRu = body,
-                Category = NotificationCategory.Vnd,
-                Severity = counts.Overdue > 0 ? NotificationSeverity.Warning : NotificationSeverity.Info,
-                EntityType = nameof(OrganizationUnit),
-                EntityId = group.Key,
-                Url = "/actualization/plan",
-                UserIds = userIds,
-                Attachment = new MailAttachment
+                FileName = AttachmentFileName(orgUnitName, today),
+                ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                Bytes = excelBytes,
+            };
+
+            if (settings.MonthlyDigestNotifyInApp)
+            {
+                // Системное уведомление, с почтовой копией по желанию (SkipEmail) — тот же
+                // приём, что и раньше, только SkipEmail теперь управляется настройкой, а не
+                // всегда false.
+                await _notifications.CreateAsync(new CreateNotificationRequest
                 {
-                    FileName = AttachmentFileName(orgUnitName, today),
-                    ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    Bytes = excelBytes,
-                },
-            }, null);
+                    TitleRu = subject,
+                    BodyRu = body,
+                    Category = NotificationCategory.Vnd,
+                    Severity = counts.Overdue > 0 ? NotificationSeverity.Warning : NotificationSeverity.Info,
+                    EntityType = nameof(OrganizationUnit),
+                    EntityId = group.Key,
+                    Url = "/actualization/plan",
+                    UserIds = userIds,
+                    Attachment = attachment,
+                    SkipEmail = !settings.MonthlyDigestNotifyEmail,
+                }, null);
+            }
+            else
+            {
+                // Только почта, без записи в системе — уведомление создавать не для чего, письмо
+                // ставим в очередь напрямую (тот же путь, каким CreateAsync пользуется внутри).
+                await _mail.EnqueueAsync(userIds, subject, body, "/actualization/plan", null, attachment);
+            }
 
             sent++;
         }
@@ -328,19 +369,31 @@ public class ActualizationNotificationService : IActualizationNotificationServic
             // молча пропускаем (та же логика, что у "нечего сообщать" в месячной сводке).
             if (userIds.Count == 0) continue;
 
-            var (subject, body) = BuildCriticalReminderText(orgUnitName, today, rows);
+            // Та же защита, что у ежемесячной сводки выше — см. её комментарий.
+            if (!settings.CriticalRemindersNotifyInApp && !settings.CriticalRemindersNotifyEmail) continue;
 
-            await _notifications.CreateAsync(new CreateNotificationRequest
+            var (subject, body) = BuildCriticalReminderText(orgUnitName, today, rows);
+            var severity = rows.Any(x => x.DaysLeft == 0) ? NotificationSeverity.Urgent : NotificationSeverity.Warning;
+
+            if (settings.CriticalRemindersNotifyInApp)
             {
-                TitleRu = subject,
-                BodyRu = body,
-                Category = NotificationCategory.Vnd,
-                Severity = rows.Any(x => x.DaysLeft == 0) ? NotificationSeverity.Urgent : NotificationSeverity.Warning,
-                EntityType = nameof(OrganizationUnit),
-                EntityId = orgUnitId,
-                Url = "/actualization/plan",
-                UserIds = userIds,
-            }, null);
+                await _notifications.CreateAsync(new CreateNotificationRequest
+                {
+                    TitleRu = subject,
+                    BodyRu = body,
+                    Category = NotificationCategory.Vnd,
+                    Severity = severity,
+                    EntityType = nameof(OrganizationUnit),
+                    EntityId = orgUnitId,
+                    Url = "/actualization/plan",
+                    UserIds = userIds,
+                    SkipEmail = !settings.CriticalRemindersNotifyEmail,
+                }, null);
+            }
+            else
+            {
+                await _mail.EnqueueAsync(userIds, subject, body, "/actualization/plan", null, null);
+            }
 
             sent++;
         }
@@ -430,6 +483,9 @@ public class ActualizationNotificationService : IActualizationNotificationServic
             throw new InvalidOperationException(
                 "Включён план актуализации, но не заданы его настройки (фильтр и колонки)");
 
+        if (!request.SendInApp && !request.SendEmail)
+            throw new InvalidOperationException("Выберите хотя бы один канал отправки — в системе или по почте");
+
         var orgUnitIds = request.ResponsibleOrgUnitIds.Distinct().ToList();
 
         var fromResponsibles = new List<int>();
@@ -457,37 +513,55 @@ public class ActualizationNotificationService : IActualizationNotificationServic
         if (missing.Count > 0)
             throw new KeyNotFoundException($"Пользователи с id={string.Join(", ", missing)} не найдены");
 
-        // Единоразовая рассылка — только системное уведомление внутри Делосферы, без почты
-        // (SkipEmail: true) и без кнопки "Перейти к задаче" (Url: null) — так требуется явно,
-        // в отличие от ежемесячной сводки и критических напоминаний выше. План, если включён,
-        // сохраняется как обычный файл системы (см. IFileStorageService) и виден получателю
-        // прямо в карточке уведомления (см. Notification.AttachmentFileId), а не как вложение
-        // письма — почта тут вообще не участвует.
+        // Канал выбирается явно (request.SendInApp/SendEmail, хотя бы один — проверено выше).
+        // Раньше рассылка была только системным уведомлением без почты; теперь план, если
+        // включён, готовится под оба канала сразу: как обычный файл системы для карточки
+        // уведомления (AttachmentFileId, только если есть системное уведомление, которое его
+        // покажет) и/или как вложение письма (MailAttachment, только если есть почта).
         int? attachmentFileId = null;
+        MailAttachment? mailAttachment = null;
+
         if (request.IncludePlan)
         {
-            var ownerId = currentUserId
-                ?? throw new InvalidOperationException("Не удалось определить пользователя для сохранения файла плана");
-
             var excelBytes = await _vndService.ExportActualizationPlanAsync(request.PlanExport!, languageCode);
             var fileName = $"План актуализации ({DateTime.UtcNow:dd.MM.yyyy}).xlsx";
             const string contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-            var fileAttachment = await _fileStorage.SaveGeneratedAsync(excelBytes, fileName, contentType, ownerId);
-            attachmentFileId = fileAttachment.Id;
+            if (request.SendInApp)
+            {
+                var ownerId = currentUserId
+                    ?? throw new InvalidOperationException("Не удалось определить пользователя для сохранения файла плана");
+
+                var fileAttachment = await _fileStorage.SaveGeneratedAsync(excelBytes, fileName, contentType, ownerId);
+                attachmentFileId = fileAttachment.Id;
+            }
+
+            if (request.SendEmail)
+                mailAttachment = new MailAttachment {FileName = fileName, ContentType = contentType, Bytes = excelBytes};
         }
 
-        await _notifications.CreateAsync(new CreateNotificationRequest
+        if (request.SendInApp)
         {
-            TitleRu = request.Subject.Trim(),
-            BodyRu = request.Message.Trim(),
-            Category = NotificationCategory.Vnd,
-            Severity = NotificationSeverity.Info,
-            Url = null,
-            UserIds = recipientIds,
-            AttachmentFileId = attachmentFileId,
-            SkipEmail = true,
-        }, currentUserId);
+            await _notifications.CreateAsync(new CreateNotificationRequest
+            {
+                TitleRu = request.Subject.Trim(),
+                BodyRu = request.Message.Trim(),
+                Category = NotificationCategory.Vnd,
+                Severity = NotificationSeverity.Info,
+                Url = null,
+                UserIds = recipientIds,
+                AttachmentFileId = attachmentFileId,
+                Attachment = mailAttachment,
+                SkipEmail = !request.SendEmail,
+            }, currentUserId);
+        }
+        else
+        {
+            // Только почта, без записи в системе — создавать уведомление не для чего, письмо
+            // ставим в очередь напрямую.
+            await _mail.EnqueueAsync(
+                recipientIds, request.Subject.Trim(), request.Message.Trim(), null, null, mailAttachment);
+        }
 
         return new SendActualizationOneTimeMailingResponse
         {
@@ -543,8 +617,12 @@ public class ActualizationNotificationService : IActualizationNotificationServic
     {
         MonthlyDigestEnabled = s.MonthlyDigestEnabled,
         MonthlyDigestColumns = ParseColumns(s.MonthlyDigestColumnsCsv),
+        MonthlyDigestNotifyInApp = s.MonthlyDigestNotifyInApp,
+        MonthlyDigestNotifyEmail = s.MonthlyDigestNotifyEmail,
         CriticalRemindersEnabled = s.CriticalRemindersEnabled,
         CriticalReminderDays = ParseThresholdDays(s.CriticalReminderDaysCsv),
+        CriticalRemindersNotifyInApp = s.CriticalRemindersNotifyInApp,
+        CriticalRemindersNotifyEmail = s.CriticalRemindersNotifyEmail,
     };
 
     private static List<string> ParseColumns(string csv) =>

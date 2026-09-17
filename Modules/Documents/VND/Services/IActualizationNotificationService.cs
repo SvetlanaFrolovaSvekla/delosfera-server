@@ -42,14 +42,16 @@ public interface IActualizationNotificationService
     Task<int> SendCriticalRemindersAsync(DateOnly today, CancellationToken ct = default);
 
     /// <summary>
-    /// Раздел "Создать единоразовую рассылку плана актуализации" — разовое системное уведомление
-    /// внутри Делосферы, не связанное с настройками выше. Почта не участвует (см.
-    /// CreateNotificationRequest.SkipEmail) и кнопки "Перейти к задаче" нет (Url = null).
-    /// Получатели — объединение состава ответственных выбранных СП и произвольных отдельных
-    /// пользователей (см. SendActualizationOneTimeMailingRequest). При IncludePlan = true план
-    /// собирается по PlanExport (та же сборка, что и у кнопки "Экспорт плана в Excel", см.
-    /// IVndService.ExportActualizationPlanAsync) и сохраняется как файл системы, видимый прямо в
-    /// карточке уведомления (см. Notification.AttachmentFileId, IFileStorageService).
+    /// Раздел "Создать единоразовую рассылку плана актуализации" — разовое письмо, не связанное с
+    /// настройками выше. Канал выбирается явно через SendInApp/SendEmail (хотя бы один обязан
+    /// быть включён) — системное уведомление внутри Делосферы, почтовая копия, или оба сразу.
+    /// Кнопки "Перейти к задаче" нет (Url = null) в любом случае. Получатели — объединение
+    /// состава ответственных выбранных СП и произвольных отдельных пользователей (см.
+    /// SendActualizationOneTimeMailingRequest). При IncludePlan = true план собирается по
+    /// PlanExport (та же сборка, что и у кнопки "Экспорт плана в Excel", см.
+    /// IVndService.ExportActualizationPlanAsync) — для SendInApp сохраняется как файл системы,
+    /// видимый прямо в карточке уведомления (Notification.AttachmentFileId, IFileStorageService),
+    /// для SendEmail идёт вложением письма.
     /// </summary>
     Task<SendActualizationOneTimeMailingResponse> SendOneTimeMailingAsync(
         SendActualizationOneTimeMailingRequest request, int? currentUserId, string languageCode);
