@@ -521,6 +521,15 @@ public class OrgSyncService(
                 unit.HeadUserId = headUser.Id;
                 unit.UpdatedAt = now;
             }
+            else if (portalUnit.Head is { } headMissing
+                     && !byLogin.ContainsKey(headMissing.Login.Trim()))
+            {
+                // Портал назвал начальника, но его логин не сматчился с пользователем СЭД
+                // (нет LdapLogin / учётка не заведена) — раньше это пропускалось молча,
+                // из-за чего у подразделения (в т.ч. филиала) начальник оставался пустым
+                // без следа в прогоне. Пишем ноту, чтобы пробел был виден.
+                notes.Add($"Начальник «{headMissing.Name}» (логин {headMissing.Login}) подразделения «{portalUnit.Name}» не найден среди пользователей.");
+            }
 
             if (portalUnit.ParentHead is { } curator
                 && byLogin.TryGetValue(curator.Login.Trim(), out var curatorUser)
