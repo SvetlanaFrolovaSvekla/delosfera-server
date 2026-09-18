@@ -30,5 +30,16 @@ public class VndApprovalStageQuote
 
     public required string Text { get; set; }
 
+    /// <summary>Версия документа редакции, к которой относится цитата (0 - самая первая
+    /// поданная версия "Р1", 1 - "Р1.1" и т.д.) — снимается в момент принятия решения как
+    /// количество уже существующих <see cref="VndRedactionRevisionSnapshot"/> этой редакции
+    /// (см. VndApprovalService.DecideAsync/AttachDecisionQuotes). Совпадает с тем, каким будет
+    /// SnapshotNumber - 1 у снимка, который снимет следующая повторная отправка, если версия,
+    /// к которой относится цитата, будет вытеснена ею. Нужно, чтобы при просмотре КОНКРЕТНОЙ
+    /// версии документа показывать только цитаты/замечания именно этой версии, а не всех версий
+    /// разом (иначе замечания к старой версии "приклеивались" бы к новой, уже исправленной) -
+    /// см. VndApprovalService.ToQuoteResponses.</summary>
+    public int RevisionIndex { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }

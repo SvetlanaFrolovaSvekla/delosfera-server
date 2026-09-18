@@ -78,6 +78,10 @@ public class DelosferaDbContext : DbContext
     // VndApprovalPhaseRound (история "Маршрута согласования" на вкладке "История" ВНД).
     public DbSet<VndApprovalPhaseRound> VndApprovalPhaseRounds => Set<VndApprovalPhaseRound>();
     public DbSet<VndApprovalPhaseRoundStageDecision> VndApprovalPhaseRoundStageDecisions => Set<VndApprovalPhaseRoundStageDecision>();
+    // Снимки файлов редакции по кругам согласования - см. VndRedactionRevisionSnapshot (даёт
+    // проверяющим возможность скачать и сравнить версию документа, к которой относились их
+    // замечания, с исправленной).
+    public DbSet<VndRedactionRevisionSnapshot> VndRedactionRevisionSnapshots => Set<VndRedactionRevisionSnapshot>();
 
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();

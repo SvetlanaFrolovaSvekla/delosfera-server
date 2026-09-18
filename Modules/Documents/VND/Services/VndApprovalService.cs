@@ -377,6 +377,14 @@ public class VndApprovalService : IVndApprovalService
 
         var quotes = ParseQuotes(request.QuotesJson);
 
+        // Версия документа редакции, к которой относится это решение (и его цитаты) - см.
+        // VndApprovalStageQuote.RevisionIndex - снимается ДО того, как решение будет записано,
+        // тем же способом, что и SnapshotNumber в ResubmitAfterRevisionAsync (количество уже
+        // существующих снимков этой редакции).
+        var revisionIndex = await _db.Set<VndRedactionRevisionSnapshot>()
+            .Where(s => s.VndRedactionId == process.RedactionId)
+            .CountAsync();
+
         var decision = request.Decision switch
         {
             ApprovalDecisionType.Approve => ApprovalStageDecision.Approved,
@@ -400,7 +408,7 @@ public class VndApprovalService : IVndApprovalService
                     or ApprovalStageDecision.Rejected;
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Primary, request.Files, currentUserId);
-                AttachDecisionQuotes(stage, ApprovalStagePhase.Primary, quotes);
+                AttachDecisionQuotes(stage, ApprovalStagePhase.Primary, quotes, revisionIndex);
 
                 await _db.SaveChangesAsync();
 
@@ -428,7 +436,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.RepeatDecidedAt = DateTime.UtcNow;
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Repeat, request.Files, currentUserId);
-                AttachDecisionQuotes(stage, ApprovalStagePhase.Repeat, quotes);
+                AttachDecisionQuotes(stage, ApprovalStagePhase.Repeat, quotes, revisionIndex);
 
                 await _db.SaveChangesAsync();
 
@@ -455,7 +463,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.FinalHoldDecidedAt = DateTime.UtcNow;
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.FinalHold, request.Files, currentUserId);
-                AttachDecisionQuotes(stage, ApprovalStagePhase.FinalHold, quotes);
+                AttachDecisionQuotes(stage, ApprovalStagePhase.FinalHold, quotes, revisionIndex);
 
                 await _db.SaveChangesAsync();
 
@@ -690,6 +698,34 @@ public class VndApprovalService : IVndApprovalService
         // Момент замены — общий для всех документов, заменённых в рамках одной отправки,
         // чтобы метки "Обновлено, дата" на фронте показывали одно и то же время.
         var resubmittedAt = DateTime.UtcNow;
+
+        // Снимок файлов редакции ДО перезаписи ниже — чтобы проверяющие могли скачать и
+        // сравнить версию, к которой относились их замечания, с исправленной (см.
+        // VndRedactionRevisionSnapshot). Phase/RoundNumber снимка = круг, который сейчас
+        // завершается этой отправкой - тот же расчёт, что чуть ниже использует
+        // SnapshotPhaseRoundIfNeededAsync для VndApprovalPhaseRound (см.
+        // DetermineActiveRevisionPhaseAsync). Снимаем безусловно, на каждую отправку - даже
+        // если по факту ни один файл не был заменён этим кругом, это всё равно отдельная
+        // пронумерованная версия ("10296-Р1.1", "10296-Р1.2" и т.д.), с которой инициатор
+        // ответил на замечания круга.
+        var (snapshotPhase, snapshotRoundNumber) = await DetermineActiveRevisionPhaseAsync(process);
+        var snapshotNumber = await _db.Set<VndRedactionRevisionSnapshot>()
+            .Where(s => s.VndRedactionId == redaction.Id)
+            .CountAsync() + 1;
+        _db.Set<VndRedactionRevisionSnapshot>().Add(new VndRedactionRevisionSnapshot
+        {
+            VndRedactionId = redaction.Id,
+            ApprovalProcessId = process.Id,
+            SnapshotNumber = snapshotNumber,
+            Phase = snapshotPhase,
+            RoundNumber = snapshotRoundNumber,
+            DocFileRuId = redaction.DocFileRuId,
+            DocFileKgId = redaction.DocFileKgId,
+            DocFileEnId = redaction.DocFileEnId,
+            TidFileId = redaction.TidFileId,
+            DisagreementMatrixFileId = redaction.DisagreementMatrixFileId,
+            CreatedAt = resubmittedAt,
+        });
 
         if (request.DocRu is not null)
         {
@@ -1761,13 +1797,22 @@ public class VndApprovalService : IVndApprovalService
         }
     }
 
-    /// <summary>Удаляет файлы и цитаты, приложенные к решению этапа в предыдущем круге
-    /// указанной фазы (Repeat/FinalHold), перед тем как круг перезапускается для этого этапа.
-    /// VndApprovalStageAttachment/VndApprovalStageQuote различают только Phase, без номера
-    /// круга внутри неё - без этой очистки при повторных кругах доработки в одной и той же
-    /// фазе старые файлы/цитаты накапливались и отображались рядом с текстом решения из
-    /// совсем другого, более позднего круга (см. AttachDecisionFilesAsync/AttachDecisionQuotes
-    /// выше - тем же способом кладутся новые).</summary>
+    /// <summary>Удаляет ФАЙЛЫ, приложенные к решению этапа в предыдущем круге указанной фазы
+    /// (Repeat/FinalHold), перед тем как круг перезапускается для этого этапа -
+    /// VndApprovalStageAttachment различает только Phase, без номера круга внутри неё, а сами
+    /// файлы занимают место в хранилище, поэтому предыдущий круг физически удаляется (текст
+    /// решения при этом остаётся доступен через VndApprovalPhaseRound - см.
+    /// SnapshotPhaseRoundIfNeededAsync).
+    ///
+    /// ЦИТАТЫ (VndApprovalStageQuote) в отличие от вложений теперь НЕ удаляются - каждая цитата
+    /// с версии 20260918 несёт RevisionIndex (версию документа, к которой относится), и
+    /// "живые" поля ответа (Primary/Repeat/FinalHoldQuotes) отфильтровываются по нему на
+    /// уровне ToQuoteResponses (см. LoadResponseAsync) - старые цитаты сами перестают попадать
+    /// в них, когда документ обновляется, без физического удаления. Раньше цитаты удалялись
+    /// вместе с вложениями - из-за этого при просмотре прошлой версии документа ("Р1.1" и т.п.)
+    /// её собственные замечания было решительно невозможно показать, они были уже стёрты (см.
+    /// ApprovalProcessResponse.AllQuotes - именно ради этого цитаты теперь хранятся бессрочно,
+    /// как и было изначально задумано в самом их док-комментарии).</summary>
     private async Task ClearPreviousRoundArtifactsAsync(VndApprovalStage stage, ApprovalStagePhase phase)
     {
         var oldAttachments = await _db.Set<VndApprovalStageAttachment>()
@@ -1788,11 +1833,6 @@ public class VndApprovalService : IVndApprovalService
             }
         }
         _db.Set<VndApprovalStageAttachment>().RemoveRange(oldAttachments);
-
-        var oldQuotes = await _db.Set<VndApprovalStageQuote>()
-            .Where(q => q.VndApprovalStageId == stage.Id && q.Phase == phase)
-            .ToListAsync();
-        _db.Set<VndApprovalStageQuote>().RemoveRange(oldQuotes);
     }
 
     /// <summary>Снимает "фотографию" круга фазы Repeat/FinalHold прямо перед тем, как его
@@ -1849,6 +1889,38 @@ public class VndApprovalService : IVndApprovalService
         }
 
         _db.Set<VndApprovalPhaseRound>().Add(round);
+    }
+
+    /// <summary>Определяет фазу/круг, чьи замечания привели к текущей повторной отправке — то
+    /// есть круг, который эта отправка завершает (см. вызов в ResubmitAfterRevisionAsync,
+    /// используется для VndRedactionRevisionSnapshot.Phase/RoundNumber). FinalHoldStartedAt
+    /// проверяем первым: если он уже задан, процесс не мог вернуться в доработку из фазы
+    /// Repeat — RevisionNeeded выставляется только в CompletePrimaryPhaseAsync,
+    /// CompleteRepeatPhaseAsync и ReturnToRevisionFromFinalHoldAsync, и последняя срабатывает
+    /// только когда финальная выдержка уже идёт. RoundNumber считается тем же способом, что и
+    /// в SnapshotPhaseRoundIfNeededAsync выше (количество уже сохранённых кругов этой фазы +
+    /// 1) — он совпадёт с номером круга, который SnapshotPhaseRoundIfNeededAsync создаст этим
+    /// же вызовом ResubmitAfterRevisionAsync, если замечания устранены полностью.</summary>
+    private async Task<(ApprovalStagePhase Phase, int? RoundNumber)> DetermineActiveRevisionPhaseAsync(
+        VndApprovalProcess process)
+    {
+        if (process.FinalHoldStartedAt is not null)
+        {
+            var roundNumber = await _db.Set<VndApprovalPhaseRound>()
+                .Where(r => r.ApprovalProcessId == process.Id && r.Phase == ApprovalStagePhase.FinalHold)
+                .CountAsync() + 1;
+            return (ApprovalStagePhase.FinalHold, roundNumber);
+        }
+
+        if (process.RepeatStartedAt is not null)
+        {
+            var roundNumber = await _db.Set<VndApprovalPhaseRound>()
+                .Where(r => r.ApprovalProcessId == process.Id && r.Phase == ApprovalStagePhase.Repeat)
+                .CountAsync() + 1;
+            return (ApprovalStagePhase.Repeat, roundNumber);
+        }
+
+        return (ApprovalStagePhase.Primary, null);
     }
 
     private static ApprovalStageDecision? GetPhaseDecision(VndApprovalStage stage, ApprovalStagePhase phase) =>
@@ -1923,9 +1995,11 @@ public class VndApprovalService : IVndApprovalService
     }
 
     /// <summary>Сохраняет цитаты, на которые согласующий сослался в резолюции конкретной фазы
-    /// (см. ParseQuotes выше), и связывает их с этапом. Вызывается из DecideAsync до
-    /// SaveChangesAsync - см. AttachDecisionFilesAsync выше, тот же паттерн.</summary>
-    private void AttachDecisionQuotes(VndApprovalStage stage, ApprovalStagePhase phase, List<ApprovalQuoteItem> quotes)
+    /// (см. ParseQuotes выше), и связывает их с этапом и версией документа, к которой они
+    /// относятся (revisionIndex - см. VndApprovalStageQuote.RevisionIndex). Вызывается из
+    /// DecideAsync до SaveChangesAsync - см. AttachDecisionFilesAsync выше, тот же паттерн.</summary>
+    private void AttachDecisionQuotes(
+        VndApprovalStage stage, ApprovalStagePhase phase, List<ApprovalQuoteItem> quotes, int revisionIndex)
     {
         if (quotes.Count == 0) return;
 
@@ -1941,6 +2015,7 @@ public class VndApprovalService : IVndApprovalService
                 Phase = phase,
                 DocumentTarget = quote.DocumentTarget,
                 Text = text,
+                RevisionIndex = revisionIndex,
                 CreatedAt = DateTime.UtcNow
             });
         }
@@ -2079,11 +2154,21 @@ public class VndApprovalService : IVndApprovalService
             .Include(x => x.DisagreementMatrixRows)
             .Include(x => x.RepeatInitiatorCommentAttachments).ThenInclude(a => a.FileAttachment)
             .Include(x => x.PhaseRounds).ThenInclude(r => r.StageDecisions)
+            .Include(x => x.RedactionSnapshots).ThenInclude(s => s.DocFileRu)
+            .Include(x => x.RedactionSnapshots).ThenInclude(s => s.DocFileKg)
+            .Include(x => x.RedactionSnapshots).ThenInclude(s => s.DocFileEn)
+            .Include(x => x.RedactionSnapshots).ThenInclude(s => s.TidFile)
+            .Include(x => x.RedactionSnapshots).ThenInclude(s => s.DisagreementMatrixFile)
             .FirstAsync(x => x.Id == processId);
 
         var initiator = await _db.Users
             .Include(u => u.Position)
             .FirstOrDefaultAsync(u => u.Id == process.InitiatorUserId);
+
+        // Версия документа редакции, которая сейчас живая (RedactionSnapshots уже загружены
+        // выше через Include) - см. VndApprovalStageQuote.RevisionIndex. "Живые" поля
+        // Primary/Repeat/FinalHoldQuotes ниже показывают только цитаты именно этой версии.
+        var liveRevisionIndex = process.RedactionSnapshots.Count;
 
         return new ApprovalProcessResponse
         {
@@ -2156,19 +2241,45 @@ public class VndApprovalService : IVndApprovalService
                 PrimaryComment = s.PrimaryComment,
                 PrimaryDecidedAt = s.PrimaryDecidedAt,
                 PrimaryAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.Primary),
-                PrimaryQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.Primary),
+                PrimaryQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.Primary, liveRevisionIndex),
                 ParticipatesInRepeat = s.ParticipatesInRepeat,
                 RepeatDecision = s.RepeatDecision.HasValue ? MapDecision(s.RepeatDecision.Value) : null,
                 RepeatComment = s.RepeatComment,
                 RepeatDecidedAt = s.RepeatDecidedAt,
                 RepeatAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.Repeat),
-                RepeatQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.Repeat),
+                RepeatQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.Repeat, liveRevisionIndex),
                 FinalHoldDecision = s.FinalHoldDecision.HasValue ? MapDecision(s.FinalHoldDecision.Value) : null,
                 FinalHoldComment = s.FinalHoldComment,
                 FinalHoldDecidedAt = s.FinalHoldDecidedAt,
                 FinalHoldAttachments = ToAttachmentResponses(s.Attachments, ApprovalStagePhase.FinalHold),
-                FinalHoldQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.FinalHold)
-            }).ToList()
+                FinalHoldQuotes = ToQuoteResponses(s.Quotes, ApprovalStagePhase.FinalHold, liveRevisionIndex)
+            }).ToList(),
+            AllQuotes = process.Stages
+                .SelectMany(s => s.Quotes)
+                .OrderBy(q => q.CreatedAt)
+                .Select(ToQuoteResponse)
+                .ToList(),
+            RedactionSnapshots = process.RedactionSnapshots
+                .OrderBy(s => s.SnapshotNumber)
+                .Select(s => new VndRedactionRevisionSnapshotResponse
+                {
+                    Id = s.Id,
+                    SnapshotNumber = s.SnapshotNumber,
+                    Phase = MapSnapshotPhase(s.Phase),
+                    RoundNumber = s.RoundNumber,
+                    DocFileRuId = s.DocFileRuId,
+                    DocFileRuName = s.DocFileRu?.OriginalFileName,
+                    DocFileKgId = s.DocFileKgId,
+                    DocFileKgName = s.DocFileKg?.OriginalFileName,
+                    DocFileEnId = s.DocFileEnId,
+                    DocFileEnName = s.DocFileEn?.OriginalFileName,
+                    TidFileId = s.TidFileId,
+                    TidFileName = s.TidFile?.OriginalFileName,
+                    DisagreementMatrixFileId = s.DisagreementMatrixFileId,
+                    DisagreementMatrixFileName = s.DisagreementMatrixFile?.OriginalFileName,
+                    CreatedAt = s.CreatedAt,
+                })
+                .ToList(),
         };
     }
 
@@ -2199,20 +2310,28 @@ public class VndApprovalService : IVndApprovalService
             })
             .ToList();
 
-    /// <summary>Цитаты этапа для конкретной фазы решения — см. ToAttachmentResponses выше,
-    /// тот же паттерн.</summary>
+    /// <summary>Цитаты этапа для конкретной фазы решения, ТОЛЬКО относящиеся к текущей живой
+    /// версии документа (liveRevisionIndex - см. VndApprovalStageQuote.RevisionIndex) — см.
+    /// ToAttachmentResponses выше, тот же паттерн, плюс фильтр по версии. Цитаты прошлых версий
+    /// сюда не попадают (иначе замечания к уже исправленной версии "приклеивались" бы к новой),
+    /// но по-прежнему доступны клиенту целиком через ApprovalProcessResponse.AllQuotes.</summary>
     private static List<ApprovalStageQuoteResponse> ToQuoteResponses(
-        IEnumerable<VndApprovalStageQuote> quotes, ApprovalStagePhase phase) =>
+        IEnumerable<VndApprovalStageQuote> quotes, ApprovalStagePhase phase, int liveRevisionIndex) =>
         quotes
-            .Where(q => q.Phase == phase)
+            .Where(q => q.Phase == phase && q.RevisionIndex == liveRevisionIndex)
             .OrderBy(q => q.CreatedAt)
-            .Select(q => new ApprovalStageQuoteResponse
-            {
-                Id = q.Id,
-                DocumentTarget = q.DocumentTarget,
-                Text = q.Text
-            })
+            .Select(ToQuoteResponse)
             .ToList();
+
+    private static ApprovalStageQuoteResponse ToQuoteResponse(VndApprovalStageQuote q) => new()
+    {
+        Id = q.Id,
+        StageId = q.VndApprovalStageId,
+        Phase = MapSnapshotPhase(q.Phase),
+        DocumentTarget = q.DocumentTarget,
+        Text = q.Text,
+        RevisionIndex = q.RevisionIndex,
+    };
 
     /// <summary>
     /// Общий хелпер отправки уведомлений по событиям согласования.
@@ -2305,5 +2424,16 @@ public class VndApprovalService : IVndApprovalService
         ApprovalStagePhase.Repeat => "repeat",
         ApprovalStagePhase.FinalHold => "finalHold",
         _ => "repeat"
+    };
+
+    /// <summary>"primary"/"repeat"/"finalHold" — в отличие от MapPhase выше (только для
+    /// VndApprovalPhaseRound, где Primary не бывает), снимок файлов редакции может относиться
+    /// и к первичному согласованию — см. VndRedactionRevisionSnapshot.Phase.</summary>
+    private static string MapSnapshotPhase(ApprovalStagePhase phase) => phase switch
+    {
+        ApprovalStagePhase.Primary => "primary",
+        ApprovalStagePhase.Repeat => "repeat",
+        ApprovalStagePhase.FinalHold => "finalHold",
+        _ => "primary"
     };
 }
