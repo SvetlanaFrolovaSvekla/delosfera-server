@@ -46,6 +46,17 @@ public class VndApprovalStage : IAuditableEntity
     /// определяет, кто участвует в повторном согласовании</summary>
     public bool ParticipatesInRepeat { get; set; }
 
+    /// <summary>Убран главным редактором из уже запущенного процесса согласования (см.
+    /// VndApprovalService.RemoveApproverAsync) — этап не удаляется из маршрута (история
+    /// согласования должна остаться видна), но становится недействующим навсегда: задача с
+    /// него снята (решение на текущей фазе принудительно проставляется как
+    /// ApprovalStageDecision.RemovedByEditor, ParticipatesInRepeat принудительно сбрасывается
+    /// в false), и он больше никогда не участвует ни в одной последующей фазе/круге, даже если
+    /// процесс потом вернётся на доработку и пройдёт повторное согласование или финальную
+    /// выдержку заново (см. соответствующие проверки в VndApprovalService). Кто и когда убрал —
+    /// в журнале активности (см. IActivityLogService), здесь достаточно самого факта.</summary>
+    public bool IsRemovedByEditor { get; set; }
+
     // --- Повторный этап (заполняется, только если ParticipatesInRepeat == true)
     public ApprovalStageDecision? RepeatDecision { get; set; }
     public string? RepeatComment { get; set; }

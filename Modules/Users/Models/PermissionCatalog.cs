@@ -371,6 +371,12 @@ public static class PermissionCatalog
             TitleRu = "Видеть счётчик просроченных и критичных по сроку ВНД на сайдбаре",
             TitleEn = "See the overdue/critical VND actualization counter in the sidebar",
             TitleKg = "Панелде мөөнөтү өткөн жана сын мезгилдеги ВНДлердин санагын көрүү"
+        },
+        [PermissionCode.EditAnyVndApprovalRoute] = new PermissionDescription
+        {
+            TitleRu = "Редактировать маршрут уже запущенного согласования ВНД: добавлять/убирать согласующих (главный редактор)",
+            TitleEn = "Edit the route of an already running VND approval: add/remove approvers (chief editor)",
+            TitleKg = "Мурунтан башталган ВНД макулдашуусунун маршрутун түзөтүү: макулдашуучуларды кошуу/алып салуу (башкы редактор)"
         }
     };
     

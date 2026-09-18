@@ -211,10 +211,13 @@ public class ActivityLogService : IActivityLogService
             or ActivityEventKind.ProcessStarted => "doc",
         ActivityEventKind.HoldStarted => "clock",
         // Смена реквизитов и повторная отправка исправленной редакции — это
-        // правка документа, как и "edit" у СЗ/закупок из технического аудита.
+        // правка документа, как и "edit" у СЗ/закупок из технического аудита. Добавление/
+        // удаление согласующего главным редактором — правка маршрута, тот же значок.
         ActivityEventKind.RequisitesUpdated
             or ActivityEventKind.Resubmitted
-            or ActivityEventKind.RedactionEdited => "edit",
+            or ActivityEventKind.RedactionEdited
+            or ActivityEventKind.ApproverAdded
+            or ActivityEventKind.ApproverRemoved => "edit",
         // Удаление черновика — красная иконка-мусорка, чтобы отличать от простой "правки".
         ActivityEventKind.DraftDeleted => "trash",
         _ => "info"

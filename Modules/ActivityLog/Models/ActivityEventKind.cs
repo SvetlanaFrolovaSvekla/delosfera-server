@@ -23,6 +23,14 @@ public enum ActivityEventKind
     /// VndService.EditRedactionDirectlyCoreAsync.</summary>
     RedactionEdited = 15,
 
+    /// <summary>Главный редактор добавил согласующего в уже запущенный процесс согласования —
+    /// см. VndApprovalService.AddApproverAsync.</summary>
+    ApproverAdded = 16,
+
+    /// <summary>Главный редактор убрал согласующего из уже запущенного процесса согласования
+    /// (этап помечен недействующим, задача снята) — см. VndApprovalService.RemoveApproverAsync.</summary>
+    ApproverRemoved = 17,
+
     /// <summary>Служебная метка "критическое напоминание по актуализации отправлено для такого-то
     /// порога/срока" (см. ActualizationNotificationService.SendCriticalRemindersAsync) — нужна
     /// только чтобы не потерять напоминание навсегда, если ровно нужный день был пропущен

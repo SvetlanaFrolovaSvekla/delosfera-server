@@ -202,4 +202,38 @@ public static class VndApprovalNotificationMessages
         BodyKg: $"{actorName} сиз баштаган «{vndTitle}» документинин {redactionCode} редакциясынын " +
                 "макулдашуусун артка алды. Редакция долбоорго кайтарылды.",
         Severity: NotificationSeverity.Warning);
+
+    /// <summary>Главный редактор добавил пользователя согласующим в уже запущенный процесс
+    /// согласования (см. VndApprovalService.AddApproverAsync) - тому, кого добавили, приходит
+    /// именно эта задача, а не TaskPrimaryApproval/TaskRepeatApproval/FinalHoldForApprovers
+    /// выше, поскольку он появился в маршруте не при обычном запуске/переходе фазы, а по
+    /// отдельному действию главного редактора - об этом стоит явно сказать.</summary>
+    public static NotificationText AddedAsApprover(
+        string actorName, string redactionCode, string vndTitle) => new(
+        TitleRu: "Вас добавили согласующим",
+        TitleEn: "You were added as an approver",
+        TitleKg: "Сизди макулдашуучу катары кошту",
+        BodyRu: $"{actorName} добавил(а) вас согласующим в маршрут согласования редакции {redactionCode} " +
+                $"документа «{vndTitle}» (главный редактор). Требуется ваше решение.",
+        BodyEn: $"{actorName} added you as an approver to the approval route of revision {redactionCode} " +
+                $"of the document \"{vndTitle}\" (chief editor). Your decision is required.",
+        BodyKg: $"{actorName} башкы редактор катары сизди «{vndTitle}» документинин {redactionCode} " +
+                "редакциясынын макулдашуу маршрутуна макулдашуучу кылып кошту. Чечимиңиз талап кылынат.",
+        Severity: NotificationSeverity.Urgent); // задача, требующая действия
+
+    /// <summary>Главный редактор убрал согласующего из уже запущенного процесса согласования
+    /// (см. VndApprovalService.RemoveApproverAsync) - его задача снята, дальше решать по этому
+    /// этапу уже не нужно.</summary>
+    public static NotificationText RemovedFromRouteByEditor(
+        string actorName, string redactionCode, string vndTitle) => new(
+        TitleRu: "Вас убрали из маршрута согласования",
+        TitleEn: "You were removed from the approval route",
+        TitleKg: "Сизди макулдашуу маршрутунан алып салды",
+        BodyRu: $"{actorName} убрал(а) вас из маршрута согласования редакции {redactionCode} документа " +
+                $"«{vndTitle}» (главный редактор). Ваша задача по этому согласованию снята.",
+        BodyEn: $"{actorName} removed you from the approval route of revision {redactionCode} of the " +
+                $"document \"{vndTitle}\" (chief editor). Your approval task has been cancelled.",
+        BodyKg: $"{actorName} башкы редактор катары сизди «{vndTitle}» документинин {redactionCode} " +
+                "редакциясынын макулдашуу маршрутунан алып салды. Бул макулдашуу боюнча тапшырмаңыз алынды.",
+        Severity: NotificationSeverity.Info);
 }

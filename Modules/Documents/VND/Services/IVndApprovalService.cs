@@ -23,5 +23,18 @@ public interface IVndApprovalService
     Task<DisagreementMatrixRowResponse> AddDisagreementMatrixRowAsync(int vndId, AddDisagreementMatrixRowRequest request, int currentUserId);
     Task<DisagreementMatrixRowResponse> UpdateDisagreementMatrixRowAsync(int vndId, int rowId, UpdateDisagreementMatrixRowRequest request, int currentUserId);
     Task DeleteDisagreementMatrixRowAsync(int vndId, int rowId, int currentUserId);
+
+    /// <summary>Главный редактор добавляет согласующего в уже запущенный процесс согласования —
+    /// маршрут редактируется на лету, без остановки согласования. Доступно только с правом
+    /// EditAnyVndApprovalRoute. См. VndApprovalStage.IsRemovedByEditor — новый этап встраивается
+    /// в ту фазу, которая сейчас активна.</summary>
+    Task<ApprovalProcessResponse> AddApproverAsync(int vndId, AddApprovalStageRequest request, int currentUserId);
+
+    /// <summary>Главный редактор убирает согласующего из уже запущенного процесса согласования —
+    /// этап не удаляется (история согласования не теряется), а помечается недействующим
+    /// (VndApprovalStage.IsRemovedByEditor), задача с него снимается. Доступно только с правом
+    /// EditAnyVndApprovalRoute.</summary>
+    Task<ApprovalProcessResponse> RemoveApproverAsync(int vndId, int stageId, RemoveApprovalStageRequest request, int currentUserId);
+
     Task ProcessTimeoutsAsync();
 }
