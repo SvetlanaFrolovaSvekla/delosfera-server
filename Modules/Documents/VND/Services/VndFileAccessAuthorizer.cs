@@ -64,6 +64,25 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
                            || canViewOtherDrafts, ct);
         if (canAccessApprovalAttachment) return true;
 
+        // Снимки файлов редакции по кругам согласования (VndRedactionRevisionSnapshot) -
+        // в отличие от вложений к резолюциям выше, остаются доступны БЕССРОЧНО, в т.ч. после
+        // завершения согласования - это часть истории версий документа, к ней нужно
+        // возвращаться и после того, как ВНД стал действующим. Доступ - тем же, кому виден сам
+        // ВНД/редакция (см. canAccessRedactionFile выше), плюс инициатору и согласующим
+        // процесса, которому принадлежит снимок, даже пока сам ВНД ещё черновик/на актуализации.
+        var canAccessRedactionSnapshot = await _db.Set<VndRedactionRevisionSnapshot>()
+            .Where(s => s.DocFileRuId == fileId
+                        || s.DocFileKgId == fileId
+                        || s.DocFileEnId == fileId
+                        || s.TidFileId == fileId
+                        || s.DisagreementMatrixFileId == fileId)
+            .AnyAsync(s => s.ApprovalProcess!.InitiatorUserId == userId
+                           || s.ApprovalProcess.Stages.Any(st => st.ApproverUserId == userId)
+                           || s.VndRedaction!.Vnd!.Status != VndStatus.Draft
+                           || canViewOtherDrafts
+                           || s.VndRedaction.Vnd.CreatedByUserId == userId, ct);
+        if (canAccessRedactionSnapshot) return true;
+
         // Файл приложен к системному уведомлению (Notification.AttachmentFileId) — например,
         // Excel-план единоразовой рассылки актуализации. Доступ только фактическим получателям
         // этого уведомления (через UserNotification), не всем подряд.

@@ -44,6 +44,12 @@ public class VndApprovalProcess : IAuditableEntity
     /// Stages.</summary>
     public ICollection<VndApprovalPhaseRound> PhaseRounds { get; set; } = new List<VndApprovalPhaseRound>();
 
+    /// <summary>Снимки файлов редакции, сделанные перед каждой перезаписью при повторных
+    /// отправках после замечаний — см. <see cref="VndRedactionRevisionSnapshot"/>. Нужно,
+    /// чтобы проверяющие могли скачать и сравнить версию документа, к которой относились их
+    /// замечания, с исправленной.</summary>
+    public ICollection<VndRedactionRevisionSnapshot> RedactionSnapshots { get; set; } = new List<VndRedactionRevisionSnapshot>();
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
