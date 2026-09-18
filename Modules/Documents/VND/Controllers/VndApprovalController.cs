@@ -173,4 +173,40 @@ public class VndApprovalController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
+
+    /// <summary>Главный редактор добавляет согласующего в уже запущенный процесс согласования</summary>
+    [HttpPost("stages")]
+    [RequirePermission(PermissionCode.EditAnyVndApprovalRoute)]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ApprovalProcessResponse>> AddApprover(
+        int vndId, [FromBody] AddApprovalStageRequest request)
+    {
+        try
+        {
+            return Ok(await _service.AddApproverAsync(vndId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
+    /// <summary>Главный редактор убирает согласующего из уже запущенного процесса согласования —
+    /// этап помечается недействующим (см. VndApprovalStage.IsRemovedByEditor), задача с него
+    /// снимается</summary>
+    [HttpPost("stages/{stageId:int}/remove")]
+    [RequirePermission(PermissionCode.EditAnyVndApprovalRoute)]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ApprovalProcessResponse>> RemoveApprover(
+        int vndId, int stageId, [FromBody] RemoveApprovalStageRequest request)
+    {
+        try
+        {
+            return Ok(await _service.RemoveApproverAsync(vndId, stageId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
 }

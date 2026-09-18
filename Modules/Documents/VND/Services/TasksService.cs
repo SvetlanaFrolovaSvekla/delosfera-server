@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Services;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
@@ -47,6 +47,9 @@ public class TasksService : ITasksService
             .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Vnd)
             .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Redaction)
             .Where(s => s.ApproverUserId == userId)
+            // Убранный главным редактором этап (см. VndApprovalStage.IsRemovedByEditor) не
+            // должен висеть у согласующего задачей - задача с него уже снята.
+            .Where(s => !s.IsRemovedByEditor)
             .Where(s =>
                 (s.ApprovalProcess!.Status == ApprovalProcessStatus.Primary
                  && s.PrimaryDecision == ApprovalStageDecision.Pending)
@@ -437,6 +440,11 @@ public class TasksService : ITasksService
             .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Vnd)
             .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Redaction)
             .Where(s => s.ApproverUserId == userId)
+            // Убранный главным редактором этап (см. VndApprovalStage.IsRemovedByEditor) не
+            // показываем и здесь, в "Выполнено" - для этого согласующего задачи по нему больше
+            // нет вообще, ни активной, ни завершённой; сам факт удаления виден в журнале
+            // активности, а не в его личном списке задач.
+            .Where(s => !s.IsRemovedByEditor)
             .Where(s =>
                 (s.PrimaryDecision != ApprovalStageDecision.Pending)
                 || (s.RepeatDecision != null && s.RepeatDecision != ApprovalStageDecision.Pending)
@@ -834,6 +842,9 @@ public class TasksService : ITasksService
         // независимо — отказ одного не должен обнулять остальные, которые ни при чём.
         var coordinationCount = await CountSafeAsync("coordination", () => _db.Set<VndApprovalStage>()
             .Where(s => s.ApproverUserId == userId)
+            // См. тот же фильтр в GetCoordinationTasksAsync выше - убранный главным редактором
+            // этап не считается ждущим решения.
+            .Where(s => !s.IsRemovedByEditor)
             .Where(s =>
                 (s.ApprovalProcess!.Status == ApprovalProcessStatus.Primary
                  && s.PrimaryDecision == ApprovalStageDecision.Pending)

@@ -352,6 +352,10 @@ public class VndApprovalService : IVndApprovalService
         if (stage.ApproverUserId != currentUserId)
             throw new UnauthorizedAccessException("Вы не назначены согласующим на этом этапе");
 
+        if (stage.IsRemovedByEditor)
+            throw new InvalidOperationException(
+                "Вы исключены из маршрута согласования главным редактором — решение принять нельзя");
+
         if ((request.Decision == ApprovalDecisionType.ApproveWithComment
              || request.Decision == ApprovalDecisionType.Reject)
             && string.IsNullOrWhiteSpace(request.Comment))
@@ -622,6 +626,7 @@ public class VndApprovalService : IVndApprovalService
         await _db.SaveChangesAsync();
 
         var approverIds = process.Stages
+            .Where(s => !s.IsRemovedByEditor)
             .Select(s => s.ApproverUserId)
             .Where(id => id != currentUserId)
             .Distinct()
@@ -856,7 +861,12 @@ public class VndApprovalService : IVndApprovalService
 
             await _db.SaveChangesAsync();
 
-            var stageApproverIds = process.Stages.Select(s => s.ApproverUserId).ToArray();
+            // См. тот же фильтр в CompleteRepeatPhaseAsync - убранные главным редактором этапы
+            // не участвуют в финальной выдержке и не получают уведомление о ней.
+            var stageApproverIds = process.Stages
+                .Where(s => !s.IsRemovedByEditor)
+                .Select(s => s.ApproverUserId)
+                .ToArray();
 
             await NotifyAsync(
                 VndApprovalNotificationMessages.FinalHoldForApprovers(redaction.Code, process.Vnd!.TitleRu),
@@ -946,6 +956,272 @@ public class VndApprovalService : IVndApprovalService
         await _db.SaveChangesAsync();
 
         return ToDisagreementRowResponse(row);
+    }
+
+    /// <summary>Главный редактор добавляет согласующего в уже запущенный процесс согласования —
+    /// маршрут редактируется на лету, без остановки согласования. Новый этап встраивается в ту
+    /// фазу, которая сейчас активна: более ранние фазы, которые процесс уже прошёл, для него
+    /// технически "пропущены" (Approved, с пояснением) — ждать от него решения по фазе, которая
+    /// уже закрылась для всех остальных, смысла нет.</summary>
+    public async Task<ApprovalProcessResponse> AddApproverAsync(
+        int vndId, AddApprovalStageRequest request, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        if (!_currentUser.HasPermission(PermissionCode.EditAnyVndApprovalRoute))
+            throw new UnauthorizedAccessException(
+                "Редактировать маршрут согласования может только главный редактор");
+
+        if (process.Status is ApprovalProcessStatus.Approved
+            or ApprovalProcessStatus.Cancelled
+            or ApprovalProcessStatus.Rejected)
+            throw new InvalidOperationException("Согласование уже завершено — маршрут менять нельзя");
+
+        var approver = await _db.Users
+                           .Include(u => u.Roles)
+                           .FirstOrDefaultAsync(u => u.Id == request.ApproverUserId)
+                       ?? throw new KeyNotFoundException(
+                           $"Пользователь с id={request.ApproverUserId} не найден");
+
+        if (!approver.Roles.SelectMany(r => r.PermissionCodes).Contains((int)PermissionCode.ActAsApprover))
+            throw new InvalidOperationException("У этого пользователя нет права выступать в роли согласующего");
+
+        // Уже действующий этап на этого же пользователя - нельзя завести второй активный
+        // одновременно. Ранее убранный этап (IsRemovedByEditor) этому не мешает - см. пояснение
+        // у RemoveApproverAsync ниже: старая запись остаётся в истории, а этот вызов заведёт
+        // для того же человека новый, отдельный этап.
+        if (process.Stages.Any(s => s.ApproverUserId == approver.Id && !s.IsRemovedByEditor))
+            throw new InvalidOperationException("Этот пользователь уже согласует эту редакцию");
+
+        if (approver.OrgUnitId is null)
+            throw new InvalidOperationException(
+                "У пользователя не указано структурное подразделение — его нельзя назначить согласующим");
+
+        var now = DateTime.UtcNow;
+        var nextOrder = process.Stages.Count == 0 ? 1 : process.Stages.Max(s => s.Order) + 1;
+
+        const string skippedPhaseComment =
+            "Добавлен главным редактором после начала этой фазы согласования — не участвовал в ней";
+
+        var stage = new VndApprovalStage
+        {
+            ApprovalProcessId = process.Id,
+            Order = nextOrder,
+            Kind = ApprovalStageKind.Custom,
+            Title = "Доп. согласующий",
+            CoordinationStageId = null,
+            OrgUnitId = approver.OrgUnitId.Value,
+            ApproverUserId = approver.Id,
+        };
+
+        // В какую фазу встраивается новый этап - определяется текущим статусом процесса. Фазы,
+        // которые процесс уже ПРОШЁЛ к этому моменту, для нового этапа считаются пропущенными
+        // (Approved, с явным пояснением) - он появился позже и не должен вечно висеть Pending по
+        // фазе, которая для него никогда не наступит.
+        switch (process.Status)
+        {
+            case ApprovalProcessStatus.Primary:
+                // Первичная фаза как раз идёт - обычный этап, решение ожидается как у всех.
+                break;
+
+            case ApprovalProcessStatus.RevisionNeeded:
+                // Ничья фаза сейчас не активна (инициатор ещё готовит исправления) - следующая
+                // активная фаза зависит от того, как он ответит на замечания при повторной
+                // отправке (ResubmitAfterRevisionAsync): обычная доработка → Repeat,
+                // несогласие/частичное согласие → сразу FinalHold. Ставим ParticipatesInRepeat
+                // на "участвует" - если отправка всё же пойдёт мимо Repeat, это никак не мешает:
+                // финальная выдержка (ResetFinalHoldDecisionsAsync) берёт согласующих из ВСЕХ
+                // непропущенных этапов процесса, а не только из ParticipatesInRepeat.
+                stage.PrimaryDecision = ApprovalStageDecision.Approved;
+                stage.PrimaryComment = skippedPhaseComment;
+                stage.PrimaryDecidedAt = now;
+                stage.ParticipatesInRepeat = true;
+                break;
+
+            case ApprovalProcessStatus.Repeated:
+                stage.PrimaryDecision = ApprovalStageDecision.Approved;
+                stage.PrimaryComment = skippedPhaseComment;
+                stage.PrimaryDecidedAt = now;
+                stage.ParticipatesInRepeat = true;
+                stage.RepeatDecision = ApprovalStageDecision.Pending;
+                break;
+
+            case ApprovalProcessStatus.FinalHold:
+                stage.PrimaryDecision = ApprovalStageDecision.Approved;
+                stage.PrimaryComment = skippedPhaseComment;
+                stage.PrimaryDecidedAt = now;
+                stage.ParticipatesInRepeat = false;
+                stage.FinalHoldDecision = ApprovalStageDecision.Pending;
+                break;
+
+            default:
+                throw new InvalidOperationException("В текущем статусе процесса маршрут менять нельзя");
+        }
+
+        _db.Set<VndApprovalStage>().Add(stage);
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+        var vnd = process.Vnd!;
+        var redaction = process.Redaction!;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ApproverAdded, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} добавил(а) согласующего {approver.FullName} в маршрут согласования " +
+                $"редакции {redaction.Code} ВНД «{vnd.TitleRu}» (главный редактор)",
+                $"{actorName} added approver {approver.FullName} to the approval route of revision " +
+                $"{redaction.Code} of VND \"{vnd.TitleRu}\" (chief editor)",
+                $"{actorName} башкы редактор катары «{vnd.TitleRu}» ВНДисинин {redaction.Code} " +
+                $"редакциясынын макулдашуу маршрутуна {approver.FullName} макулдашуучусун кошту"),
+            $"/base-vnd/{vndId}");
+
+        await _db.SaveChangesAsync();
+
+        // Уведомление о задаче - только если для нового этапа сейчас реально открыта фаза
+        // (Primary/Repeat/FinalHold Decision == Pending), а не пропущена как более ранняя.
+        var hasImmediateTask = stage.PrimaryDecision == ApprovalStageDecision.Pending
+                                || stage.RepeatDecision == ApprovalStageDecision.Pending
+                                || stage.FinalHoldDecision == ApprovalStageDecision.Pending;
+        if (hasImmediateTask)
+            await NotifyAsync(
+                VndApprovalNotificationMessages.AddedAsApprover(actorName, redaction.Code, vnd.TitleRu),
+                NotificationCategory.Vnd, vndId, currentUserId, approver.Id);
+
+        return await LoadResponseAsync(process.Id);
+    }
+
+    /// <summary>Главный редактор убирает согласующего из уже запущенного процесса согласования.
+    /// Этап не удаляется из маршрута - история согласования (в т.ч. уже принятое им решение,
+    /// если оно было) не должна пропадать - а помечается недействующим (IsRemovedByEditor):
+    /// задача с него снимается принудительной установкой ApprovalStageDecision.RemovedByEditor
+    /// на ту фазу, что сейчас активна, ParticipatesInRepeat принудительно сбрасывается в false -
+    /// и он больше никогда не участвует ни в одной последующей фазе/круге (см. проверку
+    /// IsRemovedByEditor в ResetFinalHoldDecisionsAsync).</summary>
+    public async Task<ApprovalProcessResponse> RemoveApproverAsync(
+        int vndId, int stageId, RemoveApprovalStageRequest request, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        if (!_currentUser.HasPermission(PermissionCode.EditAnyVndApprovalRoute))
+            throw new UnauthorizedAccessException(
+                "Редактировать маршрут согласования может только главный редактор");
+
+        if (process.Status is ApprovalProcessStatus.Approved
+            or ApprovalProcessStatus.Cancelled
+            or ApprovalProcessStatus.Rejected)
+            throw new InvalidOperationException("Согласование уже завершено — маршрут менять нельзя");
+
+        var stage = process.Stages.FirstOrDefault(x => x.Id == stageId)
+                    ?? throw new KeyNotFoundException($"Этап согласования с id={stageId} не найден");
+
+        if (stage.IsRemovedByEditor)
+            throw new InvalidOperationException("Этот согласующий уже убран из маршрута");
+
+        // В маршруте должен остаться хотя бы один действующий этап - иначе согласование
+        // застынет навсегда, не имея от кого дожидаться решения.
+        if (process.Stages.Count(s => !s.IsRemovedByEditor) <= 1)
+            throw new InvalidOperationException(
+                "Нельзя убрать последнего действующего согласующего в маршруте — добавьте " +
+                "другого, прежде чем убирать этого");
+
+        var now = DateTime.UtcNow;
+        stage.IsRemovedByEditor = true;
+        // Навсегда исключаем из повторного согласования - независимо от того, на какой фазе
+        // случилось удаление (см. подробности в комментарии к IsRemovedByEditor на модели).
+        stage.ParticipatesInRepeat = false;
+
+        // Задача снимается именно на той фазе, что сейчас активна для процесса - остальные две
+        // либо уже прошли (там решение, если оно было принято, остаётся как есть - это история),
+        // либо ещё не наступили и наступить для этого этапа уже не должны.
+        switch (process.Status)
+        {
+            case ApprovalProcessStatus.Primary:
+                stage.PrimaryDecision = ApprovalStageDecision.RemovedByEditor;
+                stage.PrimaryDecidedAt = now;
+                break;
+
+            case ApprovalProcessStatus.RevisionNeeded:
+                // Ничья фаза сейчас не активна - следующая, которая для этого этапа наступила бы
+                // (Repeat или, если решение по нему уже принято, FinalHold), закрывается сразу
+                // отсюда же, чтобы не оставлять её "подвешенной" до того момента, когда процесс
+                // реально туда перейдёт.
+                if (stage.RepeatDecision is null || stage.RepeatDecision == ApprovalStageDecision.Pending)
+                {
+                    stage.RepeatDecision = ApprovalStageDecision.RemovedByEditor;
+                    stage.RepeatDecidedAt = now;
+                }
+                else if (stage.FinalHoldDecision is null || stage.FinalHoldDecision == ApprovalStageDecision.Pending)
+                {
+                    stage.FinalHoldDecision = ApprovalStageDecision.RemovedByEditor;
+                    stage.FinalHoldDecidedAt = now;
+                }
+                break;
+
+            case ApprovalProcessStatus.Repeated:
+                stage.RepeatDecision = ApprovalStageDecision.RemovedByEditor;
+                stage.RepeatDecidedAt = now;
+                break;
+
+            case ApprovalProcessStatus.FinalHold:
+                stage.FinalHoldDecision = ApprovalStageDecision.RemovedByEditor;
+                stage.FinalHoldDecidedAt = now;
+                break;
+        }
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+        var vnd = process.Vnd!;
+        var redaction = process.Redaction!;
+        var removedApproverName = stage.ApproverUser?.FullName
+            ?? (await _db.Users.FindAsync(stage.ApproverUserId))?.FullName ?? "—";
+
+        var reasonSuffix = string.IsNullOrWhiteSpace(request.Reason) ? "" : $" Причина: «{request.Reason}».";
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ApproverRemoved, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} убрал(а) согласующего {removedApproverName} из маршрута согласования " +
+                $"редакции {redaction.Code} ВНД «{vnd.TitleRu}» (главный редактор).{reasonSuffix}",
+                $"{actorName} removed approver {removedApproverName} from the approval route of revision " +
+                $"{redaction.Code} of VND \"{vnd.TitleRu}\" (chief editor).",
+                $"{actorName} башкы редактор катары «{vnd.TitleRu}» ВНДисинин {redaction.Code} " +
+                $"редакциясынын макулдашуу маршрутунан {removedApproverName} макулдашуучусун алып салды."),
+            $"/base-vnd/{vndId}");
+
+        await _db.SaveChangesAsync();
+
+        await NotifyAsync(
+            VndApprovalNotificationMessages.RemovedFromRouteByEditor(actorName, redaction.Code, vnd.TitleRu),
+            NotificationCategory.Vnd, vndId, currentUserId, stage.ApproverUserId);
+
+        // Если убранный был последним, чьё решение ждали на текущей фазе - фаза теперь решена
+        // всеми, кто остался, и можно перейти дальше, не дожидаясь дедлайна (то же самое, что
+        // происходит после обычного DecideAsync).
+        switch (process.Status)
+        {
+            case ApprovalProcessStatus.Primary
+                when process.Stages.All(s => s.PrimaryDecision != ApprovalStageDecision.Pending):
+                await CompletePrimaryPhaseAsync(process);
+                break;
+
+            case ApprovalProcessStatus.Repeated:
+                var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
+                if (repeatStages.Count > 0 && repeatStages.All(s =>
+                        s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending))
+                    await CompleteRepeatPhaseAsync(process);
+                break;
+
+            case ApprovalProcessStatus.FinalHold
+                when process.Stages.All(s =>
+                    s.FinalHoldDecision is not null && s.FinalHoldDecision != ApprovalStageDecision.Pending):
+                await FinalizeApprovalAsync(process, afterRevision: true);
+                break;
+        }
+
+        await _db.SaveChangesAsync();
+
+        return await LoadResponseAsync(process.Id);
     }
 
     public async Task ProcessTimeoutsAsync()
@@ -1159,7 +1435,13 @@ public class VndApprovalService : IVndApprovalService
         // его решение тоже проставляется автоматически, иначе оно "висит" до просрочки.
         AutoApproveInitiatorStages(process, ApprovalStagePhase.FinalHold);
 
-        var stageApproverIds = process.Stages.Select(s => s.ApproverUserId).ToArray();
+        // Убранные главным редактором этапы не участвуют в финальной выдержке - см. фикс в
+        // ResetFinalHoldDecisionsAsync выше, здесь дополнительно не рассылаем им уведомление о
+        // ней, у них уже нет задачи по этому согласованию.
+        var stageApproverIds = process.Stages
+            .Where(s => !s.IsRemovedByEditor)
+            .Select(s => s.ApproverUserId)
+            .ToArray();
 
         // --- Всем согласующим: документ ушёл на финальную выдержку
         await NotifyAsync(
@@ -1320,7 +1602,10 @@ public class VndApprovalService : IVndApprovalService
     /// редакция в целом стала согласованной.</summary>
     private async Task GenerateApprovalSheetAsync(VndApprovalProcess process, VndRedaction redaction)
     {
+        // Убранные главным редактором этапы не значатся "согласовавшими" - в Листе согласования
+        // они не должны появляться, как будто фактически участвовали в решении.
         var approverIds = process.Stages
+            .Where(s => !s.IsRemovedByEditor)
             .OrderBy(s => s.Order)
             .Select(s => s.ApproverUserId)
             .ToList();
@@ -1433,6 +1718,17 @@ public class VndApprovalService : IVndApprovalService
 
         foreach (var stage in process.Stages)
         {
+            // Убранный главным редактором этап никогда не возвращается ни в один следующий круг
+            // финальной выдержки — без этой проверки LatestDecisionBeforeFinalHold ниже вернул бы
+            // ApprovalStageDecision.RemovedByEditor как "не чистое" решение (оно не Approved и не
+            // AutoApprovedByTimeout), и цикл ниже молча сбросил бы его FinalHoldDecision в Pending,
+            // возвращая уже убранного согласующего в маршрут.
+            if (stage.IsRemovedByEditor)
+            {
+                stage.FinalHoldDecision = ApprovalStageDecision.RemovedByEditor;
+                continue;
+            }
+
             var latest = LatestDecisionBeforeFinalHold(stage);
             var wasClean = latest is ApprovalStageDecision.Approved or ApprovalStageDecision.AutoApprovedByTimeout;
 
@@ -1855,6 +2151,7 @@ public class VndApprovalService : IVndApprovalService
                 OrgUnitName = s.OrgUnit?.TitleRu ?? "",
                 ApproverUserId = s.ApproverUserId,
                 ApproverName = s.ApproverUser?.FullName ?? "",
+                IsRemovedByEditor = s.IsRemovedByEditor,
                 PrimaryDecision = MapDecision(s.PrimaryDecision),
                 PrimaryComment = s.PrimaryComment,
                 PrimaryDecidedAt = s.PrimaryDecidedAt,
@@ -1996,6 +2293,7 @@ public class VndApprovalService : IVndApprovalService
         ApprovalStageDecision.ApprovedWithComment => "approved_with_comment",
         ApprovalStageDecision.Rejected => "rejected",
         ApprovalStageDecision.AutoApprovedByTimeout => "auto_approved_timeout",
+        ApprovalStageDecision.RemovedByEditor => "removed_by_editor",
         _ => "pending"
     };
 

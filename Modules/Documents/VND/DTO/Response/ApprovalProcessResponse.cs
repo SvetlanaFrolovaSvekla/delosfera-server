@@ -96,6 +96,13 @@ public class ApprovalStageResponse
     public int ApproverUserId { get; set; }
     public required string ApproverName { get; set; }
 
+    /// <summary>Убран главным редактором из уже запущенного процесса согласования (см.
+    /// VndApprovalStage.IsRemovedByEditor) — этап остаётся в маршруте (история согласования не
+    /// теряется), но недействующий: задача с него снята и он больше не участвует в согласовании.
+    /// Клиент показывает такой этап как "Недействующий (убран главным редактором)" независимо
+    /// от значения полей *Decision ниже.</summary>
+    public bool IsRemovedByEditor { get; set; }
+
     public required string PrimaryDecision { get; set; }
     public string? PrimaryComment { get; set; }
     public DateTime? PrimaryDecidedAt { get; set; }

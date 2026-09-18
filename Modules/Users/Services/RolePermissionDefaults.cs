@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Users.Models;
 
@@ -94,10 +94,16 @@ public static class RolePermissionDefaults
         // что и ConsolidateAnyVnd у методолога выше: широкий набор практически есть у любого
         // автора ВНД, а отзыв чужого согласования должен доставаться только настоящему
         // главному редактору.
+        //
+        // EditAnyVndApprovalRoute - право редактировать маршрут уже запущенного согласования
+        // (добавлять/убирать согласующих, см. VndApprovalService.AddApproverAsync/
+        // RemoveApproverAsync) - заведено по тому же принципу узкого права: не через широкий
+        // IsChiefEditor.
         ("Главный редактор ВНД", [
             PermissionCode.ViewCorrespondence,
             PermissionCode.ViewPowersOfAttorney,
             PermissionCode.CancelAnyVndApproval,
+            PermissionCode.EditAnyVndApprovalRoute,
         ]),
 
         // ── Закупки ──────────────────────────────────────────────────────────
