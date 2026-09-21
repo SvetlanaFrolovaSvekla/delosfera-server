@@ -298,6 +298,17 @@ public class OrgSyncService(
             run.EmployeesMatched++;
             var changed = false;
 
+            // ФИО ведёт портал (источник истины по кадрам): при первичном импорте имена
+            // попали в СЭД в разном виде («Имя Фамилия», без отчества, с опечатками), и без
+            // этого выравнивания расходились с порталом навсегда. Портал отдаёт «Фамилия Имя
+            // Отчество» — приводим к нему.
+            if (!string.IsNullOrWhiteSpace(employee.Name)
+                && user.FullName != employee.Name.Trim())
+            {
+                user.FullName = employee.Name.Trim();
+                changed = true;
+            }
+
             if (employee.Unit is { } unitRef
                 && unitsByExternal.TryGetValue(unitRef.Id, out var unit)
                 && user.OrgUnitId != unit.Id)
