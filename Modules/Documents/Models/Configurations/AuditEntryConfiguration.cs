@@ -12,6 +12,11 @@ public class AuditEntryConfiguration : IEntityTypeConfiguration<AuditEntry>
         builder.HasIndex(x => new { x.EntityType, x.EntityId });
         builder.HasIndex(x => x.At);
 
-        // Неизменяемость (NFR-04) обеспечивается на уровне приложения (только append).
+        // Цепочка целостности (AUD-1): Hash уникален, каждый Hash используется как PrevHash
+        // ровно один раз — уникальный индекс не даёт «раздвоить» цепь незаметно.
+        builder.HasIndex(x => x.Hash).IsUnique();
+
+        // Неизменяемость (NFR-04) обеспечивается на уровне приложения (только append),
+        // а теперь ещё и доказуема хеш-цепью (AUD-1): любое изменение/удаление обнаружит проверка.
     }
 }

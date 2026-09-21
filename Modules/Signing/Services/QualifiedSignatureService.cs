@@ -78,6 +78,27 @@ public class QualifiedSignRequest
     public required string Certificate { get; set; }
 }
 
+/// <summary>Один документ в пакетном подписании (SIGN-BATCH): подпись отпечатка карточки.</summary>
+public class BatchDocumentSignItem
+{
+    public int DocumentId { get; set; }
+
+    /// <summary>Подпись хеша карточки, полученная от криптопровайдера, base64.</summary>
+    public required string Signature { get; set; }
+
+    /// <summary>Сертификат подписанта (DER или PEM), base64.</summary>
+    public required string Certificate { get; set; }
+}
+
+/// <summary>Итог подписания одного документа в пакете. Ошибка одного не срывает остальные.</summary>
+public class BatchDocumentSignResult
+{
+    public int DocumentId { get; set; }
+    public bool Success { get; set; }
+    public SignatureInfoDto? Signature { get; set; }
+    public string? Error { get; set; }
+}
+
 public interface IQualifiedSignatureService
 {
     Task<SignChallengeDto> GetChallengeAsync(int attachmentId);
@@ -88,6 +109,12 @@ public interface IQualifiedSignatureService
 
     /// <summary>Принять квалифицированную подпись карточки документа.</summary>
     Task<SignatureInfoDto> SignDocumentAsync(int documentId, QualifiedSignRequest request, int userId);
+
+    /// <summary>Данные для подписи пачки карточек (SIGN-BATCH). Отсутствующие документы опускаются.</summary>
+    Task<List<SignChallengeDto>> GetDocumentChallengesAsync(IReadOnlyList<int> documentIds);
+
+    /// <summary>Принять подписи пачки карточек одним ключом за сессию (SIGN-BATCH). Ошибка одного документа не срывает остальные.</summary>
+    Task<List<BatchDocumentSignResult>> SignDocumentsAsync(IReadOnlyList<BatchDocumentSignItem> items, int userId);
 }
 
 /// <summary>
@@ -232,6 +259,53 @@ public class QualifiedSignatureService : IQualifiedSignatureService
 
             return ToDto(stored, await UserNameAsync(userId), certificate, trust, timestamp);
         }
+    }
+
+    // ── пакетное подписание карточек (SIGN-BATCH) ─────────────────────────────
+
+    public async Task<List<SignChallengeDto>> GetDocumentChallengesAsync(IReadOnlyList<int> documentIds)
+    {
+        // Последовательно: общий DbContext не потокобезопасен, а криптопроверка идёт
+        // при подписи, не здесь — challenge только собирает отпечатки.
+        var result = new List<SignChallengeDto>();
+        foreach (var id in documentIds.Distinct())
+        {
+            try { result.Add(await GetDocumentChallengeAsync(id)); }
+            catch (KeyNotFoundException) { /* отсутствующий документ опускаем — вызывающий сверит по DocumentId */ }
+        }
+        return result;
+    }
+
+    public async Task<List<BatchDocumentSignResult>> SignDocumentsAsync(
+        IReadOnlyList<BatchDocumentSignItem> items, int userId)
+    {
+        // Каждый документ подписывается своей подписью своего хеша (CAdES так и работает);
+        // «одним ключом за сессию» — свойство рабочего места: ключ разблокируется один раз,
+        // а сюда приходит пачка готовых подписей. Обрабатываем по одной, ошибка одной
+        // (истёк сертификат, документ изменился) не должна отменять уже принятые.
+        var results = new List<BatchDocumentSignResult>();
+        foreach (var item in items)
+        {
+            try
+            {
+                var info = await SignDocumentAsync(
+                    item.DocumentId,
+                    new QualifiedSignRequest { Signature = item.Signature, Certificate = item.Certificate },
+                    userId);
+                results.Add(new BatchDocumentSignResult
+                {
+                    DocumentId = item.DocumentId, Success = true, Signature = info,
+                });
+            }
+            catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+            {
+                results.Add(new BatchDocumentSignResult
+                {
+                    DocumentId = item.DocumentId, Success = false, Error = ex.Message,
+                });
+            }
+        }
+        return results;
     }
 
     // ── общая часть приёма подписи ───────────────────────────────────────────

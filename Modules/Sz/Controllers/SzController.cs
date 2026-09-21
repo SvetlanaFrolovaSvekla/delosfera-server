@@ -348,6 +348,8 @@ public class SzController : ControllerBase
         {
             HeadOfficeHrUserId = s?.HeadOfficeHrUserId,
             BranchHrUserId = s?.BranchHrUserId,
+            OperationsApproverUserId = s?.OperationsApproverUserId,
+            OperationsFallbackUserId = s?.OperationsFallbackUserId,
         });
     }
 
@@ -365,12 +367,16 @@ public class SzController : ControllerBase
         }
         s.HeadOfficeHrUserId = req.HeadOfficeHrUserId;
         s.BranchHrUserId = req.BranchHrUserId;
+        s.OperationsApproverUserId = req.OperationsApproverUserId;
+        s.OperationsFallbackUserId = req.OperationsFallbackUserId;
         s.UpdatedAt = now;
         await _db.SaveChangesAsync();
         return Ok(new HrRoutingSettingsDto
         {
             HeadOfficeHrUserId = s.HeadOfficeHrUserId,
             BranchHrUserId = s.BranchHrUserId,
+            OperationsApproverUserId = s.OperationsApproverUserId,
+            OperationsFallbackUserId = s.OperationsFallbackUserId,
         });
     }
 

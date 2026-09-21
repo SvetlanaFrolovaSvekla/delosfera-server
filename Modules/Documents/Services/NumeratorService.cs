@@ -47,11 +47,16 @@ public class NumeratorService : INumeratorService
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
 
-            return Format(num.Pattern, seq, tokens);
+            return Format(num.Pattern, seq, scopeKey, tokens);
         });
     }
 
-    private static string Format(string pattern, int seq, IReadOnlyDictionary<string, string>? tokens) =>
+    // Год в номере берём из года документа (явный токен "year"), затем из год-скоупа
+    // нумератора (scope_key вида "2026"), и только в крайнем случае — текущий год.
+    // Иначе документ, зарегистрированный задним числом или в декабре под следующий год,
+    // получил бы в номере текущий год, разойдясь со своим счётчиком и датой регистрации.
+    private static string Format(
+        string pattern, int seq, string scopeKey, IReadOnlyDictionary<string, string>? tokens) =>
         Placeholder.Replace(pattern, m =>
         {
             var name = m.Groups[1].Value;
@@ -59,8 +64,18 @@ public class NumeratorService : INumeratorService
             return name switch
             {
                 "seq" => fmt is null ? seq.ToString() : seq.ToString(fmt),
-                "year" => DateTime.UtcNow.Year.ToString(),
+                "year" => ResolveYear(scopeKey, tokens),
                 _ => tokens is not null && tokens.TryGetValue(name, out var v) ? v : m.Value
             };
         });
+
+    private static string ResolveYear(string scopeKey, IReadOnlyDictionary<string, string>? tokens)
+    {
+        if (tokens is not null && tokens.TryGetValue("year", out var explicitYear)
+            && !string.IsNullOrWhiteSpace(explicitYear))
+            return explicitYear;
+        if (scopeKey.Length == 4 && int.TryParse(scopeKey, out _))
+            return scopeKey;
+        return DateTime.UtcNow.Year.ToString();
+    }
 }

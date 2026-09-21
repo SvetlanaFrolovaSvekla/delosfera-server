@@ -69,13 +69,15 @@ public class HrOrderController : ControllerBase
     private readonly Files.Services.IFileStorageService _storage;
     private readonly Documents.Services.IAuditService _audit;
     private readonly INumeratorService _numerator;
+    private readonly Common.Services.IBankClock _clock;
 
     public HrOrderController(
         DelosferaDbContext db, ICurrentUserService currentUser, IDocumentHtmlService html,
         Documents.Services.IAcknowledgementService acknowledgements,
         Files.Services.IFileStorageService storage,
         Documents.Services.IAuditService audit,
-        INumeratorService numerator)
+        INumeratorService numerator,
+        Common.Services.IBankClock clock)
     {
         _db = db;
         _currentUser = currentUser;
@@ -84,6 +86,7 @@ public class HrOrderController : ControllerBase
         _storage = storage;
         _audit = audit;
         _numerator = numerator;
+        _clock = clock;
     }
 
     /// <summary>
@@ -363,7 +366,7 @@ public class HrOrderController : ControllerBase
         if (order.Status == HrOrderStatus.Signed)
             return Conflict(new { message = "Приказ подписан — изменить его нельзя, издайте новый." });
 
-        var orderDate = request.OrderDate ?? order.OrderDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var orderDate = request.OrderDate ?? order.OrderDate ?? _clock.Today;
 
         order.Kind = request.Kind;
         order.Year = orderDate.Year;

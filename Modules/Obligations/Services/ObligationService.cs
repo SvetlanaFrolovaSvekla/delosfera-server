@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Notifications.DTO.Request;
@@ -39,17 +40,21 @@ public class ObligationService : IObligationService
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
     private readonly INotificationService _notifications;
+    private readonly IBankClock _clock;
 
-    public ObligationService(DelosferaDbContext db, IAuditService audit, INotificationService notifications)
+    public ObligationService(DelosferaDbContext db, IAuditService audit, INotificationService notifications, IBankClock clock)
     {
         _db = db;
         _audit = audit;
         _notifications = notifications;
+        _clock = clock;
     }
 
     public async Task<(int Created, int AutoFulfilled, int Missed)> SyncAsync(CancellationToken ct = default)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        // Календарь периодов и «просрочено сегодня» — по дате банка (CLK-1), иначе на UTC+6
+        // период мог бы закрыться на сутки раньше/позже. Метки CreatedAt/UpdatedAt — в UTC.
+        var today = _clock.Today;
         var now = DateTime.UtcNow;
 
         var obligations = await _db.RecurringObligations

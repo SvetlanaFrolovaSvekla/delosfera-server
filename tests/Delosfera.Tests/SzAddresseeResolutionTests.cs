@@ -101,7 +101,7 @@ public class SzAddresseeResolutionTests
 
         return new SzService(db, documents, audit, engine, new PassthroughHtml(),
             new FakeCurrentUser(userId), handler, new SzProcurementService(db, documents, audit, new FakeCurrentUser(userId, PermissionCode.ViewAllSz)),
-            new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db));
+            new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db), new delosfera_server.Common.Services.BankClock());
     }
 
     private static async Task<(int SzId, int AddresseeId)> ЗавестиАsync(

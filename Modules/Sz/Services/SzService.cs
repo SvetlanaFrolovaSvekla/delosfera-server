@@ -91,12 +91,13 @@ public class SzService : ISzService
     private readonly SzRouteCompletionHandler _addresseeTasks;
     private readonly ISzProcurementService _procurement;
     private readonly IRouteTemplateSelector _templates;
+    private readonly IBankClock _clock;
 
     public SzService(
         DelosferaDbContext db, IDocumentService documents, IAuditService audit,
         IRouteEngine routeEngine, IDocumentHtmlService html, ICurrentUserService currentUser,
         SzRouteCompletionHandler addresseeTasks, ISzProcurementService procurement,
-        IRouteTemplateSelector templates)
+        IRouteTemplateSelector templates, IBankClock clock)
     {
         _procurement = procurement;
         _currentUser = currentUser;
@@ -107,9 +108,11 @@ public class SzService : ISzService
         _routeEngine = routeEngine;
         _html = html;
         _templates = templates;
+        _clock = clock;
     }
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+    // Дата банка (CLK-1): регистрация СЗ и сравнение сроков — по календарю Бишкека, не UTC.
+    private DateOnly Today => _clock.Today;
 
     public async Task<PagedResult<SzListItem>> SearchAsync(SzSearchRequest request, int currentUserId)
     {
@@ -1225,9 +1228,9 @@ public class SzService : ISzService
         foreach (var rubric in rubrics) sz.Rubrics.Add(rubric);
     }
 
-    private static SzListItem ToListItem(SzDocument x) => Fill(new SzListItem(), x);
+    private SzListItem ToListItem(SzDocument x) => Fill(new SzListItem(), x);
 
-    private static SzDetails ToDetails(SzDocument x)
+    private SzDetails ToDetails(SzDocument x)
     {
         var d = (SzDetails)Fill(new SzDetails(), x);
 
@@ -1313,7 +1316,7 @@ public class SzService : ISzService
         return d;
     }
 
-    private static SzListItem Fill(SzListItem item, SzDocument x)
+    private SzListItem Fill(SzListItem item, SzDocument x)
     {
         var today = Today;
         var daysLeft = x.DueDate is DateOnly due ? due.DayNumber - today.DayNumber : (int?)null;

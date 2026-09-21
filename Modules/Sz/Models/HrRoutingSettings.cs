@@ -17,6 +17,12 @@ public class HrRoutingSettings : IAuditableEntity
     /// <summary>Кадровик УЧР для записок филиальной сети.</summary>
     public int? BranchHrUserId { get; set; }
 
+    /// <summary>Согласующий от Операционного управления в маршруте заявок на замещение (ЗМ-Настр).</summary>
+    public int? OperationsApproverUserId { get; set; }
+
+    /// <summary>Замена согласующего Операционного управления при его отсутствии.</summary>
+    public int? OperationsFallbackUserId { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

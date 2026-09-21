@@ -25,6 +25,7 @@ public class VndActualizationService : IVndActualizationService
     private readonly IActivityLogService _activityLog;
     private readonly IPlanItemSync _planItemSync;
     private readonly IFileStorageService _fileService;
+    private readonly delosfera_server.Common.Services.IBankClock _clock;
 
     public VndActualizationService(
         DelosferaDbContext db,
@@ -33,7 +34,8 @@ public class VndActualizationService : IVndActualizationService
         ILogger<VndActualizationService> logger,
         IActivityLogService activityLog,
         IPlanItemSync planItemSync,
-        IFileStorageService fileService
+        IFileStorageService fileService,
+        delosfera_server.Common.Services.IBankClock clock
     )
     {
         _db = db;
@@ -43,6 +45,7 @@ public class VndActualizationService : IVndActualizationService
         _activityLog = activityLog;
         _planItemSync = planItemSync;
         _fileService = fileService;
+        _clock = clock;
     }
 
     /// <summary>Единое определение "главный редактор" для всей актуализации — умышленно шире,
@@ -748,7 +751,7 @@ public class VndActualizationService : IVndActualizationService
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         vnd.AdoptionCode = request.AdoptionCode;
         vnd.AdoptionDate = request.AdoptionDate;

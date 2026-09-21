@@ -318,5 +318,8 @@ public class CommissionVotingTests(PostgresFixture postgres)
     {
         public Task LogAsync(string entityType, int entityId, string action, int? userId, object? payload = null) =>
             Task.CompletedTask;
+        public Task<AuditChainStatus> VerifyChainAsync(CancellationToken ct = default) =>
+            Task.FromResult(AuditChainStatus.Ok(0));
+        public Task<int> BackfillChainAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 }

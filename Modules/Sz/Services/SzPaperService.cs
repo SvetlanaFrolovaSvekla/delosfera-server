@@ -34,14 +34,17 @@ public class SzPaperService : ISzPaperService
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
     private readonly ICurrentUserService _currentUser;
+    private readonly delosfera_server.Common.Services.IBankClock _clock;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+    // Дата банка (CLK-1): срок возврата бумажного оригинала — по календарю Бишкека.
+    private DateOnly Today => _clock.Today;
 
-    public SzPaperService(DelosferaDbContext db, IAuditService audit, ICurrentUserService currentUser)
+    public SzPaperService(DelosferaDbContext db, IAuditService audit, ICurrentUserService currentUser, delosfera_server.Common.Services.IBankClock clock)
     {
         _db = db;
         _audit = audit;
         _currentUser = currentUser;
+        _clock = clock;
     }
 
     // Контроль бумажного оригинала — делопроизводство: право «регистрировать записки»
@@ -325,7 +328,7 @@ public class SzPaperService : ISzPaperService
             .FirstOrDefaultAsync(x => x.Id == szId)
         ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
-    private static SzOriginalResponse Map(SzDocument sz)
+    private SzOriginalResponse Map(SzDocument sz)
     {
         var isOut = sz.OriginalHandedAt != null && sz.OriginalReturnedAt == null;
         return new SzOriginalResponse

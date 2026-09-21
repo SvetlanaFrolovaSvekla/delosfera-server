@@ -60,8 +60,10 @@ public class PoaExpiryWorker : BackgroundService
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<DelosferaDbContext>();
+        var clock = scope.ServiceProvider.GetRequiredService<Common.Services.IBankClock>();
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        // Срок доверенности — календарный (ValidTo: DateOnly); «истекла сегодня» по дате банка (CLK-1).
+        var today = clock.Today;
 
         var expired = await db.PowersOfAttorney
             .Where(p => p.Status == PoaStatus.Active && p.ValidTo < today)

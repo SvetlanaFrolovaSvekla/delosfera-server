@@ -41,19 +41,22 @@ public class LetterService : ILetterService
     private readonly Common.Services.Authorization.ICurrentUserService _currentUser;
     private readonly Documents.Services.IAuditService _audit;
     private readonly INumeratorService _numerator;
+    private readonly Common.Services.IBankClock _clock;
 
     public LetterService(
         DelosferaDbContext db,
         Common.Services.Authorization.ICurrentUserService currentUser,
         Files.Services.IFileStorageService storage,
         Documents.Services.IAuditService audit,
-        INumeratorService numerator)
+        INumeratorService numerator,
+        Common.Services.IBankClock clock)
     {
         _db = db;
         _currentUser = currentUser;
         _storage = storage;
         _audit = audit;
         _numerator = numerator;
+        _clock = clock;
     }
 
     /// <summary>
@@ -187,7 +190,7 @@ public class LetterService : ILetterService
         var error = Validate(request);
         if (error is not null) throw new InvalidOperationException(error);
 
-        var registeredOn = request.RegisteredOn ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var registeredOn = request.RegisteredOn ?? _clock.Today;
         var now = DateTime.UtcNow;
 
         var letter = new CorrespondenceLetter
@@ -378,7 +381,7 @@ public class LetterService : ILetterService
 
         // Проект регистрируется в момент отправки — раньше номера у него не было.
         letter.RegNumber ??= await NextNumberAsync(letter.Direction, letter.Year, ct);
-        letter.RegisteredOn ??= DateOnly.FromDateTime(DateTime.UtcNow);
+        letter.RegisteredOn ??= _clock.Today;
         letter.Status = LetterStatus.Sent;
         letter.UpdatedAt = DateTime.UtcNow;
 
@@ -401,7 +404,7 @@ public class LetterService : ILetterService
     /// </summary>
     private IQueryable<CorrespondenceLetter> Filtered(LetterFilterRequest filter)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var query = Visible(_db.CorrespondenceLetters.AsNoTracking());
 
         if (filter.Direction is {} direction)
@@ -518,7 +521,7 @@ public class LetterService : ILetterService
     /// <summary>Что просрочено — главный вопрос к книге регистрации.</summary>
     public async Task<List<LetterDto>> OverdueAsync(CancellationToken ct = default)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         return await Project(Visible(_db.CorrespondenceLetters.AsNoTracking())
                 .Where(l => l.DueDate != null
@@ -561,9 +564,9 @@ public class LetterService : ILetterService
                 "Входящее письмо не может быть ответом на входящее.");
     }
 
-    private static IQueryable<LetterDto> Project(IQueryable<CorrespondenceLetter> query)
+    private IQueryable<LetterDto> Project(IQueryable<CorrespondenceLetter> query)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         return query.Select(l => new LetterDto
         {

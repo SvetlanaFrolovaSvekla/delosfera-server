@@ -48,17 +48,20 @@ public class SzExecutionService : ISzExecutionService
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
     private readonly ICurrentUserService _currentUser;
+    private readonly delosfera_server.Common.Services.IBankClock _clock;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+    // Дата банка (CLK-1): сроки исполнения/продления сравниваем по календарю Бишкека.
+    private DateOnly Today => _clock.Today;
 
     public SzExecutionService(
         DelosferaDbContext db, IDocumentService documents, IAuditService audit,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser, delosfera_server.Common.Services.IBankClock clock)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
         _currentUser = currentUser;
+        _clock = clock;
     }
 
     /// <summary>
@@ -410,7 +413,7 @@ public class SzExecutionService : ISzExecutionService
             .FirstOrDefaultAsync(a => a.Id == id)
         ?? throw new KeyNotFoundException("Поручение не найдено");
 
-    private static SzAssignmentResponse Map(SzAssignment a)
+    private SzAssignmentResponse Map(SzAssignment a)
     {
         var live = a.State is SzAssignmentState.Open or SzAssignmentState.Reported;
         return new SzAssignmentResponse

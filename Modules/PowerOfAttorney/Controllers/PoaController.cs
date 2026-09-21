@@ -22,11 +22,13 @@ public class PoaController : ControllerBase
 {
     private readonly IPoaService _poa;
     private readonly ICurrentUserService _currentUser;
+    private readonly delosfera_server.Common.Services.IBankClock _clock;
 
-    public PoaController(IPoaService poa, ICurrentUserService currentUser)
+    public PoaController(IPoaService poa, ICurrentUserService currentUser, delosfera_server.Common.Services.IBankClock clock)
     {
         _poa = poa;
         _currentUser = currentUser;
+        _clock = clock;
     }
 
     /// <summary>Реестр доверенностей с фильтрами.</summary>
@@ -51,12 +53,12 @@ public class PoaController : ControllerBase
     [RequirePermission(PermissionCode.ViewPowersOfAttorney)]
     public async Task<IActionResult> Valid(
         [FromQuery] int userId, [FromQuery] DateOnly? on, CancellationToken ct) =>
-        Ok(await _poa.ValidForUserAsync(userId, on ?? DateOnly.FromDateTime(DateTime.UtcNow), ct));
+        Ok(await _poa.ValidForUserAsync(userId, on ?? _clock.Today, ct));
 
     /// <summary>Мои действующие доверенности — видны без права на реестр.</summary>
     [HttpGet("mine")]
     public async Task<IActionResult> Mine(CancellationToken ct) =>
-        Ok(await _poa.ValidForUserAsync(_currentUser.UserId, DateOnly.FromDateTime(DateTime.UtcNow), ct));
+        Ok(await _poa.ValidForUserAsync(_currentUser.UserId, _clock.Today, ct));
 
     /// <summary>Что истекает в ближайшие дни: продлевают заранее, а не задним числом.</summary>
     [HttpGet("expiring")]

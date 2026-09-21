@@ -34,17 +34,20 @@ public class SzArchiveService : ISzArchiveService
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
     private readonly ICurrentUserService _currentUser;
+    private readonly delosfera_server.Common.Services.IBankClock _clock;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+    // Дата банка (CLK-1): даты подшивки/сроков — по календарю Бишкека, не UTC.
+    private DateOnly Today => _clock.Today;
 
     public SzArchiveService(
         DelosferaDbContext db, IDocumentService documents, IAuditService audit,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser, delosfera_server.Common.Services.IBankClock clock)
     {
         _db = db;
         _documents = documents;
         _audit = audit;
         _currentUser = currentUser;
+        _clock = clock;
     }
 
     // Подшивка в дело — делопроизводственная операция: право «регистрировать записки»

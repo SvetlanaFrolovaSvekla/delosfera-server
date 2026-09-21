@@ -24,7 +24,7 @@ public class VndServiceTests
                 new ApprovalSheetGenerator(), new FixedApprovalUnitResolver(db)),
             new delosfera_server.Modules.Documents.Services.NumeratorService(db),
             new delosfera_server.Modules.Documents.VND.Services.DocxLegacyLinkExtractor(),
-            new NoopNotificationService(), NullLogger<VndService>.Instance);
+            new NoopNotificationService(), NullLogger<VndService>.Instance, new delosfera_server.Common.Services.BankClock());
 
     private static VndDocument SeedVnd(DelosferaDbContext db, VndStatus status) =>
         TestSupport.SeedVnd(db, status, Creator);

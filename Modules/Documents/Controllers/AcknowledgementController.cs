@@ -35,13 +35,16 @@ public class AcknowledgementController : ControllerBase
     private readonly DelosferaDbContext _db;
     private readonly IAcknowledgementService _service;
     private readonly ICurrentUserService _currentUser;
+    private readonly delosfera_server.Common.Services.IBankClock _clock;
 
     public AcknowledgementController(
-        DelosferaDbContext db, IAcknowledgementService service, ICurrentUserService currentUser)
+        DelosferaDbContext db, IAcknowledgementService service, ICurrentUserService currentUser,
+        delosfera_server.Common.Services.IBankClock clock)
     {
         _db = db;
         _service = service;
         _currentUser = currentUser;
+        _clock = clock;
     }
 
     /// <summary>Что я обязан прочитать. Отвеченное показывается ниже, но не исчезает.</summary>
@@ -87,7 +90,7 @@ public class AcknowledgementController : ControllerBase
                 // пояс, а срок ознакомления — вопрос дисциплины, а не отображения.
                 overdue = e.State == AcknowledgementState.Pending
                           && e.Sheet.DueDate != null
-                          && e.Sheet.DueDate < DateOnly.FromDateTime(DateTime.UtcNow),
+                          && e.Sheet.DueDate < _clock.Today,
             })
             .ToListAsync(ct);
 

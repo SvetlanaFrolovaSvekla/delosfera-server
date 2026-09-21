@@ -162,6 +162,14 @@ builder.Services.AddScoped<
 builder.Services.AddSingleton<
     delosfera_server.Modules.Substitutions.Services.ISubstitutionPrintService,
     delosfera_server.Modules.Substitutions.Services.SubstitutionPrintService>();
+// ЗМ-SLA: статистика по замещениям и напоминания о зависших заявках на согласовании.
+builder.Services.AddScoped<
+    delosfera_server.Modules.Substitutions.Services.ISubstitutionStatisticsService,
+    delosfera_server.Modules.Substitutions.Services.SubstitutionStatisticsService>();
+builder.Services.AddScoped<
+    delosfera_server.Modules.Substitutions.Services.ISubstitutionReminderNotifier,
+    delosfera_server.Modules.Substitutions.Services.SubstitutionReminderNotifier>();
+builder.Services.AddHostedService<delosfera_server.Modules.Substitutions.Services.SubstitutionReminderWorker>();
 // Напоминания по срокам исполнения писем (КР-1): контролируемые письма не попадают
 // в общий реестр задач, и без отдельной рассылки срок ответа НБКР виден только тому,
 // кто сам открыл книгу регистрации.
@@ -169,6 +177,8 @@ builder.Services.AddScoped<
     delosfera_server.Modules.Correspondence.Services.ILetterDeadlineNotifier,
     delosfera_server.Modules.Correspondence.Services.LetterDeadlineNotifier>();
 builder.Services.AddHostedService<delosfera_server.Modules.Correspondence.Services.LetterDeadlineWorker>();
+// AUD-1: разовый бэкфилл хеш-цепи аудита + суточная проверка целостности.
+builder.Services.AddHostedService<delosfera_server.Modules.Documents.Services.AuditIntegrityWorker>();
 
 
 // Адреса фронтенда задаются конфигурацией: на стенде это localhost, в банке —
@@ -228,9 +238,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
         };
+        // SEC-1: мгновенный отзыв доступа — сверка пользователя с БД на каждом токене
+        // (заблокирован/деактивирован → 401; права освежаются из ролей). См. TokenRevocationValidator.
+        options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+        {
+            OnTokenValidated = TokenRevocationValidator.ValidateAsync,
+        };
     });
 
 builder.Services.AddAuthorization();
+
+// Короткий кэш снимков пользователя для мгновенного отзыва доступа (SEC-1).
+builder.Services.AddMemoryCache();
 
 // Health-check для мониторинга/оркестратора (liveness).
 builder.Services.AddHealthChecks();

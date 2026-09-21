@@ -24,6 +24,12 @@ public interface ISubstitutionService
 
     /// <summary>Печатная форма: form = "order" (приказ) или "liability" (договор МО).</summary>
     Task<(byte[] Bytes, string FileName)> PrintAsync(int id, string form, CancellationToken ct = default);
+
+    /// <summary>Норматив срока согласования (ЗМ-SLA), рабочих дней на этап.</summary>
+    Task<int> GetSlaDaysAsync(CancellationToken ct = default);
+
+    /// <summary>Задать норматив срока согласования (ЗМ-SLA). Ведёт администратор.</summary>
+    Task<int> SetSlaDaysAsync(int days, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -221,6 +227,7 @@ public class SubstitutionService : ISubstitutionService
         if (steps.Count > 0)
         {
             steps[0].State = SubstitutionApprovalState.Active;
+            steps[0].ActivatedAt = DateTime.UtcNow;   // старт отсчёта SLA первого этапа (ЗМ-SLA)
             foreach (var s in steps) _db.SubstitutionApprovals.Add(s);
             entity.Status = SubstitutionStatus.OnApproval;
         }
@@ -257,6 +264,8 @@ public class SubstitutionService : ISubstitutionService
     // ── Маршрут согласования: директор филиала → Операционное управление → УЧР ──
 
     // Операционное управление согласует Касымов К.Т.; при его отсутствии — Ермакова Ю.А.
+    // Идентификаторы вынесены в HrRoutingSettings (ЗМ-Настр); константы — только крайний
+    // fallback, если строка настроек ещё не заполнена, чтобы маршрут не сломался.
     private const int OperationsApproverId = 141;   // Касымов Кубатбек (Операционное управление)
     private const int OperationsFallbackId = 563;   // Ермакова Юлия (замена при отсутствии)
 
@@ -299,8 +308,12 @@ public class SubstitutionService : ISubstitutionService
 
     private async Task<int?> ResolveOperationsApproverAsync(CancellationToken ct)
     {
-        if (await IsActiveAsync(OperationsApproverId, ct)) return OperationsApproverId;
-        if (await IsActiveAsync(OperationsFallbackId, ct)) return OperationsFallbackId;
+        var settings = await _db.HrRoutingSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var primary = settings?.OperationsApproverUserId ?? OperationsApproverId;
+        var fallback = settings?.OperationsFallbackUserId ?? OperationsFallbackId;
+
+        if (await IsActiveAsync(primary, ct)) return primary;
+        if (await IsActiveAsync(fallback, ct)) return fallback;
         return null;
     }
 
@@ -350,7 +363,10 @@ public class SubstitutionService : ISubstitutionService
         var next = entity.Approvals
             .Where(a => a.State == SubstitutionApprovalState.Pending).OrderBy(a => a.Order).FirstOrDefault();
         if (next is not null)
+        {
             next.State = SubstitutionApprovalState.Active;
+            next.ActivatedAt = DateTime.UtcNow;   // отсчёт SLA следующего этапа (ЗМ-SLA)
+        }
         else
             entity.Status = SubstitutionStatus.OnExecution;   // маршрут пройден — УЧР исполняет
 
@@ -410,6 +426,40 @@ public class SubstitutionService : ISubstitutionService
         _db.SubstitutionRequests.Remove(entity);
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Substitution", id, "Deleted", actorUserId);
+    }
+
+    // ── Норматив срока согласования (ЗМ-SLA) ──────────────────────────────────
+
+    /// <summary>Минимум/максимум норматива, чтобы настройка не выключала контроль и не была абсурдной.</summary>
+    private const int MinSlaDays = 1;
+    private const int MaxSlaDays = 30;
+    private const int DefaultSlaDays = 3;
+
+    public async Task<int> GetSlaDaysAsync(CancellationToken ct = default)
+    {
+        var s = await _db.SubstitutionSlaSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        return s?.ApprovalStepSlaDays ?? DefaultSlaDays;
+    }
+
+    public async Task<int> SetSlaDaysAsync(int days, CancellationToken ct = default)
+    {
+        if (days is < MinSlaDays or > MaxSlaDays)
+            throw new InvalidOperationException($"Норматив срока согласования — от {MinSlaDays} до {MaxSlaDays} рабочих дней");
+
+        var now = DateTime.UtcNow;
+        var s = await _db.SubstitutionSlaSettings.FirstOrDefaultAsync(ct);
+        if (s is null)
+        {
+            s = new SubstitutionSlaSettings { ApprovalStepSlaDays = days, CreatedAt = now };
+            _db.SubstitutionSlaSettings.Add(s);
+        }
+        else
+        {
+            s.ApprovalStepSlaDays = days;
+        }
+        s.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
+        return s.ApprovalStepSlaDays;
     }
 
     // ── вспомогательное ──────────────────────────────────────────────────────

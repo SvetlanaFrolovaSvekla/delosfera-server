@@ -91,7 +91,7 @@ public class SzAddresseeDecisionTests
         // Без права «видеть все записки»: распоряжение исполнением проверяется по автору/адресату.
         var execution = new SzExecutionService(db,
             new DocumentService(db, new AuditService(db), new NumeratorService(db)),
-            new AuditService(db), new FakeCurrentUser(0));
+            new AuditService(db), new FakeCurrentUser(0), new delosfera_server.Common.Services.BankClock());
 
         var (szId, addresseeId, _) = await SeedApprovedAsync(db, service, engine);
         await service.DecideAsAddresseeAsync(szId, "Согласен, прошу исполнить", addresseeId);
@@ -151,7 +151,7 @@ public class SzAddresseeDecisionTests
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
         var (service, engine) = NewService(db);
-        var execution = new SzExecutionService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)), new AuditService(db), new FakeCurrentUser(0, PermissionCode.ViewAllSz));
+        var execution = new SzExecutionService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)), new AuditService(db), new FakeCurrentUser(0, PermissionCode.ViewAllSz), new delosfera_server.Common.Services.BankClock());
 
         var (szId, addresseeId, _) = await SeedApprovedAsync(db, service, engine);
         var performer = await AddUserAsync(db, "Исполнитель поручения");
@@ -204,7 +204,7 @@ public class SzAddresseeDecisionTests
 
         return (new SzService(db, documents, audit, engine, new PassthroughHtml(),
             currentUser, handler, procurement,
-            new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db)), engine);
+            new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db), new delosfera_server.Common.Services.BankClock()), engine);
     }
 
     /// <summary>

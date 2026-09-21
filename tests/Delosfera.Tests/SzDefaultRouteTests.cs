@@ -134,7 +134,7 @@ public class SzDefaultRouteTests
         var procurement = new SzProcurementService(db, documents, audit, currentUser);
 
         var service = new SzService(db, documents, audit, engine, new PassthroughHtml(),
-            currentUser, handler, procurement, new RouteTemplateSelector(db));
+            currentUser, handler, procurement, new RouteTemplateSelector(db), new delosfera_server.Common.Services.BankClock());
 
         var head = await AddUserAsync(db, "Руководитель отдела");
 
@@ -191,7 +191,7 @@ public class SzDefaultRouteTests
         var procurement = new SzProcurementService(db, documents, audit, currentUser);
 
         var service = new SzService(db, documents, audit, engine, new PassthroughHtml(),
-            currentUser, handler, procurement, new RouteTemplateSelector(db));
+            currentUser, handler, procurement, new RouteTemplateSelector(db), new delosfera_server.Common.Services.BankClock());
 
         // Родительское управление — с руководителем или без.
         User? ancestorHead = ancestorHasHead ? await AddUserAsync(db, "Начальник управления") : null;

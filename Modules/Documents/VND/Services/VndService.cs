@@ -31,13 +31,15 @@ public class VndService : IVndService
     private readonly IDocxLegacyLinkExtractor _legacyLinkExtractor;
     private readonly INotificationService _notifications;
     private readonly ILogger<VndService> _logger;
+    private readonly delosfera_server.Common.Services.IBankClock _clock;
 
     public VndService(
         DelosferaDbContext db, IFileStorageService fileService,
         ICurrentUserService currentUser, IActivityLogService activityLog,
         IVndApprovalService approvalService, INumeratorService numerator,
         IDocxLegacyLinkExtractor legacyLinkExtractor,
-        INotificationService notifications, ILogger<VndService> logger)
+        INotificationService notifications, ILogger<VndService> logger,
+        delosfera_server.Common.Services.IBankClock clock)
     {
         _db = db;
         _fileService = fileService;
@@ -48,6 +50,7 @@ public class VndService : IVndService
         _legacyLinkExtractor = legacyLinkExtractor;
         _notifications = notifications;
         _logger = logger;
+        _clock = clock;
     }
 
     /// <summary>Уведомление автору черновика, когда действие с ним выполнил кто-то другой (обычно
@@ -218,7 +221,7 @@ public class VndService : IVndService
         // Keywords, UserGroups, Redactions) — один общий JOIN давал декартово произведение
         // строк-потомков; разбивка на отдельные запросы убирает взрывной рост.
         var entities = await query.AsNoTracking().AsSplitQuery().ToListAsync();
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         // Виды связи с текущим пользователем считаем только когда запрошен LinkedToMeOnly —
         // это отдельные запросы к БД, незачем тратить их, когда колонка "Связь со мной" всё
@@ -262,7 +265,7 @@ public class VndService : IVndService
     /// </summary>
     public async Task<byte[]> BuildActualizationPlanExcelAsync(List<VndResponse> rows, List<string> columns)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         var keywordNames = await _db.Keywords.ToDictionaryAsync(k => k.Id, k => k.TitleRu);
         var rubricNames = await _db.Rubrics.ToDictionaryAsync(r => r.Id, r => r.TitleRu);
@@ -464,7 +467,7 @@ public class VndService : IVndService
                 "Открыть чужой черновик ВНД может только его автор или пользователь с правом " +
                 "просмотра чужих черновиков");
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
         return ToResponse(entity, languageCode, today, canViewExtended);
     }
@@ -480,7 +483,7 @@ public class VndService : IVndService
     /// через условные COUNT.</summary>
     public async Task<VndActualizationSummaryResponse> GetActualizationSummaryAsync()
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var criticalEnd = today.AddDays(ActualizationThresholds.CriticalDays);
         var approachingEnd = today.AddDays(ActualizationThresholds.ApproachingDays);
 
@@ -515,14 +518,14 @@ public class VndService : IVndService
         return counts;
     }
 
-    private static IQueryable<VndDocument> ApplyActualizationBucketFilter(
+    private IQueryable<VndDocument> ApplyActualizationBucketFilter(
         IQueryable<VndDocument> query, List<string> bucketKeys)
     {
         if (bucketKeys.Count == 0) return query;
 
         var buckets = bucketKeys.Select(MapActualizationBucketKey).ToHashSet();
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var criticalEnd = today.AddDays(ActualizationThresholds.CriticalDays);
         var approachingEnd = today.AddDays(ActualizationThresholds.ApproachingDays);
 
@@ -974,7 +977,7 @@ public class VndService : IVndService
             if (!exists) throw new KeyNotFoundException($"Уровень секретности с id={request.SecrecyLevelId} не найден");
         }
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var dueDate = ResolveDueDate(request.Period, request.DueActualizationDate, today);
 
         var entity = new VndDocument
@@ -1240,7 +1243,7 @@ public class VndService : IVndService
         if (!effectiveRequiresApproval && !blockedByMissingTid)
         {
             vnd.CurrentRedactionId = redaction.Id;
-            vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+            vnd.RevisionChangedDate = _clock.Today;
 
             // Если документ был в цикле актуализации - консолидация обязательна,
             // даже если конкретно эта редакция не требовала согласования.
@@ -1444,7 +1447,7 @@ public class VndService : IVndService
         redaction.ApprovalStatus = RedactionApprovalStatus.NotRequired;
 
         vnd.CurrentRedactionId = redaction.Id;
-        vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        vnd.RevisionChangedDate = _clock.Today;
 
         // Если документ был в цикле актуализации - консолидация обязательна, даже если сама
         // редакция обошлась без согласования (см. тот же принцип в UploadRedactionAsync).
@@ -1623,7 +1626,7 @@ public class VndService : IVndService
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         vnd.Status = VndStatus.Archived;
         vnd.CancelCode = request.CancelCode;
@@ -1998,7 +2001,7 @@ public class VndService : IVndService
         }
 
         // "Изменение реквизитов" проставляется автоматически, руками эту дату задать нельзя
-        entity.RequisitesChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        entity.RequisitesChangedDate = _clock.Today;
 
         // Журнал аудита / "Последняя активность" — только если реально что-то изменилось (форма
         // реквизитов сохраняется и без правок, например по кнопке "Сохранить" без изменений —
@@ -2048,7 +2051,7 @@ public class VndService : IVndService
                            .FirstOrDefaultAsync(x => x.Id == id)
                        ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
         return ToResponse(reloaded, languageCode, today, canViewExtended);
     }
@@ -2460,7 +2463,7 @@ public class VndService : IVndService
         if (hasChanges)
         {
             redaction.DocRuUpdatedAt = editedAt;
-            vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+            vnd.RevisionChangedDate = _clock.Today;
 
             // Журнал аудита / "Последняя активность" / "Активность на портале" - раньше прямое
             // редактирование редакции (кнопка "Редактировать" на вкладке "Редакции", без
@@ -2532,7 +2535,7 @@ public class VndService : IVndService
         {
             lastRedaction.ApprovalStatus = RedactionApprovalStatus.NotRequired;
             vnd.CurrentRedactionId = lastRedaction.Id;
-            vnd.RevisionChangedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+            vnd.RevisionChangedDate = _clock.Today;
 
             var enteringConsolidation = vnd.Status == VndStatus.OnActualization;
             vnd.Status = enteringConsolidation ? VndStatus.Consolidation : VndStatus.Active;

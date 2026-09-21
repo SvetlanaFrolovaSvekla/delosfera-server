@@ -70,7 +70,7 @@ public class ConsolidationTaskVisibilityTests(PostgresFixture postgres)
         var vnd = TestSupport.SeedVnd(db, VndStatus.Consolidation, создатель);
         ЗавестиРедакциюСИнициатором(db, vnd, инициатор);
 
-        var service = new TasksService(db);
+        var service = new TasksService(db, new delosfera_server.Common.Services.BankClock(), new FakeCurrentUser(0), Microsoft.Extensions.Logging.Abstractions.NullLogger<delosfera_server.Modules.Documents.VND.Services.TasksService>.Instance);
 
         var уИнициатора = await service.GetConsolidationTasksAsync(инициатор);
         var уСоздателя = await service.GetConsolidationTasksAsync(создатель);
@@ -97,7 +97,7 @@ public class ConsolidationTaskVisibilityTests(PostgresFixture postgres)
         vnd.ActualizationResponsibleUserId = ответственный;
         await db.SaveChangesAsync();
 
-        var service = new TasksService(db);
+        var service = new TasksService(db, new delosfera_server.Common.Services.BankClock(), new FakeCurrentUser(0), Microsoft.Extensions.Logging.Abstractions.NullLogger<delosfera_server.Modules.Documents.VND.Services.TasksService>.Instance);
 
         Assert.Contains(await service.GetConsolidationTasksAsync(ответственный),
                         t => t.VndId == vnd.Id);
@@ -116,7 +116,7 @@ public class ConsolidationTaskVisibilityTests(PostgresFixture postgres)
         var vnd = TestSupport.SeedVnd(db, VndStatus.Active, инициатор);
         ЗавестиРедакциюСИнициатором(db, vnd, инициатор);
 
-        var service = new TasksService(db);
+        var service = new TasksService(db, new delosfera_server.Common.Services.BankClock(), new FakeCurrentUser(0), Microsoft.Extensions.Logging.Abstractions.NullLogger<delosfera_server.Modules.Documents.VND.Services.TasksService>.Instance);
 
         Assert.DoesNotContain(await service.GetConsolidationTasksAsync(инициатор),
                               t => t.VndId == vnd.Id);

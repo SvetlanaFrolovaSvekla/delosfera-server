@@ -131,7 +131,7 @@ public class RouteTemplateEditTests
                 new FakeSignatures(), new RouteRoleResolver(db)),
             new FakeCurrentUser(1, PermissionCode.ManageSystemSettings),
             new TaskInboxService(db, new NoSubstitutions(), new BankClock()),
-            audit);
+            audit, new delosfera_server.Modules.Workflow.Services.TaskDelegationService(db, new NoSubstitutions(), audit));
     }
 
     private static CreateRouteTemplateRequest Запрос(params TemplateStepDto[] steps) =>

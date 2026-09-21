@@ -478,7 +478,7 @@ public class VndAnalyticsService : IVndAnalyticsService
 
         var processes = await _db.VndApprovalProcesses
             .Where(p => p.PrimaryStartedAt >= fromDt && p.PrimaryStartedAt <= toDt)
-            .Select(p => new { p.Status, p.PrimaryStartedAt, p.CompletedAt })
+            .Select(p => new { p.Id, p.Status, p.PrimaryStartedAt, p.CompletedAt })
             .ToListAsync();
 
         var approved = processes.Count(p => p.Status == ApprovalProcessStatus.Approved);
@@ -491,15 +491,18 @@ public class VndAnalyticsService : IVndAnalyticsService
         var finished = approved + rejected + cancelled;
         var approvalRate = finished > 0 ? Math.Round(approved * 100.0 / finished, 1) : 0;
 
-        // Доля процессов, где потребовалось повторное согласование (были в статусе доработки/повтора)
-        var revisionRequiredIds = await _db.VndApprovalStages
-            .Where(s => s.ParticipatesInRepeat)
+        // Доля процессов, где потребовалось повторное согласование (были в статусе доработки/повтора).
+        // Числитель ограничиваем процессами окна — иначе доля стадий по всей БД, делённая
+        // на процессы окна, может превысить 100%.
+        var windowProcessIds = processes.Select(p => p.Id).ToHashSet();
+        var revisionRequiredCount = await _db.VndApprovalStages
+            .Where(s => s.ParticipatesInRepeat && windowProcessIds.Contains(s.ApprovalProcessId))
             .Select(s => s.ApprovalProcessId)
             .Distinct()
-            .ToListAsync();
+            .CountAsync();
 
         var revisionRate = processes.Count > 0
-            ? Math.Round(revisionRequiredIds.Count * 100.0 / processes.Count, 1)
+            ? Math.Round(revisionRequiredCount * 100.0 / processes.Count, 1)
             : 0;
 
         var durations = processes

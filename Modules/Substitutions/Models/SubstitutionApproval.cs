@@ -35,6 +35,9 @@ public class SubstitutionApproval
 
     public SubstitutionApprovalState State { get; set; } = SubstitutionApprovalState.Pending;
 
+    /// <summary>Когда этап стал текущим (Active). От этого момента считается SLA согласования (ЗМ-SLA).</summary>
+    public DateTime? ActivatedAt { get; set; }
+
     public string? Comment { get; set; }
     public DateTime? DecidedAt { get; set; }
     public int? DecidedByUserId { get; set; }

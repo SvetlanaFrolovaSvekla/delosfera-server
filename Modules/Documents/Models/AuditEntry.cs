@@ -23,4 +23,12 @@ public class AuditEntry
 
     /// <summary>Доп. данные действия (JSON: старое/новое значение и т.п.).</summary>
     public string? PayloadJson { get; set; }
+
+    // ── Цепочка целостности (AUD-1, tamper-evident) ───────────────────────────
+
+    /// <summary>Хеш предыдущей записи цепи. null — первая запись (или дочейновое легаси до бэкфилла).</summary>
+    public string? PrevHash { get; set; }
+
+    /// <summary>SHA-256 этой записи: hash(prevHash + существенные поля). Ретро-правка/удаление рвёт цепь.</summary>
+    public string? Hash { get; set; }
 }

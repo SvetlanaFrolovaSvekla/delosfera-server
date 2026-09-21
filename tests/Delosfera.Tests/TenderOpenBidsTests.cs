@@ -127,5 +127,6 @@ public class TenderOpenBidsTests
         public FixedClock(DateOnly today) => _today = today;
         public DateOnly Today => _today;
         public DateTime Now => _today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        public TimeZoneInfo Zone => TimeZoneInfo.Utc;
     }
 }

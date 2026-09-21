@@ -20,11 +20,15 @@ public class SubstitutionController : ControllerBase
 {
     private readonly ISubstitutionService _service;
     private readonly ICurrentUserService _currentUser;
+    private readonly ISubstitutionStatisticsService _statistics;
 
-    public SubstitutionController(ISubstitutionService service, ICurrentUserService currentUser)
+    public SubstitutionController(
+        ISubstitutionService service, ICurrentUserService currentUser,
+        ISubstitutionStatisticsService statistics)
     {
         _service = service;
         _currentUser = currentUser;
+        _statistics = statistics;
     }
 
     /// <summary>Реестр заявок; mineOnly — только свои. УЧР видит все.</summary>
@@ -126,5 +130,40 @@ public class SubstitutionController : ControllerBase
         try { await _service.DeleteAsync(id, _currentUser.UserId, ct); return NoContent(); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    // ── ЗМ-SLA: норматив срока согласования, статистика, выгрузка ──────────────
+
+    /// <summary>Норматив срока согласования (рабочих дней на этап).</summary>
+    [HttpGet("sla")]
+    public async Task<IActionResult> GetSla(CancellationToken ct) =>
+        Ok(new { approvalStepSlaDays = await _service.GetSlaDaysAsync(ct) });
+
+    /// <summary>Задать норматив срока согласования. Ведёт администратор.</summary>
+    [HttpPut("sla")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> SetSla([FromBody] SubstitutionSlaRequest request, CancellationToken ct)
+    {
+        try { return Ok(new { approvalStepSlaDays = await _service.SetSlaDaysAsync(request.ApprovalStepSlaDays, ct) }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    /// <summary>Статистика по заявкам на замещение (в работе / просрочено / исполнено).</summary>
+    [HttpGet("statistics")]
+    [RequirePermission(PermissionCode.ViewAllSz)]
+    public async Task<IActionResult> Statistics(
+        [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, CancellationToken ct) =>
+        Ok(await _statistics.GetAsync(new SubstitutionStatisticsFilter { From = from, To = to }, ct));
+
+    /// <summary>Выгрузка статистики в Excel.</summary>
+    [HttpGet("statistics/export")]
+    [RequirePermission(PermissionCode.ViewAllSz)]
+    public async Task<IActionResult> StatisticsExport(
+        [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, CancellationToken ct)
+    {
+        var bytes = await _statistics.ExportAsync(new SubstitutionStatisticsFilter { From = from, To = to }, ct);
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "substitutions-statistics.xlsx");
     }
 }

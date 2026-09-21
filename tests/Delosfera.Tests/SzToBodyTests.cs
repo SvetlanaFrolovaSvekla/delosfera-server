@@ -138,7 +138,7 @@ public class SzToBodyTests
 
         var service = new SzService(db, documents, audit, engine, new PassthroughHtml(),
             currentUser, handler, procurement,
-            new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db));
+            new delosfera_server.Modules.Workflow.Services.RouteTemplateSelector(db), new delosfera_server.Common.Services.BankClock());
 
         var author = await AddUserAsync(db, "Автор записки");
         var approver = await AddUserAsync(db, "Согласующий записки");

@@ -50,6 +50,7 @@ public class ActualizationNotificationService : IActualizationNotificationServic
     private readonly IMailQueue _mail;
     private readonly IFileStorageService _fileStorage;
     private readonly ILogger<ActualizationNotificationService> _logger;
+    private readonly delosfera_server.Common.Services.IBankClock _clock;
 
     public ActualizationNotificationService(
         DelosferaDbContext db,
@@ -57,7 +58,8 @@ public class ActualizationNotificationService : IActualizationNotificationServic
         INotificationService notifications,
         IMailQueue mail,
         IFileStorageService fileStorage,
-        ILogger<ActualizationNotificationService> logger)
+        ILogger<ActualizationNotificationService> logger,
+        delosfera_server.Common.Services.IBankClock clock)
     {
         _db = db;
         _vndService = vndService;
@@ -65,6 +67,7 @@ public class ActualizationNotificationService : IActualizationNotificationServic
         _mail = mail;
         _fileStorage = fileStorage;
         _logger = logger;
+        _clock = clock;
     }
 
     public async Task<List<ActualizationNotificationResponsibleResponse>> GetResponsiblesAsync() =>
@@ -173,7 +176,7 @@ public class ActualizationNotificationService : IActualizationNotificationServic
             .Select(x => x.User!.FullName)
             .ToListAsync();
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var rows = FilterByOrgUnit(await LoadInvolvedRowsAsync(languageCode), orgUnitId);
         var counts = CountBuckets(rows);
         var (subject, body) = BuildDigestText(orgUnit.TitleRu, today, counts);

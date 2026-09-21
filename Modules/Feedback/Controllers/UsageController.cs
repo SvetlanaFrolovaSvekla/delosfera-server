@@ -66,11 +66,13 @@ public class UsageController : ControllerBase
 
     private readonly DelosferaDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly delosfera_server.Common.Services.IBankClock _clock;
 
-    public UsageController(DelosferaDbContext db, ICurrentUserService currentUser)
+    public UsageController(DelosferaDbContext db, ICurrentUserService currentUser, delosfera_server.Common.Services.IBankClock clock)
     {
         _db = db;
         _currentUser = currentUser;
+        _clock = clock;
     }
 
     /// <summary>Принять пачку переходов от браузера.</summary>
@@ -133,7 +135,7 @@ public class UsageController : ControllerBase
     public async Task<IActionResult> Report([FromQuery] int days = 30, CancellationToken ct = default)
     {
         var (from, to) = Period(days);
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var weekAgo = today.AddDays(-7);
 
         var visits = _db.PageVisits.AsNoTracking().Where(v => v.VisitedAt >= from && v.VisitedAt < to);

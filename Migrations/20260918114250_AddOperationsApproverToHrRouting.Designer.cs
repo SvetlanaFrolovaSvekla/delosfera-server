@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using delosfera_server.Data;
 namespace delosfera_server.Migrations
 {
     [DbContext(typeof(DelosferaDbContext))]
-    partial class DelosferaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260918114250_AddOperationsApproverToHrRouting")]
+    partial class AddOperationsApproverToHrRouting
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -5835,17 +5838,9 @@ namespace delosfera_server.Migrations
                         .HasColumnType("text")
                         .HasColumnName("entity_type");
 
-                    b.Property<string>("Hash")
-                        .HasColumnType("text")
-                        .HasColumnName("hash");
-
                     b.Property<string>("PayloadJson")
                         .HasColumnType("text")
                         .HasColumnName("payload_json");
-
-                    b.Property<string>("PrevHash")
-                        .HasColumnType("text")
-                        .HasColumnName("prev_hash");
 
                     b.Property<int?>("UserId")
                         .HasColumnType("integer")
@@ -5856,10 +5851,6 @@ namespace delosfera_server.Migrations
 
                     b.HasIndex("At")
                         .HasDatabaseName("ix_audit_entry_at");
-
-                    b.HasIndex("Hash")
-                        .IsUnique()
-                        .HasDatabaseName("ix_audit_entry_hash");
 
                     b.HasIndex("EntityType", "EntityId")
                         .HasDatabaseName("ix_audit_entry_entity_type_entity_id");
@@ -7203,10 +7194,6 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("final_hold_decision");
 
-                    b.Property<bool>("IsRemovedByEditor")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_removed_by_editor");
-
                     b.Property<int>("Kind")
                         .HasColumnType("integer")
                         .HasColumnName("kind");
@@ -7339,10 +7326,6 @@ namespace delosfera_server.Migrations
                     b.Property<int>("Phase")
                         .HasColumnType("integer")
                         .HasColumnName("phase");
-
-                    b.Property<int>("RevisionIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("revision_index");
 
                     b.Property<string>("Text")
                         .IsRequired()
@@ -7991,87 +7974,6 @@ namespace delosfera_server.Migrations
                         .HasDatabaseName("ix_vnd_redaction_attachment_vnd_redaction_id_file_attachment_id");
 
                     b.ToTable("vnd_redaction_attachment", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionRevisionSnapshot", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ApprovalProcessId")
-                        .HasColumnType("integer")
-                        .HasColumnName("approval_process_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int?>("DisagreementMatrixFileId")
-                        .HasColumnType("integer")
-                        .HasColumnName("disagreement_matrix_file_id");
-
-                    b.Property<int?>("DocFileEnId")
-                        .HasColumnType("integer")
-                        .HasColumnName("doc_file_en_id");
-
-                    b.Property<int?>("DocFileKgId")
-                        .HasColumnType("integer")
-                        .HasColumnName("doc_file_kg_id");
-
-                    b.Property<int>("DocFileRuId")
-                        .HasColumnType("integer")
-                        .HasColumnName("doc_file_ru_id");
-
-                    b.Property<int>("Phase")
-                        .HasColumnType("integer")
-                        .HasColumnName("phase");
-
-                    b.Property<int?>("RoundNumber")
-                        .HasColumnType("integer")
-                        .HasColumnName("round_number");
-
-                    b.Property<int>("SnapshotNumber")
-                        .HasColumnType("integer")
-                        .HasColumnName("snapshot_number");
-
-                    b.Property<int?>("TidFileId")
-                        .HasColumnType("integer")
-                        .HasColumnName("tid_file_id");
-
-                    b.Property<int>("VndRedactionId")
-                        .HasColumnType("integer")
-                        .HasColumnName("vnd_redaction_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_vnd_redaction_revision_snapshot");
-
-                    b.HasIndex("ApprovalProcessId")
-                        .HasDatabaseName("ix_vnd_redaction_revision_snapshot_approval_process_id");
-
-                    b.HasIndex("DisagreementMatrixFileId")
-                        .HasDatabaseName("ix_vnd_redaction_revision_snapshot_disagreement_matrix_file_id");
-
-                    b.HasIndex("DocFileEnId")
-                        .HasDatabaseName("ix_vnd_redaction_revision_snapshot_doc_file_en_id");
-
-                    b.HasIndex("DocFileKgId")
-                        .HasDatabaseName("ix_vnd_redaction_revision_snapshot_doc_file_kg_id");
-
-                    b.HasIndex("DocFileRuId")
-                        .HasDatabaseName("ix_vnd_redaction_revision_snapshot_doc_file_ru_id");
-
-                    b.HasIndex("TidFileId")
-                        .HasDatabaseName("ix_vnd_redaction_revision_snapshot_tid_file_id");
-
-                    b.HasIndex("VndRedactionId", "SnapshotNumber")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vnd_redaction_revision_snapshot_vnd_redaction_id_snapshot_n");
-
-                    b.ToTable("vnd_redaction_revision_snapshot", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRepeatCommentAttachment", b =>
@@ -12358,10 +12260,6 @@ namespace delosfera_server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<DateTime?>("ActivatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("activated_at");
-
                     b.Property<string>("Comment")
                         .HasColumnType("text")
                         .HasColumnName("comment");
@@ -12622,33 +12520,6 @@ namespace delosfera_server.Migrations
                         .HasDatabaseName("ix_substitution_requests_substitute_user_id");
 
                     b.ToTable("substitution_requests", (string)null);
-                });
-
-            modelBuilder.Entity("delosfera_server.Modules.Substitutions.Models.SubstitutionSlaSettings", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ApprovalStepSlaDays")
-                        .HasColumnType("integer")
-                        .HasColumnName("approval_step_sla_days");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_substitution_sla_settings");
-
-                    b.ToTable("substitution_sla_settings", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Sz.Models.HrRoutingSettings", b =>
@@ -13478,7 +13349,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 1,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58 },
                             TitleEn = "Administrator",
                             TitleKg = "Администратор",
                             TitleRu = "Администратор",
@@ -13508,7 +13379,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 4,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58 },
                             TitleEn = "Chief VND Editor",
                             TitleKg = "ВНД башкы редактору",
                             TitleRu = "Главный редактор ВНД",
@@ -15693,68 +15564,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("VndRedaction");
                 });
 
-            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionRevisionSnapshot", b =>
-                {
-                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", "ApprovalProcess")
-                        .WithMany("RedactionSnapshots")
-                        .HasForeignKey("ApprovalProcessId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_redaction_revision_snapshot_vnd_approval_process_approv");
-
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DisagreementMatrixFile")
-                        .WithMany()
-                        .HasForeignKey("DisagreementMatrixFileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_redaction_revision_snapshot_file_attachments_disagreeme");
-
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileEn")
-                        .WithMany()
-                        .HasForeignKey("DocFileEnId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_redaction_revision_snapshot_file_attachments_doc_file_e");
-
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileKg")
-                        .WithMany()
-                        .HasForeignKey("DocFileKgId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_redaction_revision_snapshot_file_attachments_doc_file_k");
-
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "DocFileRu")
-                        .WithMany()
-                        .HasForeignKey("DocFileRuId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_redaction_revision_snapshot_file_attachments_doc_file_r");
-
-                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "TidFile")
-                        .WithMany()
-                        .HasForeignKey("TidFileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_vnd_redaction_revision_snapshot_file_attachments_tid_file_id");
-
-                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndRedaction", "VndRedaction")
-                        .WithMany()
-                        .HasForeignKey("VndRedactionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_vnd_redaction_revision_snapshot_vnd_redaction_vnd_redaction");
-
-                    b.Navigation("ApprovalProcess");
-
-                    b.Navigation("DisagreementMatrixFile");
-
-                    b.Navigation("DocFileEn");
-
-                    b.Navigation("DocFileKg");
-
-                    b.Navigation("DocFileRu");
-
-                    b.Navigation("TidFile");
-
-                    b.Navigation("VndRedaction");
-                });
-
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRepeatCommentAttachment", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "FileAttachment")
@@ -17371,8 +17180,6 @@ namespace delosfera_server.Migrations
                     b.Navigation("DisagreementMatrixRows");
 
                     b.Navigation("PhaseRounds");
-
-                    b.Navigation("RedactionSnapshots");
 
                     b.Navigation("RepeatInitiatorCommentAttachments");
 

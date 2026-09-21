@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Signing.Models;
@@ -327,7 +328,10 @@ public class RouteEngine : IRouteEngine
     private List<int> ActivateStep(RouteStep step)
     {
         step.ActivatedAt = DateTime.UtcNow;
-        var due = step.TimeNormHours.HasValue ? DateTime.UtcNow.AddHours(step.TimeNormHours.Value) : (DateTime?)null;
+        // Срок этапа — в рабочих часах по календарю банка (COND-1), не астрономических.
+        var due = step.TimeNormHours.HasValue
+            ? WorkingCalendar.AddWorkingHours(DateTime.UtcNow, step.TimeNormHours.Value)
+            : (DateTime?)null;
 
         var activated = new List<int>();
         var participants = step.Participants.OrderBy(p => p.Id).ToList();
@@ -467,7 +471,9 @@ public class RouteEngine : IRouteEngine
             var next = step.Participants.OrderBy(x => x.Id).FirstOrDefault(x => x.State == ParticipantState.Pending);
             if (next != null)
             {
-                var due = step.TimeNormHours.HasValue ? DateTime.UtcNow.AddHours(step.TimeNormHours.Value) : (DateTime?)null;
+                var due = step.TimeNormHours.HasValue
+                    ? WorkingCalendar.AddWorkingHours(DateTime.UtcNow, step.TimeNormHours.Value)
+                    : (DateTime?)null;
                 var activatedNext = ActivateParticipant(next, due);
                 await _db.SaveChangesAsync();
                 await _notifier.TaskAssignedAsync(activatedNext);

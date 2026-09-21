@@ -47,13 +47,15 @@ public class PoaService : IPoaService
     private readonly IAuditService _audit;
 
     private readonly INumeratorService _numerator;
+    private readonly Common.Services.IBankClock _clock;
 
-    public PoaService(DelosferaDbContext db, Files.Services.IFileStorageService storage, IAuditService audit, INumeratorService numerator)
+    public PoaService(DelosferaDbContext db, Files.Services.IFileStorageService storage, IAuditService audit, INumeratorService numerator, Common.Services.IBankClock clock)
     {
         _db = db;
         _storage = storage;
         _audit = audit;
         _numerator = numerator;
+        _clock = clock;
     }
 
     /// <summary>
@@ -230,7 +232,7 @@ public class PoaService : IPoaService
             throw new InvalidOperationException("Отозвать можно только действующую доверенность.");
 
         poa.Status = PoaStatus.Revoked;
-        poa.RevokedOn = on ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        poa.RevokedOn = on ?? _clock.Today;
         poa.RevokeReason = reason.Trim();
         poa.RevokedByUserId = currentUserId;
         poa.UpdatedAt = DateTime.UtcNow;
@@ -369,7 +371,7 @@ public class PoaService : IPoaService
     /// <summary>Что истекает в ближайшие дни — чтобы продлить заранее, а не задним числом.</summary>
     public async Task<List<PoaDto>> ExpiringAsync(int days, CancellationToken ct = default)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var edge = today.AddDays(Math.Clamp(days, 1, 365));
 
         return await Project(_db.PowersOfAttorney.AsNoTracking()

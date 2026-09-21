@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Authorization;
+using delosfera_server.Common.Services;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Services;
@@ -76,22 +77,24 @@ public class ObligationController : ControllerBase
     private readonly IObligationService _obligations;
     private readonly ICurrentUserService _currentUser;
     private readonly IAuditService _audit;
+    private readonly IBankClock _clock;
 
     public ObligationController(
         DelosferaDbContext db, IObligationService obligations, ICurrentUserService currentUser,
-        IAuditService audit)
+        IAuditService audit, IBankClock clock)
     {
         _db = db;
         _obligations = obligations;
         _currentUser = currentUser;
         _audit = audit;
+        _clock = clock;
     }
 
     /// <summary>Перечень обязательств с ближайшим сроком и состоянием текущего периода.</summary>
     [HttpGet]
     public async Task<IActionResult> Index([FromQuery] bool includeInactive = false, CancellationToken ct = default)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         var query = _db.RecurringObligations.AsNoTracking();
         if (!includeInactive) query = query.Where(o => o.IsActive);
@@ -139,7 +142,7 @@ public class ObligationController : ControllerBase
     [HttpGet("board")]
     public async Task<IActionResult> Board(CancellationToken ct = default)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         var rows = await _db.RecurringObligations.AsNoTracking()
             .Where(o => o.IsActive)
@@ -213,7 +216,7 @@ public class ObligationController : ControllerBase
     [HttpGet("export")]
     public async Task<IActionResult> Export([FromQuery] bool includeInactive = false, CancellationToken ct = default)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
 
         var query = _db.RecurringObligations.AsNoTracking();
         if (!includeInactive) query = query.Where(o => o.IsActive);
@@ -325,7 +328,7 @@ public class ObligationController : ControllerBase
     [HttpGet("attention")]
     public async Task<IActionResult> Attention([FromQuery] int days = 14, CancellationToken ct = default)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = _clock.Today;
         var edge = today.AddDays(Math.Clamp(days, 1, 180));
 
         var rows = await _db.ObligationPeriods.AsNoTracking()
@@ -433,9 +436,9 @@ public class ObligationController : ControllerBase
 
     /// <summary>Отметить период исполненным. Для заседаний недоступно — они закрываются сами.</summary>
     [HttpPost("periods/{periodId:int}/fulfil")]
-    [RequirePermission(PermissionCode.ManageSystemSettings)]
     public async Task<IActionResult> Fulfil(int periodId, [FromBody] FulfilRequest request, CancellationToken ct)
     {
+        if (!await CanClosePeriodAsync(periodId, ct)) return Forbid();
         try
         {
             await _obligations.FulfilAsync(periodId, request.Comment, _currentUser.UserId, ct);
@@ -447,9 +450,9 @@ public class ObligationController : ControllerBase
 
     /// <summary>Снять период: в этом промежутке обязательство не требовалось.</summary>
     [HttpPost("periods/{periodId:int}/waive")]
-    [RequirePermission(PermissionCode.ManageSystemSettings)]
     public async Task<IActionResult> Waive(int periodId, [FromBody] WaiveRequest request, CancellationToken ct)
     {
+        if (!await CanClosePeriodAsync(periodId, ct)) return Forbid();
         try
         {
             await _obligations.WaiveAsync(periodId, request.Reason, _currentUser.UserId, ct);
@@ -457,6 +460,18 @@ public class ObligationController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new {message = ex.Message}); }
         catch (InvalidOperationException ex) { return BadRequest(new {message = ex.Message}); }
+    }
+
+    // Закрыть период вправе администратор (ManageSystemSettings) ИЛИ ответственный
+    // за обязательство — по образцу поручений повестки, где отчёт заполняет исполнитель.
+    private async Task<bool> CanClosePeriodAsync(int periodId, CancellationToken ct)
+    {
+        if (_currentUser.HasPermission(PermissionCode.ManageSystemSettings)) return true;
+        var responsibleId = await _db.ObligationPeriods
+            .Where(p => p.Id == periodId)
+            .Select(p => (int?)p.Obligation.ResponsibleUserId)
+            .FirstOrDefaultAsync(ct);
+        return responsibleId is not null && responsibleId == _currentUser.UserId;
     }
 
     private static string? Validate(ObligationSaveRequest request)
