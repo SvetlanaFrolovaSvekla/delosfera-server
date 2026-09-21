@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
@@ -77,10 +78,20 @@ public class WarmupWorker : BackgroundService
         var started = DateTime.UtcNow;
         try
         {
+            // Греем от имени администратора: большинство горячих эндпоинтов защищены правами
+            // (RequirePermission), и токен без прав упёрся бы в 403 до тела действия — тогда
+            // JIT самого запроса (EF→SQL, сериализация) не прогрелся бы. С правами SEC-1
+            // (TokenRevocationValidator) пропустит, и прогреется настоящий конвейер.
+            var adminCode = (int)delosfera_server.Modules.Users.Models.PermissionCode.ManageSystemSettings;
             var user = await db.Users.AsNoTracking()
-                .Where(u => u.IsActive && u.BlockedAt == null && u.Email != null)
-                .OrderBy(u => u.Id)
-                .FirstOrDefaultAsync(ct);
+                           .Where(u => u.IsActive && u.BlockedAt == null && u.Email != null
+                                       && u.Roles.Any(r => r.PermissionCodes.Contains(adminCode)))
+                           .OrderBy(u => u.Id)
+                           .FirstOrDefaultAsync(ct)
+                       ?? await db.Users.AsNoTracking()
+                           .Where(u => u.IsActive && u.BlockedAt == null && u.Email != null)
+                           .OrderBy(u => u.Id)
+                           .FirstOrDefaultAsync(ct);
             if (user is null) return; // некому выпускать токен — греть нечего
 
             var jwt = sp.GetRequiredService<IJwtTokenService>();
@@ -95,31 +106,84 @@ public class WarmupWorker : BackgroundService
             http.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
-            for (var attempt = 1; attempt <= 10; attempt++)
+            // 1) Дождаться готовности Kestrel и прогреть первый эндпоинт (он же — контур авторизации).
+            var ready = false;
+            for (var attempt = 1; attempt <= 10 && !ready; attempt++)
             {
                 try
                 {
                     var resp = await http.GetAsync($"{baseUrl}/api/users/lookup", ct);
-                    // Читаем тело целиком — так греется и сериализация, и запись в поток.
                     await resp.Content.ReadAsByteArrayAsync(ct);
-                    _logger.LogInformation(
-                        "Прогрев HTTP /api/users/lookup: {Status} за {Ms} мс",
-                        (int)resp.StatusCode, (int)(DateTime.UtcNow - started).TotalMilliseconds);
-                    return;
+                    ready = true;
                 }
                 catch (HttpRequestException) when (attempt < 10)
                 {
-                    // Kestrel ещё поднимается — подождём и повторим.
-                    await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+                    await Task.Delay(TimeSpan.FromMilliseconds(500), ct); // Kestrel ещё поднимается
                 }
             }
+            if (!ready) return;
+
+            // 2) Прогреть горячие эндпоинты: JIT конвейера (EF→SQL, сериализация) каждого платит
+            // фоновая задача, а не первый пользователь после выкладки. Каждый — best-effort:
+            // непрогретый эндпоинт просто останется «холодным», это не ошибка запуска.
+            var warm = new (string Method, string Path, string? Body)[]
+            {
+                ("GET", "/api/org-tree", null),
+                ("GET", "/api/dictionaries/organization-unit", null),
+                ("GET", "/api/dictionaries/coordination-users", null),
+                ("GET", "/api/dictionaries/position", null),
+                ("GET", "/api/dictionaries/keyword", null),
+                ("GET", "/api/dictionaries/rubric", null),
+                ("GET", "/api/dictionaries/sz-rubric", null),
+                ("GET", "/api/dictionaries/type-vnd", null),
+                ("GET", "/api/dictionaries/security-level", null),
+                ("GET", "/api/dictionaries/user-group", null),
+                ("GET", "/api/dictionaries/approval-body", null),
+                ("GET", "/api/users?page=1&pageSize=50", null),
+                ("GET", "/api/users/approvers", null),
+                ("GET", "/api/hr/orders", null),
+                ("GET", "/api/meetings", null),
+                ("GET", "/api/obligations", null),
+                ("GET", "/api/procurement/suppliers", null),
+                ("GET", "/api/procurement/tracker", null),
+                ("GET", "/api/substitution-requests", null),
+                ("GET", "/api/calendar", null),
+                ("GET", "/api/digest", null),
+                ("GET", "/api/settings/changes", null),
+                ("GET", "/api/acknowledgements/mine", null),
+                ("GET", "/api/saved-filters", null),
+                ("POST", "/api/search", "{\"query\":\"\"}"),
+            };
+
+            var warmed = 0;
+            foreach (var (method, path, body) in warm)
+            {
+                if (ct.IsCancellationRequested) break;
+                try
+                {
+                    using var msg = new HttpRequestMessage(new HttpMethod(method), $"{baseUrl}{path}");
+                    if (body is not null)
+                        msg.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    var resp = await http.SendAsync(msg, ct);
+                    await resp.Content.ReadAsByteArrayAsync(ct);
+                    warmed++;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // best-effort: один непрогретый эндпоинт не срывает прогрев остальных
+                }
+            }
+
+            _logger.LogInformation(
+                "Прогрев HTTP: {Warmed}/{Total} эндпоинтов за {Ms} мс",
+                warmed + 1, warm.Length + 1, (int)(DateTime.UtcNow - started).TotalMilliseconds);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Прогрев HTTP /api/users/lookup не удался");
+            _logger.LogWarning(ex, "Прогрев HTTP не удался");
         }
     }
 
