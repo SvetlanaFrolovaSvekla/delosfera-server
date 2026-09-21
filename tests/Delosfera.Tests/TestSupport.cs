@@ -56,7 +56,7 @@ internal static class TestSupport
     /// </summary>
     private sealed class DisabledDirectory : ILdapDirectory
     {
-        public bool Enabled => false;
+        public Task<bool> IsEnabledAsync(CancellationToken ct = default) => Task.FromResult(false);
 
         public Task<List<DirectoryEntry>> ListUsersAsync(CancellationToken ct = default) =>
             throw new InvalidOperationException("Интеграция со службой каталогов выключена");

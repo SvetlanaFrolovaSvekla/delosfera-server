@@ -26,7 +26,7 @@ public class MailWorker : BackgroundService
                 using var scope = _scopeFactory.CreateScope();
                 var queue = scope.ServiceProvider.GetRequiredService<IMailQueue>();
 
-                if (queue.Enabled)
+                if (await queue.IsEnabledAsync(stoppingToken))
                 {
                     var sent = await queue.FlushAsync(stoppingToken);
                     if (sent > 0) _logger.LogInformation("Отправлено писем: {Count}", sent);

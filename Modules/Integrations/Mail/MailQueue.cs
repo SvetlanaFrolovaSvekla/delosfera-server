@@ -8,7 +8,8 @@ namespace delosfera_server.Modules.Integrations.Mail;
 
 public interface IMailQueue
 {
-    bool Enabled { get; }
+    /// <summary>Включена ли рассылка. Async — настройки читаются из БД, без блокировки потока пула.</summary>
+    Task<bool> IsEnabledAsync(CancellationToken ct = default);
 
     /// <summary>Поставить уведомление в очередь на отправку получателям.</summary>
     Task EnqueueAsync(
@@ -48,9 +49,11 @@ public class MailQueue : IMailQueue
     /// <summary>
     /// Читаем настройки при каждом обращении, а не запоминаем при создании:
     /// администратор выключает рассылку в интерфейсе и вправе ожидать, что она
-    /// прекратится сразу, а не после перезапуска приложения.
+    /// прекратится сразу, а не после перезапуска приложения. Асинхронно —
+    /// без блокировки потока пула (sync-over-async на настройках из БД).
     /// </summary>
-    public bool Enabled => _settings.LoadAsync().GetAwaiter().GetResult().Enabled;
+    public async Task<bool> IsEnabledAsync(CancellationToken ct = default) =>
+        (await _settings.LoadAsync(ct)).Enabled;
 
     public async Task EnqueueAsync(
         IEnumerable<int> userIds, string subject, string body, string? url, int? notificationId,

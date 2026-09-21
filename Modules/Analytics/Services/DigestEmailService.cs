@@ -48,7 +48,7 @@ public class DigestEmailService : IDigestEmailService
 
     public async Task<int> SendDailyAsync(CancellationToken ct = default)
     {
-        if (!_mail.Enabled) return 0;
+        if (!await _mail.IsEnabledAsync(ct)) return 0;
 
         // Получатели — у кого есть открытая работа. Иначе слать нечего.
         var wfUsers = await _db.WorkflowTasks

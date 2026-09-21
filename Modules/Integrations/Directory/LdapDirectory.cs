@@ -14,7 +14,8 @@ public record DirectoryEntry(
 
 public interface ILdapDirectory
 {
-    bool Enabled { get; }
+    /// <summary>Включён ли доменный вход. Async — настройки читаются из БД, без блокировки потока пула.</summary>
+    Task<bool> IsEnabledAsync(CancellationToken ct = default);
 
     /// <summary>Выгрузить сотрудников из каталога.</summary>
     Task<List<DirectoryEntry>> ListUsersAsync(CancellationToken ct = default);
@@ -58,7 +59,8 @@ public class LdapDirectory : ILdapDirectory
         _logger = logger;
     }
 
-    public bool Enabled => _configured.Enabled || _settings.GetAsync().GetAwaiter().GetResult().Enabled;
+    public async Task<bool> IsEnabledAsync(CancellationToken ct = default) =>
+        _configured.Enabled || (await _settings.GetAsync(ct)).Enabled;
 
     /// <summary>
     /// Действующие параметры связи. Общие настройки системы важнее конфигурации:

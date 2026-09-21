@@ -56,7 +56,7 @@ public class SzController : ControllerBase
     public async Task<IActionResult> Export([FromBody] SzSearchRequest request)
     {
         var bytes = await _sz.ExportAsync(request, _currentUser.UserId);
-        var stamp = DateTime.Now.ToString("dd.MM.yyyy");
+        var stamp = delosfera_server.Common.Services.WorkingCalendar.Today.ToString("dd.MM.yyyy");
         return File(bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"Реестр СЗ {stamp}.xlsx");

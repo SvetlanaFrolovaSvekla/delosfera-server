@@ -31,7 +31,8 @@ public class DirectoryController : ControllerBase
 
     /// <summary>Состояние интеграции — включена ли она в конфигурации.</summary>
     [HttpGet("status")]
-    public IActionResult Status() => Ok(new {enabled = _directory.Enabled});
+    public async Task<IActionResult> Status(CancellationToken ct) =>
+        Ok(new {enabled = await _directory.IsEnabledAsync(ct)});
 
     /// <summary>
     /// Выгрузка сотрудников из каталога без записи в базу — проверка настроек

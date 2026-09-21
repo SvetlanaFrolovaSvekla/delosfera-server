@@ -18,6 +18,10 @@ public static class WorkingCalendar
     private const string TimeZoneId = "Asia/Bishkek";
     private static readonly TimeZoneInfo Zone = ResolveZone();
 
+    /// <summary>Сегодняшняя календарная дата по времени банка (для печатных штампов/имён файлов).</summary>
+    public static DateOnly Today =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Zone));
+
     /// <summary>Прибавить к моменту (UTC) заданное число рабочих часов и вернуть срок в UTC.</summary>
     public static DateTime AddWorkingHours(DateTime fromUtc, int hours)
     {

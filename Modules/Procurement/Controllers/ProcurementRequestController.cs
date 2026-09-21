@@ -45,7 +45,7 @@ public class ProcurementRequestController : ControllerBase
     public async Task<IActionResult> Export([FromBody] ProcurementSearchRequest request)
     {
         var bytes = await _requests.ExportAsync(request, _currentUser.UserId);
-        var stamp = DateTime.Now.ToString("dd.MM.yyyy");
+        var stamp = delosfera_server.Common.Services.WorkingCalendar.Today.ToString("dd.MM.yyyy");
         return File(bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"Реестр закупок {stamp}.xlsx");

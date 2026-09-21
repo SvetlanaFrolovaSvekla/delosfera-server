@@ -48,7 +48,7 @@ public class CorrespondenceController : ControllerBase
     public async Task<IActionResult> Export([FromBody] LetterFilterRequest filter, CancellationToken ct)
     {
         var bytes = await _letters.ExportAsync(filter, ct);
-        var stamp = DateTime.Now.ToString("dd.MM.yyyy");
+        var stamp = delosfera_server.Common.Services.WorkingCalendar.Today.ToString("dd.MM.yyyy");
         return File(bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"Реестр писем {stamp}.xlsx");

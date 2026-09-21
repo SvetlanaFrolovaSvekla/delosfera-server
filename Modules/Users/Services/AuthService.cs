@@ -103,7 +103,7 @@ public class AuthService : IAuthService
 
     public async Task<AuthResult> LoginWithDirectoryAsync(DomainLoginRequest request, string languageCode)
     {
-        if (!_directory.Enabled)
+        if (!await _directory.IsEnabledAsync())
             throw new UnauthorizedAccessException("Доменный вход не настроен");
 
         var entry = await _directory.AuthenticateAsync(request.Login, request.Password)

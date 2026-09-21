@@ -130,7 +130,7 @@ public class ActivityLogController : ControllerBase
         }
 
         var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
-        return File(bytes, "text/csv", $"Журнал действий {DateTime.Now:dd.MM.yyyy}.csv");
+        return File(bytes, "text/csv", $"Журнал действий {delosfera_server.Common.Services.WorkingCalendar.Today:dd.MM.yyyy}.csv");
     }
 
     private IQueryable<AuditEntry> Filtered(
