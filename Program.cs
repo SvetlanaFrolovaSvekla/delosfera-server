@@ -299,6 +299,23 @@ using (var scope = app.Services.CreateScope())
 
     db.Database.Migrate();
 
+    // AUD-1: достроить/пересчитать хеш-цепь аудита синхронно на старте — до приёма запросов,
+    // чтобы живые записи не сцеплялись с ещё не достроенной легаси-частью (гонка раскатки).
+    // Идемпотентно: на согласованной цепи ничего не пишет.
+    try
+    {
+        var audit = scope.ServiceProvider
+            .GetRequiredService<delosfera_server.Modules.Documents.Services.IAuditService>();
+        var rechained = audit.BackfillChainAsync().GetAwaiter().GetResult();
+        if (rechained > 0)
+            app.Logger.LogInformation("AUD-1: хеш-цепь аудита пересчитана, записей затронуто: {Count}", rechained);
+    }
+    catch (Exception ex)
+    {
+        // Целостность цепи важна, но не должна валить запуск: суточный воркер повторит проверку.
+        app.Logger.LogError(ex, "AUD-1: не удалось пересчитать хеш-цепь аудита на старте");
+    }
+
     // Стартовые инструкции заводятся один раз — когда статей нет вовсе. Дальше их
     // ведёт администратор, и перезаписывать его правки при каждом запуске нельзя:
     // инструкция принадлежит банку, а не сборке.

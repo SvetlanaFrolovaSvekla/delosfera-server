@@ -121,8 +121,14 @@ public class AuditService : IAuditService
     }
 
     /// <summary>
-    /// Однократно достроить хеш-цепь по записям без хеша (бэкфилл легаси, AUD-1). Идёт по
-    /// возрастанию Id под advisory-локом. Возвращает число заполненных записей.
+    /// Полный детерминированный ре-чейн журнала аудита (AUD-1). Идёт по возрастанию Id под
+    /// advisory-локом и пересчитывает PrevHash/Hash каждой записи от начала цепи, записывая
+    /// только изменившиеся. Идемпотентно: на согласованной цепи не пишет ничего.
+    ///
+    /// Служит и первичным бэкфиллом легаси (записи без хеша), и починкой разрыва — например,
+    /// когда при первой раскатке живые записи успели сцепиться раньше, чем достроилась
+    /// легаси-часть. Запускается синхронно на старте до приёма запросов, поэтому гонки с
+    /// добавлением новых записей нет.
     /// </summary>
     public async Task<int> BackfillChainAsync(CancellationToken ct = default)
     {
@@ -132,38 +138,28 @@ public class AuditService : IAuditService
             await using var tx = await _db.Database.BeginTransactionAsync(ct);
             await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({ChainLockKey})", ct);
 
-            // Хеш последней уже сцепленной записи — старт для продолжения цепи.
-            var prevHash = await _db.AuditEntries
-                .Where(a => a.Hash != null)
-                .OrderByDescending(a => a.Id)
-                .Select(a => a.Hash)
-                .FirstOrDefaultAsync(ct);
+            // Все записи по порядку, пересчёт цепи и один flush в конце: инкрементальный
+            // SaveChanges по пакетам мог бы на миг нарушить уникальный индекс на Hash, пока
+            // часть строк ещё несёт старые хеши. Объём журнала аудита это позволяет.
+            var rows = await _db.AuditEntries.OrderBy(a => a.Id).ToListAsync(ct);
 
-            var filled = 0;
-            const int batch = 500;
-
-            while (true)
+            string? prevHash = null;
+            var changed = 0;
+            foreach (var row in rows)
             {
-                var rows = await _db.AuditEntries
-                    .Where(a => a.Hash == null)
-                    .OrderBy(a => a.Id)
-                    .Take(batch)
-                    .ToListAsync(ct);
-                if (rows.Count == 0) break;
-
-                foreach (var row in rows)
+                var hash = ComputeHash(row, prevHash);
+                if (row.PrevHash != prevHash || row.Hash != hash)
                 {
                     row.PrevHash = prevHash;
-                    row.Hash = ComputeHash(row, prevHash);
-                    prevHash = row.Hash;
-                    filled++;
+                    row.Hash = hash;
+                    changed++;
                 }
-
-                await _db.SaveChangesAsync(ct);
+                prevHash = hash;
             }
 
+            await _db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
-            return filled;
+            return changed;
         });
     }
 
