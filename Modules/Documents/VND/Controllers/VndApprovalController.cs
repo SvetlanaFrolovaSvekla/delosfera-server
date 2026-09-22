@@ -193,7 +193,8 @@ public class VndApprovalController : ControllerBase
 
     /// <summary>Главный редактор убирает согласующего из уже запущенного процесса согласования —
     /// этап помечается недействующим (см. VndApprovalStage.IsRemovedByEditor), задача с него
-    /// снимается</summary>
+    /// снимается. Только для Custom-этапов — обязательные этапы этим способом не убираются,
+    /// см. Replace ниже.</summary>
     [HttpPost("stages/{stageId:int}/remove")]
     [RequirePermission(PermissionCode.EditAnyVndApprovalRoute)]
     [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
@@ -204,6 +205,24 @@ public class VndApprovalController : ControllerBase
         try
         {
             return Ok(await _service.RemoveApproverAsync(vndId, stageId, request, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
+    /// <summary>Главный редактор заменяет согласующего на обязательном этапе маршрута — сам
+    /// этап остаётся на своём месте, меняется только исполнитель</summary>
+    [HttpPost("stages/{stageId:int}/replace")]
+    [RequirePermission(PermissionCode.EditAnyVndApprovalRoute)]
+    [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ApprovalProcessResponse>> ReplaceApprover(
+        int vndId, int stageId, [FromBody] ReplaceApprovalStageRequest request)
+    {
+        try
+        {
+            return Ok(await _service.ReplaceApproverAsync(vndId, stageId, request, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }

@@ -14,6 +14,14 @@ public interface IPlanReminderService
     Task<int> SendAsync(DateOnly today, CancellationToken ct = default);
 }
 
+public static class PlanReminderMessages
+{
+    /// <summary>Заголовок ежемесячной сводки — вынесен константой, чтобы PlanReminderWorker мог
+    /// по нему узнать в Notifications, отправляли ли сводку сегодня уже (см. комментарий на
+    /// PlanReminderWorker.GetLastRunOnFromHistoryAsync), не дублируя строку.</summary>
+    public const string MonthlyDigestTitle = "План актуализации ВНД: ежемесячная сводка";
+}
+
 /// <summary>
 /// Напоминания по годовому плану актуализации (PLN-04).
 ///
@@ -194,7 +202,7 @@ public class PlanReminderService : IPlanReminderService
 
             await _notifications.CreateAsync(new CreateNotificationRequest
             {
-                TitleRu = "План актуализации ВНД: ежемесячная сводка",
+                TitleRu = PlanReminderMessages.MonthlyDigestTitle,
                 BodyRu = body,
                 Category = NotificationCategory.Vnd,
                 Severity = overdue.Count > 0 ? NotificationSeverity.Warning : NotificationSeverity.Info,

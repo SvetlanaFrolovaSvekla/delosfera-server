@@ -187,7 +187,7 @@ public class MailQueue : IMailQueue
             : $"\n\nОткрыть в системе: {baseUrl.TrimEnd('/')}{url}";
 
         return $"""
-                {fullName}, здравствуйте!
+                Здравствуйте, {fullName}!
 
                 {body}{link}
 

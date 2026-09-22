@@ -20,6 +20,15 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 /// Полной гарантии на случай реплик с сильно разъехавшимися по времени тиками это не даёт (для
 /// этого нужна отдельная таблица с датой последнего запуска и миграция), но закрывает основной,
 /// практически всегда актуальный случай — без миграции и без новой таблицы.
+///
+/// Отдельно от реплик — перезапуск процесса (например, обычная выкладка новой сборки бэкенда)
+/// обнуляет _lastRunOn, потому что оно живёт только в памяти. Для критических/просроченных
+/// напоминаний это не страшно — SendAsync сам не отправляет их повторно (отметки "уже отправлено"
+/// живут в БД, см. комментарий в PlanReminderService). А вот ежемесячная сводка 1-го числа такой
+/// защиты не имела: повторный вызов SendAsync после перезапуска, случившегося 1-го числа после
+/// 9:00, рассылал её ещё раз. GetLastRunOnFromHistoryAsync ниже восстанавливает "сводку сегодня
+/// уже отправляли" из фактической истории уведомлений при старте воркера — так же, как это
+/// сделано в DigestEmailWorker (см. его комментарий).
 /// </summary>
 public class PlanReminderWorker : BackgroundService
 {
@@ -43,6 +52,8 @@ public class PlanReminderWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _lastRunOn = await GetLastRunOnFromHistoryAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -121,6 +132,42 @@ public class PlanReminderWorker : BackgroundService
         finally
         {
             await db.Database.CloseConnectionAsync();
+        }
+    }
+
+    /// <summary>Ежемесячную сводку плана актуализации сегодня уже отправляли (в т.ч. до
+    /// перезапуска процесса) — определяем не по in-memory _lastRunOn (после перезапуска оно
+    /// пустое), а по тому, есть ли уже в Notifications хоть одно уведомление с заголовком сводки,
+    /// созданное сегодня по времени банка (см. PlanReminderService.SendMonthlyDigestAsync — оно
+    /// не выставляет SkipEmail, поэтому такое уведомление есть всегда, когда сводка реально
+    /// уходила). Сводка возможна только 1-го числа — в другие дни сразу возвращаем null, смотреть
+    /// не за что. Критических/просроченных напоминаний это не касается — они дедуплицируются
+    /// сами, см. комментарий на классе. Ошибка проверки не должна блокировать воркер насовсем —
+    /// тогда считаем, что сегодня ещё не отправляли.</summary>
+    private async Task<DateOnly?> GetLastRunOnFromHistoryAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DelosferaDbContext>();
+            var clock = scope.ServiceProvider.GetRequiredService<IBankClock>();
+            var today = clock.Today;
+
+            if (today.Day != 1) return null;
+
+            var todayStartLocal = DateTime.SpecifyKind(today.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+            var todayStartUtc = TimeZoneInfo.ConvertTimeToUtc(todayStartLocal, clock.Zone);
+
+            var alreadySentToday = await db.Notifications
+                .AnyAsync(n => n.TitleRu == PlanReminderMessages.MonthlyDigestTitle && n.CreatedAt >= todayStartUtc, ct);
+
+            return alreadySentToday ? today : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "PlanReminderWorker: не удалось проверить по истории уведомлений, отправляли ли ежемесячную сводку сегодня");
+            return null;
         }
     }
 }

@@ -1154,6 +1154,14 @@ public class VndApprovalService : IVndApprovalService
         if (stage.IsRemovedByEditor)
             throw new InvalidOperationException("Этот согласующий уже убран из маршрута");
 
+        // Обязательный этап (Fixed - построенный из справочника coordination-users, а также
+        // legacy Legal/RiskManagement/Compliance/Methodology у старых маршрутов) этим способом не
+        // убирается - только Custom, добавленный вручную. Заменить согласующего на обязательном
+        // этапе, не теряя сам этап, можно через ReplaceApproverAsync ниже.
+        if (stage.Kind != ApprovalStageKind.Custom)
+            throw new InvalidOperationException(
+                "Обязательный этап маршрута нельзя убрать — замените согласующего вместо этого");
+
         // В маршруте должен остаться хотя бы один действующий этап - иначе согласование
         // застынет навсегда, не имея от кого дожидаться решения.
         if (process.Stages.Count(s => !s.IsRemovedByEditor) <= 1)
@@ -1256,6 +1264,181 @@ public class VndApprovalService : IVndApprovalService
         }
 
         await _db.SaveChangesAsync();
+
+        return await LoadResponseAsync(process.Id);
+    }
+
+    /// <summary>Главный редактор заменяет согласующего на обязательном этапе маршрута — см.
+    /// IVndApprovalService.ReplaceApproverAsync. Реализация сознательно повторяет две половины
+    /// RemoveApproverAsync (снятие задачи по текущей фазе со старой записи) и AddApproverAsync
+    /// (встраивание новой записи в текущую активную фазу) - вместо вызова их напрямую, чтобы не
+    /// проходить дважды проверки прав/статуса процесса и не задваивать запись в БД лишним
+    /// промежуточным сохранением.</summary>
+    public async Task<ApprovalProcessResponse> ReplaceApproverAsync(
+        int vndId, int stageId, ReplaceApprovalStageRequest request, int currentUserId)
+    {
+        var process = await LoadProcessForVndAsync(vndId);
+
+        if (!_currentUser.HasPermission(PermissionCode.EditAnyVndApprovalRoute))
+            throw new UnauthorizedAccessException(
+                "Редактировать маршрут согласования может только главный редактор");
+
+        if (process.Status is ApprovalProcessStatus.Approved
+            or ApprovalProcessStatus.Cancelled
+            or ApprovalProcessStatus.Rejected)
+            throw new InvalidOperationException("Согласование уже завершено — маршрут менять нельзя");
+
+        var oldStage = process.Stages.FirstOrDefault(x => x.Id == stageId)
+                       ?? throw new KeyNotFoundException($"Этап согласования с id={stageId} не найден");
+
+        if (oldStage.IsRemovedByEditor)
+            throw new InvalidOperationException("Этот согласующий уже убран из маршрута");
+
+        var newApprover = await _db.Users
+                               .Include(u => u.Roles)
+                               .FirstOrDefaultAsync(u => u.Id == request.NewApproverUserId)
+                           ?? throw new KeyNotFoundException(
+                               $"Пользователь с id={request.NewApproverUserId} не найден");
+
+        if (!newApprover.Roles.SelectMany(r => r.PermissionCodes).Contains((int)PermissionCode.ActAsApprover))
+            throw new InvalidOperationException("У этого пользователя нет права выступать в роли согласующего");
+
+        if (newApprover.OrgUnitId is null)
+            throw new InvalidOperationException(
+                "У пользователя не указано структурное подразделение — его нельзя назначить согласующим");
+
+        if (newApprover.Id == oldStage.ApproverUserId)
+            throw new InvalidOperationException("Этот пользователь уже согласует на этом этапе");
+
+        // Тот же человек не может держать два действующих этапа одновременно - та же проверка,
+        // что и в AddApproverAsync.
+        if (process.Stages.Any(s =>
+                s.Id != oldStage.Id && s.ApproverUserId == newApprover.Id && !s.IsRemovedByEditor))
+            throw new InvalidOperationException("Этот пользователь уже согласует эту редакцию");
+
+        var now = DateTime.UtcNow;
+
+        // 1. Убираем старую запись - та же логика снятия задачи по активной сейчас фазе, что и в
+        // RemoveApproverAsync выше (история его решений на пройденных фазах остаётся как есть).
+        oldStage.IsRemovedByEditor = true;
+        oldStage.ParticipatesInRepeat = false;
+
+        switch (process.Status)
+        {
+            case ApprovalProcessStatus.Primary:
+                oldStage.PrimaryDecision = ApprovalStageDecision.RemovedByEditor;
+                oldStage.PrimaryDecidedAt = now;
+                break;
+
+            case ApprovalProcessStatus.RevisionNeeded:
+                if (oldStage.RepeatDecision is null || oldStage.RepeatDecision == ApprovalStageDecision.Pending)
+                {
+                    oldStage.RepeatDecision = ApprovalStageDecision.RemovedByEditor;
+                    oldStage.RepeatDecidedAt = now;
+                }
+                else if (oldStage.FinalHoldDecision is null
+                         || oldStage.FinalHoldDecision == ApprovalStageDecision.Pending)
+                {
+                    oldStage.FinalHoldDecision = ApprovalStageDecision.RemovedByEditor;
+                    oldStage.FinalHoldDecidedAt = now;
+                }
+                break;
+
+            case ApprovalProcessStatus.Repeated:
+                oldStage.RepeatDecision = ApprovalStageDecision.RemovedByEditor;
+                oldStage.RepeatDecidedAt = now;
+                break;
+
+            case ApprovalProcessStatus.FinalHold:
+                oldStage.FinalHoldDecision = ApprovalStageDecision.RemovedByEditor;
+                oldStage.FinalHoldDecidedAt = now;
+                break;
+        }
+
+        // 2. Заводим новую запись на том же месте маршрута - тот же Kind/CoordinationStageId/
+        // Title/Order, что и у старой (маршрут внешне не меняется - меняется только исполнитель).
+        // Встраивается в текущую активную фазу так же, как в AddApproverAsync выше (более ранние
+        // пройденные фазы для неё считаются пропущенными).
+        var newStage = new VndApprovalStage
+        {
+            ApprovalProcessId = process.Id,
+            Order = oldStage.Order,
+            Kind = oldStage.Kind,
+            Title = oldStage.Title,
+            CoordinationStageId = oldStage.CoordinationStageId,
+            OrgUnitId = newApprover.OrgUnitId.Value,
+            ApproverUserId = newApprover.Id,
+        };
+
+        const string skippedPhaseComment =
+            "Добавлен главным редактором после начала этой фазы согласования — не участвовал в ней";
+
+        switch (process.Status)
+        {
+            case ApprovalProcessStatus.Primary:
+                break;
+
+            case ApprovalProcessStatus.RevisionNeeded:
+                newStage.PrimaryDecision = ApprovalStageDecision.Approved;
+                newStage.PrimaryComment = skippedPhaseComment;
+                newStage.PrimaryDecidedAt = now;
+                newStage.ParticipatesInRepeat = true;
+                break;
+
+            case ApprovalProcessStatus.Repeated:
+                newStage.PrimaryDecision = ApprovalStageDecision.Approved;
+                newStage.PrimaryComment = skippedPhaseComment;
+                newStage.PrimaryDecidedAt = now;
+                newStage.ParticipatesInRepeat = true;
+                newStage.RepeatDecision = ApprovalStageDecision.Pending;
+                break;
+
+            case ApprovalProcessStatus.FinalHold:
+                newStage.PrimaryDecision = ApprovalStageDecision.Approved;
+                newStage.PrimaryComment = skippedPhaseComment;
+                newStage.PrimaryDecidedAt = now;
+                newStage.ParticipatesInRepeat = false;
+                newStage.FinalHoldDecision = ApprovalStageDecision.Pending;
+                break;
+        }
+
+        _db.Set<VndApprovalStage>().Add(newStage);
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+        var vnd = process.Vnd!;
+        var redaction = process.Redaction!;
+        var oldApproverName = oldStage.ApproverUser?.FullName
+            ?? (await _db.Users.FindAsync(oldStage.ApproverUserId))?.FullName ?? "—";
+        var reasonSuffix = string.IsNullOrWhiteSpace(request.Reason) ? "" : $" Причина: «{request.Reason}».";
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ApproverRemoved, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} заменил(а) согласующего {oldApproverName} на {newApprover.FullName} на этапе " +
+                $"«{oldStage.Title}» в маршруте согласования редакции {redaction.Code} ВНД «{vnd.TitleRu}» " +
+                $"(главный редактор).{reasonSuffix}",
+                $"{actorName} replaced approver {oldApproverName} with {newApprover.FullName} on stage " +
+                $"\"{oldStage.Title}\" of the approval route of revision {redaction.Code} of VND " +
+                $"\"{vnd.TitleRu}\" (chief editor).",
+                $"{actorName} башкы редактор катары «{vnd.TitleRu}» ВНДисинин {redaction.Code} " +
+                $"редакциясынын макулдашуу маршрутундагы «{oldStage.Title}» этабында {oldApproverName} " +
+                $"макулдашуучусун {newApprover.FullName} дегенге алмаштырды."),
+            $"/base-vnd/{vndId}");
+
+        await _db.SaveChangesAsync();
+
+        await NotifyAsync(
+            VndApprovalNotificationMessages.RemovedFromRouteByEditor(actorName, redaction.Code, vnd.TitleRu),
+            NotificationCategory.Vnd, vndId, currentUserId, oldStage.ApproverUserId);
+
+        var hasImmediateTask = newStage.PrimaryDecision == ApprovalStageDecision.Pending
+                                || newStage.RepeatDecision == ApprovalStageDecision.Pending
+                                || newStage.FinalHoldDecision == ApprovalStageDecision.Pending;
+        if (hasImmediateTask)
+            await NotifyAsync(
+                VndApprovalNotificationMessages.AddedAsApprover(actorName, redaction.Code, vnd.TitleRu),
+                NotificationCategory.Vnd, vndId, currentUserId, newApprover.Id);
 
         return await LoadResponseAsync(process.Id);
     }

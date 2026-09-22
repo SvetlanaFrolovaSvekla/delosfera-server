@@ -26,6 +26,17 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 /// воркера нет текущего HTTP-пользователя, и без этого флага сводка тихо теряла бы часть
 /// документов (см. комментарий у SearchAsync).
 /// </summary>
+public static class ActualizationNotificationMessages
+{
+    /// <summary>Общий для всех подразделений стабильный префикс темы ежемесячной сводки (дальше
+    /// идут месяц/год и название подразделения — см. BuildDigestText) — вынесен константой, чтобы
+    /// ActualizationNotificationWorker мог по нему узнать в Notifications/OutgoingEmail,
+    /// отправляли ли сводку сегодня уже (см. комментарий на
+    /// ActualizationNotificationWorker.GetLastMonthlyDigestRunOnFromHistoryAsync), не дублируя
+    /// строку.</summary>
+    public const string MonthlyDigestSubjectPrefix = "План актуализации ВНД: сводка на ";
+}
+
 public class ActualizationNotificationService : IActualizationNotificationService
 {
     // Те же статусы, что ACTUALIZATION_PLANNING_STATUSES на фронте
@@ -671,7 +682,7 @@ public class ActualizationNotificationService : IActualizationNotificationServic
     private static (string Subject, string Body) BuildDigestText(
         string orgUnitName, DateOnly today, BucketCounts counts)
     {
-        var subject = $"План актуализации ВНД: сводка на {today:MM.yyyy} — {orgUnitName}";
+        var subject = $"{ActualizationNotificationMessages.MonthlyDigestSubjectPrefix}{today:MM.yyyy} — {orgUnitName}";
 
         var body = $"""
             Ежемесячная сводка по плану актуализации ВНД для подразделения «{orgUnitName}» на {today:dd.MM.yyyy}.

@@ -33,8 +33,20 @@ public interface IVndApprovalService
     /// <summary>Главный редактор убирает согласующего из уже запущенного процесса согласования —
     /// этап не удаляется (история согласования не теряется), а помечается недействующим
     /// (VndApprovalStage.IsRemovedByEditor), задача с него снимается. Доступно только с правом
-    /// EditAnyVndApprovalRoute.</summary>
+    /// EditAnyVndApprovalRoute — и только для Custom-этапов (добавленных вручную). Обязательные
+    /// этапы (Fixed и legacy Legal/RiskManagement/Compliance/Methodology) этим методом убрать
+    /// нельзя — см. ReplaceApproverAsync ниже.</summary>
     Task<ApprovalProcessResponse> RemoveApproverAsync(int vndId, int stageId, RemoveApprovalStageRequest request, int currentUserId);
+
+    /// <summary>Главный редактор заменяет согласующего на обязательном этапе маршрута — сам этап
+    /// (его место в маршруте, принадлежность записи справочника CoordinationStageId) сохраняется,
+    /// меняется только исполнитель: старая запись убирается точно так же, как в
+    /// RemoveApproverAsync (история согласования остаётся), а на её место заводится новая, с тем
+    /// же Kind/CoordinationStageId/Title/Order, что были у старой — маршрут внешне не меняется,
+    /// меняется только имя согласующего. Доступно только с правом EditAnyVndApprovalRoute. В
+    /// отличие от RemoveApproverAsync — можно на любом Kind, включая последний действующий этап
+    /// в маршруте (иначе последний обязательный этап нельзя было бы переназначить вовсе).</summary>
+    Task<ApprovalProcessResponse> ReplaceApproverAsync(int vndId, int stageId, ReplaceApprovalStageRequest request, int currentUserId);
 
     Task ProcessTimeoutsAsync();
 }

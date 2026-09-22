@@ -19,6 +19,14 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 /// этой in-memory защиты недостаточно — см. подробный комментарий у PlanReminderWorker.
 /// AdvisoryLockKey сериализует тик между репликами тем же способом (pg_try_advisory_lock,
 /// без миграций), закрывая практический случай (реплики подняты одновременно).
+///
+/// Перезапуск процесса (например, обычная выкладка новой сборки бэкенда) обнуляет обе отметки —
+/// они живут только в памяти. Для критических напоминаний это не страшно — SendCriticalRemindersAsync
+/// сам не отправляет повторно то, что уже отправлял (пороги отмечаются в журнале активности, см.
+/// LoadSentReminderMarkersAsync в ActualizationNotificationService). А вот ежемесячная сводка
+/// такой защиты не имела: перезапуск 1-го числа после 9:00 рассылал её ещё раз —
+/// GetLastMonthlyDigestRunOnFromHistoryAsync ниже восстанавливает эту отметку из фактической
+/// истории уведомлений/писем при старте воркера, так же как в DigestEmailWorker/PlanReminderWorker.
 /// </summary>
 public class ActualizationNotificationWorker : BackgroundService
 {
@@ -44,6 +52,8 @@ public class ActualizationNotificationWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _lastMonthlyDigestRunOn = await GetLastMonthlyDigestRunOnFromHistoryAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -117,6 +127,49 @@ public class ActualizationNotificationWorker : BackgroundService
         finally
         {
             await db.Database.CloseConnectionAsync();
+        }
+    }
+
+    /// <summary>Ежемесячную сводку по актуализации ВНД сегодня уже отправляли (в т.ч. до
+    /// перезапуска процесса) — определяем не по in-memory _lastMonthlyDigestRunOn (после
+    /// перезапуска оно пустое), а по фактической истории: в зависимости от настроек канала
+    /// (ActualizationNotificationSettings.MonthlyDigestNotifyInApp/Email — см.
+    /// ActualizationNotificationService.SendMonthlyDigestAsync) сводка сегодня могла лечь либо
+    /// в Notifications, либо сразу в очередь писем (OutgoingEmail) без записи в Notifications —
+    /// проверяем оба места. Тема письма стабильна по префиксу (месяц/год и подразделение —
+    /// переменная часть, см. ActualizationNotificationMessages.MonthlyDigestSubjectPrefix).
+    /// Сводка возможна только 1-го числа — в другие дни сразу возвращаем null. Ошибка проверки
+    /// не должна блокировать воркер насовсем — тогда считаем, что сегодня ещё не отправляли.</summary>
+    private async Task<DateOnly?> GetLastMonthlyDigestRunOnFromHistoryAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DelosferaDbContext>();
+            var clock = scope.ServiceProvider.GetRequiredService<IBankClock>();
+            var today = clock.Today;
+
+            if (today.Day != 1) return null;
+
+            var todayStartLocal = DateTime.SpecifyKind(today.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+            var todayStartUtc = TimeZoneInfo.ConvertTimeToUtc(todayStartLocal, clock.Zone);
+
+            var alreadySentAsNotification = await db.Notifications
+                .AnyAsync(n => n.EntityType == "OrganizationUnit"
+                               && n.TitleRu.StartsWith(ActualizationNotificationMessages.MonthlyDigestSubjectPrefix)
+                               && n.CreatedAt >= todayStartUtc, ct);
+
+            var alreadySentAsEmail = !alreadySentAsNotification && await db.OutgoingEmails
+                .AnyAsync(e => e.Subject.StartsWith(ActualizationNotificationMessages.MonthlyDigestSubjectPrefix)
+                               && e.CreatedAt >= todayStartUtc, ct);
+
+            return (alreadySentAsNotification || alreadySentAsEmail) ? today : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "ActualizationNotificationWorker: не удалось проверить по истории, отправляли ли ежемесячную сводку сегодня");
+            return null;
         }
     }
 }

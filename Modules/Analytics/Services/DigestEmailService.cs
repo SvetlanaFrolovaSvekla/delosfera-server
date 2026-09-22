@@ -14,6 +14,14 @@ public interface IDigestEmailService
     Task<int> SendDailyAsync(CancellationToken ct = default);
 }
 
+public static class DigestEmailMessages
+{
+    /// <summary>Тема письма дайджеста — вынесена константой, чтобы DigestEmailWorker мог по ней
+    /// узнать в OutgoingEmail, отправляли ли дайджест сегодня уже (см. комментарий на
+    /// DigestEmailWorker.GetLastRunOnFromHistoryAsync), не дублируя строку.</summary>
+    public const string Subject = "Ваш дайджест на сегодня";
+}
+
 /// <summary>
 /// Утренняя рассылка дайджеста (УВ-15). Собирает получателей — тех, у кого есть открытые
 /// задачи или незакрытые листы ознакомления, — и каждому кладёт в почтовую очередь
@@ -72,7 +80,7 @@ public class DigestEmailService : IDigestEmailService
 
             // Именованный ct: чтобы вызов совпадал и с 6-, и с 7-параметровой версией
             // EnqueueAsync (у неё между notificationId и ct есть опциональное вложение).
-            await _mail.EnqueueAsync([uid], "Ваш дайджест на сегодня", BuildBody(digest), "/digest", null, ct: ct);
+            await _mail.EnqueueAsync([uid], DigestEmailMessages.Subject, BuildBody(digest), "/digest", null, ct: ct);
             sent++;
         }
 
