@@ -11,6 +11,7 @@ using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Documents.VND.Messages;
+using delosfera_server.Modules.Files.Services;
 using ActivityText = delosfera_server.Modules.ActivityLog.Models.ActivityText;
 
 namespace delosfera_server.Modules.Documents.VND.Services;
@@ -23,6 +24,7 @@ public class VndActualizationService : IVndActualizationService
     private readonly ILogger<VndActualizationService> _logger;
     private readonly IActivityLogService _activityLog;
     private readonly IPlanItemSync _planItemSync;
+    private readonly IFileStorageService _fileService;
 
     public VndActualizationService(
         DelosferaDbContext db,
@@ -30,7 +32,8 @@ public class VndActualizationService : IVndActualizationService
         INotificationService notifications,
         ILogger<VndActualizationService> logger,
         IActivityLogService activityLog,
-        IPlanItemSync planItemSync
+        IPlanItemSync planItemSync,
+        IFileStorageService fileService
     )
     {
         _db = db;
@@ -39,6 +42,7 @@ public class VndActualizationService : IVndActualizationService
         _logger = logger;
         _activityLog = activityLog;
         _planItemSync = planItemSync;
+        _fileService = fileService;
     }
 
     /// <summary>Единое определение "главный редактор" для всей актуализации — умышленно шире,
@@ -291,6 +295,91 @@ public class VndActualizationService : IVndActualizationService
         return await BuildStateResponseAsync(vnd);
     }
 
+    /// <summary>Отменить черновик редакции, уже загруженный в рамках текущего цикла актуализации
+    /// (со всеми его файлами и ТИД), и вернуть план цикла на "без изменений" — используется, когда
+    /// ответственный переключает "Актуализация без изменений" обратно на включено уже ПОСЛЕ того,
+    /// как успел загрузить новую редакцию (см. ActualizationSettingsPanel на фронте — там перед
+    /// вызовом этого метода обязательно показывается предупреждение с подтверждением, поскольку
+    /// удаление необратимо). Если черновика ещё нет (чекбокс переключают до загрузки файлов) —
+    /// фронт этот метод не вызывает, там достаточно UpdatePerformedSettingsAsync.</summary>
+    public async Task<VndActualizationStateResponse> DiscardDraftRedactionAsync(int vndId, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments
+                      .Include(x => x.Redactions).ThenInclude(r => r.Attachments)
+                      .FirstOrDefaultAsync(x => x.Id == vndId)
+                  ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+
+        if (vnd.Status != VndStatus.OnActualization)
+            throw new InvalidOperationException(
+                "Отменить черновик редакции можно только в процессе актуализации");
+
+        if (!vnd.ActualizationPerformed)
+            throw new InvalidOperationException("Шаг «Выполнить актуализацию» ещё не пройден");
+
+        if (vnd.ActualizationPlannedNoChanges)
+            throw new InvalidOperationException("Уже заявлено «без изменений» — отменять нечего");
+
+        if (vnd.ActualizationResponsibleUserId != currentUserId && !IsChiefEditor())
+            throw new UnauthorizedAccessException(
+                "Отменить черновик редакции может только назначенный ответственный или главный редактор ВНД");
+
+        // "Черновик этого цикла" - самая свежая по номеру редакция документа со статусом
+        // "Черновик" (ещё не отправлена на согласование). Number <= 1 отсекает совсем свежий
+        // ВНД без единой актуализации (первая редакция никогда не создаётся в рамках цикла
+        // актуализации - см. AddRedactionAsync/uploadMode) - такое сюда попасть не должно, но
+        // проверка на всякий случай, чтобы случайно не удалить саму первую редакцию документа.
+        var draft = vnd.Redactions
+            .Where(r => r.ApprovalStatus == RedactionApprovalStatus.Draft)
+            .OrderByDescending(r => r.Number)
+            .FirstOrDefault();
+
+        if (draft is null || draft.Number <= 1)
+            throw new InvalidOperationException(
+                "Черновик редакции этого цикла актуализации не найден — отменять нечего");
+
+        var fileIds = new List<int> {draft.DocFileRuId};
+        if (draft.DocFileKgId.HasValue) fileIds.Add(draft.DocFileKgId.Value);
+        if (draft.DocFileEnId.HasValue) fileIds.Add(draft.DocFileEnId.Value);
+        if (draft.TidFileId.HasValue) fileIds.Add(draft.TidFileId.Value);
+        fileIds.AddRange(draft.Attachments.Select(a => a.FileAttachmentId));
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+        var draftCode = draft.Code;
+
+        _db.Set<VndRedactionAttachment>().RemoveRange(draft.Attachments);
+        _db.VndRedactions.Remove(draft);
+
+        vnd.ActualizationPlannedNoChanges = true;
+
+        var openRecord = await _db.Set<VndActualizationRecord>()
+            .Where(r => r.VndId == vndId && r.PublishedAt == null)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync();
+        if (openRecord is not null)
+            openRecord.PlannedNoChanges = true;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.ProcessStarted, vndId, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} отменил(а) черновик редакции {draftCode} ВНД «{vnd.TitleRu}» и переключил(а) актуализацию на «без изменений»",
+                $"{actorName} discarded draft revision {draftCode} of VND \"{vnd.TitleRu}\" and switched actualization to \"no changes\"",
+                $"{actorName} «{vnd.TitleRu}» ВНДисинин {draftCode} редакциясынын долбоорун жокко чыгарды жана актуализацияны «өзгөртүүсүз» бурду"),
+            $"/base-vnd/{vndId}");
+
+        await _db.SaveChangesAsync();
+
+        // Файлы удаляем после метаданных, best-effort — недоступность хранилища не должна
+        // откатывать уже выполненное удаление черновика (см. тот же паттерн в VndService.DeleteAsync).
+        foreach (var fileId in fileIds.Distinct())
+        {
+            try { await _fileService.DeleteAsync(fileId); }
+            catch { /* файл уже удалён или хранилище недоступно — не критично */ }
+        }
+
+        return await BuildStateResponseAsync(vnd);
+    }
+
     public async Task<VndActualizationRequestResponse> RequestAccessAsync(
         int vndId, RequestActualizationAccessRequest request, int currentUserId)
     {
@@ -301,13 +390,15 @@ public class VndActualizationService : IVndActualizationService
             throw new InvalidOperationException(
                 "Запросить доступ к актуализации можно только для действующего ВНД");
 
-        var requiredPermission = request.RequiresApproval
-            ? PermissionCode.ActualizeVndWithApprovalByRequest
-            : PermissionCode.ActualizeVndWithoutApprovalByRequest;
-
-        if (!_currentUser.HasPermission(requiredPermission))
+        // Заявка "по запросу" теперь всегда требует последующего согласования главным
+        // редактором - без согласования актуализацию может начать только он сам, напрямую
+        // (см. StartAsync). Оба права ByRequest сегодня означают одно и то же: "можно подать
+        // заявку на доступ" - различие "с/без согласования" в самой заявке потеряло смысл,
+        // поэтому любое из двух прав достаточно, чтобы подать заявку.
+        if (!_currentUser.HasPermission(PermissionCode.ActualizeVndWithApprovalByRequest) &&
+            !_currentUser.HasPermission(PermissionCode.ActualizeVndWithoutApprovalByRequest))
             throw new UnauthorizedAccessException(
-                $"У вас нет права \"{(request.RequiresApproval ? "с последующим согласованием" : "без согласования")}\" (по запросу)");
+                "У вас нет права запросить доступ к актуализации этого документа");
 
         var alreadyPending = await _db.VndActualizationRequests.AnyAsync(x =>
             x.VndId == vndId && x.RequestedByUserId == currentUserId
@@ -319,8 +410,12 @@ public class VndActualizationService : IVndActualizationService
         {
             VndId = vndId,
             RequestedByUserId = currentUserId,
-            RequiresApproval = request.RequiresApproval,
-            ShiftNextPeriod = request.ShiftNextPeriod,
+            RequiresApproval = true,
+            // Заглушка - заявитель больше не выбирает это значение, финальное решение
+            // проставляется в DecideRequestAsync при одобрении главным редактором. До этого
+            // момента поле нигде не читается (на фронте у "pending" заявки больше не
+            // показывается).
+            ShiftNextPeriod = false,
             Status = ActualizationAccessStatus.Pending
         };
 
@@ -362,10 +457,10 @@ public class VndActualizationService : IVndActualizationService
         return requests.Select(ToRequestResponse).ToList();
     }
 
-    /// <summary>Решение по заявке — approve/reject. При одобрении главный редактор может
-    /// скорректировать пожелание заявителя насчёт сдвига срока (тогда заявителю отдельно
-    /// уходит уведомление об этом). Одновременно все ОСТАЛЬНЫЕ pending-заявки по этому же ВНД
-    /// автоматически отклоняются.</summary>
+    /// <summary>Решение по заявке — approve/reject. Сдвигать ли срок следующей актуализации
+    /// решает исключительно главный редактор здесь, в момент одобрения — заявитель это не
+    /// выбирает и никакого "пожелания" на этот счёт нет. Одновременно все ОСТАЛЬНЫЕ
+    /// pending-заявки по этому же ВНД автоматически отклоняются.</summary>
     public async Task<VndActualizationRequestResponse> DecideRequestAsync(
         int requestId, ActualizationRequestDecisionRequest request, int currentUserId)
     {
@@ -387,10 +482,6 @@ public class VndActualizationService : IVndActualizationService
         if (request.Approve && request.ShiftNextPeriod is null)
             throw new InvalidOperationException(
                 "При одобрении заявки нужно указать, сдвигать ли срок следующей актуализации");
-
-        var requestedShift = current.ShiftNextPeriod; // исходное пожелание заявителя
-        var shiftOverridden = request.Approve
-                               && request.ShiftNextPeriod!.Value != requestedShift;
 
         current.Status = request.Approve ? ActualizationAccessStatus.Approved : ActualizationAccessStatus.Rejected;
         current.DecidedByUserId = currentUserId;
@@ -422,18 +513,25 @@ public class VndActualizationService : IVndActualizationService
         var vndTitle = current.Vnd!.TitleRu;
 
         var notice = request.Approve
-            ? (shiftOverridden
-                ? VndActualizationNotificationMessages.AccessApprovedShiftOverridden(vndTitle, request.ShiftNextPeriod!.Value)
-                : VndActualizationNotificationMessages.AccessApproved(vndTitle))
+            ? VndActualizationNotificationMessages.AccessApprovedWithShiftDecision(vndTitle, request.ShiftNextPeriod!.Value)
             : VndActualizationNotificationMessages.AccessRejected(vndTitle);
 
-        await NotifyAsync(notice, current.VndId, currentUserId, [current.RequestedByUserId]);
+        // Явная ссылка на вкладку «Актуализация» — тот же баг навигации, что и у уведомления
+        // "Заявка на доступ к актуализации" главному редактору (см. Start/RequestAccess выше):
+        // без urlOverride клиент шлёт на голый /base-vnd/{id}, а статус документа тут ещё "active"
+        // (цикл стартует только после ConfirmStartAfterRequestAsync), для которого таб "approval"
+        // (дефолт клиента для ссылок без ?tab=) не входит в список разрешённых - пользователя
+        // откидывало бы на «Реквизиты». "actual" разрешён для статуса "active".
+        await NotifyAsync(
+            notice, current.VndId, currentUserId, [current.RequestedByUserId],
+            urlOverride: $"/base-vnd/{current.VndId}?tab=actual");
 
         foreach (var other in otherPending)
         {
             await NotifyAsync(
                 VndActualizationNotificationMessages.AccessRejectedAnotherApproved(vndTitle),
-                current.VndId, currentUserId, [other.RequestedByUserId]);
+                current.VndId, currentUserId, [other.RequestedByUserId],
+                urlOverride: $"/base-vnd/{current.VndId}?tab=actual");
         }
 
         return await LoadRequestResponseAsync(current.Id);

@@ -24,6 +24,27 @@ public static class VndActualizationNotificationMessages
         BodyKg: $"«{vndTitle}» документин актуалдаштырууга болгон арызыңыз бекитилди. Процессти баштасаңыз болот.",
         Severity: NotificationSeverity.Success);
 
+    /// <summary>Заявка одобрена через DecideRequestAsync — там же, в момент одобрения, главный
+    /// редактор решает и сдвиг срока следующей актуализации (заявитель это не выбирает и
+    /// никакого "пожелания" не подаёт), поэтому сразу сообщаем финальное решение. Отдельно от
+    /// AccessApproved(vndTitle) выше — тот используется при авто-одобрении заявки в StartAsync
+    /// (прямой старт главным редактором), где сдвиг срока ещё не решён на этом шаге (решается
+    /// позже, на шаге "Выполнить актуализацию"), и апеллировать к нему рано.</summary>
+    public static NotificationText AccessApprovedWithShiftDecision(string vndTitle, bool shiftNextPeriod) => new(
+        TitleRu: "Доступ к актуализации одобрен",
+        TitleEn: "Actualization access approved",
+        TitleKg: "Актуалдаштырууга кирүү уруксат берилди",
+        BodyRu: $"Ваша заявка на актуализацию документа «{vndTitle}» одобрена. Можно начинать процесс. " +
+                "Срок следующей актуализации после публикации " +
+                (shiftNextPeriod ? "будет сдвинут." : "сдвигаться не будет."),
+        BodyEn: $"Your request to actualize the document \"{vndTitle}\" was approved. You can start the process. " +
+                "The next actualization due date after publishing " +
+                (shiftNextPeriod ? "will be shifted." : "will not be shifted."),
+        BodyKg: $"«{vndTitle}» документин актуалдаштырууга болгон арызыңыз бекитилди. Процессти баштасаңыз болот. " +
+                "Жарыялангандан кийин кийинки актуалдаштыруу мөөнөтү " +
+                (shiftNextPeriod ? "жылдырылат." : "жылдырылбайт."),
+        Severity: NotificationSeverity.Success);
+
     public static NotificationText AccessRejected(string vndTitle) => new(
         TitleRu: "Доступ к актуализации отклонён",
         TitleEn: "Actualization access rejected",
@@ -44,24 +65,6 @@ public static class VndActualizationNotificationMessages
         BodyKg: $"«{vndTitle}» документи актуалдаштыруудан кийин жарыяланды" +
                 (hadChanges ? " (өзгөртүүлөр менен)." : " (өзгөртүүсүз)."),
         Severity: NotificationSeverity.Success);
-    
-    /// <summary>Одобрено, но главный редактор скорректировал пожелание заявителя по сдвигу
-    /// срока следующей актуализации — заявитель должен узнать об этом отдельно от простого
-    /// "одобрено", иначе итоговое решение будет для него неожиданностью.</summary>
-    public static NotificationText AccessApprovedShiftOverridden(string vndTitle, bool finalShiftNextPeriod) => new(
-        TitleRu: "Доступ к актуализации одобрен (с изменением условия)",
-        TitleEn: "Actualization access approved (condition changed)",
-        TitleKg: "Актуалдаштырууга кирүү уруксат берилди (шарт өзгөртүлдү)",
-        BodyRu: $"Ваша заявка на актуализацию документа «{vndTitle}» одобрена. Главный редактор изменил " +
-                "ваше пожелание насчёт сдвига срока следующей актуализации: итоговое решение — " +
-                (finalShiftNextPeriod ? "срок будет сдвинут." : "срок сдвигаться не будет."),
-        BodyEn: $"Your request to actualize the document \"{vndTitle}\" was approved. The chief editor changed " +
-                "your preference regarding shifting the next actualization due date: the final decision — " +
-                (finalShiftNextPeriod ? "the date will be shifted." : "the date will not be shifted."),
-        BodyKg: $"«{vndTitle}» документин актуалдаштырууга болгон арызыңыз бекитилди. Башкы редактор " +
-                "кийинки актуалдаштыруу мөөнөтүн жылдыруу боюнча каалооңузду өзгөрттү: акыркы чечим — " +
-                (finalShiftNextPeriod ? "мөөнөт жылдырылат." : "мөөнөт жылдырылбайт."),
-        Severity: NotificationSeverity.Warning);
 
     /// <summary>Заявка автоматически отклонена, потому что по этому же ВНД была одобрена другая
     /// заявка (на актуализацию можно взять только одного ответственного за раз). Без отдельного

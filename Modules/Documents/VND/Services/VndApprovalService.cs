@@ -1355,14 +1355,20 @@ public class VndApprovalService : IVndApprovalService
                 break;
         }
 
-        // 2. Заводим новую запись на том же месте маршрута - тот же Kind/CoordinationStageId/
-        // Title/Order, что и у старой (маршрут внешне не меняется - меняется только исполнитель).
-        // Встраивается в текущую активную фазу так же, как в AddApproverAsync выше (более ранние
-        // пройденные фазы для неё считаются пропущенными).
+        // 2. Заводим новую запись с тем же Kind/CoordinationStageId/Title, что и у старой (маршрут
+        // по существу не меняется - меняется только исполнитель). Order не может повторять
+        // oldStage.Order: строка старого этапа не удаляется физически (IsRemovedByEditor лишь
+        // прячет её из активных - история решений остаётся), а на (ApprovalProcessId, Order)
+        // в БД висит уникальный индекс. Поэтому новой записи, как и в AddApproverAsync выше,
+        // выделяем следующий свободный Order - она встанет в списке этапов последней; текущая
+        // активная фаза подхватывает её так же, как в AddApproverAsync (более ранние пройденные
+        // фазы для неё считаются пропущенными).
+        var nextOrder = process.Stages.Max(s => s.Order) + 1;
+
         var newStage = new VndApprovalStage
         {
             ApprovalProcessId = process.Id,
-            Order = oldStage.Order,
+            Order = nextOrder,
             Kind = oldStage.Kind,
             Title = oldStage.Title,
             CoordinationStageId = oldStage.CoordinationStageId,

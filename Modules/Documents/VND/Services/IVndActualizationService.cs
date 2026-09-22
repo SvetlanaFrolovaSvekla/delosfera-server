@@ -21,6 +21,12 @@ public interface IVndActualizationService
     Task<VndActualizationStateResponse> UpdatePerformedSettingsAsync(
         int vndId, PerformActualizationRequest request, int currentUserId);
 
+    /// <summary>Отменить черновик редакции, уже загруженный в рамках текущего цикла актуализации
+    /// (со всеми файлами и ТИД), и вернуть план цикла на "без изменений" — для переключения
+    /// чекбокса "Актуализация без изменений" обратно на включено уже после загрузки редакции.
+    /// Удаление необратимо, фронт должен подтвердить действие перед вызовом.</summary>
+    Task<VndActualizationStateResponse> DiscardDraftRedactionAsync(int vndId, int currentUserId);
+
     /// <summary>Запросить доступ к актуализации — для ActualizeVnd...ByRequest</summary>
     Task<VndActualizationRequestResponse> RequestAccessAsync(
         int vndId, RequestActualizationAccessRequest request, int currentUserId);

@@ -91,6 +91,23 @@ public class VndActualizationController : ControllerBase
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
 
+    /// <summary>Отменить черновик редакции, уже загруженный в рамках текущего цикла актуализации
+    /// (со всеми файлами и ТИД), и вернуть план цикла на "без изменений" — для переключения
+    /// "Актуализация без изменений" обратно на включено уже после загрузки редакции. Доступно
+    /// ответственному за актуализацию или главному редактору ВНД</summary>
+    [HttpPost("discard-draft")]
+    [ProducesResponseType(typeof(VndActualizationStateResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndActualizationStateResponse>> DiscardDraft(int vndId)
+    {
+        try
+        {
+            return Ok(await _service.DiscardDraftRedactionAsync(vndId, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
     /// <summary>Подтвердить старт актуализации после одобренной заявки — совмещает старт цикла
     /// и шаг "Выполнить актуализацию" (для пути "по заявке")</summary>
     [HttpPost("confirm-start")]
