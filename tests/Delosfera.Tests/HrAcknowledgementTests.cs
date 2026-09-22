@@ -123,6 +123,103 @@ public class HrAcknowledgementTests
             }, стенд.Actor));
     }
 
+    // ── авторизация управления листом (Б-19) ──────────────────────────────────
+
+    [Fact]
+    public async Task Создатель_управляет_своим_листом()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+        var сервис = Сервис(db);
+
+        var sheet = await сервис.CreateAsync(new CreateSheetRequest
+        {
+            DocumentId = стенд.DocumentId,
+            RequireSignature = false,
+            Targets = new AcknowledgementTargets {UserIds = [стенд.Employee]},
+        }, стенд.Actor);
+
+        var другой = await ПользовательАsync(db, "Ещё сотрудник");
+
+        // Создатель дослал, снял участника и закрыл лист — happy path.
+        var добавлено = await сервис.AddParticipantsAsync(
+            sheet.Id, new AcknowledgementTargets {UserIds = [другой]}, стенд.Actor);
+        Assert.Equal(1, добавлено);
+
+        var entry = await db.Set<AcknowledgementEntry>()
+            .FirstAsync(e => e.SheetId == sheet.Id && e.UserId == стенд.Employee);
+        await сервис.CancelAsync(entry.Id, стенд.Actor, "перевод");
+
+        await сервис.CloseAsync(sheet.Id, стенд.Actor);
+
+        var после = await db.Set<AcknowledgementSheet>().FirstAsync(s => s.Id == sheet.Id);
+        Assert.NotNull(после.ClosedAt);
+    }
+
+    [Fact]
+    public async Task Кадровик_по_праву_управляет_чужим_листом()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+        var сервис = Сервис(db);
+
+        var sheet = await сервис.CreateAsync(new CreateSheetRequest
+        {
+            DocumentId = стенд.DocumentId,
+            RequireSignature = false,
+            Targets = new AcknowledgementTargets {UserIds = [стенд.Employee]},
+        }, стенд.Actor);
+
+        var кадровик = await ПользовательАsync(db, "Другой кадровик");
+        var новый = await ПользовательАsync(db, "Досланный");
+
+        // Лист чужой (создатель — стенд.Actor), но у кадровика есть право управления
+        // (actorCanManage: true) — все операции проходят.
+        var добавлено = await сервис.AddParticipantsAsync(
+            sheet.Id, new AcknowledgementTargets {UserIds = [новый]}, кадровик, actorCanManage: true);
+        Assert.Equal(1, добавлено);
+
+        await сервис.CloseAsync(sheet.Id, кадровик, actorCanManage: true);
+
+        var после = await db.Set<AcknowledgementSheet>().FirstAsync(s => s.Id == sheet.Id);
+        Assert.NotNull(после.ClosedAt);
+    }
+
+    [Fact]
+    public async Task Чужой_без_права_листом_не_управляет()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+        var сервис = Сервис(db);
+
+        var sheet = await сервис.CreateAsync(new CreateSheetRequest
+        {
+            DocumentId = стенд.DocumentId,
+            RequireSignature = false,
+            Targets = new AcknowledgementTargets {UserIds = [стенд.Employee]},
+        }, стенд.Actor);
+
+        // стенд.Employee — участник листа, но не его создатель и без права управления.
+        var посторонний = стенд.Employee;
+        var новый = await ПользовательАsync(db, "Кого-то тащат");
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => сервис.AddParticipantsAsync(
+                sheet.Id, new AcknowledgementTargets {UserIds = [новый]}, посторонний));
+
+        var entry = await db.Set<AcknowledgementEntry>()
+            .FirstAsync(e => e.SheetId == sheet.Id && e.UserId == стенд.Employee);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => сервис.CancelAsync(entry.Id, посторонний, "снимаю чужого"));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => сервис.CloseAsync(sheet.Id, посторонний));
+
+        // Лист не пострадал: он открыт, участник на месте.
+        var после = await db.Set<AcknowledgementSheet>().FirstAsync(s => s.Id == sheet.Id);
+        Assert.Null(после.ClosedAt);
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private sealed record Стенд(int OrderId, int DocumentId, int Employee, int Actor);

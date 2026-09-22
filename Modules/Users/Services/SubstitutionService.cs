@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Users.DTO;
 using delosfera_server.Modules.Users.Models;
@@ -29,12 +30,14 @@ public class SubstitutionService : ISubstitutionService
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
     private readonly IBankClock _clock;
+    private readonly ICurrentUserService _currentUser;
 
-    public SubstitutionService(DelosferaDbContext db, IAuditService audit, IBankClock clock)
+    public SubstitutionService(DelosferaDbContext db, IAuditService audit, IBankClock clock, ICurrentUserService currentUser)
     {
         _db = db;
         _audit = audit;
         _clock = clock;
+        _currentUser = currentUser;
     }
 
     public async Task<List<SubstitutionDto>> ListAsync(int? userId)
@@ -69,6 +72,12 @@ public class SubstitutionService : ISubstitutionService
 
     public async Task<SubstitutionDto> CreateAsync(SubstitutionCreateRequest request, int actorUserId)
     {
+        // Оформить замещение можно только на себя (request.UserId — замещаемый),
+        // иначе любой сотрудник перенаправил бы чужие задачи/согласования на себя.
+        // Кадровику/администратору (ManageUsers) разрешено оформлять за других.
+        if (request.UserId != actorUserId && !_currentUser.HasPermission(PermissionCode.ManageUsers))
+            throw new UnauthorizedAccessException("Замещение можно оформить только на себя");
+
         if (request.UserId == request.SubstituteUserId)
             throw new ArgumentException("Сотрудник не может замещать сам себя");
 
@@ -116,6 +125,12 @@ public class SubstitutionService : ISubstitutionService
     {
         var entity = await _db.Substitutions.FirstOrDefaultAsync(s => s.Id == id)
                      ?? throw new KeyNotFoundException("Замещение не найдено");
+
+        // Отменить замещение вправе только его участник (замещаемый или замещающий),
+        // либо кадровик/администратор (ManageUsers).
+        if (entity.UserId != actorUserId && entity.SubstituteUserId != actorUserId
+            && !_currentUser.HasPermission(PermissionCode.ManageUsers))
+            throw new UnauthorizedAccessException("Отменить замещение может только его участник");
 
         if (entity.IsCancelled)
             throw new InvalidOperationException("Замещение уже отменено");

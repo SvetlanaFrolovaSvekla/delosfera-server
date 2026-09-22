@@ -55,6 +55,7 @@ public class SupplierController : ControllerBase
 
     /// <summary>Поставить оценку поставщику по итогам закупки/договора (ЗК-9).</summary>
     [HttpPost("{id:int}/ratings")]
+    [RequirePermission(PermissionCode.ManageSuppliers)]
     public async Task<IActionResult> AddRating(int id, [FromBody] AddSupplierRatingRequest request) =>
         await Run(() => _suppliers.AddRatingAsync(id, request, _currentUser.UserId));
 

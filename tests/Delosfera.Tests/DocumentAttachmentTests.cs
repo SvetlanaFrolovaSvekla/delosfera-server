@@ -155,6 +155,65 @@ public class DocumentAttachmentTests
         Assert.Contains("не совпадает с записанным хешем", error.Message);
     }
 
+    // ── авторизация (IDOR): вложениями управляет автор документа ──────────────
+
+    [Fact]
+    public async Task Add_ByAuthor_Succeeds()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (documentId, authorId) = await SeedDocumentWithAuthorAsync(db);
+        var (service, _, _) = NewServiceWithStorage(db, new FakeCurrentUser(authorId));
+
+        var added = await service.AddAsync(documentId, FakeFile("свой файл", "приказ.txt"), userId: authorId);
+
+        Assert.True(added.Id > 0);
+    }
+
+    [Fact]
+    public async Task Add_ByNonAuthor_WithoutPrivilege_Throws()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (documentId, authorId) = await SeedDocumentWithAuthorAsync(db);
+        var stranger = new FakeCurrentUser(authorId + 1000); // не автор, без прав
+        var (service, _, _) = NewServiceWithStorage(db, stranger);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => service.AddAsync(documentId, FakeFile("чужой файл", "x.txt"), userId: authorId + 1000));
+    }
+
+    [Fact]
+    public async Task Replace_ByNonAuthor_WithoutPrivilege_Throws()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (documentId, authorId) = await SeedDocumentWithAuthorAsync(db);
+
+        var (ownerService, _, _) = NewServiceWithStorage(db, new FakeCurrentUser(authorId));
+        var added = await ownerService.AddAsync(documentId, FakeFile("исходный", "a.txt"), userId: authorId);
+
+        var (strangerService, _, _) = NewServiceWithStorage(db, new FakeCurrentUser(authorId + 1000));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => strangerService.ReplaceAsync(added.Id, FakeFile("подмена", "a.txt"), userId: authorId + 1000));
+    }
+
+    [Fact]
+    public async Task Delete_ByNonAuthor_WithoutPrivilege_Throws()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (documentId, authorId) = await SeedDocumentWithAuthorAsync(db);
+
+        var (ownerService, _, _) = NewServiceWithStorage(db, new FakeCurrentUser(authorId));
+        var added = await ownerService.AddAsync(documentId, FakeFile("к удалению", "a.txt"), userId: authorId);
+
+        var (strangerService, _, _) = NewServiceWithStorage(db, new FakeCurrentUser(authorId + 1000));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => strangerService.DeleteAsync(added.Id, userId: authorId + 1000));
+
+        // Вложение и подпись не тронуты чужой попыткой.
+        Assert.Single(await ownerService.ListAsync(documentId));
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private (IDocumentAttachmentService Service, ISignatureService Signatures) NewService(DelosferaDbContext db)
@@ -165,14 +224,18 @@ public class DocumentAttachmentTests
 
     /// <summary>То же, но с доступом к хранилищу — для проверок подмены файла.</summary>
     private (IDocumentAttachmentService Service, ISignatureService Signatures, InMemoryFileStorage Storage)
-        NewServiceWithStorage(DelosferaDbContext db)
+        NewServiceWithStorage(DelosferaDbContext db, delosfera_server.Common.Services.Authorization.ICurrentUserService? currentUser = null)
     {
         var audit = new AuditService(db);
         var signatures = new SignatureService(db, audit, new FakeFingerprints(), new NoRegulation());
         var storage = new InMemoryFileStorage(db);
 
+        // По умолчанию — привилегированный пользователь: существующие проверки про
+        // подписи и хеши не о правах доступа, и заводить под каждую точное совпадение
+        // автора значило бы засорять их. Тесты авторизации задают currentUser явно.
         var service = new DocumentAttachmentService(
             db, storage, signatures, audit,
+            currentUser ?? new FakeCurrentUser(1, PermissionCode.ManageSystemSettings),
             NullLogger<DocumentAttachmentService>.Instance);
 
         return (service, signatures, storage);
@@ -202,6 +265,33 @@ public class DocumentAttachmentTests
         await db.SaveChangesAsync();
 
         return document.Id;
+    }
+
+    /// <summary>Тот же посев, но возвращает и id автора — тестам авторизации нужен владелец.</summary>
+    private static async Task<(int DocumentId, int AuthorId)> SeedDocumentWithAuthorAsync(DelosferaDbContext db)
+    {
+        var author = new User
+        {
+            FullName = "Автор Документа",
+            Email = $"attach-owner-{Guid.NewGuid():N}@keremetbank.kg",
+            PasswordHash = "x",
+        };
+
+        db.Users.Add(author);
+        await db.SaveChangesAsync();
+
+        var document = new Document
+        {
+            Type = DocumentType.Sz,
+            Title = "Документ для проверки прав на вложения",
+            StatusCode = "Draft",
+            AuthorId = author.Id,
+        };
+
+        db.Documents.Add(document);
+        await db.SaveChangesAsync();
+
+        return (document.Id, author.Id);
     }
 
     private static IFormFile FakeFile(string content, string name)

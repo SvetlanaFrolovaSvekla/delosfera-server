@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Signing.Services;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Documents.Services;
 
@@ -58,6 +60,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
     private readonly IFileStorageService _files;
     private readonly ISignatureService _signatures;
     private readonly IAuditService _audit;
+    private readonly ICurrentUserService _currentUser;
     private readonly ILogger<DocumentAttachmentService> _logger;
 
     public DocumentAttachmentService(
@@ -65,14 +68,36 @@ public class DocumentAttachmentService : IDocumentAttachmentService
         IFileStorageService files,
         ISignatureService signatures,
         IAuditService audit,
+        ICurrentUserService currentUser,
         ILogger<DocumentAttachmentService> logger)
     {
         _db = db;
         _files = files;
         _signatures = signatures;
         _audit = audit;
+        _currentUser = currentUser;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Вложения карточки правит (добавляет, заменяет, удаляет) её автор. Замена и
+    /// удаление аннулируют подписи под документом (SIG-01), а добавление меняет
+    /// состав карточки — чужой рукой этого делать нельзя. Вмешаться в чужой документ
+    /// может только администратор системы (<see cref="PermissionCode.ManageSystemSettings"/>).
+    /// </summary>
+    private void EnsureAuthorOrPrivileged(int documentAuthorId, int userId, string message)
+    {
+        if (documentAuthorId == userId) return;
+        if (_currentUser.HasPermission(PermissionCode.ManageSystemSettings)) return;
+        throw new UnauthorizedAccessException(message);
+    }
+
+    private async Task<int> DocumentAuthorIdAsync(int documentId) =>
+        await _db.Documents
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)d.AuthorId)
+            .FirstOrDefaultAsync()
+        ?? throw new KeyNotFoundException("Документ не найден");
 
     public async Task<List<AttachmentDto>> ListAsync(int documentId)
     {
@@ -108,6 +133,9 @@ public class DocumentAttachmentService : IDocumentAttachmentService
     {
         var document = await _db.Documents.FirstOrDefaultAsync(d => d.Id == documentId)
             ?? throw new KeyNotFoundException("Документ не найден");
+
+        EnsureAuthorOrPrivileged(document.AuthorId, userId,
+            "Прикреплять файлы к документу может только его автор");
 
         RequireFile(file);
 
@@ -150,6 +178,9 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
 
+        EnsureAuthorOrPrivileged(await DocumentAuthorIdAsync(attachment.DocumentId), userId,
+            "Заменить файл вложения может только автор документа");
+
         RequireFile(file);
 
         var hash = await ComputeHashAsync(file);
@@ -189,6 +220,9 @@ public class DocumentAttachmentService : IDocumentAttachmentService
         var attachment = await _db.DocumentAttachments
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
+
+        EnsureAuthorOrPrivileged(await DocumentAuthorIdAsync(attachment.DocumentId), userId,
+            "Удалить вложение может только автор документа");
 
         // Подписи не удаляем вместе с вложением, а аннулируем: факт подписания —
         // часть истории документа, и стирать его нельзя даже вместе с файлом.

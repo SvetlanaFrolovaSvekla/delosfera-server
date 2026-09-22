@@ -3,6 +3,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Modules.Meetings.Services;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
 
 namespace Delosfera.Tests;
@@ -143,7 +144,8 @@ public class BodyMemberTests
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private static IBodyMemberService Состав(DelosferaDbContext db) =>
-        new BodyMemberService(db, new BankClock());
+        new BodyMemberService(db, new BankClock(),
+            new MeetingAccessService(db, new FakeCurrentUser(0, PermissionCode.ManageBoardMeetings)));
 
     private static DateOnly ВчераАsync() =>
         DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);

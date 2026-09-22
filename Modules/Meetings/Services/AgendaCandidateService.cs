@@ -101,11 +101,16 @@ public class AgendaCandidateService : IAgendaCandidateService
 
     private readonly DelosferaDbContext _db;
     private readonly Documents.Services.IDocumentService _documents;
+    private readonly IMeetingAccessService _access;
 
-    public AgendaCandidateService(DelosferaDbContext db, Documents.Services.IDocumentService documents)
+    public AgendaCandidateService(
+        DelosferaDbContext db,
+        Documents.Services.IDocumentService documents,
+        IMeetingAccessService access)
     {
         _db = db;
         _documents = documents;
+        _access = access;
     }
 
     public async Task<List<AgendaCandidateDto>> ListAsync(MeetingBody body, CancellationToken ct = default)
@@ -211,6 +216,10 @@ public class AgendaCandidateService : IAgendaCandidateService
         var meeting = await _db.Meetings.FirstOrDefaultAsync(m => m.Id == meetingId, ct)
             ?? throw new InvalidOperationException("Заседание не найдено.");
 
+        // Повестку органа определяет его секретарь: включать вопросы в чужое
+        // заседание вправе только он.
+        _access.RequireManage(meeting.Body);
+
         var request = await _db.ProcurementRequests
             .Include(r => r.Document)
             .FirstOrDefaultAsync(r => r.Id == requestId, ct)
@@ -260,6 +269,10 @@ public class AgendaCandidateService : IAgendaCandidateService
     {
         var meeting = await _db.Meetings.FirstOrDefaultAsync(m => m.Id == meetingId, ct)
             ?? throw new InvalidOperationException("Заседание не найдено.");
+
+        // Повестку органа определяет его секретарь: включать вопросы в чужое
+        // заседание вправе только он.
+        _access.RequireManage(meeting.Body);
 
         var sz = await _db.SzDocuments
             .Include(s => s.Document)

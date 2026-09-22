@@ -68,7 +68,7 @@ public class SubstitutionController : ControllerBase
     [HttpPost("{id:int}/submit")]
     public async Task<IActionResult> Submit(int id, CancellationToken ct)
     {
-        try { return Ok(await _service.SubmitAsync(id, _currentUser.UserId, ct)); }
+        try { return Ok(await _service.SubmitAsync(id, _currentUser.UserId, _currentUser.HasPermission(PermissionCode.ManageSystemSettings), ct)); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
@@ -106,7 +106,7 @@ public class SubstitutionController : ControllerBase
     [HttpPost("{id:int}/withdraw")]
     public async Task<IActionResult> Withdraw(int id, CancellationToken ct)
     {
-        try { return Ok(await _service.WithdrawAsync(id, _currentUser.UserId, ct)); }
+        try { return Ok(await _service.WithdrawAsync(id, _currentUser.UserId, _currentUser.HasPermission(PermissionCode.ManageSystemSettings), ct)); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
@@ -127,7 +127,7 @@ public class SubstitutionController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        try { await _service.DeleteAsync(id, _currentUser.UserId, ct); return NoContent(); }
+        try { await _service.DeleteAsync(id, _currentUser.UserId, _currentUser.HasPermission(PermissionCode.ManageSystemSettings), ct); return NoContent(); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }

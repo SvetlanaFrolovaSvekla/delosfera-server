@@ -98,7 +98,12 @@ public class UserController : ControllerBase
     /// <param name="source">Фильтр по источнику учётной записи</param>
     /// <param name="isBlocked">Фильтр по статусу блокировки</param>
     /// <response code="200">Список пользователей получен успешно</response>
+    // Полный справочник с ПДн (email, роли, статус блокировки) — только тем, кому он
+    // нужен по работе: администратору пользователей и администратору справочников ВНД
+    // (назначение ответственных за актуализацию). Для выбора человека в формах есть
+    // облегчённый lookup без ПДн, он остаётся открытым.
     [HttpGet]
+    [RequirePermission(PermissionCode.ManageUsers, PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(typeof(UserPageResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<UserPageResponse>> GetPage(
         [FromQuery] int page = 1,

@@ -3,6 +3,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Meetings.Models;
 using delosfera_server.Modules.Meetings.Services;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
 
 namespace Delosfera.Tests;
@@ -119,12 +120,34 @@ public class MeetingAttendanceTests
         Assert.Contains(явка, x => x.UserId == стенд.Member);
     }
 
+    [Fact]
+    public async Task Не_секретарь_явку_не_отмечает()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+
+        // Явка влияет на кворум и попадает в протокол: отмечать её вправе только
+        // секретарь органа, а не любой вошедший — иначе кворум подделает кто угодно.
+        var посторонний = new FakeCurrentUser(стенд.Member);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => Состав(db, посторонний).MarkAttendanceAsync(стенд.MeetingId, new AttendanceMarkRequest
+            {
+                UserId = стенд.Member, Present = false, Note = "Командировка",
+            }, actorUserId: стенд.Member));
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private sealed record Стенд(int MeetingId, int Chairman, int Member, int Secretary);
 
-    private static IBodyMemberService Состав(DelosferaDbContext db) =>
-        new BodyMemberService(db, new BankClock());
+    /// <summary>
+    /// Состав с проверкой прав. По умолчанию текущий пользователь — секретарь
+    /// Правления, чтобы счастливый путь отметки явки шёл как раньше.
+    /// </summary>
+    private static IBodyMemberService Состав(DelosferaDbContext db, ICurrentUserService? currentUser = null) =>
+        new BodyMemberService(db, new BankClock(),
+            new MeetingAccessService(db, currentUser ?? new FakeCurrentUser(0, PermissionCode.ManageBoardMeetings)));
 
     private static async Task<Стенд> SeedAsync(DelosferaDbContext db)
     {

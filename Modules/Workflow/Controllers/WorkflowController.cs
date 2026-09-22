@@ -301,6 +301,13 @@ public class WorkflowController : ControllerBase
     [HttpPost("instances/from-template")]
     public async Task<ActionResult<RouteInstanceResponse>> Instantiate([FromBody] InstantiateRequest req)
     {
+        // Маршрут строится по конкретному документу — заводить его вправе только автор
+        // документа или администратор. Иначе любой мог бы создавать маршруты по чужим
+        // карточкам. Внутренние контурные вызовы (СЗ/закупки/кастом-документы) идут в
+        // движок напрямую, минуя контроллер, и этой проверкой не затрагиваются.
+        await EnsureCanManageDocumentRouteAsync(
+            req.DocumentId, "Создать маршрут по документу может его автор или администратор");
+
         var inst = await _engine.InstantiateFromTemplateAsync(req.DocumentId, req.TemplateId);
         return Ok(await LoadResponse(inst.Id));
     }
@@ -309,6 +316,15 @@ public class WorkflowController : ControllerBase
     [HttpPost("instances/{id:int}/start")]
     public async Task<ActionResult<RouteInstanceResponse>> Start(int id)
     {
+        var documentId = await _db.RouteInstances.AsNoTracking()
+            .Where(i => i.Id == id).Select(i => (int?)i.DocumentId).FirstOrDefaultAsync();
+        if (documentId is null) return NotFound(new { message = "Маршрут не найден" });
+
+        // Запуск активирует задачи участников и рассылку — двигать чужой документ по
+        // маршруту нельзя. Пускает автор документа или администратор.
+        await EnsureCanManageDocumentRouteAsync(
+            documentId.Value, "Запустить маршрут документа может его автор или администратор");
+
         try
         {
             await _engine.StartAsync(id, _currentUser.UserId);
@@ -333,8 +349,38 @@ public class WorkflowController : ControllerBase
     [HttpPost("remarks/{id:int}/confirm")]
     public async Task<IActionResult> ConfirmRemark(int id)
     {
+        // Строгий режим: замечание закрывает и проталкивает маршрут тот, кто обязан
+        // доработать документ, то есть его автор/инициатор (либо администратор). Чужое
+        // замечание закрывать нельзя — иначе доработка обходится посторонним.
+        var documentId = await _db.Remarks.AsNoTracking()
+            .Where(r => r.Id == id)
+            .Select(r => (int?)r.Resolution!.RouteParticipant!.RouteStep!.RouteInstance!.DocumentId)
+            .FirstOrDefaultAsync();
+        if (documentId is null) return NotFound(new { message = "Замечание не найдено" });
+
+        await EnsureCanManageDocumentRouteAsync(
+            documentId.Value, "Подтвердить устранение замечания может автор документа или администратор");
+
         await _engine.ConfirmRemarkResolvedAsync(id, _currentUser.UserId);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Маршрутом документа (создать, запустить, подтвердить устранение замечания)
+    /// управляет автор документа либо администратор системы (ManageSystemSettings) —
+    /// тем же правом, что и справочником шаблонов маршрутов. Без этой проверки любой
+    /// аутентифицированный пользователь мог двигать чужой документ по маршруту.
+    /// Бросает 403 (UnauthorizedAccessException) для вошедшего, 404 если документа нет.
+    /// </summary>
+    private async Task EnsureCanManageDocumentRouteAsync(int documentId, string message)
+    {
+        var authorId = await _db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId).Select(d => (int?)d.AuthorId).FirstOrDefaultAsync();
+        if (authorId is null)
+            throw new KeyNotFoundException("Документ маршрута не найден");
+        if (authorId == _currentUser.UserId) return;
+        if (_currentUser.HasPermission(PermissionCode.ManageSystemSettings)) return;
+        throw new UnauthorizedAccessException(message);
     }
 
     /// <summary>Состояние экземпляра маршрута.</summary>

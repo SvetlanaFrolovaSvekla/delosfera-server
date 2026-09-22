@@ -37,7 +37,7 @@ public class CustomDocumentController : ControllerBase
 
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] CustomDocumentSaveRequest request) =>
-        await Run(() => _documents.UpdateAsync(id, request));
+        await Run(() => _documents.UpdateAsync(id, request, _currentUser.UserId));
 
     /// <summary>Отправить на согласование по шаблону маршрута из настроек типа.</summary>
     [HttpPost("{id:int}/submit")]

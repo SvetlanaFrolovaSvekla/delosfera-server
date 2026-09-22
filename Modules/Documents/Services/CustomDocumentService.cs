@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Data;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.DTO;
 using delosfera_server.Modules.Documents.Models;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Documents.Services;
 
@@ -11,7 +13,7 @@ public interface ICustomDocumentService
     Task<List<CustomDocumentDto>> ListAsync(int definitionId);
     Task<CustomDocumentDto> GetAsync(int documentId);
     Task<CustomDocumentDto> CreateAsync(CustomDocumentSaveRequest request, int authorId);
-    Task<CustomDocumentDto> UpdateAsync(int documentId, CustomDocumentSaveRequest request);
+    Task<CustomDocumentDto> UpdateAsync(int documentId, CustomDocumentSaveRequest request, int actorUserId);
 
     /// <summary>Отправить на согласование по шаблону маршрута, заданному типу (GEN-06).</summary>
     Task<CustomDocumentDto> SubmitAsync(int documentId, int actorUserId);
@@ -35,17 +37,33 @@ public class CustomDocumentService : ICustomDocumentService
     private readonly IDocumentTypeDefinitionService _definitions;
     private readonly IDocumentService _documents;
     private readonly Workflow.Services.IRouteEngine _routes;
+    private readonly ICurrentUserService _currentUser;
 
     public CustomDocumentService(
         DelosferaDbContext db,
         IDocumentTypeDefinitionService definitions,
         IDocumentService documents,
-        Workflow.Services.IRouteEngine routes)
+        Workflow.Services.IRouteEngine routes,
+        ICurrentUserService currentUser)
     {
         _db = db;
         _definitions = definitions;
         _documents = documents;
         _routes = routes;
+        _currentUser = currentUser;
+    }
+
+    /// <summary>
+    /// Черновик кастом-документа правит и отправляет на согласование сам его автор:
+    /// карточка принадлежит одному человеку, и переписывать или проталкивать чужую
+    /// по её {id} со стороны нельзя. Вмешаться может только администратор системы
+    /// (<see cref="PermissionCode.ManageSystemSettings"/>).
+    /// </summary>
+    private void EnsureAuthorOrPrivileged(Document document, int actorUserId, string message)
+    {
+        if (document.AuthorId == actorUserId) return;
+        if (_currentUser.HasPermission(PermissionCode.ManageSystemSettings)) return;
+        throw new UnauthorizedAccessException(message);
     }
 
     public async Task<List<CustomDocumentDto>> ListAsync(int definitionId)
@@ -84,10 +102,12 @@ public class CustomDocumentService : ICustomDocumentService
         return ToDto(await LoadAsync(document.Id));
     }
 
-    public async Task<CustomDocumentDto> UpdateAsync(int documentId, CustomDocumentSaveRequest request)
+    public async Task<CustomDocumentDto> UpdateAsync(int documentId, CustomDocumentSaveRequest request, int actorUserId)
     {
         var document = await _db.Documents.FirstOrDefaultAsync(d => d.Id == documentId)
             ?? throw new KeyNotFoundException("Документ не найден");
+
+        EnsureAuthorOrPrivileged(document, actorUserId, "Править можно только собственный черновик");
 
         if (document.DefinitionId is not { } definitionId)
             throw new InvalidOperationException("Документ не относится к настраиваемому типу");
@@ -107,6 +127,8 @@ public class CustomDocumentService : ICustomDocumentService
     public async Task<CustomDocumentDto> SubmitAsync(int documentId, int actorUserId)
     {
         var document = await LoadTrackedAsync(documentId);
+
+        EnsureAuthorOrPrivileged(document, actorUserId, "Отправить на согласование можно только собственный черновик");
 
         if (document.DefinitionId is not { } definitionId)
             throw new InvalidOperationException("Документ не относится к настраиваемому типу");

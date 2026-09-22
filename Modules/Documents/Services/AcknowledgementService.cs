@@ -37,16 +37,26 @@ public interface IAcknowledgementService
 {
     Task<AcknowledgementSheet> CreateAsync(CreateSheetRequest request, int authorUserId, CancellationToken ct = default);
 
-    /// <summary>Дослать лист тем, кого забыли или кто пришёл позже.</summary>
-    Task<int> AddParticipantsAsync(int sheetId, AcknowledgementTargets targets, int actorUserId, CancellationToken ct = default);
+    /// <summary>
+    /// Дослать лист тем, кого забыли или кто пришёл позже. Досылать может только
+    /// создатель листа или сотрудник с правом управления (actorCanManage).
+    /// </summary>
+    Task<int> AddParticipantsAsync(int sheetId, AcknowledgementTargets targets, int actorUserId, bool actorCanManage = false, CancellationToken ct = default);
 
     Task AcknowledgeAsync(int entryId, int userId, CancellationToken ct = default);
     Task RefuseAsync(int entryId, int userId, string reason, CancellationToken ct = default);
 
-    /// <summary>Снять сотрудника с ознакомления: уволился, переведён, включён по ошибке.</summary>
-    Task CancelAsync(int entryId, int actorUserId, string? reason, CancellationToken ct = default);
+    /// <summary>
+    /// Снять сотрудника с ознакомления: уволился, переведён, включён по ошибке.
+    /// Снимать может только создатель листа или сотрудник с правом управления.
+    /// </summary>
+    Task CancelAsync(int entryId, int actorUserId, string? reason, bool actorCanManage = false, CancellationToken ct = default);
 
-    Task CloseAsync(int sheetId, int actorUserId, CancellationToken ct = default);
+    /// <summary>
+    /// Закрыть лист. Закрывать может только создатель листа или сотрудник с правом
+    /// управления.
+    /// </summary>
+    Task CloseAsync(int sheetId, int actorUserId, bool actorCanManage = false, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -143,11 +153,14 @@ public class AcknowledgementService : IAcknowledgementService
     }
 
     public async Task<int> AddParticipantsAsync(
-        int sheetId, AcknowledgementTargets targets, int actorUserId, CancellationToken ct = default)
+        int sheetId, AcknowledgementTargets targets, int actorUserId, bool actorCanManage = false,
+        CancellationToken ct = default)
     {
         var sheet = await _db.AcknowledgementSheets
             .FirstOrDefaultAsync(s => s.Id == sheetId, ct)
             ?? throw new KeyNotFoundException("Лист ознакомления не найден");
+
+        EnsureCanManageSheet(sheet, actorUserId, actorCanManage);
 
         if (sheet.ClosedAt is not null)
             throw new InvalidOperationException("Лист закрыт — досылать его некому");
@@ -234,11 +247,18 @@ public class AcknowledgementService : IAcknowledgementService
     }
 
     public async Task CancelAsync(
-        int entryId, int actorUserId, string? reason, CancellationToken ct = default)
+        int entryId, int actorUserId, string? reason, bool actorCanManage = false,
+        CancellationToken ct = default)
     {
         var entry = await _db.AcknowledgementEntries
+            .Include(e => e.Sheet)
             .FirstOrDefaultAsync(e => e.Id == entryId, ct)
             ?? throw new KeyNotFoundException("Строка листа не найдена");
+
+        var sheet = entry.Sheet
+            ?? throw new KeyNotFoundException("Лист ознакомления не найден");
+
+        EnsureCanManageSheet(sheet, actorUserId, actorCanManage);
 
         // Снять можно только того, кто ещё не расписался: роспись не отменяют,
         // она уже состоялась.
@@ -256,11 +276,14 @@ public class AcknowledgementService : IAcknowledgementService
             new {причина = entry.Comment});
     }
 
-    public async Task CloseAsync(int sheetId, int actorUserId, CancellationToken ct = default)
+    public async Task CloseAsync(
+        int sheetId, int actorUserId, bool actorCanManage = false, CancellationToken ct = default)
     {
         var sheet = await _db.AcknowledgementSheets
             .FirstOrDefaultAsync(s => s.Id == sheetId, ct)
             ?? throw new KeyNotFoundException("Лист ознакомления не найден");
+
+        EnsureCanManageSheet(sheet, actorUserId, actorCanManage);
 
         sheet.ClosedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
@@ -389,6 +412,22 @@ public class AcknowledgementService : IAcknowledgementService
             ?? throw new InvalidOperationException("Лист ознакомления не найден");
 
         return (entry, sheet);
+    }
+
+    /// <summary>
+    /// Управлять листом — досылать участников, снимать их, закрывать лист — вправе
+    /// только тот, кто лист завёл, либо сотрудник с правом управления (кадровая
+    /// служба). Иначе любой вошедший мог бы навязывать и снимать ознакомления по
+    /// чужому листу и закрывать его.
+    /// </summary>
+    private static void EnsureCanManageSheet(
+        AcknowledgementSheet sheet, int actorUserId, bool actorCanManage)
+    {
+        if (sheet.CreatedByUserId == actorUserId || actorCanManage)
+            return;
+
+        throw new UnauthorizedAccessException(
+            "Управлять листом ознакомления может только его создатель или кадровая служба");
     }
 
     private static string? Trim(string? value) =>

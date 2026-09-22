@@ -94,11 +94,13 @@ public class BodyMemberService : IBodyMemberService
 {
     private readonly DelosferaDbContext _db;
     private readonly IBankClock _clock;
+    private readonly IMeetingAccessService _access;
 
-    public BodyMemberService(DelosferaDbContext db, IBankClock clock)
+    public BodyMemberService(DelosferaDbContext db, IBankClock clock, IMeetingAccessService access)
     {
         _db = db;
         _clock = clock;
+        _access = access;
     }
 
     public async Task<List<BodyMemberDto>> ListAsync(MeetingBody? body, CancellationToken ct = default)
@@ -248,6 +250,10 @@ public class BodyMemberService : IBodyMemberService
         var meeting = await _db.Meetings.AsNoTracking()
             .FirstOrDefaultAsync(m => m.Id == meetingId, ct)
             ?? throw new KeyNotFoundException("Заседание не найдено");
+
+        // Явка считается в кворум и попадает в протокол — отмечать её вправе только
+        // секретарь органа, а не любой пользователь, знающий id заседания.
+        _access.RequireManage(meeting.Body);
 
         var inBody = await _db.BodyMembers
             .AnyAsync(m => m.Body == meeting.Body && m.UserId == request.UserId, ct);

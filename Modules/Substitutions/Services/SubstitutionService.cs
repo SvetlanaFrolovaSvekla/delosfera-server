@@ -15,12 +15,12 @@ public interface ISubstitutionService
     Task<SubstitutionDetails?> GetAsync(int id, CancellationToken ct = default);
     Task<SubstitutionDetails> CreateAsync(SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default);
     Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, bool isHrEditor = false, CancellationToken ct = default);
-    Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, CancellationToken ct = default);
+    Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
     Task<SubstitutionDetails> ApproveAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
     Task<SubstitutionDetails> RejectAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
     Task<SubstitutionDetails> ExecuteAsync(int id, int actorUserId, CancellationToken ct = default);
-    Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, CancellationToken ct = default);
-    Task DeleteAsync(int id, int actorUserId, CancellationToken ct = default);
+    Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
+    Task DeleteAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
 
     /// <summary>Печатная форма: form = "order" (приказ) или "liability" (договор МО).</summary>
     Task<(byte[] Bytes, string FileName)> PrintAsync(int id, string form, CancellationToken ct = default);
@@ -154,7 +154,13 @@ public class SubstitutionService : ISubstitutionService
             .FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
 
-        var editableByInitiator = entity.Status is SubstitutionStatus.Draft or SubstitutionStatus.Rejected;
+        // Заявку правит её инициатор; УЧР — по праву ведения кадровых СЗ (isHrEditor).
+        // Раньше проверялся только статус: любой мог переписать чужую карточку
+        // (паспорт, ИНН, адреса) по {id}. Теперь доступ решает владелец/право.
+        var isInitiator = entity.InitiatorUserId == actorUserId;
+
+        var editableByInitiator = isInitiator
+            && entity.Status is SubstitutionStatus.Draft or SubstitutionStatus.Rejected;
 
         // УЧР правит заявку после согласования Начальником операционного управления —
         // то есть когда этап «Операционное управление» уже пройден (Approved).
@@ -164,8 +170,15 @@ public class SubstitutionService : ISubstitutionService
             && entity.Status is SubstitutionStatus.OnApproval or SubstitutionStatus.OnExecution;
 
         if (!editableByInitiator && !editableByHr)
+        {
+            // Посторонний (не инициатор и без права УЧР) — это отказ в доступе (403),
+            // а не ошибка статуса. Инициатору/УЧР с неподходящим статусом — 400/409.
+            if (!isInitiator && !isHrEditor)
+                throw new UnauthorizedAccessException(
+                    "Редактировать заявку на замещение может только инициатор или УЧР");
             throw new InvalidOperationException(
                 "Изменять можно черновик, отклонённую заявку, либо (УЧР) после согласования Операционным управлением");
+        }
 
         // Лог изменений: снимок ключевых полей до и после для аудита.
         var before = Snapshot(entity);
@@ -201,10 +214,15 @@ public class SubstitutionService : ISubstitutionService
         ["description"] = e.Description,
     };
 
-    public async Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, CancellationToken ct = default)
+    public async Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default)
     {
         var entity = await _db.SubstitutionRequests.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
+
+        // Отправить черновик в УЧР может только его инициатор (или администратор).
+        // Иначе посторонний присваивал бы рег.номер чужой заявке по {id}.
+        if (entity.InitiatorUserId != actorUserId && !isPrivileged)
+            throw new UnauthorizedAccessException("Отправить заявку может только инициатор");
 
         if (entity.Status is not (SubstitutionStatus.Draft or SubstitutionStatus.Rejected))
             throw new InvalidOperationException("Отправить можно только черновик или отклонённую заявку");
@@ -399,10 +417,14 @@ public class SubstitutionService : ISubstitutionService
         return (await GetAsync(id, ct))!;
     }
 
-    public async Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, CancellationToken ct = default)
+    public async Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default)
     {
         var entity = await _db.SubstitutionRequests.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
+
+        // Отозвать заявку из работы вправе только её инициатор (или администратор).
+        if (entity.InitiatorUserId != actorUserId && !isPrivileged)
+            throw new UnauthorizedAccessException("Отозвать заявку может только инициатор");
 
         if (entity.Status is SubstitutionStatus.Executed or SubstitutionStatus.Withdrawn)
             throw new InvalidOperationException("Заявка уже завершена");
@@ -415,10 +437,14 @@ public class SubstitutionService : ISubstitutionService
         return (await GetAsync(id, ct))!;
     }
 
-    public async Task DeleteAsync(int id, int actorUserId, CancellationToken ct = default)
+    public async Task DeleteAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default)
     {
         var entity = await _db.SubstitutionRequests.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
+
+        // Удалить черновик может только его инициатор (или администратор).
+        if (entity.InitiatorUserId != actorUserId && !isPrivileged)
+            throw new UnauthorizedAccessException("Удалить заявку может только инициатор");
 
         if (entity.Status != SubstitutionStatus.Draft)
             throw new InvalidOperationException("Удалить можно только черновик");

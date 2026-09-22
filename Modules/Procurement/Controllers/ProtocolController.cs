@@ -56,6 +56,7 @@ public class ProtocolController : ControllerBase
 
     /// <summary>Подписать протокол от имени стороны.</summary>
     [HttpPost("requests/{id:int}/protocol/sign")]
+    [RequirePermission(PermissionCode.ManageProcurementProtocol)]
     public async Task<IActionResult> Sign(int id, [FromBody] ProtocolSignRequest request) =>
         await Run(() => _protocols.SignAsync(id, request, _currentUser.UserId));
 

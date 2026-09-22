@@ -34,6 +34,28 @@ public class AuditChainTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Verify_HoldsAfterReload_WhenTimestampHasSubMicrosecondTicks()
+    {
+        // Регрессия AUD-BREAK: раньше момент писался с точностью тика (100 нс) и уходил
+        // в хеш, а Postgres хранит timestamptz до микросекунды — при перечитывании из базы
+        // хеш пересчитывался по усечённому моменту и не сходился, честная запись выглядела
+        // «изменённой». Проверять надо в СВЕЖЕМ контексте: тот, что писал, держит запись в
+        // identity map с исходным (неусечённым) моментом и подмену бы замаскировал.
+        await using var db = await postgres.NewIsolatedDbAsync();
+        var audit = new AuditService(db);
+
+        await audit.LogAsync("Doc", 1, "Created", 10);
+        await audit.LogAsync("Doc", 1, "Approved", 11, new { step = "УЧР" });
+        await audit.LogAsync("Doc", 1, "Signed", 12);
+
+        await using var fresh = postgres.NewDbFor(db);
+        var status = await new AuditService(fresh).VerifyChainAsync();
+
+        Assert.True(status.Valid);
+        Assert.Equal(3, status.CheckedCount);
+    }
+
+    [Fact]
     public async Task Verify_DetectsTampering()
     {
         await using var db = await postgres.NewIsolatedDbAsync();

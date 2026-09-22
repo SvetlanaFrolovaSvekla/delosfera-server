@@ -36,7 +36,11 @@ public class AuditService : IAuditService
             EntityId = entityId,
             Action = action,
             UserId = userId,
-            At = DateTime.UtcNow,
+            // Момент фиксируем с точностью до микросекунды — ровно столько хранит
+            // timestamptz в Postgres. Иначе At уходил бы в хеш с точностью тика (100 нс),
+            // а из базы возвращался усечённым до микросекунд, и пересчёт хеша при проверке
+            // цепи не сходился бы с сохранённым — честная запись выглядела бы «изменённой».
+            At = TruncateToMicroseconds(DateTime.UtcNow),
             PayloadJson = payload is null ? null : JsonSerializer.Serialize(payload),
         };
 
@@ -167,6 +171,14 @@ public class AuditService : IAuditService
     /// Канонический хеш записи. Разделитель  (Unit Separator) не встречается в тексте,
     /// поэтому поля не «склеиваются» неоднозначно. Дата — в UTC ISO-8601 «O».
     /// </summary>
+    /// <summary>
+    /// Отбрасывает часть момента мельче микросекунды. Postgres хранит timestamptz с
+    /// точностью до микросекунды, а .NET DateTime — до тика (100 нс); без усечения
+    /// значение в хеше и значение в базе расходятся на седьмой знак дробной секунды.
+    /// </summary>
+    private static DateTime TruncateToMicroseconds(DateTime dt) =>
+        new(dt.Ticks - dt.Ticks % TimeSpan.TicksPerMicrosecond, dt.Kind);
+
     private static string ComputeHash(AuditEntry e, string? prevHash)
     {
         var canonical = string.Join('',

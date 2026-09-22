@@ -9,11 +9,17 @@ namespace delosfera_server.Common.Authorization;
 /// </summary>
 public class RequirePermissionAttribute : Attribute, IAuthorizationFilter
 {
-    private readonly PermissionCode _permission;
+    private readonly PermissionCode[] _permissions;
 
-    public RequirePermissionAttribute(PermissionCode permission)
+    /// <summary>
+    /// Требует любое из перечисленных прав (логическое ИЛИ). С одним аргументом ведёт
+    /// себя как прежде; несколько — когда один эндпоинт законно доступен нескольким
+    /// ролям (например, список сотрудников нужен и администратору пользователей, и
+    /// администратору справочников ВНД для назначения ответственных).
+    /// </summary>
+    public RequirePermissionAttribute(params PermissionCode[] permissions)
     {
-        _permission = permission;
+        _permissions = permissions;
     }
 
     public void OnAuthorization(AuthorizationFilterContext context)
@@ -26,10 +32,12 @@ public class RequirePermissionAttribute : Attribute, IAuthorizationFilter
             return;
         }
 
-        var hasPermission = user.Claims
+        var granted = user.Claims
             .Where(c => c.Type == "permission")
             .Select(c => int.TryParse(c.Value, out var code) ? code : (int?)null)
-            .Contains((int)_permission);
+            .ToHashSet();
+
+        var hasPermission = _permissions.Any(p => granted.Contains((int)p));
 
         if (!hasPermission)
         {

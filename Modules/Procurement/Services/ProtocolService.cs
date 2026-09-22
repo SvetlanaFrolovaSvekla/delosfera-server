@@ -227,6 +227,12 @@ public class ProtocolService : IProtocolService
         var protocol = await LoadAsync(requestId)
                        ?? throw new KeyNotFoundException("Протокол по этой закупке не сформирован");
 
+        // Право подписывать за конкретную сторону не даётся правом ведения протокола:
+        // оно проверяется отдельно, иначе любой обладатель ManageProcurementProtocol
+        // мог бы поставить подпись за инициатора, куратора или утверждающего, назвав
+        // роль в теле запроса. Подписант каждой роли закреплён в оргструктуре закупки.
+        await ПроверитьПравоПодписиАsync(protocol.RequestId, request.Role, actorUserId);
+
         var card = await BuildAsync(protocol);
         if (card.Blockers.Count > 0)
             throw new InvalidOperationException(string.Join("; ", card.Blockers));
@@ -265,6 +271,50 @@ public class ProtocolService : IProtocolService
         });
 
         return await BuildAsync((await LoadAsync(requestId))!);
+    }
+
+    /// <summary>
+    /// Кто вправе подписать протокол за указанную сторону.
+    ///
+    /// Подписант каждой роли закреплён в оргструктуре закупки, а не берётся из тела
+    /// запроса: роль в подвале печатной формы соответствует конкретному сотруднику.
+    ///  • Инициатор — автор карточки заявки (Document.AuthorId);
+    ///  • Куратор организатора закупки — куратор инициирующего подразделения
+    ///    (InitiatorUnit.CuratorUserId);
+    ///  • Утверждающий (Заместитель Председателя Правления) — курирующий закупку член
+    ///    Правления (ProcurementRequest.CuratorUserId).
+    ///
+    /// Проверка закрытая: если подписант роли в закупке не определён, подпись за неё
+    /// поставить нельзя — так исключается подделка подписи от несуществующей стороны.
+    /// </summary>
+    private async Task ПроверитьПравоПодписиАsync(int requestId, ProtocolSignerRole role, int actorUserId)
+    {
+        var роли = await _db.ProcurementRequests
+            .Where(r => r.Id == requestId)
+            .Select(r => new
+            {
+                Initiator = (int?)r.Document!.AuthorId,
+                OrganizerCurator = r.InitiatorUnit!.CuratorUserId,
+                Approver = r.CuratorUserId,
+            })
+            .FirstOrDefaultAsync()
+            ?? throw new KeyNotFoundException($"Заявка на закупку {requestId} не найдена");
+
+        var подписант = role switch
+        {
+            ProtocolSignerRole.Initiator => роли.Initiator,
+            ProtocolSignerRole.OrganizerCurator => роли.OrganizerCurator,
+            ProtocolSignerRole.Approver => роли.Approver,
+            _ => null,
+        };
+
+        if (подписант is null)
+            throw new UnauthorizedAccessException(
+                $"Подписант роли «{RoleTitle(role)}» по этой закупке не определён — подписание за эту сторону невозможно");
+
+        if (подписант != actorUserId)
+            throw new UnauthorizedAccessException(
+                $"Подписать за роль «{RoleTitle(role)}» вправе только закреплённый за ней сотрудник");
     }
 
     /// <summary>

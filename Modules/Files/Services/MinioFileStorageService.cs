@@ -25,7 +25,7 @@ public class MinioFileStorageService : IFileStorageService
         await ValidateContentSignatureAsync(file, ext, ct);
         var hash = await ComputeHashAsync(file, ct);
 
-        var objectName = $"{Guid.NewGuid()}/{file.FileName}";
+        var objectName = $"{Guid.NewGuid()}/{SafeKeySegment(file.FileName)}";
 
         await using var stream = file.OpenReadStream();
         await _minio.PutObjectAsync(new PutObjectArgs()
@@ -55,7 +55,7 @@ public class MinioFileStorageService : IFileStorageService
         byte[] content, string fileName, string contentType, int userId, CancellationToken ct = default)
     {
         var hash = Convert.ToHexStringLower(SHA256.HashData(content));
-        var objectName = $"{Guid.NewGuid()}/{fileName}";
+        var objectName = $"{Guid.NewGuid()}/{SafeKeySegment(fileName)}";
 
         await using (var stream = new MemoryStream(content))
         {
@@ -81,6 +81,35 @@ public class MinioFileStorageService : IFileStorageService
         _db.FileAttachments.Add(entity);
         await _db.SaveChangesAsync(ct);
         return entity;
+    }
+
+    /// <summary>
+    /// Безопасный сегмент имени объекта в бакете. Имя файла приходит от пользователя и
+    /// раньше подставлялось в ключ как есть: «../» в имени отменял GUID-префикс и позволял
+    /// писать в корень бакета, произвольные префиксы или соседние бакеты (path-traversal),
+    /// а управляющие/сверхдлинные имена валили загрузку. Отбрасываем путь, управляющие
+    /// символы и разделители, срезаем «..» и ограничиваем длину. Уникальность даёт GUID —
+    /// само имя нужно лишь для читаемости ключа; отображаемое имя хранится в OriginalFileName.
+    /// </summary>
+    public static string SafeKeySegment(string? fileName)
+    {
+        var baseName = Path.GetFileName(fileName ?? string.Empty);
+        var cleaned = new string(baseName
+            .Where(c => !char.IsControl(c) && c != '/' && c != '\\')
+            .ToArray())
+            .Replace("..", string.Empty)
+            .Trim()
+            .TrimStart('.');
+
+        if (string.IsNullOrWhiteSpace(cleaned))
+            cleaned = "file";
+
+        // Ключ объекта в MinIO ограничен; держим сегмент коротким, сохраняя хвост с расширением.
+        const int maxLength = 120;
+        if (cleaned.Length > maxLength)
+            cleaned = cleaned[^maxLength..];
+
+        return cleaned;
     }
 
     public async Task<(Stream, string, string)> DownloadAsync(int fileId, CancellationToken ct = default)

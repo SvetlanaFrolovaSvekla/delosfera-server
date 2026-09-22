@@ -6,6 +6,7 @@ using delosfera_server.Modules.Meetings.Services;
 using delosfera_server.Modules.Procurement.Models;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Workflow.Models;
+using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
 
 namespace Delosfera.Tests;
@@ -31,7 +32,7 @@ public class AgendaFromProcurementTests
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db);
 
-        var очередь = await new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db))).ListAsync(MeetingBody.Board);
+        var очередь = await Сервис(db).ListAsync(MeetingBody.Board);
 
         var заявка = Assert.Single(очередь.Where(c => c.Kind == AgendaCandidateKind.Procurement));
         Assert.Equal(стенд.RequestId, заявка.ProcurementRequestId);
@@ -44,7 +45,7 @@ public class AgendaFromProcurementTests
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db, этапАктивен: false);
 
-        var очередь = await new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db))).ListAsync(MeetingBody.Board);
+        var очередь = await Сервис(db).ListAsync(MeetingBody.Board);
 
         // Заявка ещё ходит по подразделениям: выносить нечего, пока согласование
         // не дошло до этапа, где решение принимает орган.
@@ -57,7 +58,7 @@ public class AgendaFromProcurementTests
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db, орган: ApprovalAuthority.Curator);
 
-        var очередь = await new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db))).ListAsync(MeetingBody.Board);
+        var очередь = await Сервис(db).ListAsync(MeetingBody.Board);
 
         Assert.DoesNotContain(очередь, c => c.ProcurementRequestId == стенд.RequestId);
     }
@@ -70,7 +71,7 @@ public class AgendaFromProcurementTests
 
         // Заседания Совета директоров и собрания акционеров система не ведёт, а
         // кредитный комитет закупки не утверждает: чужую очередь засорять нечем.
-        var кредитный = await new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db))).ListAsync(MeetingBody.CreditCommittee);
+        var кредитный = await Сервис(db).ListAsync(MeetingBody.CreditCommittee);
 
         Assert.DoesNotContain(кредитный, c => c.Kind == AgendaCandidateKind.Procurement);
     }
@@ -80,7 +81,7 @@ public class AgendaFromProcurementTests
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db);
-        var сервис = new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)));
+        var сервис = Сервис(db);
 
         var item = await сервис.TakeProcurementIntoAgendaAsync(
             стенд.MeetingId, стенд.RequestId, "О приобретении серверов", null, стенд.Actor);
@@ -98,7 +99,7 @@ public class AgendaFromProcurementTests
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
         var стенд = await SeedAsync(db);
-        var сервис = new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)));
+        var сервис = Сервис(db);
 
         await сервис.TakeProcurementIntoAgendaAsync(стенд.MeetingId, стенд.RequestId, null, null, стенд.Actor);
 
@@ -122,14 +123,63 @@ public class AgendaFromProcurementTests
         db.Meetings.Add(кредитный);
         await db.SaveChangesAsync();
 
+        // Право вести оба органа есть — упереться должны именно в несовпадение органа
+        // заявки и заседания, а не в гейт полномочий.
+        var секретарь = new FakeCurrentUser(стенд.Actor,
+            PermissionCode.ManageBoardMeetings, PermissionCode.ManageCreditCommitteeMeetings);
+
         var ошибка = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => new AgendaCandidateService(db, new DocumentService(db, new AuditService(db), new NumeratorService(db)))
+            () => Сервис(db, секретарь)
                 .TakeProcurementIntoAgendaAsync(кредитный.Id, стенд.RequestId, null, null, стенд.Actor));
 
         Assert.Contains("другого органа", ошибка.Message);
     }
 
+    [Fact]
+    public async Task Не_секретарь_не_включает_заявку_в_повестку()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+
+        // Пользователь без права вести заседания Правления не может протолкнуть
+        // вопрос в чужую повестку — иначе повестку органа определял бы любой.
+        var посторонний = new FakeCurrentUser(стенд.Actor);
+        var сервис = Сервис(db, посторонний);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => сервис.TakeProcurementIntoAgendaAsync(стенд.MeetingId, стенд.RequestId, null, null, стенд.Actor));
+
+        // И записку тоже: тот же гейт стоит на обоих источниках повестки.
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => сервис.TakeIntoAgendaAsync(стенд.MeetingId, 1, null, null, стенд.Actor));
+    }
+
+    [Fact]
+    public async Task Секретарь_включает_заявку_несмотря_на_гейт()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+
+        // Секретарь Правления (право ManageBoardMeetings) проходит проверку и
+        // включает вопрос — счастливый путь не сломан.
+        var секретарь = new FakeCurrentUser(стенд.Actor, PermissionCode.ManageBoardMeetings);
+        var item = await Сервис(db, секретарь)
+            .TakeProcurementIntoAgendaAsync(стенд.MeetingId, стенд.RequestId, null, null, стенд.Actor);
+
+        Assert.Equal(стенд.RequestId, item.SourceProcurementRequestId);
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Сервис отбора с проверкой прав. По умолчанию текущий пользователь —
+    /// секретарь Правления, чтобы счётные тесты счастливого пути шли как раньше.
+    /// </summary>
+    private static AgendaCandidateService Сервис(
+        DelosferaDbContext db, ICurrentUserService? currentUser = null) =>
+        new(db,
+            new DocumentService(db, new AuditService(db), new NumeratorService(db)),
+            new MeetingAccessService(db, currentUser ?? new FakeCurrentUser(0, PermissionCode.ManageBoardMeetings)));
 
     private sealed record Стенд(int RequestId, int MeetingId, int Actor);
 

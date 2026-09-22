@@ -32,16 +32,19 @@ public class MeetingNotificationService : IMeetingNotificationService
     private readonly ILogger<MeetingNotificationService> _logger;
 
     private readonly IBodyMemberService _bodyMembers;
+    private readonly IMeetingAccessService _access;
 
     public MeetingNotificationService(
         DelosferaDbContext db,
         INotificationService notifications,
         IBodyMemberService bodyMembers,
+        IMeetingAccessService access,
         ILogger<MeetingNotificationService> logger)
     {
         _db = db;
         _notifications = notifications;
         _bodyMembers = bodyMembers;
+        _access = access;
         _logger = logger;
     }
 
@@ -69,6 +72,10 @@ public class MeetingNotificationService : IMeetingNotificationService
             .Include(m => m.Items).ThenInclude(i => i.SourceSz).ThenInclude(s => s!.Document)
             .FirstOrDefaultAsync(m => m.Id == meetingId)
             ?? throw new KeyNotFoundException("Заседание не найдено");
+
+        // Массовую рассылку по заседанию инициирует только секретарь этого органа —
+        // иначе любой вошедший мог бы запустить письма всем членам органа и докладчикам.
+        _access.RequireManage(meeting.Body);
 
         var recipients = new HashSet<int> { meeting.SecretaryUserId };
 

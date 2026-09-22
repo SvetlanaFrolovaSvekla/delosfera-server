@@ -114,6 +114,22 @@ public class SzService : ISzService
     // Дата банка (CLK-1): регистрация СЗ и сравнение сроков — по календарю Бишкека, не UTC.
     private DateOnly Today => _clock.Today;
 
+    /// <summary>
+    /// Черновик правит, удаляет, отправляет и меняет ему маршрут согласующих сам
+    /// его автор. Записка часто касается одного подразделения (оклады, перемещения,
+    /// спорная закупка), и переписывать или проталкивать чужую записку по её {id}
+    /// не должен никто со стороны. Вмешаться в застрявшую записку могут только
+    /// привилегированные роли: держатель реестра СЗ целиком (<see cref="PermissionCode.ViewAllSz"/>)
+    /// и администратор системы (<see cref="PermissionCode.ManageSystemSettings"/>).
+    /// </summary>
+    private void EnsureAuthorOrPrivileged(SzDocument sz, int actorUserId, string message)
+    {
+        if (sz.Document!.AuthorId == actorUserId) return;
+        if (_currentUser.HasPermission(PermissionCode.ViewAllSz)) return;
+        if (_currentUser.HasPermission(PermissionCode.ManageSystemSettings)) return;
+        throw new UnauthorizedAccessException(message);
+    }
+
     public async Task<PagedResult<SzListItem>> SearchAsync(SzSearchRequest request, int currentUserId)
     {
         var query = await FilteredQueryAsync(request, currentUserId);
@@ -197,7 +213,10 @@ public class SzService : ISzService
 
         if (!string.IsNullOrWhiteSpace(request.Query))
         {
-            var q = request.Query.Trim();
+            // Управляющие символы (в т.ч. NUL 0x00) в тексте поиска роняли запрос:
+            // Postgres не хранит NUL в text и падал на ILike. Чистим их до запроса.
+            var q = new string(request.Query.Where(c => !char.IsControl(c)).ToArray()).Trim();
+            if (q.Length > 0)
             query = query.Where(x =>
                 EF.Functions.ILike(x.Document!.Title, $"%{q}%") ||
                 (x.Document!.RegNumber != null && EF.Functions.ILike(x.Document!.RegNumber!, $"%{q}%")) ||
@@ -460,8 +479,23 @@ public class SzService : ISzService
         return details;
     }
 
+    /// <summary>
+    /// Базовая проверка полей записки до записи. Пустой (или из одних пробелов)
+    /// заголовок и отрицательная сумма раньше молча сохранялись.
+    /// </summary>
+    private static void ValidateSaveRequest(SzSaveRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+            throw new ArgumentException("Укажите заголовок служебной записки");
+
+        if (request.Amount is < 0)
+            throw new ArgumentException("Сумма не может быть отрицательной");
+    }
+
     public async Task<SzDetails> CreateDraftAsync(SzSaveRequest request, int authorId)
     {
+        ValidateSaveRequest(request);
+
         var kind = await _db.SzKinds.FirstOrDefaultAsync(k => k.Id == request.KindId)
             ?? throw new KeyNotFoundException("Вид служебной записки не найден");
 
@@ -499,6 +533,11 @@ public class SzService : ISzService
             .Include(x => x.Rubrics)
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        EnsureAuthorOrPrivileged(sz, actorUserId,
+            "Нет прав на изменение этой служебной записки");
+
+        ValidateSaveRequest(request);
 
         // Правка полей разрешена, пока записка не ушла дальше автора.
         if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision))
@@ -562,13 +601,27 @@ public class SzService : ISzService
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
+        EnsureAuthorOrPrivileged(sz, actorUserId,
+            "Нет прав на удаление этой служебной записки");
+
         if (sz.Document!.StatusCode != SzStatus.Draft)
             throw new InvalidOperationException("Удалить можно только черновик");
 
         // Карточка документа уходит вместе с запиской (каскад по DocumentId).
         _db.SzDocuments.Remove(sz);
         _db.Documents.Remove(sz.Document);
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // На черновик успели сослаться из другого места (пункт повестки, маршрут,
+            // лист ознакомления) — внешний ключ не даёт удалить. Отдаём понятный отказ
+            // вместо ошибки БД (500).
+            throw new InvalidOperationException(
+                "Нельзя удалить: на записку есть ссылки из других процессов. Отзовите или снимите их сначала.");
+        }
 
         await _audit.LogAsync("Sz", id, "Deleted", actorUserId);
     }
@@ -578,6 +631,9 @@ public class SzService : ISzService
         var sz = await _db.SzDocuments.Include(x => x.Document).Include(x => x.Kind)
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        EnsureAuthorOrPrivileged(sz, actorUserId,
+            "Нет прав на отправку этой служебной записки");
 
         if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision or SzStatus.Withdrawn))
             throw new InvalidOperationException(
@@ -756,6 +812,9 @@ public class SzService : ISzService
         var sz = await _db.SzDocuments.Include(x => x.Document)
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
+
+        EnsureAuthorOrPrivileged(sz, actorUserId,
+            "Нет прав на изменение согласующих этой служебной записки");
 
         if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision))
             throw new InvalidOperationException(

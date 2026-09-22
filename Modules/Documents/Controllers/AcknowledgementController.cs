@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Documents.Controllers;
 
@@ -164,8 +166,13 @@ public class AcknowledgementController : ControllerBase
         return Ok(new {sheet, entries});
     }
 
-    /// <summary>Завести лист ознакомления по документу.</summary>
+    /// <summary>
+    /// Завести лист ознакомления по документу. Обязать сотрудников ознакомиться —
+    /// административное действие кадровой/records-службы, поэтому нужно право
+    /// управления кадровыми приказами (как и на HrOrder «завести лист»).
+    /// </summary>
     [HttpPost]
+    [RequirePermission(PermissionCode.ManageHrOrders)]
     public async Task<IActionResult> Create([FromBody] CreateSheetRequest request, CancellationToken ct) =>
         await Run(async () =>
         {
@@ -179,7 +186,9 @@ public class AcknowledgementController : ControllerBase
         int sheetId, [FromBody] AcknowledgementTargets targets, CancellationToken ct) =>
         await Run(async () => new
         {
-            добавлено = await _service.AddParticipantsAsync(sheetId, targets, _currentUser.UserId, ct),
+            добавлено = await _service.AddParticipantsAsync(
+                sheetId, targets, _currentUser.UserId,
+                _currentUser.HasPermission(PermissionCode.ManageHrOrders), ct),
         });
 
     /// <summary>Ознакомлен — ставится подпись, если лист её требует.</summary>
@@ -207,7 +216,9 @@ public class AcknowledgementController : ControllerBase
         int entryId, [FromBody] CancelEntryRequest request, CancellationToken ct) =>
         await Run(async () =>
         {
-            await _service.CancelAsync(entryId, _currentUser.UserId, request.Reason, ct);
+            await _service.CancelAsync(
+                entryId, _currentUser.UserId, request.Reason,
+                _currentUser.HasPermission(PermissionCode.ManageHrOrders), ct);
             return new {ok = true};
         });
 
@@ -215,7 +226,9 @@ public class AcknowledgementController : ControllerBase
     public async Task<IActionResult> Close(int sheetId, CancellationToken ct) =>
         await Run(async () =>
         {
-            await _service.CloseAsync(sheetId, _currentUser.UserId, ct);
+            await _service.CloseAsync(
+                sheetId, _currentUser.UserId,
+                _currentUser.HasPermission(PermissionCode.ManageHrOrders), ct);
             return new {ok = true};
         });
 

@@ -667,6 +667,20 @@ public class HrOrderController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Title))
             return "Укажите заголовок приказа.";
 
+        if (!Enum.IsDefined(request.Kind))
+            return "Неизвестный вид приказа.";
+
+        // Длины проверяем до записи в БД: колонки ограничены, иначе слишком длинный
+        // заголовок/основание/текст падал ошибкой БД (500) вместо понятного отказа.
+        if (request.Title.Length > 1000)
+            return "Заголовок приказа слишком длинный (максимум 1000 символов).";
+
+        if (request.Basis is { Length: > 1000 })
+            return "Основание слишком длинное (максимум 1000 символов).";
+
+        if (request.Body is { Length: > 20000 })
+            return "Текст приказа слишком длинный (максимум 20000 символов).";
+
         if (request.Employees.Count == 0)
             return "Укажите хотя бы одного сотрудника.";
 
