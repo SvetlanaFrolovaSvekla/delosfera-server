@@ -328,22 +328,27 @@ public class VndActualizationService : IVndActualizationService
         await _db.SaveChangesAsync();
 
         var requester = await _db.Users.FindAsync(currentUserId);
-        var chiefEditorIds = await GetChiefEditorIdsAsync();
+        var reviewerIds = await GetActualizationRequestReviewerIdsAsync();
 
         // Ведём прямо на вкладку «Актуализация» этого документа — там сразу видно, кто
         // запросил доступ, и можно одобрить в один клик (не через реквизиты/маршрут вручную).
         await NotifyAsync(
             VndActualizationNotificationMessages.AccessRequested(vnd.TitleRu, requester?.FullName ?? "—"),
-            vndId, currentUserId, chiefEditorIds.ToArray(), urlOverride: $"/base-vnd/{vndId}?tab=actual");
+            vndId, currentUserId, reviewerIds.ToArray(), urlOverride: $"/base-vnd/{vndId}?tab=actual");
 
         return await LoadRequestResponseAsync(entity.Id);
     }
 
     public async Task<List<VndActualizationRequestResponse>> GetPendingRequestsAsync(int currentUserId)
     {
+        // Узкое ApproveVndActualizationRequests — для тех, кому доверено именно рассмотрение
+        // заявок; широкие ActualizeAnyVndWith(out)Approval оставлены для обратной совместимости
+        // (тот, у кого есть право самому брать любую ВНД в актуализацию, тоже может рассмотреть
+        // заявку) — см. комментарий у PermissionCode.ApproveVndActualizationRequests.
+        var canReviewRequests = _currentUser.HasPermission(PermissionCode.ApproveVndActualizationRequests);
         var canWithoutApproval = _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
         var canWithApproval = _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval);
-        if (!canWithoutApproval && !canWithApproval)
+        if (!canReviewRequests && !canWithoutApproval && !canWithApproval)
             throw new UnauthorizedAccessException("Просматривать заявки может только главный редактор ВНД");
 
         var requests = await _db.VndActualizationRequests
@@ -364,9 +369,11 @@ public class VndActualizationService : IVndActualizationService
     public async Task<VndActualizationRequestResponse> DecideRequestAsync(
         int requestId, ActualizationRequestDecisionRequest request, int currentUserId)
     {
+        // См. комментарий у той же проверки в GetPendingRequestsAsync выше.
+        var canReviewRequests = _currentUser.HasPermission(PermissionCode.ApproveVndActualizationRequests);
         var canWithoutApproval = _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
         var canWithApproval = _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval);
-        if (!canWithoutApproval && !canWithApproval)
+        if (!canReviewRequests && !canWithoutApproval && !canWithApproval)
             throw new UnauthorizedAccessException("Решения по заявкам принимает только главный редактор ВНД");
 
         var current = await _db.VndActualizationRequests
@@ -788,9 +795,17 @@ public class VndActualizationService : IVndActualizationService
         _ => throw new InvalidOperationException("Неизвестный период актуализации")
     };
 
-    private async Task<List<int>> GetChiefEditorIdsAsync() =>
+    /// <summary>Кому уходит уведомление о новой заявке на актуализацию — тот же круг лиц, что
+    /// видит вкладку "Заявки на актуализацию" и решает по ним (см. GetPendingRequestsAsync/
+    /// DecideRequestAsync выше): узкое ApproveVndActualizationRequests, плюс по историческим
+    /// причинам ещё и широкий набор "главного редактора" (ActualizeAnyVndWith(out)Approval) —
+    /// см. комментарий у PermissionCode.ApproveVndActualizationRequests. Если роль назначена
+    /// только ради рассмотрения заявок (например, роли без права брать любую ВНД в актуализацию
+    /// напрямую), выдавайте именно узкое право, а не широкое.</summary>
+    private async Task<List<int>> GetActualizationRequestReviewerIdsAsync() =>
         await _db.Users
             .Where(u => u.Roles.Any(r =>
+                r.PermissionCodes.Contains((int)PermissionCode.ApproveVndActualizationRequests) ||
                 r.PermissionCodes.Contains((int)PermissionCode.ActualizeAnyVndWithApproval) ||
                 r.PermissionCodes.Contains((int)PermissionCode.ActualizeAnyVndWithoutApproval)))
             .Select(u => u.Id)

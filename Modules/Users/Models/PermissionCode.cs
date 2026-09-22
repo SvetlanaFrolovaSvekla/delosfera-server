@@ -301,5 +301,22 @@ public enum PermissionCode
     /// только настоящий главный редактор — поэтому право заведено отдельно, а не через
     /// IsChiefEditor.
     /// </summary>
-    EditAnyVndApprovalRoute = 59
+    EditAnyVndApprovalRoute = 59,
+
+    /// <summary>
+    /// Видеть вкладку "Заявки на актуализацию" и решать по заявкам — одобрить/отклонить (см.
+    /// VndActualizationService.GetPendingRequestsAsync/DecideRequestAsync). Тот же список
+    /// пользователей получает и уведомление о новой заявке (см.
+    /// VndActualizationService.GetActualizationRequestReviewerIdsAsync).
+    ///
+    /// Узкое право по тому же принципу, что и CancelAnyVndApproval/ConsolidateAnyVnd/
+    /// EditAnyVndApprovalRoute выше: широкий набор прав "главного редактора"
+    /// (ActualizeAnyVndWith(out)Approval) даёт и другим ролям (например, администраторам) — не
+    /// потому, что им нужно рассматривать заявки на актуализацию, а по другим причинам (право
+    /// самим брать любую ВНД в актуализацию без запроса). Раньше рассмотрение заявок и рассылка
+    /// уведомлений о них шли через этот широкий набор, из-за чего письма о заявках получал
+    /// вообще любой, кому этот набор достался — заведено отдельно, чтобы это можно было доверить
+    /// только настоящему главному редактору ВНД, не трогая широкий набор.
+    /// </summary>
+    ApproveVndActualizationRequests = 60
 }

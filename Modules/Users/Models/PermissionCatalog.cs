@@ -377,6 +377,12 @@ public static class PermissionCatalog
             TitleRu = "Редактировать маршрут уже запущенного согласования ВНД: добавлять/убирать согласующих (главный редактор)",
             TitleEn = "Edit the route of an already running VND approval: add/remove approvers (chief editor)",
             TitleKg = "Мурунтан башталган ВНД макулдашуусунун маршрутун түзөтүү: макулдашуучуларды кошуу/алып салуу (башкы редактор)"
+        },
+        [PermissionCode.ApproveVndActualizationRequests] = new PermissionDescription
+        {
+            TitleRu = "Видеть вкладку «Заявки на актуализацию» и решать по заявкам — одобрить/отклонить (получает и уведомления о новых заявках)",
+            TitleEn = "See the \"Actualization requests\" tab and decide on requests — approve/reject (also receives notifications about new requests)",
+            TitleKg = "«Актуалдаштырууга өтүнмөлөр» бетин көрүү жана өтүнмөлөр боюнча чечим кабыл алуу — бекитүү/четке кагуу (жаңы өтүнмөлөр жөнүндө билдирмелерди да алат)"
         }
     };
     

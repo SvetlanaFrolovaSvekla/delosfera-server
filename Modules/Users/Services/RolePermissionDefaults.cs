@@ -99,11 +99,20 @@ public static class RolePermissionDefaults
         // (добавлять/убирать согласующих, см. VndApprovalService.AddApproverAsync/
         // RemoveApproverAsync) - заведено по тому же принципу узкого права: не через широкий
         // IsChiefEditor.
+        //
+        // ApproveVndActualizationRequests - право видеть вкладку "Заявки на актуализацию" и
+        // решать по ним (и получать о них уведомления, см. VndActualizationService.
+        // GetActualizationRequestReviewerIdsAsync) - раньше это шло только через широкий набор
+        // "главного редактора" (ActualizeAnyVndWith(out)Approval), из-за чего письма о заявках
+        // получал и любой другой, кому этот широкий набор достался не за это (например,
+        // администраторы) - заведено отдельно по тому же принципу узкого права, что и три
+        // права выше.
         ("Главный редактор ВНД", [
             PermissionCode.ViewCorrespondence,
             PermissionCode.ViewPowersOfAttorney,
             PermissionCode.CancelAnyVndApproval,
             PermissionCode.EditAnyVndApprovalRoute,
+            PermissionCode.ApproveVndActualizationRequests,
         ]),
 
         // ── Закупки ──────────────────────────────────────────────────────────
