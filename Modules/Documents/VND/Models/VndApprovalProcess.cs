@@ -15,6 +15,13 @@ public class VndApprovalProcess : IAuditableEntity
 
     public int InitiatorUserId { get; set; }
 
+    /// <summary>Процесс запущен в рамках "актуализации без изменений" (см.
+    /// VndDocument.ActualizationPlannedNoChanges): новая редакция не создавалась, на повторное
+    /// согласование ушла уже действующая, ранее согласованная редакция. Влияет на подпись Листа
+    /// согласования, отображение процесса в истории/ходе согласования и на то, во что
+    /// возвращается редакция при отзыве/отклонении (она остаётся действующей, а не черновиком).</summary>
+    public bool IsNoChangesActualization { get; set; }
+
     // --- Текущий статус ВНД (Primary/RevisionNeeded/Repeated/FinalHold/Approved/Cancelled/Rejected)
     public ApprovalProcessStatus Status { get; set; } = ApprovalProcessStatus.Primary;
 

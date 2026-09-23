@@ -28,6 +28,15 @@ public class ApprovalQuoteItem
     public required string DocumentTarget { get; set; }
 
     public required string Text { get; set; }
+
+    /// <summary>Контекст перед/после цитаты и номер вхождения - "якорь" для точного поиска места
+    /// в тексте, см. VndApprovalStageQuote.Prefix/Suffix/Occurrence. Необязательны.</summary>
+    public string? Prefix { get; set; }
+    public string? Suffix { get; set; }
+    public int? Occurrence { get; set; }
+
+    /// <summary>Замечание согласующего к этому фрагменту - см. VndApprovalStageQuote.Note.</summary>
+    public string? Note { get; set; }
 }
 
 public enum ApprovalDecisionType

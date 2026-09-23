@@ -46,6 +46,14 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
                         || r.DocFileKgId == fileId
                         || r.DocFileEnId == fileId
                         || r.TidFileId == fileId
+                        // Лист согласования (в т.ч. все прежние листы редакции - см.
+                        // VndRedactionApprovalSheet) и матрица разногласий - такие же файлы
+                        // редакции, их показывают в блоке "Специальные вложения". Раньше они сюда
+                        // не входили, и скачать их мог только тот, кто их сформировал/загрузил
+                        // (для автоматического листа - инициатор согласования).
+                        || r.ApprovalSheetFileId == fileId
+                        || r.DisagreementMatrixFileId == fileId
+                        || r.ApprovalSheets.Any(s => s.FileAttachmentId == fileId)
                         || r.Attachments.Any(a => a.FileAttachmentId == fileId))
             .AnyAsync(r => r.Vnd!.Status != VndStatus.Draft
                            || canViewOtherDrafts

@@ -43,6 +43,9 @@ public class VndApprovalService : IVndApprovalService
     // текст длиннее просто обрезаем, а не отклоняем весь запрос.
     private const int MaxQuotesPerDecision = 50;
     private const int MaxQuoteTextLength = 1000;
+    // Контекст до/после цитаты ("якорь", см. VndApprovalStageQuote.Prefix/Suffix) - клиент шлёт
+    // до 64 символов с каждой стороны; ограничение колонки в БД - 200.
+    private const int MaxQuoteContextLength = 200;
 
     /// <summary>Пояснение к решению по фазе, которую этап "пропустил", потому что был добавлен
     /// главным редактором (AddApproverAsync/ReplaceApproverAsync) уже после её начала. По нему же
@@ -249,6 +252,9 @@ public class VndApprovalService : IVndApprovalService
             VndId = vndId,
             RedactionId = lastRedaction.Id,
             InitiatorUserId = initiatorUserId,
+            // Актуализация без изменений: на согласование ушла уже действующая редакция - см.
+            // isNoChangesReviewRound выше и VndApprovalProcess.IsNoChangesActualization.
+            IsNoChangesActualization = isNoChangesReviewRound,
             Status = ApprovalProcessStatus.Primary,
             PrimaryDeadlineMinutes = request.PrimaryDeadlineMinutes,
             RepeatDeadlineMinutes = request.RepeatDeadlineMinutes,
@@ -278,21 +284,29 @@ public class VndApprovalService : IVndApprovalService
             initiatorName = initiatorUser?.FullName ?? "—";
         }
 
+        // Актуализация без изменений - в журнале должно быть видно, что это не новая редакция, а
+        // повторное согласование уже действующей.
+        var (noChangesRu, noChangesEn, noChangesKg) = isNoChangesReviewRound
+            ? (" — повторное согласование в рамках актуализации без изменений",
+               " — re-approval as part of actualization without changes",
+               " — өзгөртүүсүз актуалдаштыруунун алкагында кайра макулдашуу")
+            : ("", "", "");
+
         _activityLog.Log(
             ActivityModules.Vnd, ActivityEventKind.ProcessStarted, vndId, vnd.Code,
             currentUserId,
             startedOnBehalfOfInitiator
                 ? new ActivityText(
                     $"{actorName} запустил(а) согласование редакции {lastRedaction.Code} ВНД «{vnd.TitleRu}» " +
-                    $"от имени инициатора {initiatorName} (главный редактор, чужой черновик)",
+                    $"от имени инициатора {initiatorName} (главный редактор, чужой черновик){noChangesRu}",
                     $"{actorName} started approval of revision {lastRedaction.Code} of VND \"{vnd.TitleRu}\" " +
-                    $"on behalf of initiator {initiatorName} (chief editor, someone else's draft)",
+                    $"on behalf of initiator {initiatorName} (chief editor, someone else's draft){noChangesEn}",
                     $"{actorName} «{vnd.TitleRu}» ВНДисинин {lastRedaction.Code} редакциясын {initiatorName} " +
-                    "демилгечисинин атынан макулдашууну баштады (башкы редактор, бөтөн долбоор)")
+                    $"демилгечисинин атынан макулдашууну баштады (башкы редактор, бөтөн долбоор){noChangesKg}")
                 : new ActivityText(
-                    $"{actorName} запустил(а) согласование редакции {lastRedaction.Code} ВНД «{vnd.TitleRu}»",
-                    $"{actorName} started approval of revision {lastRedaction.Code} of VND \"{vnd.TitleRu}\"",
-                    $"{actorName} «{vnd.TitleRu}» ВНДисинин {lastRedaction.Code} редакциясын макулдашууну баштады"),
+                    $"{actorName} запустил(а) согласование редакции {lastRedaction.Code} ВНД «{vnd.TitleRu}»{noChangesRu}",
+                    $"{actorName} started approval of revision {lastRedaction.Code} of VND \"{vnd.TitleRu}\"{noChangesEn}",
+                    $"{actorName} «{vnd.TitleRu}» ВНДисинин {lastRedaction.Code} редакциясын макулдашууну баштады{noChangesKg}"),
             $"/base-vnd/{vndId}");
         await _db.SaveChangesAsync();
 
@@ -419,8 +433,14 @@ public class VndApprovalService : IVndApprovalService
         // VndApprovalStageQuote.RevisionIndex - снимается ДО того, как решение будет записано,
         // тем же способом, что и SnapshotNumber в ResubmitAfterRevisionAsync (количество уже
         // существующих снимков этой редакции).
+        //
+        // Считаем снимки именно ЭТОГО процесса, а не всей редакции: живая версия на клиенте и в
+        // LoadResponseAsync (liveRevisionIndex) - это количество снимков процесса. Раньше здесь
+        // считались снимки всей редакции, и если одну и ту же редакцию согласовывали повторно
+        // (актуализация без изменений), у нового процесса цитаты получали "чужой" номер версии
+        // и не показывались вообще нигде - ни в тексте, ни в панели комментариев.
         var revisionIndex = await _db.Set<VndRedactionRevisionSnapshot>()
-            .Where(s => s.VndRedactionId == process.RedactionId)
+            .Where(s => s.ApprovalProcessId == process.Id)
             .CountAsync();
 
         var decision = request.Decision switch
@@ -651,15 +671,14 @@ public class VndApprovalService : IVndApprovalService
         var vndId = vnd.Id;
 
         // Редакция снова становится черновиком (её можно править, переотправить или удалить).
-        redaction.ApprovalStatus = RedactionApprovalStatus.Draft;
-
         // Документ: если это была первая редакция — возвращаем в черновик; если это цикл
         // актуализации существующего ВНД — возвращаем на актуализацию, а не в черновик.
         // (Если это вызвано архивацией — VndService.CancelAsync сразу следом перезапишет
         // Status на Archived; этот промежуточный переход нужен только затем, чтобы редакция
         // и документ синхронно вышли из "На согласовании" тем же путём, что и при обычном
         // отзыве согласования.)
-        vnd.Status = redaction.Number <= 1 ? VndStatus.Draft : VndStatus.OnActualization;
+        // Актуализация без изменений - особый случай, см. RevertRedactionAfterAbortAsync.
+        await RevertRedactionAfterAbortAsync(process);
 
         _activityLog.Log(
             ActivityModules.Vnd, ActivityEventKind.Other, vndId, vnd.Code, currentUserId,
@@ -747,8 +766,10 @@ public class VndApprovalService : IVndApprovalService
         // пронумерованная версия ("10296-Р1.1", "10296-Р1.2" и т.д.), с которой инициатор
         // ответил на замечания круга.
         var (snapshotPhase, snapshotRoundNumber) = await DetermineActiveRevisionPhaseAsync(process);
+        // Нумерация - в рамках процесса (см. комментарий у revisionIndex в DecideAsync): версия N
+        // документа = снимок с SnapshotNumber N+1 этого же процесса.
         var snapshotNumber = await _db.Set<VndRedactionRevisionSnapshot>()
-            .Where(s => s.VndRedactionId == redaction.Id)
+            .Where(s => s.ApprovalProcessId == process.Id)
             .CountAsync() + 1;
         _db.Set<VndRedactionRevisionSnapshot>().Add(new VndRedactionRevisionSnapshot
         {
@@ -875,7 +896,7 @@ public class VndApprovalService : IVndApprovalService
             // потому что при первой отправке после первичного согласования (repeat-круга ещё
             // не было) снимать нечего - SnapshotPhaseRoundIfNeededAsync сама это определяет и
             // тогда ничего не создаёт.
-            await SnapshotPhaseRoundIfNeededAsync(
+            var archivedRepeatRound = await SnapshotPhaseRoundIfNeededAsync(
                 process, ApprovalStagePhase.Repeat, previousRepeatStartedAt,
                 previousRepeatInitiatorComment, process.Stages.Where(s => s.ParticipatesInRepeat));
 
@@ -886,7 +907,7 @@ public class VndApprovalService : IVndApprovalService
                 // не относятся к решению, которое согласующий сейчас примет заново - без этой
                 // очистки они оставались привязанными к той же фазе (Repeat) и отображались
                 // рядом с текстом НОВОГО решения, как будто были приложены к нему.
-                await ClearPreviousRoundArtifactsAsync(stage, ApprovalStagePhase.Repeat);
+                await ArchivePreviousRoundAttachmentsAsync(stage, ApprovalStagePhase.Repeat, archivedRepeatRound);
 
                 stage.RepeatDecision = ApprovalStageDecision.Pending;
                 stage.RepeatComment = null;
@@ -1759,8 +1780,7 @@ public class VndApprovalService : IVndApprovalService
         var redaction = process.Redaction!;
         var vnd = process.Vnd!;
 
-        redaction.ApprovalStatus = RedactionApprovalStatus.Draft;
-        vnd.Status = redaction.Number <= 1 ? VndStatus.Draft : VndStatus.OnActualization;
+        await RevertRedactionAfterAbortAsync(process);
 
         var rejecter = await _db.Users.FindAsync(rejectedByUserId);
         var rejecterName = rejecter?.FullName ?? "—";
@@ -1794,6 +1814,37 @@ public class VndApprovalService : IVndApprovalService
                 VndApprovalNotificationMessages.ProcessRejectedTaskCancelled(
                     rejecterName, redaction.Code, vnd.TitleRu, comment),
                 NotificationCategory.Vnd, process.VndId, rejectedByUserId, pendingApproverIds);
+    }
+
+    /// <summary>Во что возвращаются редакция и документ, когда процесс согласования прерван
+    /// (отзыв - CancelInternalAsync, отклонение - RejectApprovalAsync).
+    ///
+    /// Обычно редакция снова становится черновиком, а документ - черновиком (первая редакция) или
+    /// "На актуализации". Но при актуализации без изменений (IsNoChangesActualization) на
+    /// согласовании была УЖЕ ДЕЙСТВУЮЩАЯ, ранее согласованная редакция: превращать её в черновик
+    /// нельзя - раньше так и происходило, и у документа с единственной редакцией Р1 ВНД
+    /// откатывался в "Черновик", а действующую редакцию становилось можно удалить/переписать.
+    /// Здесь редакции возвращается её прежний статус, а документ остаётся "На актуализации" -
+    /// ответственный может запустить согласование заново или изменить решение по циклу.</summary>
+    private async Task RevertRedactionAfterAbortAsync(VndApprovalProcess process)
+    {
+        var redaction = process.Redaction!;
+        var vnd = process.Vnd!;
+
+        if (!process.IsNoChangesActualization)
+        {
+            redaction.ApprovalStatus = RedactionApprovalStatus.Draft;
+            vnd.Status = redaction.Number <= 1 ? VndStatus.Draft : VndStatus.OnActualization;
+            return;
+        }
+
+        var wasApprovedBefore = await _db.VndApprovalProcesses.AnyAsync(p =>
+            p.RedactionId == redaction.Id && p.Id != process.Id && p.Status == ApprovalProcessStatus.Approved);
+
+        redaction.ApprovalStatus = wasApprovedBefore
+            ? RedactionApprovalStatus.Approved
+            : RedactionApprovalStatus.NotRequired;
+        vnd.Status = VndStatus.OnActualization;
     }
 
     private async Task FinalizeApprovalAsync(VndApprovalProcess process, bool afterRevision)
@@ -1839,10 +1890,18 @@ public class VndApprovalService : IVndApprovalService
 
         _activityLog.Log(
             ActivityModules.Vnd, ActivityEventKind.Finalized, process.VndId, vnd.Code, null,
-            new ActivityText(
-                $"Редакция {redaction.Code} ВНД «{vnd.TitleRu}» согласована, ВНД переведён в статус «Консолидация»",
-                $"Revision {redaction.Code} of VND \"{vnd.TitleRu}\" has been approved, VND moved to \"Consolidation\" status",
-                $"«{vnd.TitleRu}» ВНДисинин {redaction.Code} редакциясы макулдашылды, ВНД «Консолидация» абалына өттү"),
+            process.IsNoChangesActualization
+                ? new ActivityText(
+                    $"Редакция {redaction.Code} ВНД «{vnd.TitleRu}» повторно согласована в рамках актуализации " +
+                    "без изменений (сформирован новый лист согласования), ВНД переведён в статус «Консолидация»",
+                    $"Revision {redaction.Code} of VND \"{vnd.TitleRu}\" has been re-approved as part of actualization " +
+                    "without changes (a new approval sheet was generated), VND moved to \"Consolidation\" status",
+                    $"«{vnd.TitleRu}» ВНДисинин {redaction.Code} редакциясы өзгөртүүсүз актуалдаштыруунун алкагында " +
+                    "кайра макулдашылды (жаңы макулдашуу барагы түзүлдү), ВНД «Консолидация» абалына өттү")
+                : new ActivityText(
+                    $"Редакция {redaction.Code} ВНД «{vnd.TitleRu}» согласована, ВНД переведён в статус «Консолидация»",
+                    $"Revision {redaction.Code} of VND \"{vnd.TitleRu}\" has been approved, VND moved to \"Consolidation\" status",
+                    $"«{vnd.TitleRu}» ВНДисинин {redaction.Code} редакциясы макулдашылды, ВНД «Консолидация» абалына өттү"),
             $"/base-vnd/{process.VndId}");
 
         var notice = afterRevision
@@ -1887,10 +1946,17 @@ public class VndApprovalService : IVndApprovalService
 
         var approvedAt = process.CompletedAt ?? DateTime.UtcNow;
 
+        // Повторное согласование той же редакции в рамках актуализации без изменений - у
+        // редакции появится ещё один лист, и по самому файлу должно быть видно, к какому
+        // согласованию он относится (см. VndRedactionApprovalSheet).
+        var note = process.IsNoChangesActualization
+            ? $"Повторное согласование в рамках актуализации без изменений от {approvedAt:dd.MM.yyyy}"
+            : null;
+
         byte[] content;
         try
         {
-            content = _approvalSheetGenerator.Generate(process.Vnd!.TitleRu, approvedAt, approvers);
+            content = _approvalSheetGenerator.Generate(process.Vnd!.TitleRu, approvedAt, approvers, note);
         }
         catch (Exception ex)
         {
@@ -1901,14 +1967,27 @@ public class VndApprovalService : IVndApprovalService
             return;
         }
 
-        var fileName = $"{redaction.Code}_Лист_согласования.docx";
+        var fileName = process.IsNoChangesActualization
+            ? $"{redaction.Code}_Лист_согласования_актуализация_без_изменений_{approvedAt:dd.MM.yyyy}.docx"
+            : $"{redaction.Code}_Лист_согласования.docx";
         const string wordContentType =
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
         var saved = await _fileService.SaveGeneratedAsync(
             content, fileName, wordContentType, process.InitiatorUserId);
 
+        // Последний лист - в ApprovalSheetFileId (как и раньше), а в истории листов редакции
+        // сохраняются ВСЕ, включая прежние - см. VndRedactionApprovalSheet.
         redaction.ApprovalSheetFileId = saved.Id;
+        _db.Set<VndRedactionApprovalSheet>().Add(new VndRedactionApprovalSheet
+        {
+            VndRedactionId = redaction.Id,
+            ApprovalProcessId = process.Id,
+            FileAttachmentId = saved.Id,
+            IsNoChangesActualization = process.IsNoChangesActualization,
+            ApprovedAt = approvedAt,
+            CreatedAt = DateTime.UtcNow,
+        });
     }
 
     /// <summary>Если инициатор согласования сам числится согласующим на одном из этапов, его
@@ -2086,7 +2165,7 @@ public class VndApprovalService : IVndApprovalService
             }
         }
 
-        await SnapshotPhaseRoundIfNeededAsync(
+        var archivedFinalHoldRound = await SnapshotPhaseRoundIfNeededAsync(
             process, ApprovalStagePhase.FinalHold, process.FinalHoldStartedAt, null, stagesStartingNewRound);
 
         foreach (var stage in stagesStartingNewRound)
@@ -2095,7 +2174,7 @@ public class VndApprovalService : IVndApprovalService
             // круга (Phase здесь не различает круги) иначе остались бы привязаны к той же
             // фазе FinalHold и отображались бы рядом с текстом решения, которое согласующий
             // ещё не принял.
-            await ClearPreviousRoundArtifactsAsync(stage, ApprovalStagePhase.FinalHold);
+            await ArchivePreviousRoundAttachmentsAsync(stage, ApprovalStagePhase.FinalHold, archivedFinalHoldRound);
 
             stage.FinalHoldDecision = ApprovalStageDecision.Pending;
             stage.FinalHoldComment = null;
@@ -2103,29 +2182,39 @@ public class VndApprovalService : IVndApprovalService
         }
     }
 
-    /// <summary>Удаляет ФАЙЛЫ, приложенные к решению этапа в предыдущем круге указанной фазы
-    /// (Repeat/FinalHold), перед тем как круг перезапускается для этого этапа -
-    /// VndApprovalStageAttachment различает только Phase, без номера круга внутри неё, а сами
-    /// файлы занимают место в хранилище, поэтому предыдущий круг физически удаляется (текст
-    /// решения при этом остаётся доступен через VndApprovalPhaseRound - см.
-    /// SnapshotPhaseRoundIfNeededAsync).
+    /// <summary>Переносит вложения, приложенные к решению этапа в предыдущем круге указанной
+    /// фазы (Repeat/FinalHold), в архив этого круга (VndApprovalStageAttachment.PhaseRoundId =
+    /// снимок круга), перед тем как круг перезапускается для этого этапа. После этого они
+    /// больше не отображаются рядом с НОВЫМ решением согласующего (у "живых" полей ответа
+    /// фильтр PhaseRoundId == null - см. ToAttachmentResponses), но остаются доступны в
+    /// истории согласования у своего круга (ApprovalPhaseRoundStageDecisionResponse.Attachments).
     ///
-    /// ЦИТАТЫ (VndApprovalStageQuote) в отличие от вложений теперь НЕ удаляются - каждая цитата
-    /// с версии 20260918 несёт RevisionIndex (версию документа, к которой относится), и
-    /// "живые" поля ответа (Primary/Repeat/FinalHoldQuotes) отфильтровываются по нему на
-    /// уровне ToQuoteResponses (см. LoadResponseAsync) - старые цитаты сами перестают попадать
-    /// в них, когда документ обновляется, без физического удаления. Раньше цитаты удалялись
-    /// вместе с вложениями - из-за этого при просмотре прошлой версии документа ("Р1.1" и т.п.)
-    /// её собственные замечания было решительно невозможно показать, они были уже стёрты (см.
-    /// ApprovalProcessResponse.AllQuotes - именно ради этого цитаты теперь хранятся бессрочно,
-    /// как и было изначально задумано в самом их док-комментарии).</summary>
-    private async Task ClearPreviousRoundArtifactsAsync(VndApprovalStage stage, ApprovalStagePhase phase)
+    /// Раньше вложения предыдущего круга физически удалялись вместе с файлами в хранилище - из-за
+    /// этого после нескольких кругов доработки файлы к замечаниям прошлых кругов было уже не
+    /// открыть, хотя сам текст этих замечаний в истории оставался.
+    ///
+    /// round == null - снимка круга не создавалось (SnapshotPhaseRoundIfNeededAsync ничего не
+    /// нашла: ни одного решения по фазе ещё не было). Тогда и вложений к решениям этой фазы быть
+    /// не может (они сохраняются только вместе с решением, см. DecideAsync); на всякий случай
+    /// такие "висячие" вложения удаляем, как и раньше, чтобы они не приклеились к новому решению.
+    ///
+    /// ЦИТАТЫ (VndApprovalStageQuote) не трогаем - каждая несёт RevisionIndex (версию документа,
+    /// к которой относится), и "живые" поля ответа фильтруются по нему (см. ToQuoteResponses).</summary>
+    private async Task ArchivePreviousRoundAttachmentsAsync(
+        VndApprovalStage stage, ApprovalStagePhase phase, VndApprovalPhaseRound? round)
     {
-        var oldAttachments = await _db.Set<VndApprovalStageAttachment>()
-            .Where(a => a.VndApprovalStageId == stage.Id && a.Phase == phase)
+        var liveAttachments = await _db.Set<VndApprovalStageAttachment>()
+            .Where(a => a.VndApprovalStageId == stage.Id && a.Phase == phase && a.PhaseRoundId == null)
             .ToListAsync();
 
-        foreach (var old in oldAttachments)
+        if (round is not null)
+        {
+            foreach (var attachment in liveAttachments)
+                attachment.PhaseRound = round;
+            return;
+        }
+
+        foreach (var old in liveAttachments)
         {
             try
             {
@@ -2138,7 +2227,7 @@ public class VndApprovalService : IVndApprovalService
                     old.FileAttachmentId, stage.Id);
             }
         }
-        _db.Set<VndApprovalStageAttachment>().RemoveRange(oldAttachments);
+        _db.Set<VndApprovalStageAttachment>().RemoveRange(liveAttachments);
     }
 
     /// <summary>Снимает "фотографию" круга фазы Repeat/FinalHold прямо перед тем, как его
@@ -2148,7 +2237,7 @@ public class VndApprovalService : IVndApprovalService
     /// Ничего не создаёт (тихо выходит), если сохранять нечего - это самый первый заход в фазу
     /// (ни у одного этапа ещё нет решения по ней, и комментария инициатора тоже нет): в этом
     /// случае "предыдущего круга" попросту не было.</summary>
-    private async Task SnapshotPhaseRoundIfNeededAsync(
+    private async Task<VndApprovalPhaseRound?> SnapshotPhaseRoundIfNeededAsync(
         VndApprovalProcess process, ApprovalStagePhase phase, DateTime? startedAt,
         string? initiatorComment, IEnumerable<VndApprovalStage> stagesInPhase)
     {
@@ -2164,7 +2253,7 @@ public class VndApprovalService : IVndApprovalService
             .ToList();
 
         if (decidedStages.Count == 0 && string.IsNullOrEmpty(initiatorComment))
-            return;
+            return null;
 
         var roundNumber = await _db.Set<VndApprovalPhaseRound>()
             .Where(r => r.ApprovalProcessId == process.Id && r.Phase == phase)
@@ -2195,6 +2284,7 @@ public class VndApprovalService : IVndApprovalService
         }
 
         _db.Set<VndApprovalPhaseRound>().Add(round);
+        return round;
     }
 
     /// <summary>Определяет фазу/круг, чьи замечания привели к текущей повторной отправке — то
@@ -2309,22 +2399,48 @@ public class VndApprovalService : IVndApprovalService
     {
         if (quotes.Count == 0) return;
 
+        // Одна отметка времени на все цитаты решения + порядок вставки (Id) при выдаче - см.
+        // ToQuoteResponses. Порядок важен: клиент сопоставляет цитаты со строками "Цитата: «...»"
+        // в тексте резолюции по порядку (FormattedResolutionComment), а при разных CreatedAt,
+        // снятых в цикле, "одновременные" цитаты могли выдаваться в произвольном порядке.
+        var createdAt = DateTime.UtcNow;
+
         foreach (var quote in quotes.Take(MaxQuotesPerDecision))
         {
-            var text = quote.Text.Trim();
+            var text = (quote.Text ?? "").Trim();
             if (text.Length == 0) continue;
             if (text.Length > MaxQuoteTextLength) text = text[..MaxQuoteTextLength];
+
+            var target = (quote.DocumentTarget ?? "").Trim();
+            if (!AllowedQuoteTargets.Contains(target)) target = "ru";
 
             _db.Set<VndApprovalStageQuote>().Add(new VndApprovalStageQuote
             {
                 VndApprovalStageId = stage.Id,
                 Phase = phase,
-                DocumentTarget = quote.DocumentTarget,
+                DocumentTarget = target,
                 Text = text,
                 RevisionIndex = revisionIndex,
-                CreatedAt = DateTime.UtcNow
+                Prefix = ClipOrNull(quote.Prefix, MaxQuoteContextLength, fromEnd: true),
+                Suffix = ClipOrNull(quote.Suffix, MaxQuoteContextLength, fromEnd: false),
+                Occurrence = quote.Occurrence is >= 0 and <= 100_000 ? quote.Occurrence : null,
+                Note = ClipOrNull(quote.Note, MaxResolutionCommentLength, fromEnd: false),
+                CreatedAt = createdAt
             });
         }
+    }
+
+    // Вкладки документа редакции, на которые может ссылаться цитата - см. RedactionViewTarget на клиенте.
+    private static readonly HashSet<string> AllowedQuoteTargets =
+        ["ru", "kg", "en", "tid", "approvalSheet", "disagreementMatrix"];
+
+    /// <summary>Пустая строка -> null; слишком длинная обрезается (контекст ПЕРЕД цитатой - с
+    /// начала, чтобы остался кусок, примыкающий к самой цитате; всё остальное - с конца).</summary>
+    private static string? ClipOrNull(string? value, int maxLength, bool fromEnd)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (value.Length <= maxLength) return value;
+        return fromEnd ? value[^maxLength..] : value[..maxLength];
     }
 
     /// <summary>Обязательные этапы маршрута больше не завязаны на фиксированный enum/позиции -
@@ -2460,16 +2576,29 @@ public class VndApprovalService : IVndApprovalService
             .Include(x => x.DisagreementMatrixRows)
             .Include(x => x.RepeatInitiatorCommentAttachments).ThenInclude(a => a.FileAttachment)
             .Include(x => x.PhaseRounds).ThenInclude(r => r.StageDecisions)
+            .Include(x => x.PhaseRounds).ThenInclude(r => r.Attachments).ThenInclude(a => a.FileAttachment)
             .Include(x => x.RedactionSnapshots).ThenInclude(s => s.DocFileRu)
             .Include(x => x.RedactionSnapshots).ThenInclude(s => s.DocFileKg)
             .Include(x => x.RedactionSnapshots).ThenInclude(s => s.DocFileEn)
             .Include(x => x.RedactionSnapshots).ThenInclude(s => s.TidFile)
             .Include(x => x.RedactionSnapshots).ThenInclude(s => s.DisagreementMatrixFile)
+            // Много коллекций в одном запросе (этапы x вложения x цитаты x круги x снимки) -
+            // одним JOIN'ом это декартово произведение, которое быстро растёт с каждым кругом
+            // доработки. Раздельные запросы дают тот же результат без раздувания выборки.
+            .AsSplitQuery()
             .FirstAsync(x => x.Id == processId);
 
         var initiator = await _db.Users
             .Include(u => u.Position)
             .FirstOrDefaultAsync(u => u.Id == process.InitiatorUserId);
+
+        // Лист согласования, сформированный именно по итогам этого процесса (у редакции их может
+        // быть несколько - см. VndRedactionApprovalSheet).
+        var processSheet = await _db.Set<VndRedactionApprovalSheet>()
+            .Where(s => s.ApprovalProcessId == process.Id)
+            .OrderByDescending(s => s.CreatedAt)
+            .Select(s => new { s.FileAttachmentId, s.FileAttachment!.OriginalFileName })
+            .FirstOrDefaultAsync();
 
         // Версия документа редакции, которая сейчас живая (RedactionSnapshots уже загружены
         // выше через Include) - см. VndApprovalStageQuote.RevisionIndex. "Живые" поля
@@ -2484,6 +2613,9 @@ public class VndApprovalService : IVndApprovalService
             InitiatorUserId = process.InitiatorUserId,
             InitiatorName = initiator?.FullName ?? "",
             InitiatorPosition = initiator?.Position?.TitleRu,
+            IsNoChangesActualization = process.IsNoChangesActualization,
+            ApprovalSheetFileId = processSheet?.FileAttachmentId,
+            ApprovalSheetFileName = processSheet?.OriginalFileName,
             Status = MapStatus(process.Status),
             PrimaryDeadlineMinutes = process.PrimaryDeadlineMinutes,
             RepeatDeadlineMinutes = process.RepeatDeadlineMinutes,
@@ -2529,6 +2661,17 @@ public class VndApprovalService : IVndApprovalService
                         Decision = MapDecision(d.Decision),
                         Comment = d.Comment,
                         DecidedAt = d.DecidedAt,
+                        Attachments = r.Attachments
+                            .Where(a => a.VndApprovalStageId == d.VndApprovalStageId)
+                            .OrderBy(a => a.CreatedAt)
+                            .Select(a => new ApprovalStageAttachmentResponse
+                            {
+                                Id = a.Id,
+                                FileId = a.FileAttachmentId,
+                                FileName = a.FileAttachment?.OriginalFileName ?? "",
+                                SizeBytes = a.FileAttachment?.SizeBytes ?? 0
+                            })
+                            .ToList(),
                     }).ToList(),
                 })
                 .ToList(),
@@ -2563,6 +2706,7 @@ public class VndApprovalService : IVndApprovalService
             AllQuotes = process.Stages
                 .SelectMany(s => s.Quotes)
                 .OrderBy(q => q.CreatedAt)
+                .ThenBy(q => q.Id)
                 .Select(ToQuoteResponse)
                 .ToList(),
             RedactionSnapshots = process.RedactionSnapshots
@@ -2605,7 +2749,9 @@ public class VndApprovalService : IVndApprovalService
     private static List<ApprovalStageAttachmentResponse> ToAttachmentResponses(
         IEnumerable<VndApprovalStageAttachment> attachments, ApprovalStagePhase phase) =>
         attachments
-            .Where(a => a.Phase == phase)
+            // Только вложения ТЕКУЩЕГО решения фазы - вложения завершённых кругов лежат в архиве
+            // своего круга (PhaseRoundId, см. ArchivePreviousRoundAttachmentsAsync).
+            .Where(a => a.Phase == phase && a.PhaseRoundId == null)
             .OrderBy(a => a.CreatedAt)
             .Select(a => new ApprovalStageAttachmentResponse
             {
@@ -2626,6 +2772,7 @@ public class VndApprovalService : IVndApprovalService
         quotes
             .Where(q => q.Phase == phase && q.RevisionIndex == liveRevisionIndex)
             .OrderBy(q => q.CreatedAt)
+            .ThenBy(q => q.Id)
             .Select(ToQuoteResponse)
             .ToList();
 
@@ -2637,6 +2784,10 @@ public class VndApprovalService : IVndApprovalService
         DocumentTarget = q.DocumentTarget,
         Text = q.Text,
         RevisionIndex = q.RevisionIndex,
+        Prefix = q.Prefix,
+        Suffix = q.Suffix,
+        Occurrence = q.Occurrence,
+        Note = q.Note,
     };
 
     /// <summary>

@@ -825,7 +825,9 @@ public class VndService : IVndService
             .Include(x => x.Organ)
             .Include(x => x.ResponsibleExecutors)
             .Include(x => x.Rubrics)
-            .Include(x => x.Keywords);
+            .Include(x => x.Keywords)
+            // Все листы согласования редакции (их бывает несколько - см. VndRedactionApprovalSheet).
+            .Include(x => x.ApprovalSheets).ThenInclude(s => s.FileAttachment);
 
     /// <summary>Копирует реквизиты в НОВУЮ редакцию (заголовок/вид, орган/разработчик/куратор,
     /// гриф секретности, период, ответственные исполнители/рубрики/ключевые слова) — либо с
@@ -895,6 +897,20 @@ public class VndService : IVndService
         DocEnUpdatedAt = x.DocEnUpdatedAt,
         TidFileId = x.TidFileId,
         ApprovalSheetFileId = x.ApprovalSheetFileId,
+        ApprovalSheets = x.ApprovalSheets
+            .OrderBy(s => s.ApprovedAt).ThenBy(s => s.Id)
+            .Select(s => new VndRedactionApprovalSheetResponse
+            {
+                Id = s.Id,
+                FileId = s.FileAttachmentId,
+                FileName = s.FileAttachment?.OriginalFileName ?? $"Лист_согласования_{s.FileAttachmentId}.docx",
+                SizeBytes = s.FileAttachment?.SizeBytes ?? 0,
+                ApprovalProcessId = s.ApprovalProcessId,
+                IsNoChangesActualization = s.IsNoChangesActualization,
+                IsManual = s.ApprovalProcessId is null,
+                ApprovedAt = s.ApprovedAt,
+            })
+            .ToList(),
         DisagreementMatrixFileId = x.DisagreementMatrixFileId,
         RequiresApproval = x.RequiresApproval,
         ApprovalStatus = x.ApprovalStatus.ToString(),
@@ -2389,16 +2405,56 @@ public class VndService : IVndService
             changed.Add("ТИД убран");
         }
 
+        // Лист согласования: у редакции их может быть несколько (см. VndRedactionApprovalSheet),
+        // ApprovalSheetFileId - последний из них. Ручная замена/удаление касаются именно
+        // последнего листа; предыдущие (например, от первичного согласования, если последний -
+        // от актуализации без изменений) остаются в истории как есть.
+        var latestSheet = redaction.ApprovalSheets
+            .Where(s => s.FileAttachmentId == redaction.ApprovalSheetFileId)
+            .OrderByDescending(s => s.ApprovedAt).ThenByDescending(s => s.Id)
+            .FirstOrDefault();
+
         if (request.ApprovalSheet is not null)
         {
             var saved = await _fileService.SaveAsync(request.ApprovalSheet, currentUserId);
             redaction.ApprovalSheetFileId = saved.Id;
+
+            if (latestSheet is not null)
+            {
+                // Исправленный файл того же листа - привязка к процессу и дата согласования
+                // остаются прежними, меняется только сам файл.
+                latestSheet.FileAttachmentId = saved.Id;
+                latestSheet.FileAttachment = saved;
+            }
+            else
+            {
+                redaction.ApprovalSheets.Add(new VndRedactionApprovalSheet
+                {
+                    VndRedactionId = redaction.Id,
+                    FileAttachmentId = saved.Id,
+                    FileAttachment = saved,
+                    ApprovedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                });
+            }
+
             hasChanges = true;
             changed.Add("Лист согласования заменён");
         }
         else if (request.RemoveApprovalSheet && redaction.ApprovalSheetFileId is not null)
         {
-            redaction.ApprovalSheetFileId = null;
+            if (latestSheet is not null)
+            {
+                redaction.ApprovalSheets.Remove(latestSheet);
+                _db.Set<VndRedactionApprovalSheet>().Remove(latestSheet);
+            }
+
+            // Последним становится предыдущий лист (если он был) - иначе листа нет совсем.
+            redaction.ApprovalSheetFileId = redaction.ApprovalSheets
+                .OrderByDescending(s => s.ApprovedAt).ThenByDescending(s => s.Id)
+                .Select(s => (int?)s.FileAttachmentId)
+                .FirstOrDefault();
+
             hasChanges = true;
             changed.Add("Лист согласования убран");
         }

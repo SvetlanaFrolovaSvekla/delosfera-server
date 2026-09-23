@@ -23,6 +23,17 @@ public class VndApprovalStageAttachment
     public int FileAttachmentId { get; set; }
     public FileAttachment? FileAttachment { get; set; }
 
+    /// <summary>Круг фазы Repeat/FinalHold, к решению которого относилось вложение, если этот круг
+    /// уже завершён и перезаписан следующим (см. <see cref="VndApprovalPhaseRound"/> и
+    /// VndApprovalService.ArchivePreviousRoundAttachments). Null - вложение относится к ТЕКУЩЕМУ
+    /// решению этапа по фазе Phase (Primary всегда null - у первичного согласования один круг).
+    ///
+    /// Раньше вложения предыдущего круга физически удалялись вместе с файлами, из-за чего в
+    /// истории согласования нельзя было открыть файлы, приложенные к замечаниям прошлых кругов.
+    /// Теперь они сохраняются и "переезжают" в архив круга.</summary>
+    public int? PhaseRoundId { get; set; }
+    public VndApprovalPhaseRound? PhaseRound { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }
 

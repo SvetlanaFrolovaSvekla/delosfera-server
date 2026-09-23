@@ -18,10 +18,9 @@ namespace delosfera_server.Modules.Documents.VND.Models;
 /// 3...) → "Финальная выдержка" (может тоже повториться, если на ней снова оставили
 /// замечание) - именно в таком порядке.
 ///
-/// Вложения и цитаты предыдущих кругов сознательно НЕ дублируются сюда (они физически
-/// удаляются в ClearPreviousRoundArtifactsAsync вместе с файлами в хранилище) - в снимке
-/// круга сохраняется только текст решения/комментария, этого достаточно для отображения
-/// истории круга в карусели схем маршрута.</summary>
+/// Вложения к решениям этого круга НЕ удаляются, а привязываются к нему (см.
+/// <see cref="VndApprovalStageAttachment.PhaseRoundId"/>, Attachments ниже); цитаты кругов
+/// хранятся бессрочно и отличаются версией документа (VndApprovalStageQuote.RevisionIndex).</summary>
 public class VndApprovalPhaseRound
 {
     public int Id { get; set; }
@@ -51,6 +50,11 @@ public class VndApprovalPhaseRound
 
     public ICollection<VndApprovalPhaseRoundStageDecision> StageDecisions { get; set; } =
         new List<VndApprovalPhaseRoundStageDecision>();
+
+    /// <summary>Вложения, приложенные согласующими к решениям ЭТОГО круга (см.
+    /// VndApprovalStageAttachment.PhaseRoundId).</summary>
+    public ICollection<VndApprovalStageAttachment> Attachments { get; set; } =
+        new List<VndApprovalStageAttachment>();
 
     public DateTime CreatedAt { get; set; }
 }

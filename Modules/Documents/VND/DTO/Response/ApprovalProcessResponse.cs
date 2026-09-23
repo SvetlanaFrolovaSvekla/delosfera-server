@@ -10,6 +10,15 @@ public class ApprovalProcessResponse
 
     /// <summary>Должность инициатора (если назначена)</summary>
     public string? InitiatorPosition { get; set; }
+
+    /// <summary>Процесс запущен в рамках актуализации без изменений - на согласование ушла уже
+    /// действующая редакция (см. VndApprovalProcess.IsNoChangesActualization).</summary>
+    public bool IsNoChangesActualization { get; set; }
+
+    /// <summary>Лист согласования, сформированный по итогам ИМЕННО этого процесса (null, пока
+    /// процесс не завершён согласованием) - у редакции их может быть несколько.</summary>
+    public int? ApprovalSheetFileId { get; set; }
+    public string? ApprovalSheetFileName { get; set; }
     public required string Status { get; set; } // primary/revision_needed/repeated/final_hold/approved/cancelled
 
     public string? RepeatInitiatorComment { get; set; }
@@ -93,6 +102,11 @@ public class ApprovalPhaseRoundStageDecisionResponse
     public required string Decision { get; set; }
     public string? Comment { get; set; }
     public DateTime? DecidedAt { get; set; }
+
+    /// <summary>Файлы, приложенные согласующим к решению ЭТОГО круга (см.
+    /// VndApprovalStageAttachment.PhaseRoundId) - раньше удалялись при переходе к следующему
+    /// кругу, теперь сохраняются в истории.</summary>
+    public List<ApprovalStageAttachmentResponse> Attachments { get; set; } = [];
 }
 
 public class ApprovalStageResponse
@@ -172,6 +186,15 @@ public class ApprovalStageQuoteResponse
     /// <summary>Версия документа редакции, к которой относится цитата - 0 для самой первой
     /// поданной версии ("Р1"), 1 для "Р1.1" и т.д. — см. VndApprovalStageQuote.RevisionIndex.</summary>
     public int RevisionIndex { get; set; }
+
+    /// <summary>"Якорь" цитаты - контекст до/после и номер вхождения (см.
+    /// VndApprovalStageQuote.Prefix/Suffix/Occurrence). null у старых цитат.</summary>
+    public string? Prefix { get; set; }
+    public string? Suffix { get; set; }
+    public int? Occurrence { get; set; }
+
+    /// <summary>Замечание согласующего именно к этому фрагменту - см. VndApprovalStageQuote.Note.</summary>
+    public string? Note { get; set; }
 }
 
 /// <summary>Снимок файлов редакции, сохранённый перед тем, как инициатор перезаписал их

@@ -755,6 +755,9 @@ public class VndActualizationService : IVndActualizationService
                 ? (int?)null
                 : await _db.VndApprovalProcesses
                     .Where(p => p.RedactionId == lastRedaction.Id)
+                    // У одной редакции может быть несколько процессов (актуализация без
+                    // изменений гоняет её через согласование повторно) - берём последний.
+                    .OrderByDescending(p => p.CreatedAt)
                     .Select(p => (int?)p.InitiatorUserId)
                     .FirstOrDefaultAsync();
 

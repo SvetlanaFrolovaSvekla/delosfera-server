@@ -7116,6 +7116,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("initiator_user_id");
 
+                    b.Property<bool>("IsNoChangesActualization")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_no_changes_actualization");
+
                     b.Property<int>("PrimaryDeadlineMinutes")
                         .HasColumnType("integer")
                         .HasColumnName("primary_deadline_minutes");
@@ -7301,6 +7305,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("phase");
 
+                    b.Property<int?>("PhaseRoundId")
+                        .HasColumnType("integer")
+                        .HasColumnName("phase_round_id");
+
                     b.Property<int>("VndApprovalStageId")
                         .HasColumnType("integer")
                         .HasColumnName("vnd_approval_stage_id");
@@ -7310,6 +7318,9 @@ namespace delosfera_server.Migrations
 
                     b.HasIndex("FileAttachmentId")
                         .HasDatabaseName("ix_vnd_approval_stage_attachment_file_attachment_id");
+
+                    b.HasIndex("PhaseRoundId")
+                        .HasDatabaseName("ix_vnd_approval_stage_attachment_phase_round_id");
 
                     b.HasIndex("VndApprovalStageId", "Phase", "FileAttachmentId")
                         .IsUnique()
@@ -7336,13 +7347,31 @@ namespace delosfera_server.Migrations
                         .HasColumnType("text")
                         .HasColumnName("document_target");
 
+                    b.Property<string>("Note")
+                        .HasColumnType("text")
+                        .HasColumnName("note");
+
+                    b.Property<int?>("Occurrence")
+                        .HasColumnType("integer")
+                        .HasColumnName("occurrence");
+
                     b.Property<int>("Phase")
                         .HasColumnType("integer")
                         .HasColumnName("phase");
 
+                    b.Property<string>("Prefix")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("prefix");
+
                     b.Property<int>("RevisionIndex")
                         .HasColumnType("integer")
                         .HasColumnName("revision_index");
+
+                    b.Property<string>("Suffix")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("suffix");
 
                     b.Property<string>("Text")
                         .IsRequired()
@@ -7961,6 +7990,54 @@ namespace delosfera_server.Migrations
                         .HasDatabaseName("ix_vnd_redaction_vnd_id_number");
 
                     b.ToTable("vnd_redaction", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionApprovalSheet", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ApprovalProcessId")
+                        .HasColumnType("integer")
+                        .HasColumnName("approval_process_id");
+
+                    b.Property<DateTime>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("FileAttachmentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("file_attachment_id");
+
+                    b.Property<bool>("IsNoChangesActualization")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_no_changes_actualization");
+
+                    b.Property<int>("VndRedactionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_redaction_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_redaction_approval_sheet");
+
+                    b.HasIndex("ApprovalProcessId")
+                        .HasDatabaseName("ix_vnd_redaction_approval_sheet_approval_process_id");
+
+                    b.HasIndex("FileAttachmentId")
+                        .HasDatabaseName("ix_vnd_redaction_approval_sheet_file_attachment_id");
+
+                    b.HasIndex("VndRedactionId")
+                        .HasDatabaseName("ix_vnd_redaction_approval_sheet_vnd_redaction_id");
+
+                    b.ToTable("vnd_redaction_approval_sheet", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionAttachment", b =>
@@ -15440,6 +15517,12 @@ namespace delosfera_server.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_vnd_approval_stage_attachment_file_attachments_file_attachm");
 
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalPhaseRound", "PhaseRound")
+                        .WithMany("Attachments")
+                        .HasForeignKey("PhaseRoundId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_vnd_approval_stage_attachment_vnd_approval_phase_round_pha");
+
                     b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalStage", "VndApprovalStage")
                         .WithMany("Attachments")
                         .HasForeignKey("VndApprovalStageId")
@@ -15448,6 +15531,8 @@ namespace delosfera_server.Migrations
                         .HasConstraintName("fk_vnd_approval_stage_attachment_vnd_approval_stages_vnd_appro");
 
                     b.Navigation("FileAttachment");
+
+                    b.Navigation("PhaseRound");
 
                     b.Navigation("VndApprovalStage");
                 });
@@ -15670,6 +15755,35 @@ namespace delosfera_server.Migrations
                     b.Navigation("Type");
 
                     b.Navigation("Vnd");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionApprovalSheet", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", "ApprovalProcess")
+                        .WithMany()
+                        .HasForeignKey("ApprovalProcessId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_vnd_redaction_approval_sheet_vnd_approval_processes_approva");
+
+                    b.HasOne("delosfera_server.Modules.Files.Models.FileAttachment", "FileAttachment")
+                        .WithMany()
+                        .HasForeignKey("FileAttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_redaction_approval_sheet_file_attachments_file_attachme");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndRedaction", "VndRedaction")
+                        .WithMany("ApprovalSheets")
+                        .HasForeignKey("VndRedactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_redaction_approval_sheet_vnd_redactions_vnd_redaction_id");
+
+                    b.Navigation("ApprovalProcess");
+
+                    b.Navigation("FileAttachment");
+
+                    b.Navigation("VndRedaction");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionAttachment", b =>
@@ -17363,6 +17477,8 @@ namespace delosfera_server.Migrations
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalPhaseRound", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("StageDecisions");
                 });
 
@@ -17397,6 +17513,8 @@ namespace delosfera_server.Migrations
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedaction", b =>
                 {
+                    b.Navigation("ApprovalSheets");
+
                     b.Navigation("Attachments");
                 });
 

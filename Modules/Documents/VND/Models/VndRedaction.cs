@@ -63,6 +63,11 @@ public class VndRedaction : IAuditableEntity
     public int? ApprovalSheetFileId { get; set; }
     public FileAttachment? ApprovalSheetFile { get; set; }
 
+    /// <summary>ВСЕ листы согласования этой редакции, от первого до последнего - см.
+    /// VndRedactionApprovalSheet. Их больше одного, когда редакцию повторно согласовывали в
+    /// рамках актуализации без изменений. ApprovalSheetFileId выше - всегда последний из них.</summary>
+    public ICollection<VndRedactionApprovalSheet> ApprovalSheets { get; set; } = new List<VndRedactionApprovalSheet>();
+
     /// <summary>Матрица разногласий — .docx-файл (сформированный в системе по введённым строкам
     /// либо загруженный инициатором готовым файлом, см. ResubmitAfterRevisionRequest.DisagreementMatrix)
     /// с позициями, по которым инициатор не согласен с замечаниями (RemarksAgreement.PartiallyAgree

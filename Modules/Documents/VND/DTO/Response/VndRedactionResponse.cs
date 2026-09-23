@@ -28,6 +28,11 @@ public class VndRedactionResponse
     /// окончательно завершается. Null, пока редакция не согласована.</summary>
     public int? ApprovalSheetFileId { get; set; }
 
+    /// <summary>Все листы согласования редакции, от первого к последнему (последний совпадает с
+    /// ApprovalSheetFileId). Больше одного - когда редакцию повторно согласовывали в рамках
+    /// актуализации без изменений.</summary>
+    public List<VndRedactionApprovalSheetResponse> ApprovalSheets { get; set; } = [];
+
     /// <summary>Матрица разногласий — null, пока инициатор не отправил редакцию с несогласием
     /// (частичным или полным) по замечаниям.</summary>
     public int? DisagreementMatrixFileId { get; set; }
@@ -79,4 +84,23 @@ public class VndRedactionAttachmentResponse
     public int FileId { get; set; }
     public required string FileName { get; set; }
     public long SizeBytes { get; set; }
+}
+
+public class VndRedactionApprovalSheetResponse
+{
+    public int Id { get; set; }
+    public int FileId { get; set; }
+    public required string FileName { get; set; }
+    public long SizeBytes { get; set; }
+
+    /// <summary>Процесс согласования, по итогам которого сформирован лист (null - приложен вручную).</summary>
+    public int? ApprovalProcessId { get; set; }
+
+    /// <summary>Лист от повторного согласования в рамках актуализации без изменений.</summary>
+    public bool IsNoChangesActualization { get; set; }
+
+    /// <summary>Лист приложен главным редактором вручную, а не сформирован системой.</summary>
+    public bool IsManual { get; set; }
+
+    public DateTime ApprovedAt { get; set; }
 }

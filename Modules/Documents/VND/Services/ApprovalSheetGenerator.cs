@@ -14,8 +14,12 @@ public interface IApprovalSheetGenerator
     /// <summary>Формирует DOCX "Лист согласования" по встроенному шаблону
     /// (ApprovalSheetTemplate.docx) — подставляет название ВНД в заголовок и по одной строке
     /// на каждого согласующего в таблицу, с единой датой окончательного согласования и
-    /// результатом "Согласовано".</summary>
-    byte[] Generate(string vndTitle, DateTime approvedAt, IReadOnlyList<ApprovalSheetApproverInfo> approvers);
+    /// результатом "Согласовано".
+    /// <paramref name="note"/> - необязательная пояснительная строка под заголовком (например,
+    /// "Повторное согласование в рамках актуализации без изменений от 23.09.2026"), чтобы по самому
+    /// файлу было видно, к какому согласованию редакции он относится, если листов у неё несколько.</summary>
+    byte[] Generate(string vndTitle, DateTime approvedAt, IReadOnlyList<ApprovalSheetApproverInfo> approvers,
+        string? note = null);
 }
 
 /// <summary>Генератор Листа согласования — вызывается из VndApprovalService.FinalizeApprovalAsync
@@ -27,7 +31,8 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
     // LogicalName встроенного ресурса — см. EmbeddedResource в delosfera-server.csproj.
     private const string TemplateResourceName = "ApprovalSheetTemplate.docx";
 
-    public byte[] Generate(string vndTitle, DateTime approvedAt, IReadOnlyList<ApprovalSheetApproverInfo> approvers)
+    public byte[] Generate(string vndTitle, DateTime approvedAt, IReadOnlyList<ApprovalSheetApproverInfo> approvers,
+        string? note = null)
     {
         using var templateStream = Assembly.GetExecutingAssembly().GetManifestResourceStream(TemplateResourceName)
             ?? throw new InvalidOperationException($"Встроенный ресурс {TemplateResourceName} не найден");
@@ -40,7 +45,9 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
         {
             var body = doc.MainDocumentPart!.Document.Body!;
 
-            FillTitle(body, vndTitle);
+            var titleParagraph = FillTitle(body, vndTitle);
+            if (!string.IsNullOrWhiteSpace(note))
+                InsertNote(body, titleParagraph, note);
             FillTable(body, approvedAt, approvers);
 
             doc.MainDocumentPart.Document.Save();
@@ -51,11 +58,38 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
 
     /// <summary>Заголовок шаблона содержит строку вида "К «»" одним текстовым узлом (подтверждено
     /// при разборе шаблона) — вставляем название ВНД между кавычками.</summary>
-    private static void FillTitle(Body body, string vndTitle)
+    private static Paragraph? FillTitle(Body body, string vndTitle)
     {
         var target = body.Descendants<Text>().FirstOrDefault(t => t.Text.Contains("«»"));
-        if (target is not null)
-            target.Text = target.Text.Replace("«»", $"«{vndTitle}»");
+        if (target is null) return null;
+        target.Text = target.Text.Replace("«»", $"«{vndTitle}»");
+        return target.Ancestors<Paragraph>().FirstOrDefault();
+    }
+
+    /// <summary>Пояснительная строка сразу под заголовком "К «...»" - по центру, курсивом, тем же
+    /// шрифтом Arial, что и весь шаблон. Если заголовок в шаблоне не нашёлся - ставим строку
+    /// перед таблицей, чтобы пояснение не потерялось.</summary>
+    private static void InsertNote(Body body, Paragraph? titleParagraph, string note)
+    {
+        var paragraph = new Paragraph(
+            new ParagraphProperties(new Justification { Val = JustificationValues.Center }),
+            new Run(
+                new RunProperties(
+                    new RunFonts { Ascii = "Arial", HighAnsi = "Arial", ComplexScript = "Arial" },
+                    new Italic(),
+                    new FontSize { Val = "20" },
+                    new FontSizeComplexScript { Val = "20" }),
+                new Text(note) { Space = SpaceProcessingModeValues.Preserve }));
+
+        if (titleParagraph is not null)
+        {
+            titleParagraph.InsertAfterSelf(paragraph);
+            return;
+        }
+
+        var table = body.Descendants<Table>().FirstOrDefault();
+        if (table is not null) table.InsertBeforeSelf(paragraph);
+        else body.AppendChild(paragraph);
     }
 
     private static void FillTable(Body body, DateTime approvedAt, IReadOnlyList<ApprovalSheetApproverInfo> approvers)

@@ -16,5 +16,8 @@ public class VndApprovalStageQuoteConfiguration : IEntityTypeConfiguration<VndAp
             .HasConstraintName("fk_vnd_approval_stage_quote_vnd_approval_stage_id");
 
         builder.HasIndex(x => new { x.VndApprovalStageId, x.Phase });
+
+        builder.Property(x => x.Prefix).HasMaxLength(200);
+        builder.Property(x => x.Suffix).HasMaxLength(200);
     }
 }
