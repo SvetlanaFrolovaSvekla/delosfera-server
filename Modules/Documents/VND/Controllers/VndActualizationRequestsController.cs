@@ -49,4 +49,19 @@ public class VndActualizationRequestsController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
+
+    /// <summary>Отозвать свою заявку — доступно только заявителю, и только пока заявка ещё не
+    /// рассмотрена (status == "pending")</summary>
+    [HttpPost("{requestId:int}/revoke")]
+    [ProducesResponseType(typeof(VndActualizationRequestResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<VndActualizationRequestResponse>> Revoke(int requestId)
+    {
+        try
+        {
+            return Ok(await _service.RevokeRequestAsync(requestId, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
 }

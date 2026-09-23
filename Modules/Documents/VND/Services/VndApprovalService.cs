@@ -44,6 +44,15 @@ public class VndApprovalService : IVndApprovalService
     private const int MaxQuotesPerDecision = 50;
     private const int MaxQuoteTextLength = 1000;
 
+    /// <summary>Пояснение к решению по фазе, которую этап "пропустил", потому что был добавлен
+    /// главным редактором (AddApproverAsync/ReplaceApproverAsync) уже после её начала. По нему же
+    /// ResetFinalHoldDecisionsAsync отличает такой этап от "настоящего" чистого согласования.</summary>
+    private const string SkippedPhaseComment =
+        "Добавлен главным редактором после начала этой фазы согласования — не участвовал в ней";
+
+    private const string InitiatorAutoApprovedComment =
+        "Согласовано автоматически — инициатор является согласующим на этом этапе";
+
     private readonly DelosferaDbContext _db;
     private readonly IFileStorageService _fileService;
     private readonly INotificationService _notifications;
@@ -108,8 +117,37 @@ public class VndApprovalService : IVndApprovalService
         // просто нажатием чужой кнопки "приписывалось" не ему. См. VndSelectApproverModal/
         // VndStartApprovalModal на фронте - там же теперь и уведомление автору (SentToApproval
         // ниже, получатель расширен на CreatedByUserId).
-        var draftOwnerId = vnd.CreatedByUserId;
-        var actingOnSomeoneElsesDraft = draftOwnerId.HasValue && draftOwnerId.Value != currentUserId;
+        // Выбор инициатора имеет смысл только для настоящего главного редактора - у обычного
+        // редактора (разработчика/куратора/ответственного исполнителя/ответственного за
+        // актуализацию, см. IsLinkedToVndAsync выше) такого выбора быть не должно: он всегда сам
+        // инициатор, когда отправляет, даже если формально не является автором самого черновика
+        // (например, действует как ответственный за актуализацию, назначенный не тем, кто когда-то
+        // создавал ВНД). Раньше здесь проверялось только draftOwnerId != currentUserId — из-за
+        // этого обычный редактор, отправляющий чужой (по CreatedByUserId) документ, тоже видел
+        // выбор "Кто будет указан инициатором согласования?", хотя мог быть только собой.
+        //
+        // IsChiefEditor() тут не подходит (тот же принцип, что и у CancelAnyVndApproval/
+        // ConsolidateAnyVnd/EditAnyVndApprovalRoute выше по файлу и в PermissionCode.cs): её
+        // широкий набор (CreateVndWith(out)Approval/ActualizeAnyVndWith(out)Approval) есть
+        // практически у любого автора ВНД, включая обычных редакторов - то и подтвердилось на
+        // практике: обычный редактор с одним лишь CreateVndWithApproval проходил эту проверку и
+        // видел выбор инициатора. Нужно именно узкое право EditAnyVndApprovalRoute ("роль
+        // главного редактора" - редактирование маршрута согласования), которым обычные редакторы
+        // не наделяются.
+        // Кто фактически подготовил редакцию/ТИД, отправляемые на согласование именно сейчас: если
+        // сейчас идёт цикл актуализации, это её ответственный (vnd.ActualizationResponsibleUserId -
+        // тот, кто нажал "Взять в актуализацию" и всё загрузил), а НЕ тот, кто когда-то создал сам
+        // документ (vnd.CreatedByUserId) - иначе, когда согласование запускает главный редактор,
+        // который к тому же и есть первоначальный создатель ВНД (а актуализацию по факту вёл кто-то
+        // другой), draftOwnerId совпадал бы с currentUserId и выбор инициатора не предлагался бы
+        // вовсе, хотя настоящий автор ЭТОЙ редакции - не он (реальный сценарий: Бермет создала ВНД,
+        // Айбек взял её в актуализацию и всё загрузил, Бермет запускает согласование - до этой
+        // правки панель выбора инициатора у неё не появлялась). Тот же принцип уже применён у
+        // defaultResponsibleUserId/canSelectResponsible для поля "Разработчик" в VndUploadTidModal.
+        var draftOwnerId = vnd.ActualizationResponsibleUserId ?? vnd.CreatedByUserId;
+        var actingOnSomeoneElsesDraft =
+            _currentUser.HasPermission(PermissionCode.EditAnyVndApprovalRoute)
+            && draftOwnerId.HasValue && draftOwnerId.Value != currentUserId;
 
         if (!actingOnSomeoneElsesDraft && request.InitiatorUserId.HasValue &&
             request.InitiatorUserId.Value != currentUserId)
@@ -201,7 +239,7 @@ public class VndApprovalService : IVndApprovalService
             foreach (var selfStage in stages.Where(s => s.ApproverUserId == currentUserId))
             {
                 selfStage.PrimaryDecision = ApprovalStageDecision.Approved;
-                selfStage.PrimaryComment = "Согласовано автоматически — инициатор является согласующим на этом этапе";
+                selfStage.PrimaryComment = InitiatorAutoApprovedComment;
                 selfStage.PrimaryDecidedAt = now;
             }
         }
@@ -873,8 +911,11 @@ public class VndApprovalService : IVndApprovalService
                 VndApprovalNotificationMessages.TaskRepeatApproval(redaction.Code, process.Vnd!.TitleRu),
                 NotificationCategory.Vnd, vndId, currentUserId, repeatApproverIds);
 
+            // Count == 0 - все, кто оставлял замечания, успели быть убраны/заменены главным
+            // редактором, пока шла доработка: ждать решения не от кого, иначе процесс висел бы в
+            // "Повторном согласовании" до дедлайна.
             var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
-            if (repeatStages.Count > 0 && repeatStages.All(s =>
+            if (repeatStages.All(s =>
                     s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending))
             {
                 await CompleteRepeatPhaseAsync(process);
@@ -1036,9 +1077,6 @@ public class VndApprovalService : IVndApprovalService
         var now = DateTime.UtcNow;
         var nextOrder = process.Stages.Count == 0 ? 1 : process.Stages.Max(s => s.Order) + 1;
 
-        const string skippedPhaseComment =
-            "Добавлен главным редактором после начала этой фазы согласования — не участвовал в ней";
-
         var stage = new VndApprovalStage
         {
             ApprovalProcessId = process.Id,
@@ -1069,14 +1107,14 @@ public class VndApprovalService : IVndApprovalService
                 // финальная выдержка (ResetFinalHoldDecisionsAsync) берёт согласующих из ВСЕХ
                 // непропущенных этапов процесса, а не только из ParticipatesInRepeat.
                 stage.PrimaryDecision = ApprovalStageDecision.Approved;
-                stage.PrimaryComment = skippedPhaseComment;
+                stage.PrimaryComment = SkippedPhaseComment;
                 stage.PrimaryDecidedAt = now;
                 stage.ParticipatesInRepeat = true;
                 break;
 
             case ApprovalProcessStatus.Repeated:
                 stage.PrimaryDecision = ApprovalStageDecision.Approved;
-                stage.PrimaryComment = skippedPhaseComment;
+                stage.PrimaryComment = SkippedPhaseComment;
                 stage.PrimaryDecidedAt = now;
                 stage.ParticipatesInRepeat = true;
                 stage.RepeatDecision = ApprovalStageDecision.Pending;
@@ -1084,7 +1122,7 @@ public class VndApprovalService : IVndApprovalService
 
             case ApprovalProcessStatus.FinalHold:
                 stage.PrimaryDecision = ApprovalStageDecision.Approved;
-                stage.PrimaryComment = skippedPhaseComment;
+                stage.PrimaryComment = SkippedPhaseComment;
                 stage.PrimaryDecidedAt = now;
                 stage.ParticipatesInRepeat = false;
                 stage.FinalHoldDecision = ApprovalStageDecision.Pending;
@@ -1094,7 +1132,18 @@ public class VndApprovalService : IVndApprovalService
                 throw new InvalidOperationException("В текущем статусе процесса маршрут менять нельзя");
         }
 
+        // Главный редактор добавил в маршрут самого инициатора согласования (типичный сценарий:
+        // инициатор был согласующим на обязательном этапе, редактор заменил его там на другого
+        // человека и вернул инициатора доп. этапом) - решение инициатора по активной фазе, как и
+        // при старте процесса (см. StartAsync), проставляется автоматически. Иначе этап висит
+        // "В ожидании": у инициатора на карточке нет панели резолюции (он инициатор, а не
+        // согласующий), и фаза не может завершиться до дедлайна.
+        AutoApproveIfInitiator(process, stage, now);
+
         _db.Set<VndApprovalStage>().Add(stage);
+        // EF обычно сам подхватывает новый этап в process.Stages (fixup по ApprovalProcessId),
+        // но проверки AdvanceAfterRouteChangeAsync ниже должны видеть его гарантированно.
+        if (!process.Stages.Contains(stage)) process.Stages.Add(stage);
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
@@ -1123,6 +1172,10 @@ public class VndApprovalService : IVndApprovalService
             await NotifyAsync(
                 VndApprovalNotificationMessages.AddedAsApprover(actorName, redaction.Code, vnd.TitleRu),
                 NotificationCategory.Vnd, vndId, currentUserId, approver.Id);
+
+        // Если новый этап сразу оказался решённым (автосогласование инициатора) - фаза могла
+        // закрыться, переходим дальше, не дожидаясь дедлайна.
+        await AdvanceAfterRouteChangeAsync(process);
 
         return await LoadResponseAsync(process.Id);
     }
@@ -1242,28 +1295,7 @@ public class VndApprovalService : IVndApprovalService
         // Если убранный был последним, чьё решение ждали на текущей фазе - фаза теперь решена
         // всеми, кто остался, и можно перейти дальше, не дожидаясь дедлайна (то же самое, что
         // происходит после обычного DecideAsync).
-        switch (process.Status)
-        {
-            case ApprovalProcessStatus.Primary
-                when process.Stages.All(s => s.PrimaryDecision != ApprovalStageDecision.Pending):
-                await CompletePrimaryPhaseAsync(process);
-                break;
-
-            case ApprovalProcessStatus.Repeated:
-                var repeatStages = process.Stages.Where(s => s.ParticipatesInRepeat).ToList();
-                if (repeatStages.Count > 0 && repeatStages.All(s =>
-                        s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending))
-                    await CompleteRepeatPhaseAsync(process);
-                break;
-
-            case ApprovalProcessStatus.FinalHold
-                when process.Stages.All(s =>
-                    s.FinalHoldDecision is not null && s.FinalHoldDecision != ApprovalStageDecision.Pending):
-                await FinalizeApprovalAsync(process, afterRevision: true);
-                break;
-        }
-
-        await _db.SaveChangesAsync();
+        await AdvanceAfterRouteChangeAsync(process);
 
         return await LoadResponseAsync(process.Id);
     }
@@ -1376,9 +1408,6 @@ public class VndApprovalService : IVndApprovalService
             ApproverUserId = newApprover.Id,
         };
 
-        const string skippedPhaseComment =
-            "Добавлен главным редактором после начала этой фазы согласования — не участвовал в ней";
-
         switch (process.Status)
         {
             case ApprovalProcessStatus.Primary:
@@ -1386,14 +1415,14 @@ public class VndApprovalService : IVndApprovalService
 
             case ApprovalProcessStatus.RevisionNeeded:
                 newStage.PrimaryDecision = ApprovalStageDecision.Approved;
-                newStage.PrimaryComment = skippedPhaseComment;
+                newStage.PrimaryComment = SkippedPhaseComment;
                 newStage.PrimaryDecidedAt = now;
                 newStage.ParticipatesInRepeat = true;
                 break;
 
             case ApprovalProcessStatus.Repeated:
                 newStage.PrimaryDecision = ApprovalStageDecision.Approved;
-                newStage.PrimaryComment = skippedPhaseComment;
+                newStage.PrimaryComment = SkippedPhaseComment;
                 newStage.PrimaryDecidedAt = now;
                 newStage.ParticipatesInRepeat = true;
                 newStage.RepeatDecision = ApprovalStageDecision.Pending;
@@ -1401,14 +1430,20 @@ public class VndApprovalService : IVndApprovalService
 
             case ApprovalProcessStatus.FinalHold:
                 newStage.PrimaryDecision = ApprovalStageDecision.Approved;
-                newStage.PrimaryComment = skippedPhaseComment;
+                newStage.PrimaryComment = SkippedPhaseComment;
                 newStage.PrimaryDecidedAt = now;
                 newStage.ParticipatesInRepeat = false;
                 newStage.FinalHoldDecision = ApprovalStageDecision.Pending;
                 break;
         }
 
+        // Новым согласующим назначен сам инициатор - см. пояснение в AddApproverAsync.
+        AutoApproveIfInitiator(process, newStage, now);
+
         _db.Set<VndApprovalStage>().Add(newStage);
+        // EF обычно сам подхватывает новый этап в process.Stages (fixup по ApprovalProcessId),
+        // но проверки AdvanceAfterRouteChangeAsync ниже должны видеть его гарантированно.
+        if (!process.Stages.Contains(newStage)) process.Stages.Add(newStage);
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
@@ -1445,6 +1480,10 @@ public class VndApprovalService : IVndApprovalService
             await NotifyAsync(
                 VndApprovalNotificationMessages.AddedAsApprover(actorName, redaction.Code, vnd.TitleRu),
                 NotificationCategory.Vnd, vndId, currentUserId, newApprover.Id);
+
+        // Замена могла закрыть текущую фазу: прежний согласующий был последним, кого ждали, а
+        // новый - инициатор (автосогласован) либо фаза для него уже пройдена.
+        await AdvanceAfterRouteChangeAsync(process);
 
         return await LoadResponseAsync(process.Id);
     }
@@ -1882,17 +1921,19 @@ public class VndApprovalService : IVndApprovalService
     /// стоит проверить, не оказалась ли фаза уже полностью решена (см. вызывающий код).</summary>
     private static void AutoApproveInitiatorStages(VndApprovalProcess process, ApprovalStagePhase phase)
     {
-        const string comment = "Согласовано автоматически — инициатор является согласующим на этом этапе";
+        const string comment = InitiatorAutoApprovedComment;
         var now = DateTime.UtcNow;
 
         IEnumerable<VndApprovalStage> stages = phase switch
         {
             ApprovalStagePhase.Repeat => process.Stages.Where(s =>
                 s.ApproverUserId == process.InitiatorUserId
+                && !s.IsRemovedByEditor
                 && s.ParticipatesInRepeat
                 && s.RepeatDecision == ApprovalStageDecision.Pending),
             ApprovalStagePhase.FinalHold => process.Stages.Where(s =>
                 s.ApproverUserId == process.InitiatorUserId
+                && !s.IsRemovedByEditor
                 && s.FinalHoldDecision == ApprovalStageDecision.Pending),
             _ => Enumerable.Empty<VndApprovalStage>()
         };
@@ -1912,6 +1953,71 @@ public class VndApprovalService : IVndApprovalService
                 stage.FinalHoldDecidedAt = now;
             }
         }
+    }
+
+    /// <summary>Этап, который главный редактор только что добавил/заменил в уже запущенном
+    /// процессе (AddApproverAsync/ReplaceApproverAsync): если его согласующий - сам инициатор
+    /// согласования, решение по активной сейчас фазе проставляется автоматически, как при старте
+    /// процесса (StartAsync) и при входе в повторное согласование/финальную выдержку
+    /// (AutoApproveInitiatorStages). На доработке (RevisionNeeded) активной фазы нет - там
+    /// автосогласование сработает само при повторной отправке.</summary>
+    private static void AutoApproveIfInitiator(VndApprovalProcess process, VndApprovalStage stage, DateTime now)
+    {
+        if (stage.ApproverUserId != process.InitiatorUserId) return;
+
+        switch (process.Status)
+        {
+            case ApprovalProcessStatus.Primary when stage.PrimaryDecision == ApprovalStageDecision.Pending:
+                stage.PrimaryDecision = ApprovalStageDecision.Approved;
+                stage.PrimaryComment = InitiatorAutoApprovedComment;
+                stage.PrimaryDecidedAt = now;
+                stage.ParticipatesInRepeat = false;
+                break;
+
+            case ApprovalProcessStatus.Repeated when stage.RepeatDecision == ApprovalStageDecision.Pending:
+                stage.RepeatDecision = ApprovalStageDecision.Approved;
+                stage.RepeatComment = InitiatorAutoApprovedComment;
+                stage.RepeatDecidedAt = now;
+                break;
+
+            case ApprovalProcessStatus.FinalHold when stage.FinalHoldDecision == ApprovalStageDecision.Pending:
+                stage.FinalHoldDecision = ApprovalStageDecision.Approved;
+                stage.FinalHoldComment = InitiatorAutoApprovedComment;
+                stage.FinalHoldDecidedAt = now;
+                break;
+        }
+    }
+
+    /// <summary>После правки маршрута главным редактором (добавление/удаление/замена
+    /// согласующего) проверяет, не оказалась ли активная фаза уже решена всеми действующими
+    /// участниками, и если да - переводит процесс дальше так же, как это сделал бы DecideAsync
+    /// после последнего решения. Без этого процесс "зависал" до дедлайна, например когда
+    /// последний, чьего решения ждали, был заменён на инициатора (автосогласован) или убран.</summary>
+    private async Task AdvanceAfterRouteChangeAsync(VndApprovalProcess process)
+    {
+        switch (process.Status)
+        {
+            case ApprovalProcessStatus.Primary
+                when process.Stages.All(s => s.PrimaryDecision != ApprovalStageDecision.Pending):
+                await CompletePrimaryPhaseAsync(process, save: false);
+                break;
+
+            // Пустой список участников повторного согласования (все, кто оставлял замечания,
+            // убраны/заменены) - тоже повод завершить фазу: ждать решения больше не от кого.
+            case ApprovalProcessStatus.Repeated
+                when process.Stages.Where(s => s.ParticipatesInRepeat).All(s =>
+                    s.RepeatDecision is not null && s.RepeatDecision != ApprovalStageDecision.Pending):
+                await CompleteRepeatPhaseAsync(process, save: false);
+                break;
+
+            case ApprovalProcessStatus.FinalHold
+                when process.Stages.All(s =>
+                    s.FinalHoldDecision is not null && s.FinalHoldDecision != ApprovalStageDecision.Pending):
+                await FinalizeApprovalAsync(process, afterRevision: true);
+                break;
+        }
+
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>Определяет, какое решение по этапу считается "актуальным" на момент входа в
@@ -1955,7 +2061,18 @@ public class VndApprovalService : IVndApprovalService
             }
 
             var latest = LatestDecisionBeforeFinalHold(stage);
-            var wasClean = latest is ApprovalStageDecision.Approved or ApprovalStageDecision.AutoApprovedByTimeout;
+
+            // Этап, добавленный главным редактором во время доработки (RevisionNeeded), ещё ни
+            // разу не принимал решения сам: его PrimaryDecision = Approved - лишь технический
+            // "пропуск" уже закрытой первичной фазы (SkippedPhaseComment). Без этой проверки он
+            // считался бы "чисто согласовавшим" и при отправке с разногласиями сразу на финальную
+            // выдержку автоматически согласовывался бы, так ни разу и не увидев документ.
+            var joinedLateWithoutDecision = stage.RepeatDecision is null
+                                            && stage.FinalHoldDecision is null
+                                            && stage.PrimaryComment == SkippedPhaseComment;
+
+            var wasClean = !joinedLateWithoutDecision
+                           && latest is ApprovalStageDecision.Approved or ApprovalStageDecision.AutoApprovedByTimeout;
 
             if (wasClean)
             {

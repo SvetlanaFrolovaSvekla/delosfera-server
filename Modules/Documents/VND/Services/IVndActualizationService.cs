@@ -39,6 +39,10 @@ public interface IVndActualizationService
     Task<VndActualizationRequestResponse> DecideRequestAsync(
         int requestId, ActualizationRequestDecisionRequest request, int currentUserId);
 
+    /// <summary>Заявитель отзывает свою ещё не рассмотренную заявку — доступно только самому
+    /// заявителю и только пока заявка в статусе Pending</summary>
+    Task<VndActualizationRequestResponse> RevokeRequestAsync(int requestId, int currentUserId);
+
     /// <summary>Подтвердить старт актуализации после одобренной заявки — совмещает старт цикла
     /// и шаг "Выполнить актуализацию" (единственная кнопка для пути "по заявке")</summary>
     Task<VndActualizationStateResponse> ConfirmStartAfterRequestAsync(

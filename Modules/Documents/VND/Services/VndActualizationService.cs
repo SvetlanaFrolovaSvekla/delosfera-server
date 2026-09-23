@@ -540,6 +540,42 @@ public class VndActualizationService : IVndActualizationService
         return await LoadRequestResponseAsync(current.Id);
     }
 
+    /// <summary>Заявитель отзывает свою заявку до того, как по ней принято решение — например,
+    /// передумал или доступ больше не нужен. В отличие от DecideRequestAsync выше доступно только
+    /// самому заявителю (не главному редактору) и только пока заявка Pending — как только по ней
+    /// есть решение (approve/reject), отзывать уже нечего.</summary>
+    public async Task<VndActualizationRequestResponse> RevokeRequestAsync(int requestId, int currentUserId)
+    {
+        var current = await _db.VndActualizationRequests
+                          .Include(x => x.Vnd)
+                          .FirstOrDefaultAsync(x => x.Id == requestId)
+                      ?? throw new KeyNotFoundException($"Заявка с id={requestId} не найдена");
+
+        if (current.RequestedByUserId != currentUserId)
+            throw new UnauthorizedAccessException("Отозвать можно только свою собственную заявку");
+
+        if (current.Status != ActualizationAccessStatus.Pending)
+            throw new InvalidOperationException(
+                "Отозвать можно только заявку, ещё не рассмотренную главным редактором");
+
+        current.Status = ActualizationAccessStatus.Revoked;
+        current.DecidedByUserId = currentUserId;
+        current.DecidedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        var vndTitle = current.Vnd!.TitleRu;
+        var requester = await _db.Users.FindAsync(currentUserId);
+        var reviewerIds = await GetActualizationRequestReviewerIdsAsync();
+
+        await NotifyAsync(
+            VndActualizationNotificationMessages.AccessRequestRevoked(vndTitle, requester?.FullName ?? "—"),
+            current.VndId, currentUserId, reviewerIds.ToArray(),
+            urlOverride: $"/base-vnd/{current.VndId}?tab=actual");
+
+        return await LoadRequestResponseAsync(current.Id);
+    }
+
     /// <summary>Шаг "Выполнить актуализацию" для пути "по заявке" (обычный редактор) — совмещает
     /// в себе и старт цикла (переход в "На актуализации"), и фиксацию финальных условий: этот
     /// путь, в отличие от прямого старта главным редактором, не разбит на два отдельных клика —
@@ -964,6 +1000,7 @@ public class VndActualizationService : IVndActualizationService
             ActualizationAccessStatus.Pending => "pending",
             ActualizationAccessStatus.Approved => "approved",
             ActualizationAccessStatus.Rejected => "rejected",
+            ActualizationAccessStatus.Revoked => "revoked",
             _ => "pending"
         },
         DecidedByUserId = x.DecidedByUserId,

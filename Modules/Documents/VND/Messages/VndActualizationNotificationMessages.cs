@@ -54,6 +54,17 @@ public static class VndActualizationNotificationMessages
         BodyKg: $"«{vndTitle}» документин актуалдаштырууга болгон арызыңыз четке кагылды.",
         Severity: NotificationSeverity.Warning);
 
+    /// <summary>Заявитель сам отозвал свою заявку до решения — уходит тому же кругу лиц, что
+    /// получал уведомление AccessRequested выше (см. GetActualizationRequestReviewerIdsAsync).</summary>
+    public static NotificationText AccessRequestRevoked(string vndTitle, string requesterName) => new(
+        TitleRu: "Заявка на доступ к актуализации отозвана",
+        TitleEn: "Actualization access request revoked",
+        TitleKg: "Актуалдаштырууга кирүү укугуна арыз кайтарылды",
+        BodyRu: $"{requesterName} отозвал(а) заявку на доступ к актуализации документа «{vndTitle}».",
+        BodyEn: $"{requesterName} revoked the request for access to actualize the document \"{vndTitle}\".",
+        BodyKg: $"{requesterName} «{vndTitle}» документин актуалдаштырууга уруксат алуу арызын кайтарып алды.",
+        Severity: NotificationSeverity.Info);
+
     public static NotificationText Published(string vndTitle, bool hadChanges) => new(
         TitleRu: "ВНД опубликован после актуализации",
         TitleEn: "VND published after actualization",
