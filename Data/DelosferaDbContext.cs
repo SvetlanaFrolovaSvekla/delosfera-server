@@ -83,6 +83,11 @@ public class DelosferaDbContext : DbContext
     // замечания, с исправленной).
     public DbSet<VndRedactionRevisionSnapshot> VndRedactionRevisionSnapshots => Set<VndRedactionRevisionSnapshot>();
 
+    // Предложения по ВНД от сотрудников главному редактору (см. VndProposal)
+    public DbSet<VndProposal> VndProposals => Set<VndProposal>();
+    public DbSet<VndProposalQuote> VndProposalQuotes => Set<VndProposalQuote>();
+    public DbSet<VndProposalAttachment> VndProposalAttachments => Set<VndProposalAttachment>();
+
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<NotificationSetting> NotificationSettings => Set<NotificationSetting>(); // персональные настройки (УВ-16)

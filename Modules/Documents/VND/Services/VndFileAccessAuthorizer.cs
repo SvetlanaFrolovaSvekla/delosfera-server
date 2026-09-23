@@ -91,6 +91,16 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
                            || s.VndRedaction.Vnd.CreatedByUserId == userId, ct);
         if (canAccessRedactionSnapshot) return true;
 
+        // Вложения к предложениям по ВНД (VndProposalAttachment): автору доступны как
+        // загрузившему (см. isUploader выше), получателям предложений - по праву
+        // ManageVndProposals (главный редактор ВНД).
+        if (_currentUser.HasPermission(PermissionCode.ManageVndProposals))
+        {
+            var isProposalAttachment = await _db.VndProposalAttachments
+                .AnyAsync(a => a.FileAttachmentId == fileId, ct);
+            if (isProposalAttachment) return true;
+        }
+
         // Файл приложен к системному уведомлению (Notification.AttachmentFileId) — например,
         // Excel-план единоразовой рассылки актуализации. Доступ только фактическим получателям
         // этого уведомления (через UserNotification), не всем подряд.

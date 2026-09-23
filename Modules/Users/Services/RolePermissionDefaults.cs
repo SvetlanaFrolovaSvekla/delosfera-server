@@ -113,6 +113,9 @@ public static class RolePermissionDefaults
             PermissionCode.CancelAnyVndApproval,
             PermissionCode.EditAnyVndApprovalRoute,
             PermissionCode.ApproveVndActualizationRequests,
+            // ManageVndProposals - предложения по ВНД от сотрудников (см. VndProposal):
+            // уведомления о новых предложениях и страница "Предложения по ВНД".
+            PermissionCode.ManageVndProposals,
         ]),
 
         // ── Закупки ──────────────────────────────────────────────────────────

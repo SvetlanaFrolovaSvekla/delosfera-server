@@ -383,6 +383,12 @@ public static class PermissionCatalog
             TitleRu = "Видеть вкладку «Заявки на актуализацию» и решать по заявкам — одобрить/отклонить (получает и уведомления о новых заявках)",
             TitleEn = "See the \"Actualization requests\" tab and decide on requests — approve/reject (also receives notifications about new requests)",
             TitleKg = "«Актуалдаштырууга өтүнмөлөр» бетин көрүү жана өтүнмөлөр боюнча чечим кабыл алуу — бекитүү/четке кагуу (жаңы өтүнмөлөр жөнүндө билдирмелерди да алат)"
+        },
+        [PermissionCode.ManageVndProposals] = new PermissionDescription
+        {
+            TitleRu = "Получать и разбирать предложения по ВНД (уведомления о новых предложениях, страница «Предложения по ВНД»)",
+            TitleEn = "Receive and review proposals on IRDs (notifications about new proposals, \"IRD proposals\" page)",
+            TitleKg = "ИНД боюнча сунуштарды алуу жана карап чыгуу (жаңы сунуштар жөнүндө билдирмелер, «ИНД боюнча сунуштар» бети)"
         }
     };
     

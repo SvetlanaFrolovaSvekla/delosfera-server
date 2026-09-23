@@ -32,6 +32,10 @@ public static class VndServiceExtensions
         builder.Services.AddScoped<IActualizationNotificationService, ActualizationNotificationService>();
         builder.Services.AddHostedService<ActualizationNotificationWorker>();
 
+        // Предложения по ВНД от сотрудников главному редактору ("+ Предложения по ВНД" на
+        // странице документа и страница "Предложения по ВНД" в разделе "Нормотворчество")
+        builder.Services.AddScoped<IVndProposalService, VndProposalService>();
+
         return builder;
     }
 }
