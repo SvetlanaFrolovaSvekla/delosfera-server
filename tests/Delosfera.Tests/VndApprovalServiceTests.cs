@@ -23,7 +23,16 @@ public class VndApprovalServiceTests
         new(db, new NoopFileStorage(), new NoopNotificationService(),
             new FakeCurrentUser(Approver1), NullLogger<VndApprovalService>.Instance,
             new FakeActivityLog(), new ApprovalSheetGenerator(),
-            new FixedApprovalUnitResolver(db));
+            new FixedApprovalUnitResolver(db), new FixedWorkCalendar());
+
+    /// <summary>Календарь без праздников — только пн–пт 09:00–18:00.</summary>
+    private sealed class FixedWorkCalendar : IVndWorkCalendarCache
+    {
+        public Task<VndWorkingCalendar.Rules> GetRulesAsync(CancellationToken ct = default) =>
+            Task.FromResult(VndWorkingCalendar.Rules.Empty);
+
+        public void Invalidate() { }
+    }
 
     // Двухэтапный процесс на первичной фазе: решение по одному этапу не завершает фазу,
     // поэтому изолируем логику DecideAsync без тяжёлого перехода фаз.
@@ -67,6 +76,7 @@ public class VndApprovalServiceTests
             RepeatDeadlineMinutes = 60,
             FinalHoldDeadlineMinutes = 60,
             PrimaryStartedAt = DateTime.UtcNow,
+            PrimaryDeadlineAt = DateTime.UtcNow.AddMinutes(60),
             Stages =
             [
                 new VndApprovalStage { Order = 1, OrgUnitId = db.OrganizationUnits.OrderBy(x => x.Id).First().Id, ApproverUserId = Approver1, PrimaryDecision = ApprovalStageDecision.Pending },

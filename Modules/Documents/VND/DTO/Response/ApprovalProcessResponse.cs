@@ -31,6 +31,11 @@ public class ApprovalProcessResponse
     public int RepeatDeadlineMinutes { get; set; }
     public int FinalHoldDeadlineMinutes { get; set; }
 
+    /// <summary>true — нормативы в рабочих минутах (1 д. = 9 ч, пн–пт 09–18 без праздников),
+    /// сроки *DeadlineAt посчитаны по производственному календарю ВНД. false — старый процесс
+    /// с календарными нормативами (1 д. = 24 ч).</summary>
+    public bool UsesWorkingTime { get; set; }
+
     public DateTime PrimaryStartedAt { get; set; }
     public DateTime PrimaryDeadlineAt { get; set; }
     public DateTime? RepeatStartedAt { get; set; }

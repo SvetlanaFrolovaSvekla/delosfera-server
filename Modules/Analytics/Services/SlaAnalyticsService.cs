@@ -201,22 +201,19 @@ public class SlaAnalyticsService : ISlaAnalyticsService
             {
                 ApproverUserId = s.ApproverUserId,
                 Status = s.ApprovalProcess!.Status,
-                PrimaryStartedAt = s.ApprovalProcess!.PrimaryStartedAt,
-                PrimaryDeadlineMinutes = s.ApprovalProcess!.PrimaryDeadlineMinutes,
-                RepeatStartedAt = s.ApprovalProcess!.RepeatStartedAt,
-                RepeatDeadlineMinutes = s.ApprovalProcess!.RepeatDeadlineMinutes,
-                FinalHoldStartedAt = s.ApprovalProcess!.FinalHoldStartedAt,
-                FinalHoldDeadlineMinutes = s.ApprovalProcess!.FinalHoldDeadlineMinutes,
+                PrimaryDeadlineAt = s.ApprovalProcess!.PrimaryDeadlineAt,
+                RepeatDeadlineAt = s.ApprovalProcess!.RepeatDeadlineAt,
+                FinalHoldDeadlineAt = s.ApprovalProcess!.FinalHoldDeadlineAt,
             })
             .ToListAsync();
 
-    // Срок берётся по текущей фазе: дедлайны — вычисляемые свойства процесса, поэтому
-    // считаем в памяти из «старт + норматив, мин».
+    // Срок берётся по текущей фазе. Дедлайны хранятся в процессе (с учётом рабочего
+    // календаря ВНД - см. VndApprovalDeadlines), пересчитывать "старт + минуты" нельзя.
     private static DateTime? StageDue(VndStageDue s) => s.Status switch
     {
-        ApprovalProcessStatus.Primary => s.PrimaryStartedAt.AddMinutes(s.PrimaryDeadlineMinutes),
-        ApprovalProcessStatus.Repeated => s.RepeatStartedAt?.AddMinutes(s.RepeatDeadlineMinutes),
-        ApprovalProcessStatus.FinalHold => s.FinalHoldStartedAt?.AddMinutes(s.FinalHoldDeadlineMinutes),
+        ApprovalProcessStatus.Primary => s.PrimaryDeadlineAt,
+        ApprovalProcessStatus.Repeated => s.RepeatDeadlineAt,
+        ApprovalProcessStatus.FinalHold => s.FinalHoldDeadlineAt,
         _ => null,
     };
 
@@ -238,11 +235,8 @@ public class SlaAnalyticsService : ISlaAnalyticsService
     {
         public int ApproverUserId { get; init; }
         public ApprovalProcessStatus Status { get; init; }
-        public DateTime PrimaryStartedAt { get; init; }
-        public int PrimaryDeadlineMinutes { get; init; }
-        public DateTime? RepeatStartedAt { get; init; }
-        public int RepeatDeadlineMinutes { get; init; }
-        public DateTime? FinalHoldStartedAt { get; init; }
-        public int FinalHoldDeadlineMinutes { get; init; }
+        public DateTime PrimaryDeadlineAt { get; init; }
+        public DateTime? RepeatDeadlineAt { get; init; }
+        public DateTime? FinalHoldDeadlineAt { get; init; }
     }
 }

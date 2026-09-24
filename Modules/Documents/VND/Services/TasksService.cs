@@ -97,6 +97,7 @@ public class TasksService : ITasksService
                     "final" => process.FinalHoldDeadlineMinutes,
                     _ => null
                 },
+                UsesWorkingTime = process.UsesWorkingTime,
                 InitiatorComment = phase == "primary" ? null : process.RepeatInitiatorComment,
                 ActualizationPlannedNoChanges = process.Vnd!.ActualizationPlannedNoChanges,
                 CreatedAt = phase switch

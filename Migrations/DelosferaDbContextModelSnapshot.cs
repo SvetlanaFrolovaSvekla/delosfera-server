@@ -7037,11 +7037,112 @@ namespace delosfera_server.Migrations
                         {
                             Id = 1,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            FinalHoldDeadlineMinutes = 4320,
-                            PrimaryDeadlineMinutes = 10080,
-                            RepeatDeadlineMinutes = 5760,
+                            FinalHoldDeadlineMinutes = 1620,
+                            PrimaryDeadlineMinutes = 3780,
+                            RepeatDeadlineMinutes = 2160,
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndFavorite", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("VndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("UserId", "VndId")
+                        .HasName("pk_vnd_favorite");
+
+                    b.HasIndex("VndId")
+                        .HasDatabaseName("ix_vnd_favorite_vnd_id");
+
+                    b.ToTable("vnd_favorite", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndWorkHoursSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("WorkEndMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("work_end_minutes");
+
+                    b.Property<int>("WorkStartMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("work_start_minutes");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_work_hours_settings");
+
+                    b.ToTable("vnd_work_hours_settings", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            WorkEndMinutes = 1080,
+                            WorkStartMinutes = 540
+                        });
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndWorkCalendarDay", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date")
+                        .HasColumnName("date");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_work_calendar_day");
+
+                    b.HasIndex("Date")
+                        .IsUnique()
+                        .HasDatabaseName("ix_vnd_work_calendar_day_date");
+
+                    b.ToTable("vnd_work_calendar_day", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndApprovalPhaseRound", b =>
@@ -7154,6 +7255,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("final_hold_deadline_minutes");
 
+                    b.Property<DateTime?>("FinalHoldDeadlineAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("final_hold_deadline_at");
+
                     b.Property<DateTime?>("FinalHoldStartedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("final_hold_started_at");
@@ -7166,6 +7271,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_no_changes_actualization");
 
+                    b.Property<DateTime>("PrimaryDeadlineAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("primary_deadline_at");
+
                     b.Property<int>("PrimaryDeadlineMinutes")
                         .HasColumnType("integer")
                         .HasColumnName("primary_deadline_minutes");
@@ -7177,6 +7286,10 @@ namespace delosfera_server.Migrations
                     b.Property<int>("RedactionId")
                         .HasColumnType("integer")
                         .HasColumnName("redaction_id");
+
+                    b.Property<DateTime?>("RepeatDeadlineAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("repeat_deadline_at");
 
                     b.Property<int>("RepeatDeadlineMinutes")
                         .HasColumnType("integer")
@@ -7197,6 +7310,10 @@ namespace delosfera_server.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
+
+                    b.Property<bool>("UsesWorkingTime")
+                        .HasColumnType("boolean")
+                        .HasColumnName("uses_working_time");
 
                     b.Property<int>("VndId")
                         .HasColumnType("integer")
@@ -15901,6 +16018,27 @@ namespace delosfera_server.Migrations
                     b.Navigation("SecrecyLevel");
 
                     b.Navigation("Type");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndFavorite", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_favorite_users_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "Vnd")
+                        .WithMany()
+                        .HasForeignKey("VndId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_favorite_vnd_document_vnd_id");
+
+                    b.Navigation("User");
+
+                    b.Navigation("Vnd");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndLink", b =>

@@ -30,6 +30,12 @@ public class VndApprovalProcess : IAuditableEntity
     public int RepeatDeadlineMinutes  { get; set; } // Согласование после устранения замечаний
     public int FinalHoldDeadlineMinutes  { get; set; } // Финальная выдержка
 
+    /// <summary>Нормативы — в РАБОЧИХ минутах (пн–пт 09:00–18:00 по Бишкеку без праздников из
+    /// справочника "Производственный календарь", 1 д. = 540 мин — см. VndWorkingCalendar).
+    /// false — процесс запущен до перехода на рабочий календарь: его нормативы остаются
+    /// календарными (1 д. = 1440 мин), чтобы срок уже идущего согласования не сдвинулся.</summary>
+    public bool UsesWorkingTime { get; set; }
+
     // Моменты отсчёта выдержек
     public DateTime PrimaryStartedAt { get; set; }
     public DateTime? RepeatStartedAt { get; set; }
@@ -60,10 +66,13 @@ public class VndApprovalProcess : IAuditableEntity
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
-    // Конкретные дедлайны для согласующих  
-    public DateTime PrimaryDeadlineAt => PrimaryStartedAt.AddMinutes(PrimaryDeadlineMinutes);
-    public DateTime? RepeatDeadlineAt => RepeatStartedAt?.AddMinutes(RepeatDeadlineMinutes);
-    public DateTime? FinalHoldDeadlineAt => FinalHoldStartedAt?.AddMinutes(FinalHoldDeadlineMinutes);
+    // Конкретные дедлайны для согласующих. Хранятся в БД (а не вычисляются "старт + минуты"),
+    // потому что с рабочим календарём срок зависит от праздников - считается один раз при
+    // старте фазы (VndApprovalDeadlines.Apply) и пересчитывается только при правке
+    // производственного календаря. Заодно фоновая проверка просрочек фильтрует по ним прямо в SQL.
+    public DateTime PrimaryDeadlineAt { get; set; }
+    public DateTime? RepeatDeadlineAt { get; set; }
+    public DateTime? FinalHoldDeadlineAt { get; set; }
     
     // Матрица разногласий
     public ICollection<VndDisagreementMatrixRow> DisagreementMatrixRows { get; set; } = new List<VndDisagreementMatrixRow>();

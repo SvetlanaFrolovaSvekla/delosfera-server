@@ -19,9 +19,9 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 
 public class VndApprovalService : IVndApprovalService
 {
-    // Верхняя граница норматива срока согласования — 90 дней. Должна совпадать с
-    // MAX_DEADLINE_MINUTES на клиенте (src/constants/coordinationParams.ts).
-    private const int MaxDeadlineMinutes = 90 * 24 * 60;
+    // Верхняя граница норматива срока согласования — 90 РАБОЧИХ дней (нормативы считаются в
+    // рабочих минутах, 1 д. = рабочий день банка из справочника, см. VndWorkingCalendar.Rules.
+    // MaxDeadlineMinutes). На клиенте - getMaxDeadlineMinutes() в src/constants/coordinationParams.ts.
 
     // Максимальная длина комментария к резолюции согласующего и комментария инициатора
     // при повторной отправке. Должна совпадать с MAX_RESOLUTION_COMMENT_LENGTH на клиенте
@@ -64,6 +64,7 @@ public class VndApprovalService : IVndApprovalService
     private readonly IActivityLogService _activityLog;
     private readonly IApprovalSheetGenerator _approvalSheetGenerator;
     private readonly IFixedApprovalUnitResolver _fixedUnits;
+    private readonly IVndWorkCalendarCache _workCalendar;
 
     public VndApprovalService(
         DelosferaDbContext db,
@@ -73,7 +74,8 @@ public class VndApprovalService : IVndApprovalService
         ILogger<VndApprovalService> logger,
         IActivityLogService activityLog,
         IApprovalSheetGenerator approvalSheetGenerator,
-        IFixedApprovalUnitResolver fixedUnits)
+        IFixedApprovalUnitResolver fixedUnits,
+        IVndWorkCalendarCache workCalendar)
     {
         _db = db;
         _fileService = fileService;
@@ -83,7 +85,13 @@ public class VndApprovalService : IVndApprovalService
         _activityLog = activityLog;
         _approvalSheetGenerator = approvalSheetGenerator;
         _fixedUnits = fixedUnits;
+        _workCalendar = workCalendar;
     }
+
+    /// <summary>Пересчитать сохранённые сроки фаз после того, как у процесса сменилась
+    /// точка отсчёта (старт новой фазы/круга). См. VndApprovalDeadlines.</summary>
+    private async Task RefreshDeadlinesAsync(VndApprovalProcess process) =>
+        VndApprovalDeadlines.Apply(process, await _workCalendar.GetRulesAsync());
 
     private bool IsChiefEditor() =>
         _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
@@ -208,11 +216,12 @@ public class VndApprovalService : IVndApprovalService
         // расчёт дедлайна: PrimaryStartedAt.AddMinutes(...) кидает ArgumentOutOfRangeException,
         // если результат выходит за пределы DateTime, а слишком большое int-значение минут
         // (например, случайно введённое количество часов вместо минут) на это способно.
-        if (request.PrimaryDeadlineMinutes > MaxDeadlineMinutes ||
-            request.RepeatDeadlineMinutes > MaxDeadlineMinutes ||
-            request.FinalHoldDeadlineMinutes > MaxDeadlineMinutes)
+        var maxDeadlineMinutes = (await _workCalendar.GetRulesAsync()).MaxDeadlineMinutes;
+        if (request.PrimaryDeadlineMinutes > maxDeadlineMinutes ||
+            request.RepeatDeadlineMinutes > maxDeadlineMinutes ||
+            request.FinalHoldDeadlineMinutes > maxDeadlineMinutes)
             throw new InvalidOperationException(
-                $"Норматив срока не может превышать {MaxDeadlineMinutes / 60 / 24} дней");
+                $"Норматив срока не может превышать {VndWorkingCalendar.MaxDeadlineWorkDays} рабочих дней");
 
         // Себя можно указать согласующим только на обязательном (фиксированном) этапе из
         // справочника - принадлежность инициатора нужному подразделению всё равно проверяется
@@ -260,8 +269,11 @@ public class VndApprovalService : IVndApprovalService
             RepeatDeadlineMinutes = request.RepeatDeadlineMinutes,
             FinalHoldDeadlineMinutes = request.FinalHoldDeadlineMinutes,
             PrimaryStartedAt = now,
+            // Новые согласования считают срок только в рабочее время (пн–пт 09–18, без праздников).
+            UsesWorkingTime = true,
             Stages = stages
         };
+        await RefreshDeadlinesAsync(process);
 
         _db.VndApprovalProcesses.Add(process);
 
@@ -916,6 +928,7 @@ public class VndApprovalService : IVndApprovalService
 
             process.Status = ApprovalProcessStatus.Repeated;
             process.RepeatStartedAt = DateTime.UtcNow;
+            await RefreshDeadlinesAsync(process);
 
             // Инициатор мог быть согласующим на одном из этапов - на повторном согласовании
             // его решение тоже проставляется автоматически, иначе оно "висит" до просрочки.
@@ -953,6 +966,7 @@ public class VndApprovalService : IVndApprovalService
             process.Status = ApprovalProcessStatus.FinalHold;
             await ResetFinalHoldDecisionsAsync(process);
             process.FinalHoldStartedAt = DateTime.UtcNow;
+            await RefreshDeadlinesAsync(process);
 
             // См. комментарий выше - тот же самообход для финальной выдержки.
             AutoApproveInitiatorStages(process, ApprovalStagePhase.FinalHold);
@@ -1518,10 +1532,12 @@ public class VndApprovalService : IVndApprovalService
             .Include(x => x.Stages)
             .Include(x => x.Redaction)
             .Include(x => x.Vnd)
-            .Where(x => x.Status == ApprovalProcessStatus.Primary)
+            // Срок хранится в БД - просроченные отбираются прямо в SQL, а не загрузкой ВСЕХ
+            // идущих процессов со всеми этапами раз в минуту.
+            .Where(x => x.Status == ApprovalProcessStatus.Primary && x.PrimaryDeadlineAt <= now)
             .ToListAsync();
 
-        foreach (var process in primaryProcesses.Where(p => p.PrimaryDeadlineAt <= now))
+        foreach (var process in primaryProcesses)
         {
             var trackedBefore = SnapshotTrackedEntities();
 
@@ -1549,11 +1565,11 @@ public class VndApprovalService : IVndApprovalService
             .Include(x => x.Stages)
             .Include(x => x.Redaction)
             .Include(x => x.Vnd)
-            .Where(x => x.Status == ApprovalProcessStatus.Repeated)
+            .Where(x => x.Status == ApprovalProcessStatus.Repeated
+                        && x.RepeatDeadlineAt != null && x.RepeatDeadlineAt <= now)
             .ToListAsync();
 
-        foreach (var process in
-                 repeatedProcesses.Where(p => p.RepeatDeadlineAt is not null && p.RepeatDeadlineAt <= now))
+        foreach (var process in repeatedProcesses)
         {
             var trackedBefore = SnapshotTrackedEntities();
 
@@ -1583,11 +1599,11 @@ public class VndApprovalService : IVndApprovalService
             .Include(x => x.Stages)
             .Include(x => x.Redaction)
             .Include(x => x.Vnd)
-            .Where(x => x.Status == ApprovalProcessStatus.FinalHold)
+            .Where(x => x.Status == ApprovalProcessStatus.FinalHold
+                        && x.FinalHoldDeadlineAt != null && x.FinalHoldDeadlineAt <= now)
             .ToListAsync();
 
-        foreach (var process in finalHoldProcesses.Where(p =>
-                     p.FinalHoldDeadlineAt is not null && p.FinalHoldDeadlineAt <= now))
+        foreach (var process in finalHoldProcesses)
         {
             var trackedBefore = SnapshotTrackedEntities();
 
@@ -1715,6 +1731,7 @@ public class VndApprovalService : IVndApprovalService
         // ResubmitAfterRevisionAsync выше, откуда исходно и был скопирован этот блок).
         await ResetFinalHoldDecisionsAsync(process);
         process.FinalHoldStartedAt = DateTime.UtcNow;
+        await RefreshDeadlinesAsync(process);
 
         // Инициатор мог быть согласующим на одном из этапов - на финальной выдержке
         // его решение тоже проставляется автоматически, иначе оно "висит" до просрочки.
@@ -2620,6 +2637,7 @@ public class VndApprovalService : IVndApprovalService
             PrimaryDeadlineMinutes = process.PrimaryDeadlineMinutes,
             RepeatDeadlineMinutes = process.RepeatDeadlineMinutes,
             FinalHoldDeadlineMinutes = process.FinalHoldDeadlineMinutes,
+            UsesWorkingTime = process.UsesWorkingTime,
             PrimaryStartedAt = process.PrimaryStartedAt,
             PrimaryDeadlineAt = process.PrimaryDeadlineAt,
             RepeatInitiatorComment = process.RepeatInitiatorComment,

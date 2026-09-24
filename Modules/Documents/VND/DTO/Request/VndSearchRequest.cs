@@ -55,4 +55,8 @@ public class VndSearchRequest
     /// других пользователей (требует право ViewOtherUsersDrafts). Пусто = без доп. фильтра
     /// (но пользователь без права ViewOtherUsersDrafts в любом случае не увидит чужие черновики).</summary>
     public string? DraftOwnerScope { get; set; }
+
+    /// <summary>Вкладка "Избранное": только документы, отмеченные звёздочкой текущим
+    /// пользователем (см. VndFavorite).</summary>
+    public bool FavoritesOnly { get; set; }
 }

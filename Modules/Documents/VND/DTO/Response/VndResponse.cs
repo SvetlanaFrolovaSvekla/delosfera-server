@@ -96,4 +96,7 @@ public class VndResponse
     /// с LinkedToMeOnly=true, иначе пустой список (не вычисляется, чтобы не тратить время
     /// на поиск, где фильтр не запрашивался).</summary>
     public List<string> LinkedToMeRelations { get; set; } = [];
+
+    /// <summary>Документ в "Избранном" текущего пользователя (звёздочка).</summary>
+    public bool IsFavorite { get; set; }
 }

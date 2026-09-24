@@ -37,6 +37,14 @@ public static class VndServiceExtensions
         // согласования.
         builder.Services.AddScoped<IVndApprovalNormSettingsService, VndApprovalNormSettingsService>();
 
+        // Производственный календарь ВНД (праздники / переносы / сокращённые дни) — справочник
+        // в разделе ВНД. Сроки согласования редакций считаются только в рабочее время
+        // (пн–пт 09:00–18:00 по Бишкеку без праздников). Кэш — singleton: справочник крошечный
+        // и нужен на каждом старте фазы согласования.
+        builder.Services.AddSingleton<IVndWorkCalendarCache, VndWorkCalendarCache>();
+        builder.Services.AddScoped<IVndWorkCalendarService, VndWorkCalendarService>();
+        builder.Services.AddScoped<IVndFavoriteService, VndFavoriteService>();
+
         // Раздел "Уведомления" → "Настройки рассылок" → "Нормотворчество": ответственные
         // сотрудники СП за актуализацию и ежемесячная сводка им 1-го числа
         builder.Services.AddScoped<IActualizationNotificationService, ActualizationNotificationService>();

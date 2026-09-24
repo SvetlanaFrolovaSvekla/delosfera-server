@@ -17,14 +17,13 @@ public interface IVndApprovalNormSettingsService
 /// </summary>
 public class VndApprovalNormSettingsService : IVndApprovalNormSettingsService
 {
-    /// <summary>Должно совпадать с MaxDeadlineMinutes в StartApprovalRequest (90 дней).</summary>
-    private const int MaxDeadlineMinutes = 90 * 24 * 60;
-
     private readonly DelosferaDbContext _db;
+    private readonly IVndWorkCalendarCache _workCalendar;
 
-    public VndApprovalNormSettingsService(DelosferaDbContext db)
+    public VndApprovalNormSettingsService(DelosferaDbContext db, IVndWorkCalendarCache workCalendar)
     {
         _db = db;
+        _workCalendar = workCalendar;
     }
 
     public async Task<VndApprovalNormSettingsResponse> GetAsync()
@@ -32,9 +31,11 @@ public class VndApprovalNormSettingsService : IVndApprovalNormSettingsService
 
     public async Task<VndApprovalNormSettingsResponse> UpdateAsync(UpdateVndApprovalNormSettingsRequest request)
     {
-        Validate(request.PrimaryDeadlineMinutes, "Первичное согласование");
-        Validate(request.RepeatDeadlineMinutes, "Согласование после внесённых изменений");
-        Validate(request.FinalHoldDeadlineMinutes, "Финальная выдержка");
+        // 90 рабочих дней по текущему рабочему времени банка (справочник "Производственный календарь")
+        var max = (await _workCalendar.GetRulesAsync()).MaxDeadlineMinutes;
+        Validate(request.PrimaryDeadlineMinutes, "Первичное согласование", max);
+        Validate(request.RepeatDeadlineMinutes, "Согласование после внесённых изменений", max);
+        Validate(request.FinalHoldDeadlineMinutes, "Финальная выдержка", max);
 
         var settings = await LoadAsync();
         settings.PrimaryDeadlineMinutes = request.PrimaryDeadlineMinutes;
@@ -45,12 +46,12 @@ public class VndApprovalNormSettingsService : IVndApprovalNormSettingsService
         return ToResponse(settings);
     }
 
-    private static void Validate(int minutes, string stage)
+    private static void Validate(int minutes, string stage, int maxDeadlineMinutes)
     {
         if (minutes <= 0)
             throw new InvalidOperationException($"Норматив «{stage}» должен быть больше нуля");
-        if (minutes > MaxDeadlineMinutes)
-            throw new InvalidOperationException($"Норматив «{stage}» не может превышать 90 дней");
+        if (minutes > maxDeadlineMinutes)
+            throw new InvalidOperationException($"Норматив «{stage}» не может превышать 90 рабочих дней");
     }
 
     private async Task<VndApprovalNormSettings> LoadAsync()

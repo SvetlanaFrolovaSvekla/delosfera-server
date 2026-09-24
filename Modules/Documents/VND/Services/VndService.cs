@@ -216,6 +216,12 @@ public class VndService : IVndService
         query = ApplyLinkedToMeFilter(query, request.LinkedToMeOnly, request.LinkedToMeRelations);
         query = ApplyDraftVisibilityFilter(query, request.DraftOwnerScope);
 
+        // Системные вызовы (ежемесячная сводка по актуализации) идут без HTTP-пользователя —
+        // у них нет и "Избранного".
+        var userId = TryGetCurrentUserId();
+        if (request.FavoritesOnly)
+            query = query.Where(x => _db.VndFavorites.Any(f => f.UserId == userId && f.VndId == x.Id));
+
         // Поиск — только чтение с проекцией в DTO, отслеживание не нужно (AsNoTracking).
         // AsSplitQuery: у VndDocument пять коллекций в Include (ResponsibleExecutors, Rubrics,
         // Keywords, UserGroups, Redactions) — один общий JOIN давал декартово произведение
@@ -230,9 +236,43 @@ public class VndService : IVndService
             ? await BuildLinkedToMeRelationsAsync(entities)
             : null;
 
+        // Избранное пользователя — обычно единицы-десятки id, один лёгкий запрос по PK.
+        var favoriteIds = userId is null
+            ? []
+            : await _db.VndFavorites
+                .Where(f => f.UserId == userId)
+                .Select(f => f.VndId)
+                .ToHashSetAsync();
+
         return entities
-            .Select(x => ToResponse(x, languageCode, today, canViewExtended, relationsByVndId?.GetValueOrDefault(x.Id)))
+            .Select(x =>
+            {
+                var response = ToResponse(x, languageCode, today, canViewExtended, relationsByVndId?.GetValueOrDefault(x.Id));
+                response.IsFavorite = favoriteIds.Contains(x.Id);
+                return response;
+            })
             .ToList();
+    }
+
+    /// <summary>Проставить VndResponse.IsFavorite для текущего пользователя.</summary>
+    private async Task<VndResponse> WithFavoriteAsync(VndResponse response)
+    {
+        var userId = TryGetCurrentUserId();
+        if (userId is not null)
+            response.IsFavorite = await _db.VndFavorites.AnyAsync(f => f.UserId == userId && f.VndId == response.Id);
+        return response;
+    }
+
+    private int? TryGetCurrentUserId()
+    {
+        try
+        {
+            return _currentUser.UserId;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -469,7 +509,7 @@ public class VndService : IVndService
 
         var today = _clock.Today;
         var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
-        return ToResponse(entity, languageCode, today, canViewExtended);
+        return await WithFavoriteAsync(ToResponse(entity, languageCode, today, canViewExtended));
     }
 
     /// <summary>Сводка по срокам актуализации для дашборда планирования ("Планирование
@@ -1669,7 +1709,7 @@ public class VndService : IVndService
         await _db.SaveChangesAsync();
 
         var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
-        return ToResponse(vnd, languageCode, today, canViewExtended);
+        return await WithFavoriteAsync(ToResponse(vnd, languageCode, today, canViewExtended));
     }
 
     /// <summary>Обновляет реквизиты ВНД. TitleRu/En/Kg, TypeId, утверждение/вступление в силу,
@@ -2069,7 +2109,7 @@ public class VndService : IVndService
 
         var today = _clock.Today;
         var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
-        return ToResponse(reloaded, languageCode, today, canViewExtended);
+        return await WithFavoriteAsync(ToResponse(reloaded, languageCode, today, canViewExtended));
     }
 
     public async Task<VndLinksResponse> GetLinksAsync(int vndId, string languageCode)

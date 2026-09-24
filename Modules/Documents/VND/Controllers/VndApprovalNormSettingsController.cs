@@ -33,7 +33,7 @@ public class VndApprovalNormSettingsController : ControllerBase
 
     /// <summary>Сохранить нормативы по умолчанию.</summary>
     /// <response code="200">Нормативы сохранены</response>
-    /// <response code="409">Значение вне диапазона (0; 90 дней]</response>
+    /// <response code="409">Значение вне диапазона (0; 90 рабочих дней]</response>
     [HttpPut]
     [RequirePermission(PermissionCode.ManageVndDictionaries)]
     [ProducesResponseType(typeof(VndApprovalNormSettingsResponse), StatusCodes.Status200OK)]

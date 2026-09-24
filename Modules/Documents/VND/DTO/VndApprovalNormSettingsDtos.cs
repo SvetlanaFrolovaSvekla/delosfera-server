@@ -1,6 +1,7 @@
 namespace delosfera_server.Modules.Documents.VND.DTO;
 
-/// <summary>Нормативы сроков согласования редакции ВНД по умолчанию (в минутах).</summary>
+/// <summary>Нормативы сроков согласования редакции ВНД по умолчанию (в рабочих минутах:
+/// 1 д. = 9 ч = 540 мин, отсчёт только пн–пт 09:00–18:00 по Бишкеку без праздников).</summary>
 public class VndApprovalNormSettingsResponse
 {
     /// <summary>"Первичное согласование".</summary>

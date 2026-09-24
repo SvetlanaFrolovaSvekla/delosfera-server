@@ -7,11 +7,11 @@ public class StartApprovalRequest
     // Список этапов согласования
     public required List<ApprovalStageRequest> Stages { get; set; }
 
-    // Норматив первичного согласования, в минутах
+    // Норматив первичного согласования, в РАБОЧИХ минутах (1 д. = 540, см. VndWorkingCalendar)
     public required int PrimaryDeadlineMinutes { get; set; }
-    // Норматив согласования после исправленных замечаний, в минутах
+    // Норматив согласования после исправленных замечаний, в рабочих минутах
     public required int RepeatDeadlineMinutes { get; set; }
-    // Норматив финальной выдержки, в минутах
+    // Норматив финальной выдержки, в рабочих минутах
     public required int FinalHoldDeadlineMinutes { get; set; }
 
     /// <summary>Кто будет указан инициатором согласования - имеет смысл только когда действие

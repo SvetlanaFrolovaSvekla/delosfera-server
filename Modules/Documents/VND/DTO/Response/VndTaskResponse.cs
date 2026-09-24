@@ -44,6 +44,9 @@ public class VndTaskResponse
     /// <summary>Норматив в минутах для текущей фазы согласования (Primary/Repeat/FinalHold)</summary>
     public int? DeadlineMinutes { get; set; }
 
+    /// <summary>DeadlineMinutes — рабочие минуты (1 д. = 9 ч), см. VndApprovalProcess.UsesWorkingTime.</summary>
+    public bool UsesWorkingTime { get; set; }
+
     /// <summary>Комментарий инициатора к повторному кругу/финальной выдержке — контекст,
     /// зачем документ снова пришёл на согласование.</summary>
     public string? InitiatorComment { get; set; }
