@@ -12,6 +12,10 @@ public class LegacyLinkResolveResponse
 
     public int? VndId { get; set; }
     public string? Code { get; set; }
+    /// <summary>Наименование и статус документа ("active" | "arch" | ...) - для карточки при
+    /// наведении на ссылку в тексте.</summary>
+    public string? Title { get; set; }
+    public string? Status { get; set; }
 
     public int? FileId { get; set; }
     public string? FileName { get; set; }

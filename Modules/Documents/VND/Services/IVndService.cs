@@ -45,7 +45,10 @@ public interface IVndService
     /// текста документа vndId в реальный документ/вложение системы — см.
     /// LegacyLinkResolveResponse и DocxLegacyLinkExtractor. Бросает KeyNotFoundException, если
     /// ссылка ни на что не разрешилась.</summary>
-    Task<LegacyLinkResolveResponse> ResolveLegacyLinkAsync(int vndId, string type, string legacyId);
+    /// redactionId - для db://attachments/{n}: редакция, в тексте которой ссылка (номер вложения
+    /// относится к ЕЁ вложениям); null - текущая редакция документа.
+    Task<LegacyLinkResolveResponse> ResolveLegacyLinkAsync(
+        int vndId, string type, string legacyId, int? redactionId = null, string languageCode = "ru");
     Task<VndRedactionResponse> EditLastRevisionDirectlyAsync(
         int vndId, EditLastRevisionDirectlyRequest request, int currentUserId);
     /// <summary>То же самое, что EditLastRevisionDirectlyAsync, но для ЛЮБОЙ редакции документа,

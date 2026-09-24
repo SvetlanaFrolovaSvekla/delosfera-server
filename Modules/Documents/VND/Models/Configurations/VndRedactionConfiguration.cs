@@ -9,6 +9,9 @@ public class VndRedactionConfiguration : IEntityTypeConfiguration<VndRedaction>
     {
         builder.ToTable("vnd_redaction");
 
+        builder.Property(x => x.LegacyLinksScanKey).HasMaxLength(200);
+        builder.Property(x => x.LegacyAttachmentRefs).HasMaxLength(1000);
+
         // Номер редакции уникален в рамках одного ВНД
         builder.HasIndex(x => new { x.VndId, x.Number }).IsUnique();
 

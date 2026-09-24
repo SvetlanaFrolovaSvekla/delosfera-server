@@ -50,6 +50,7 @@ public static class SettingsChangeCollector
         ["RecurringObligation"] = "Регулярные обязательства",
 
         ["ActualizationSettings"] = "Настройки актуализации",
+        ["VndApprovalNormSettings"] = "Нормативы согласования ВНД",
         ["DocumentTypeDefinition"] = "Типы документов",
         ["CustomDictionary"] = "Пользовательские справочники",
     };

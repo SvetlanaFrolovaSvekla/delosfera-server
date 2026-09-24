@@ -8,6 +8,11 @@ public static class VndServiceExtensions
     public static WebApplicationBuilder AddVndServices(this WebApplicationBuilder builder)
     {
         builder.Services.AddScoped<IVndService, VndService>();
+
+        // Легаси-гиперссылки db://documents/{код} (isrib) из текста редакций - индекс в vnd_link,
+        // чтобы видеть, какая редакция ссылается, и показывать "Ссылающиеся документы" у цели.
+        builder.Services.AddScoped<IVndLegacyLinkIndexer, VndLegacyLinkIndexer>();
+        builder.Services.AddHostedService<VndLegacyLinkIndexWorker>();
         builder.Services.AddScoped<IFileAccessAuthorizer, VndFileAccessAuthorizer>();
 
         // Годовой план актуализации (PLN-01..07): реестр, импорт, связь с циклом
@@ -26,6 +31,11 @@ public static class VndServiceExtensions
         // ActualizationThresholdsRefreshWorker.
         builder.Services.AddScoped<IActualizationBucketSettingsService, ActualizationBucketSettingsService>();
         builder.Services.AddHostedService<ActualizationThresholdsRefreshWorker>();
+
+        // Нормативы согласования редакции ВНД по умолчанию (первичное / после изменений /
+        // финальная выдержка) — справочник в разделе ВНД, предзаполняет модалку запуска
+        // согласования.
+        builder.Services.AddScoped<IVndApprovalNormSettingsService, VndApprovalNormSettingsService>();
 
         // Раздел "Уведомления" → "Настройки рассылок" → "Нормотворчество": ответственные
         // сотрудники СП за актуализацию и ежемесячная сводка им 1-го числа

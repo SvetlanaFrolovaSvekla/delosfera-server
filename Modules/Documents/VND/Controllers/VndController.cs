@@ -244,7 +244,9 @@ public class VndController : ControllerBase
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
     }
 
-    /// <summary>Добавить ссылку на другой (только действующий) ВНД</summary>
+    /// <summary>Добавить ссылку на другой (только действующий) ВНД - "без упоминания в тексте"
+    /// (как раньше) или с привязкой к фрагменту текста редакции (Source) и, при желании, к
+    /// конкретному месту целевого документа (Target) - см. AddVndLinkRequest.</summary>
     [HttpPost("{vndId:int}/links")]
     [RequirePermission(PermissionCode.EditVndRequisites)]
     [ProducesResponseType(typeof(VndLinkResponse), StatusCodes.Status201Created)]
@@ -271,6 +273,7 @@ public class VndController : ControllerBase
             return NoContent();
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
     /// <summary>Разрешить легаси-ссылку db://documents/{code} или db://attachments/{n},
@@ -282,11 +285,12 @@ public class VndController : ControllerBase
     [ProducesResponseType(typeof(LegacyLinkResolveResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LegacyLinkResolveResponse>> ResolveLegacyLink(
-        int vndId, [FromQuery] string type, [FromQuery] string legacyId)
+        int vndId, [FromQuery] string type, [FromQuery] string legacyId, [FromQuery] int? redactionId = null)
     {
         try
         {
-            return Ok(await _service.ResolveLegacyLinkAsync(vndId, type, legacyId));
+            var language = _languageResolver.Resolve(Request);
+            return Ok(await _service.ResolveLegacyLinkAsync(vndId, type, legacyId, redactionId, language));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
     }

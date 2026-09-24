@@ -133,4 +133,16 @@ public class VndRedaction : IAuditableEntity
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>"Отпечаток" файлов текста редакции (id файлов RU/KG/EN + даты их замены), для
+    /// которых легаси-гиперссылки db://documents/{код} уже проиндексированы в vnd_link (см.
+    /// VndLegacyLinkIndexer). Не совпадает с текущими файлами (или null) - редакцию нужно
+    /// переиндексировать.</summary>
+    public string? LegacyLinksScanKey { get; set; }
+
+    /// <summary>Номера вложений из легаси-гиперссылок db://attachments/{n} в тексте этой редакции,
+    /// по языкам: "ru:1,2;kg:1" (null - таких ссылок нет). Заполняется тем же индексатором
+    /// (VndLegacyLinkIndexer), что и LegacyLinksScanKey. Номер n - порядковый (1-based) номер
+    /// вложения ЭТОЙ редакции (по возрастанию id), как было принято в isrib.</summary>
+    public string? LegacyAttachmentRefs { get; set; }
 }

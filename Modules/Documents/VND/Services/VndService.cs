@@ -2081,91 +2081,132 @@ public class VndService : IVndService
                       .FirstOrDefaultAsync(x => x.Id == vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
-        var outgoing = await _db.Set<VndLink>()
+        // Легаси-гиперссылки db://documents/{код} (isrib) из текста ВСЕХ редакций этого документа
+        // хранятся в vnd_link (Kind = LegacyText) - перед показом досинхронизируем индекс для
+        // редакций, чьи файлы поменялись с прошлого раза (обычно - ничего не делает). Ссылки ИЗ
+        // других документов на этот индексируются фоновым VndLegacyLinkIndexWorker и при открытии
+        // "Связей" тех документов. Ошибка индексации не должна ронять саму вкладку.
+        try
+        {
+            await new VndLegacyLinkIndexer(_db, _fileService, _legacyLinkExtractor, _logger).IndexVndAsync(vndId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Не удалось обновить индекс легаси-ссылок ВНД {VndId}", vndId);
+            _db.ChangeTracker.Clear();
+        }
+
+        var outgoing = await _db.VndLinks
+            .AsNoTracking()
             .Where(l => l.SourceVndId == vndId)
             .Include(l => l.TargetVnd)
+            .Include(l => l.SourceRedaction)
+            .Include(l => l.TargetRedaction)
             .ToListAsync();
 
-        var incoming = await _db.Set<VndLink>()
+        var incoming = await _db.VndLinks
+            .AsNoTracking()
             .Where(l => l.TargetVndId == vndId)
             .Include(l => l.SourceVnd)
+            .Include(l => l.SourceRedaction)
+            .Include(l => l.TargetRedaction)
             .ToListAsync();
+
+        var relatedVndIds = outgoing.Select(l => l.TargetVndId)
+            .Concat(incoming.Select(l => l.SourceVndId))
+            .Append(vndId)
+            .Distinct()
+            .ToList();
+        var currentRedactionIds = await _db.VndDocuments
+            .Where(d => d.CurrentRedactionId != null && relatedVndIds.Contains(d.Id))
+            .Select(d => d.CurrentRedactionId!.Value)
+            .ToListAsync();
+        var currentSet = currentRedactionIds.ToHashSet();
 
         var response = new VndLinksResponse
         {
-            Outgoing = outgoing.Select(l => ToLinkResponse(l.Id, l.TargetVnd!, languageCode)).ToList(),
-            Incoming = incoming.Select(l => ToLinkResponse(l.Id, l.SourceVnd!, languageCode)).ToList()
+            Outgoing = outgoing
+                .OrderBy(l => l.SourceRedaction?.Number ?? 0)
+                .ThenBy(l => l.Kind)
+                .ThenBy(l => l.Id)
+                .Select(l => ToLinkResponse(l, l.TargetVnd!, languageCode, currentSet))
+                .ToList(),
+            Incoming = incoming
+                .OrderBy(l => l.SourceVndId)
+                .ThenBy(l => l.SourceRedaction?.Number ?? 0)
+                .ThenBy(l => l.Id)
+                .Select(l => ToLinkResponse(l, l.SourceVnd!, languageCode, currentSet))
+                .ToList(),
         };
 
-        // Легаси-гиперссылки db://... унаследованные из старой системы (isrib) — см.
-        // обсуждение с Пупуриком (документ 7985/ред5): извлекаем их из текста текущей редакции
-        // и подмешиваем как автоматически обнаруженные. В vnd_link они не хранятся — это
-        // вычисляется на лету при каждом запросе связей, чтобы не заводить отдельную таблицу
-        // и миграцию под MVP этой функциональности.
-        if (vnd.CurrentRedaction is { DocFileRuId: > 0 } redaction)
+        // Ссылки на СОБСТВЕННЫЕ вложения документа (db://attachments/{n}) - из текста КАЖДОЙ
+        // редакции (номера уже извлечены индексатором выше, см. VndRedaction.LegacyAttachmentRefs).
+        // Номер вложения относится к вложениям ИМЕННО той редакции, в тексте которой ссылка.
+        var redactionsWithRefs = await _db.VndRedactions
+            .AsNoTracking()
+            .Where(r => r.VndId == vndId && r.LegacyAttachmentRefs != null)
+            .Include(r => r.Attachments)
+            .ThenInclude(a => a.FileAttachment)
+            .OrderBy(r => r.Number)
+            .ToListAsync();
+
+        foreach (var r in redactionsWithRefs)
         {
-            var refs = await ExtractLegacyReferencesAsync(redaction.DocFileRuId);
-
-            if (refs.DocumentCodes.Count > 0)
-            {
-                var alreadyLinkedIds = response.Outgoing.Select(x => x.VndId).ToHashSet();
-                var byCode = await _db.VndDocuments
-                    .Where(x => refs.DocumentCodes.Contains(x.Code) && x.Id != vndId)
-                    .ToListAsync();
-
-                foreach (var doc in byCode)
-                {
-                    if (!alreadyLinkedIds.Add(doc.Id)) continue; // уже есть как ручная связь
-                    var autoLink = ToLinkResponse(0, doc, languageCode);
-                    autoLink.IsAutoDetected = true;
-                    response.Outgoing.Add(autoLink);
-                }
-            }
-
-            var attachmentsInOrder = redaction.Attachments
+            var attachmentsInOrder = r.Attachments
                 .OrderBy(a => a.Id)
                 .Select(a => a.FileAttachment!)
                 .ToList();
 
-            response.AttachmentReferences = refs.AttachmentIndexes.Select(legacyIndex =>
+            foreach (var (legacyIndex, languages) in ParseLegacyAttachmentRefs(r.LegacyAttachmentRefs))
             {
                 var file = legacyIndex >= 1 && legacyIndex <= attachmentsInOrder.Count
                     ? attachmentsInOrder[legacyIndex - 1]
                     : null;
 
-                return new VndAttachmentLinkResponse
+                response.AttachmentReferences.Add(new VndAttachmentLinkResponse
                 {
                     LegacyIndex = legacyIndex,
                     FileId = file?.Id ?? 0,
                     FileName = file?.OriginalFileName ?? $"Вложение №{legacyIndex}",
                     Resolved = file != null,
-                };
-            }).ToList();
+                    RedactionId = r.Id,
+                    RedactionNumber = r.Number,
+                    RedactionCode = r.Code,
+                    IsCurrentRedaction = vnd.CurrentRedactionId == r.Id,
+                    RedactionApprovalStatus = r.ApprovalStatus.ToString(),
+                    Languages = languages,
+                });
+            }
         }
 
         return response;
     }
 
-    /// <summary>Скачивает Word-файл текущей редакции и извлекает из него легаси-гиперссылки
-    /// db://... — см. DocxLegacyLinkExtractor. Ошибки скачивания/парсинга не пробрасываются
-    /// дальше (см. её же catch) — не должны ронять показ вкладки "Связи".</summary>
-    private async Task<LegacyLinkReferences> ExtractLegacyReferencesAsync(int docFileId)
+    /// <summary>Разбирает VndRedaction.LegacyAttachmentRefs ("ru:1,2;kg:1") в список (номер
+    /// вложения → языки текста, где он встречается), по возрастанию номера.</summary>
+    private static List<(int Index, List<string> Languages)> ParseLegacyAttachmentRefs(string? value)
     {
-        try
+        var result = new SortedDictionary<int, List<string>>();
+        if (string.IsNullOrWhiteSpace(value)) return [];
+
+        foreach (var part in value.Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
-            var (stream, _, _) = await _fileService.DownloadAsync(docFileId);
-            await using (stream)
+            var colon = part.IndexOf(':');
+            if (colon <= 0) continue;
+            var lang = part[..colon];
+            foreach (var raw in part[(colon + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries))
             {
-                return _legacyLinkExtractor.Extract(stream);
+                if (!int.TryParse(raw, out var index)) continue;
+                if (!result.TryGetValue(index, out var langs)) result[index] = langs = [];
+                if (!langs.Contains(lang)) langs.Add(lang);
             }
         }
-        catch
-        {
-            return LegacyLinkReferences.Empty;
-        }
+
+        return result.Select(kv => (kv.Key, kv.Value)).ToList();
     }
 
-    public async Task<LegacyLinkResolveResponse> ResolveLegacyLinkAsync(int vndId, string type, string legacyId)
+    public async Task<LegacyLinkResolveResponse> ResolveLegacyLinkAsync(
+        int vndId, string type, string legacyId, int? redactionId = null, string languageCode = "ru")
     {
         if (type == "documents")
         {
@@ -2175,7 +2216,11 @@ public class VndService : IVndService
             var doc = await _db.VndDocuments.FirstOrDefaultAsync(x => x.Code == code)
                       ?? throw new KeyNotFoundException($"Документ с кодом {legacyId} не найден");
 
-            return new LegacyLinkResolveResponse { Kind = "vnd", VndId = doc.Id, Code = doc.Code };
+            return new LegacyLinkResolveResponse
+            {
+                Kind = "vnd", VndId = doc.Id, Code = doc.Code,
+                Title = doc.ResolveTitle(languageCode), Status = MapStatusBack(doc.Status),
+            };
         }
 
         if (type == "attachments")
@@ -2183,14 +2228,22 @@ public class VndService : IVndService
             if (!int.TryParse(legacyId, out var legacyIndex) || legacyIndex < 1)
                 throw new KeyNotFoundException($"Некорректный номер вложения: {legacyId}");
 
-            var vnd = await _db.VndDocuments
-                          .Include(x => x.CurrentRedaction)
-                          .ThenInclude(r => r!.Attachments)
-                          .ThenInclude(a => a.FileAttachment)
-                          .FirstOrDefaultAsync(x => x.Id == vndId)
+            // Номер вложения относится к вложениям той редакции, в тексте которой стоит ссылка
+            // (redactionId - редакция, открытая на вкладке «Редакции»); без него - как раньше,
+            // к текущей редакции документа.
+            var vnd = await _db.VndDocuments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == vndId)
                       ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
+            var targetRedactionId = redactionId ?? vnd.CurrentRedactionId;
 
-            var attachmentsInOrder = vnd.CurrentRedaction?.Attachments
+            var redaction = targetRedactionId is null
+                ? null
+                : await _db.VndRedactions
+                    .AsNoTracking()
+                    .Include(r => r.Attachments)
+                    .ThenInclude(a => a.FileAttachment)
+                    .FirstOrDefaultAsync(r => r.Id == targetRedactionId && r.VndId == vndId);
+
+            var attachmentsInOrder = redaction?.Attachments
                 .OrderBy(a => a.Id)
                 .Select(a => a.FileAttachment!)
                 .ToList() ?? [];
@@ -2221,35 +2274,169 @@ public class VndService : IVndService
         if (target.Status != VndStatus.Active)
             throw new InvalidOperationException("Ссылку можно добавить только на действующий ВНД");
 
-        var alreadyLinked = await _db.Set<VndLink>()
-            .AnyAsync(l => l.SourceVndId == vndId && l.TargetVndId == request.TargetVndId);
-        if (alreadyLinked)
-            throw new InvalidOperationException("Ссылка на этот документ уже добавлена");
+        var source = request.Source is null ? null : await ValidateLinkAnchorAsync(request.Source, vndId, "ссылающегося");
+        var targetAnchor = request.Target is null ? null : await ValidateLinkAnchorAsync(request.Target, request.TargetVndId, "целевого");
 
-        var link = new VndLink { SourceVndId = vndId, TargetVndId = request.TargetVndId };
-        _db.Set<VndLink>().Add(link);
+        var link = new VndLink
+        {
+            SourceVndId = vndId,
+            TargetVndId = request.TargetVndId,
+            Kind = VndLinkKind.Manual,
+            CreatedByUserId = _currentUser.UserId,
+            CreatedAt = DateTime.UtcNow,
+        };
+        if (source is not null)
+        {
+            link.SourceRedactionId = source.RedactionId;
+            link.SourceDocumentTarget = source.DocumentTarget;
+            link.SourceText = source.Text;
+            link.SourcePrefix = source.Prefix;
+            link.SourceSuffix = source.Suffix;
+            link.SourceOccurrence = source.Occurrence;
+        }
+        if (targetAnchor is not null)
+        {
+            link.TargetRedactionId = targetAnchor.RedactionId;
+            link.TargetDocumentTarget = targetAnchor.DocumentTarget;
+            link.TargetText = targetAnchor.Text;
+            link.TargetPrefix = targetAnchor.Prefix;
+            link.TargetSuffix = targetAnchor.Suffix;
+            link.TargetOccurrence = targetAnchor.Occurrence;
+        }
+
+        // Одна и та же ссылка дважды не нужна: "без упоминания в тексте" - одна на пару
+        // документов (как и раньше), "с упоминанием" - одна на одно и то же место текста.
+        var sameLinks = await _db.VndLinks
+            .Where(l => l.SourceVndId == vndId && l.TargetVndId == request.TargetVndId && l.Kind == VndLinkKind.Manual)
+            .ToListAsync();
+        var duplicate = sameLinks.Any(l =>
+            l.SourceRedactionId == link.SourceRedactionId
+            && l.SourceDocumentTarget == link.SourceDocumentTarget
+            && l.SourceText == link.SourceText
+            && l.SourceOccurrence == link.SourceOccurrence
+            && l.TargetRedactionId == link.TargetRedactionId
+            && l.TargetText == link.TargetText
+            && l.TargetOccurrence == link.TargetOccurrence);
+        if (duplicate)
+            throw new InvalidOperationException(source is null
+                ? "Ссылка на этот документ уже добавлена"
+                : "Ссылка на этот документ уже прикреплена к этому месту текста");
+
+        _db.VndLinks.Add(link);
         await _db.SaveChangesAsync();
 
-        return ToLinkResponse(link.Id, target, languageCode);
+        var saved = await _db.VndLinks
+            .AsNoTracking()
+            .Include(l => l.SourceRedaction)
+            .Include(l => l.TargetRedaction)
+            .FirstAsync(l => l.Id == link.Id);
+        var currentSet = await _db.VndDocuments
+            .Where(d => (d.Id == vndId || d.Id == request.TargetVndId) && d.CurrentRedactionId != null)
+            .Select(d => d.CurrentRedactionId!.Value)
+            .ToListAsync();
+
+        return ToLinkResponse(saved, target, languageCode, currentSet.ToHashSet());
+    }
+
+    private static readonly HashSet<string> LinkAnchorLanguages = ["ru", "kg", "en"];
+
+    /// <summary>Проверяет "якорь" ссылки (редакция принадлежит документу, на выбранном языке есть
+    /// текст, фрагмент не пустой) и нормализует его (обрезка длины). whose - для текста ошибки.</summary>
+    private async Task<VndLinkAnchorRequest> ValidateLinkAnchorAsync(VndLinkAnchorRequest anchor, int vndId, string whose)
+    {
+        var redaction = await _db.VndRedactions.AsNoTracking().FirstOrDefaultAsync(r => r.Id == anchor.RedactionId)
+                        ?? throw new KeyNotFoundException($"Редакция с id={anchor.RedactionId} не найдена");
+        if (redaction.VndId != vndId)
+            throw new InvalidOperationException($"Редакция {redaction.Code} не относится к документу {whose} ВНД");
+
+        var lang = (anchor.DocumentTarget ?? "").Trim().ToLowerInvariant();
+        if (!LinkAnchorLanguages.Contains(lang))
+            throw new InvalidOperationException($"Неизвестный язык текста: {anchor.DocumentTarget}");
+        var hasText = lang switch
+        {
+            "ru" => redaction.DocFileRuId > 0,
+            "kg" => redaction.DocFileKgId != null,
+            _ => redaction.DocFileEnId != null,
+        };
+        if (!hasText)
+            throw new InvalidOperationException($"У редакции {redaction.Code} нет текста на выбранном языке");
+
+        var text = (anchor.Text ?? "").Trim();
+        if (text.Length == 0)
+            throw new InvalidOperationException("Выделите фрагмент текста, к которому нужно прикрепить ссылку");
+
+        static string? Cut(string? value, int max) =>
+            string.IsNullOrEmpty(value) ? null : value.Length <= max ? value : value[..max];
+
+        return new VndLinkAnchorRequest
+        {
+            RedactionId = redaction.Id,
+            DocumentTarget = lang,
+            Text = Cut(text, 1000)!,
+            // Префикс - хвост текста ДО фрагмента, суффикс - начало текста ПОСЛЕ: обрезаем с
+            // "дальней" от фрагмента стороны, чтобы не потерять самый ценный контекст.
+            Prefix = anchor.Prefix is { Length: > 200 } p ? p[^200..] : Cut(anchor.Prefix, 200),
+            Suffix = Cut(anchor.Suffix, 200),
+            Occurrence = anchor.Occurrence is >= 0 ? anchor.Occurrence : null,
+        };
     }
 
     public async Task DeleteLinkAsync(int vndId, int linkId)
     {
-        var link = await _db.Set<VndLink>()
+        var link = await _db.VndLinks
                        .FirstOrDefaultAsync(l => l.Id == linkId && (l.SourceVndId == vndId || l.TargetVndId == vndId))
                    ?? throw new KeyNotFoundException($"Связь с id={linkId} не найдена");
 
-        _db.Set<VndLink>().Remove(link);
+        if (link.Kind == VndLinkKind.LegacyText)
+            throw new InvalidOperationException(
+                "Эта ссылка прошита в самом тексте редакции - она исчезнет, когда гиперссылку уберут из файла");
+
+        _db.VndLinks.Remove(link);
         await _db.SaveChangesAsync();
     }
 
-    private static VndLinkResponse ToLinkResponse(int linkId, VndDocument doc, string languageCode) => new()
+    private static VndLinkResponse ToLinkResponse(
+        VndLink link, VndDocument otherSide, string languageCode, IReadOnlySet<int> currentRedactionIds) => new()
     {
-        Id = linkId,
-        VndId = doc.Id,
-        Code = doc.Code,
-        Title = doc.ResolveTitle(languageCode),
-        Status = MapStatusBack(doc.Status)
+        Id = link.Id,
+        VndId = otherSide.Id,
+        Code = otherSide.Code,
+        Title = otherSide.ResolveTitle(languageCode),
+        Status = MapStatusBack(otherSide.Status),
+        Kind = link.Kind == VndLinkKind.LegacyText ? "legacy" : "manual",
+        IsAutoDetected = link.Kind == VndLinkKind.LegacyText,
+        CreatedAt = link.CreatedAt,
+        Source = link.SourceRedaction is { } sr
+            ? new VndLinkAnchorResponse
+            {
+                RedactionId = sr.Id,
+                RedactionNumber = sr.Number,
+                RedactionCode = sr.Code,
+                IsCurrentRedaction = currentRedactionIds.Contains(sr.Id),
+                RedactionApprovalStatus = sr.ApprovalStatus.ToString(),
+                DocumentTarget = link.SourceDocumentTarget,
+                Text = link.SourceText,
+                Prefix = link.SourcePrefix,
+                Suffix = link.SourceSuffix,
+                Occurrence = link.SourceOccurrence,
+                LegacyCode = link.LegacyCode,
+            }
+            : null,
+        Target = link.TargetRedaction is { } tr
+            ? new VndLinkAnchorResponse
+            {
+                RedactionId = tr.Id,
+                RedactionNumber = tr.Number,
+                RedactionCode = tr.Code,
+                IsCurrentRedaction = currentRedactionIds.Contains(tr.Id),
+                RedactionApprovalStatus = tr.ApprovalStatus.ToString(),
+                DocumentTarget = link.TargetDocumentTarget,
+                Text = link.TargetText,
+                Prefix = link.TargetPrefix,
+                Suffix = link.TargetSuffix,
+                Occurrence = link.TargetOccurrence,
+            }
+            : null,
     };
 
     public async Task<VndRedactionResponse> EditLastRevisionDirectlyAsync(
