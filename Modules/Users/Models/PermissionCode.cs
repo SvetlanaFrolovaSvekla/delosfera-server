@@ -326,5 +326,11 @@ public enum PermissionCode
     /// отметки "прочитано/не прочитано", доступ к приложенным файлам. Роль главного редактора ВНД.
     /// Отправить предложение может любой пользователь с правом ViewVnd — отдельного права на это нет.
     /// </summary>
-    ManageVndProposals = 61
+    ManageVndProposals = 61,
+
+    /// <summary>Просмотр реестра оп-риск событий (716-П).</summary>
+    ViewRiskEvents = 62,
+
+    /// <summary>Регистрация и ведение оп-риск событий.</summary>
+    ManageRiskEvents = 63
 }
