@@ -93,13 +93,21 @@ public class SubstitutionController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
-    /// <summary>Исполнить заявку (УЧР): приказ оформлен.</summary>
+    /// <summary>
+    /// Исполнить заявку (УЧР): приказ оформлен. Исполнять вправе назначенный на этапе
+    /// «УЧР» кадровик (у него нет права «видеть все СЗ») либо держатель ViewAllSz —
+    /// проверка внутри сервиса, поэтому жёсткого RequirePermission здесь нет.
+    /// </summary>
     [HttpPost("{id:int}/execute")]
-    [RequirePermission(PermissionCode.ViewAllSz)]
     public async Task<IActionResult> Execute(int id, CancellationToken ct)
     {
-        try { return Ok(await _service.ExecuteAsync(id, _currentUser.UserId, ct)); }
+        try
+        {
+            return Ok(await _service.ExecuteAsync(
+                id, _currentUser.UserId, _currentUser.HasPermission(PermissionCode.ViewAllSz), ct));
+        }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 

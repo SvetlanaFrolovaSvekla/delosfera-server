@@ -18,7 +18,7 @@ public interface ISubstitutionService
     Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
     Task<SubstitutionDetails> ApproveAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
     Task<SubstitutionDetails> RejectAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
-    Task<SubstitutionDetails> ExecuteAsync(int id, int actorUserId, CancellationToken ct = default);
+    Task<SubstitutionDetails> ExecuteAsync(int id, int actorUserId, bool canViewAll, CancellationToken ct = default);
     Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
     Task DeleteAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
 
@@ -263,13 +263,23 @@ public class SubstitutionService : ISubstitutionService
         return (await GetAsync(id, ct))!;
     }
 
-    public async Task<SubstitutionDetails> ExecuteAsync(int id, int actorUserId, CancellationToken ct = default)
+    public async Task<SubstitutionDetails> ExecuteAsync(
+        int id, int actorUserId, bool canViewAll, CancellationToken ct = default)
     {
-        var entity = await _db.SubstitutionRequests.FirstOrDefaultAsync(x => x.Id == id, ct)
+        var entity = await _db.SubstitutionRequests
+            .Include(x => x.Approvals)
+            .FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
 
         if (entity.Status != SubstitutionStatus.OnExecution)
             throw new InvalidOperationException("Исполнить можно только заявку на исполнении");
+
+        // Исполняет назначенный на этапе «УЧР» кадровик (у него нет широкого права
+        // «видеть все СЗ») либо держатель ViewAllSz. Без этой развилки исполнить мог
+        // только администратор, а кнопка у самого УЧР не появлялась.
+        var isHrExecutor = entity.Approvals.Any(a => a.RoleLabel == "УЧР" && a.UserId == actorUserId);
+        if (!canViewAll && !isHrExecutor)
+            throw new UnauthorizedAccessException("Исполнить заявку может назначенный кадровик УЧР или сотрудник с доступом ко всем СЗ");
 
         entity.Status = SubstitutionStatus.Executed;
         entity.UpdatedAt = DateTime.UtcNow;
