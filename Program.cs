@@ -127,6 +127,9 @@ builder.AddMeetingServices();
 builder.AddIntegrationServices();
 builder.AddSearchServices();
 
+// Онлайн-соредактирование вложений через OnlyOffice Document Server (COOP-1).
+builder.AddCoauthoringServices();
+
 // Разовую работу при первом обращении к данным делаем заранее и вхолостую:
 // иначе она достаётся тому, кто первым открыл раздел после выкладки.
 builder.Services.AddHostedService<delosfera_server.Common.Services.WarmupWorker>();
@@ -148,6 +151,12 @@ builder.Services.AddScoped<
     delosfera_server.Modules.Obligations.Services.IObligationService,
     delosfera_server.Modules.Obligations.Services.ObligationService>();
 builder.Services.AddHostedService<delosfera_server.Modules.Obligations.Services.ObligationWorker>();
+
+// События операционного риска (RISK-1, 716-П / НБКР): поднимаются с шагов
+// согласования и карточек документов, риск-подразделение ведёт по ним реестр.
+builder.Services.AddScoped<
+    delosfera_server.Modules.RiskEvents.Services.IRiskEventService,
+    delosfera_server.Modules.RiskEvents.Services.RiskEventService>();
 
 // Канцелярия: книга регистрации входящих и исходящих. Запросы регулятора и
 // обращения клиентов — категории писем, а не отдельные реестры.

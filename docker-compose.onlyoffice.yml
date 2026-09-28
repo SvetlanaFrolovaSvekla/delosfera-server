@@ -1,0 +1,44 @@
+# OnlyOffice Document Server для онлайн-соредактирования вложений (COOP-1).
+#
+# ВНЕШНЯЯ инфраструктура: сам Delosfera этот сервис не поднимает и от его наличия в
+# рантайме не зависит (без настроенной секции OnlyOffice интеграция просто выключена).
+# Файл ОТДЕЛЬНЫЙ и текущий compose не трогает — поднимается своей командой:
+#
+#   docker compose -f docker-compose.onlyoffice.yml up -d
+#
+# Затем задайте приложению секцию OnlyOffice (env / user-secrets):
+#   OnlyOffice__ServerUrl   = http(s)://<адрес-этого-DS>            (напр. http://localhost:8080)
+#   OnlyOffice__JwtSecret   = <тот же секрет, что JWT_SECRET ниже>
+#   OnlyOffice__ApiPublicUrl= http(s)://<адрес НАШЕГО API, видимый из контейнера DS>
+#
+# Важно: JWT_SECRET здесь и OnlyOffice__JwtSecret в приложении ДОЛЖНЫ СОВПАДАТЬ —
+# на нём держится подпись конфига редактора и валидация callback'а. Значение НЕ
+# коммитьте: задайте через .env или переменные окружения хоста.
+
+services:
+  onlyoffice-documentserver:
+    image: onlyoffice/documentserver:8.2
+    container_name: delosfera-onlyoffice
+    restart: unless-stopped
+    ports:
+      - "8080:80"      # http://localhost:8080 → OnlyOffice__ServerUrl
+    environment:
+      # Включаем обязательную JWT-подпись запросов (в проде выключать нельзя).
+      JWT_ENABLED: "true"
+      JWT_SECRET: "${ONLYOFFICE_JWT_SECRET:?задайте ONLYOFFICE_JWT_SECRET (== OnlyOffice__JwtSecret приложения)}"
+      JWT_HEADER: "Authorization"
+      JWT_IN_BODY: "true"
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_log:/var/log/onlyoffice
+      - onlyoffice_cache:/var/lib/onlyoffice/documentserver/App_Data/cache/files
+    # DS ходит на НАШ API за файлом и с callback'ом. Если API — на хосте, а DS — в
+    # контейнере, укажите в OnlyOffice__ApiPublicUrl адрес, доступный из контейнера
+    # (напр. http://host.docker.internal:5199), и раскомментируйте:
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+
+volumes:
+  onlyoffice_data:
+  onlyoffice_log:
+  onlyoffice_cache:

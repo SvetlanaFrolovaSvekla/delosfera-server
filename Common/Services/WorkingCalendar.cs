@@ -54,6 +54,38 @@ public static class WorkingCalendar
         return TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(cursor, DateTimeKind.Unspecified), Zone);
     }
 
+    /// <summary>
+    /// Сколько рабочих часов (пн–пт, 09:00–18:00 по времени банка) укладывается между двумя
+    /// моментами UTC. Обратная к <see cref="AddWorkingHours"/> операция: process mining меряет
+    /// длительность этапов так же, как движок отсчитывает нормативы, иначе «долгий» этап,
+    /// пришедшийся на выходные, выглядел бы узким местом там, где просто никто не работал.
+    /// </summary>
+    public static double WorkingHoursBetween(DateTime fromUtc, DateTime toUtc)
+    {
+        if (toUtc <= fromUtc) return 0;
+
+        var cursor = TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.SpecifyKind(fromUtc, DateTimeKind.Utc), Zone);
+        var end = TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.SpecifyKind(toUtc, DateTimeKind.Utc), Zone);
+
+        var total = 0.0;
+        // Верхняя граница цикла — страховка от зацикливания; шаг цикла — рабочий день.
+        var guard = 0;
+        while (cursor < end && guard++ < 200_000)
+        {
+            cursor = MoveToWorkingTime(cursor);
+            if (cursor >= end) break;
+
+            var dayEnd = cursor.Date.AddHours(WorkEndHour);
+            var segmentEnd = end < dayEnd ? end : dayEnd;
+            total += (segmentEnd - cursor).TotalHours;
+            cursor = dayEnd; // следующая итерация перекатит на утро следующего рабочего дня
+        }
+
+        return total;
+    }
+
     /// <summary>Ближайший рабочий момент не раньше <paramref name="local"/> (локальное время банка).</summary>
     private static DateTime MoveToWorkingTime(DateTime local)
     {

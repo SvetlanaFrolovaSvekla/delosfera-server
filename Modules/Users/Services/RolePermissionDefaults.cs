@@ -32,6 +32,10 @@ public static class RolePermissionDefaults
             PermissionCode.RegisterCorrespondence,
             PermissionCode.ViewHrOrders,
             PermissionCode.ManageHrOrders,
+            // RISK-1: администратор ведёт базу событий операционного риска, пока
+            // роль риск-подразделения не заведена в справочнике отдельно.
+            PermissionCode.ViewRiskEvents,
+            PermissionCode.ManageRiskEvents,
         ]),
 
         // Делопроизводство: книга регистрации — их основная работа. Реестр записок

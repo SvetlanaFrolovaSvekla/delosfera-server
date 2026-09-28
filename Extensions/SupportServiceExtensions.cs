@@ -1,6 +1,7 @@
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Signing.Services;
+using delosfera_server.Modules.Signing.Services.Oep;
 
 namespace delosfera_server.Extensions;
 
@@ -20,6 +21,13 @@ public static class SupportServiceExtensions
         // службы меток не влиял на остальные обращения наружу.
         builder.Services.AddHttpClient("timestamp");
         builder.Services.AddScoped<ITimestampService, TimestampService>();
+
+        // Облачная ЭП ГП «Инфоком» (ОЭП, INT-03): подпись отпечатка через облако УЦ
+        // по пин-коду. Типизированный HttpClient — свой таймаут, Bearer и User-Agent
+        // ставятся в самом клиенте. Без Oep:BaseUrl/ServiceToken интеграция выключена.
+        builder.Services.Configure<OepOptions>(builder.Configuration.GetSection(OepOptions.Section));
+        builder.Services.AddHttpClient<IOepSignatureClient, OepSignatureClient>();
+        builder.Services.AddScoped<IOepSigningService, OepSigningService>();
 
         // Ознакомление с документами (Б-19): роспись сотрудника под приказом или ВНД
         builder.Services.AddScoped<IAcknowledgementService, AcknowledgementService>();

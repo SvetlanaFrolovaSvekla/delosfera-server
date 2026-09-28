@@ -54,13 +54,23 @@ public class RouteEngine : IRouteEngine
             .Select(d => d.Author!.OrgUnitId)
             .FirstOrDefaultAsync();
 
-        // Подразделение из карточки: у записки это адресное подразделение, у
-        // заявки на закупку — инициирующее.
-        var targetUnit = await _db.SzDocuments.AsNoTracking()
+        // Подразделение из карточки — на него ссылаются роли target-unit-head/curator.
+        // Для кадровой СЗ (HrKindId задан) это ПОДРАЗДЕЛЕНИЕ СОТРУДНИКА (EmployeeUnitId):
+        // его начальник — профильный согласующий, его куратор — курирующий зампред
+        // (алгоритм кадровой СЗ). Для обычной записки — адресное подразделение,
+        // для заявки на закупку — инициирующее.
+        var sz = await _db.SzDocuments.AsNoTracking()
             .Where(s => s.DocumentId == documentId)
-            .Select(s => s.CorrespondentUnitId ?? s.EmployeeUnitId ?? s.AuthorUnitId)
-            .FirstOrDefaultAsync()
-            ?? await _db.ProcurementRequests.AsNoTracking()
+            .Select(s => new { s.HrKindId, s.CorrespondentUnitId, s.EmployeeUnitId, s.AuthorUnitId })
+            .FirstOrDefaultAsync();
+
+        int? targetUnit;
+        if (sz is not null)
+            targetUnit = sz.HrKindId is not null
+                ? sz.EmployeeUnitId ?? sz.CorrespondentUnitId ?? sz.AuthorUnitId
+                : sz.CorrespondentUnitId ?? sz.EmployeeUnitId ?? sz.AuthorUnitId;
+        else
+            targetUnit = await _db.ProcurementRequests.AsNoTracking()
                 .Where(r => r.DocumentId == documentId)
                 .Select(r => r.InitiatorUnitId)
                 .FirstOrDefaultAsync();
@@ -125,20 +135,43 @@ public class RouteEngine : IRouteEngine
                 "Не удалось определить согласующих: " + string.Join("; ", unresolved.Distinct()) +
                 ". Заполните справочник оргструктуры или состав органа");
 
-        var instance = new RouteInstance
+        // Автор не согласует сам себя: если роль этапа разрешилась в автора записки
+        // (например «руководитель подразделения автора», когда директор филиала сам
+        // создал кадровую СЗ), этап пропускаем — по алгоритму он уходит сразу дальше.
+        var authorId = await _db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?) d.AuthorId)
+            .FirstOrDefaultAsync();
+
+        // Автор попал в этап ТОЛЬКО через роль (не назван поимённо) и это он сам.
+        // Поимённо названного автора не трогаем — его указали намеренно.
+        bool IsAuthorByRole(RouteTemplateParticipant tp) =>
+            tp.UserId is null && authorId is not null
+            && resolved.TryGetValue(tp.Id, out var byRole) && byRole == authorId.Value;
+
+        var stepModels = new List<RouteStep>();
+        var order = 1;
+        foreach (var ts in steps)
         {
-            DocumentId = documentId,
-            TemplateId = templateId,
-            Status = RouteInstanceStatus.Draft,
-            Steps = steps.Select(ts => new RouteStep
+            // Из согласующих этапа убираем автора, пришедшего ролью (сам себе визу не ставит).
+            var keep = ts.Participants.Where(tp => !IsAuthorByRole(tp)).ToList();
+
+            // Этап согласования, где после этого не осталось ни одного согласующего,
+            // пропускаем целиком. Этапы подписания/иные с явными участниками не режем.
+            if (keep.Count == 0 && ts.Kind == StepKind.Approval)
+                continue;
+
+            stepModels.Add(new RouteStep
             {
-                Order = ts.Order,
+                Order = order++,
                 Mode = ts.Mode,
                 Kind = ts.Kind,
                 IsFinalMethodology = ts.IsFinalMethodology,
                 TimeNormHours = ts.TimeNormHours,
+                // Кворум имеет смысл только на развилке — на последовательном этапе его не переносим.
+                Quorum = ts.Mode == StepMode.Parallel ? ts.Quorum : null,
                 RequiredSignatureLevel = ts.RequiredSignatureLevel,
-                Participants = ts.Participants.Select(tp => new RouteParticipant
+                Participants = (keep.Count > 0 ? keep : ts.Participants).Select(tp => new RouteParticipant
                 {
                     UserId = tp.UserId ?? (resolved.TryGetValue(tp.Id, out var byRole) ? byRole : null),
                     UnitId = tp.UnitId,
@@ -146,7 +179,19 @@ public class RouteEngine : IRouteEngine
                     Required = tp.Required,
                     State = ParticipantState.Pending
                 }).ToList()
-            }).ToList()
+            });
+        }
+
+        if (stepModels.Count == 0)
+            throw new InvalidOperationException(
+                "После исключения автора в маршруте не осталось согласующих — назначьте другого согласующего");
+
+        var instance = new RouteInstance
+        {
+            DocumentId = documentId,
+            TemplateId = templateId,
+            Status = RouteInstanceStatus.Draft,
+            Steps = stepModels
         };
 
         _db.RouteInstances.Add(instance);
@@ -478,6 +523,27 @@ public class RouteEngine : IRouteEngine
                 await _db.SaveChangesAsync();
                 await _notifier.TaskAssignedAsync(activatedNext);
                 return;
+            }
+        }
+
+        // Кворум развилки: как только набралось нужное число чистых одобрений, этап
+        // проходит, не дожидаясь остальных — оставшихся аннулируем. Считаем только
+        // «Согласовано»: «с замечаниями» уводит маршрут на доработку и в кворум не идёт.
+        if (step.Mode == StepMode.Parallel && step.Quorum is int quorum && quorum > 0)
+        {
+            var approved = step.Participants.Count(
+                x => x.State == ParticipantState.Done && x.Resolution?.Type == ResolutionType.Approved);
+            if (approved >= quorum)
+            {
+                foreach (var other in step.Participants
+                             .Where(x => x.State is ParticipantState.Active or ParticipantState.Pending))
+                {
+                    other.State = ParticipantState.Cancelled;
+                    CloseTask(other.Id, WorkflowTaskState.Cancelled);
+                }
+                await _db.SaveChangesAsync();
+                await _audit.LogAsync(Entity, inst.Id, "QuorumReached", actorUserId,
+                    new { step = step.Order, quorum, approved });
             }
         }
 

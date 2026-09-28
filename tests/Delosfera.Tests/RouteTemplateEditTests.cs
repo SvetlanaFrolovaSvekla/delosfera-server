@@ -1,5 +1,6 @@
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
+using delosfera_server.Modules.Dictionaries.Models;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.Models;
@@ -78,6 +79,60 @@ public class RouteTemplateEditTests
     }
 
     [Fact]
+    public async Task Параллельный_и_условный_этапы_сохраняются_и_читаются()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var шаблон = await ШаблонАsync(db, этапов: 1);
+
+        // Конструктор графа отдаёт этап-развилку (все согласуют сразу) и условный
+        // этап (вынесение на орган по порогу). Проверяем, что режим, условие и вид
+        // этапа переживают запись целиком и читаются обратно.
+        await Контроллер(db).UpdateTemplate(шаблон, new CreateRouteTemplateRequest
+        {
+            Name = "Смешанный маршрут",
+            DocumentType = DocumentType.Sz,
+            Steps =
+            [
+                new TemplateStepDto
+                {
+                    Order = 1, Mode = StepMode.Parallel, Kind = StepKind.Approval,
+                    Participants =
+                    [
+                        new TemplateParticipantDto {RoleRef = RouteRoles.AuthorHead, Required = true},
+                        new TemplateParticipantDto {RoleRef = RouteRoles.AuthorCurator, Required = true},
+                    ],
+                },
+                new TemplateStepDto
+                {
+                    Order = 2, Mode = StepMode.Sequential, Kind = StepKind.Board,
+                    Condition = "board-authority",
+                    Participants = [new TemplateParticipantDto {RoleRef = RouteRoles.BoardChairman, Required = true}],
+                },
+            ],
+        }, default);
+
+        var шаги = await ШагиАsync(db, шаблон);
+
+        Assert.Equal(2, шаги.Count);
+        Assert.Equal(StepMode.Parallel, шаги[0].Mode);
+        Assert.Equal(2, шаги[0].Participants.Count);
+        Assert.Null(шаги[0].Condition);
+        Assert.Equal(StepMode.Sequential, шаги[1].Mode);
+        Assert.Equal(StepKind.Board, шаги[1].Kind);
+        Assert.Equal("board-authority", шаги[1].Condition);
+    }
+
+    [Fact]
+    public void Каталог_ролей_содержит_кадровика_с_названием()
+    {
+        // Список ролей конструктора задаётся на сервере (RouteRoles.Title), а не в клиенте.
+        var роли = RouteRoles.Catalog().ToList();
+
+        Assert.Contains(роли, r => r.Value == RouteRoles.HrOfficer && r.Title == "Кадровик УЧР");
+        Assert.Contains(роли, r => r.Value == RouteRoles.BoardChairman);
+    }
+
+    [Fact]
     public async Task Маршрут_без_этапов_не_принимается()
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
@@ -119,6 +174,128 @@ public class RouteTemplateEditTests
         Assert.Empty(await db.RouteTemplates.Where(t => t.Id == шаблон).ToListAsync());
     }
 
+    [Fact]
+    public async Task Финальный_методолог_не_последний_не_принимается()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var шаблон = await ШаблонАsync(db, этапов: 1);
+
+        // Этап финального контроля стоит первым — движок такой маршрут не запустит.
+        var ответ = await Контроллер(db).UpdateTemplate(шаблон, new CreateRouteTemplateRequest
+        {
+            Name = "Кадровая",
+            DocumentType = DocumentType.Sz,
+            Steps =
+            [
+                new TemplateStepDto
+                {
+                    Order = 1, Kind = StepKind.FinalControl, IsFinalMethodology = true,
+                    Participants = [new TemplateParticipantDto {RoleRef = RouteRoles.AuthorHead, Required = true}],
+                },
+                new TemplateStepDto
+                {
+                    Order = 2, Kind = StepKind.Approval,
+                    Participants = [new TemplateParticipantDto {RoleRef = RouteRoles.BoardChairman, Required = true}],
+                },
+            ],
+        }, default);
+
+        var плохой = Assert.IsType<BadRequestObjectResult>(ответ);
+        Assert.Contains("финального контроля методологии должен быть последним", плохой.Value!.ToString());
+    }
+
+    [Fact]
+    public async Task Параллельная_развилка_без_обязательного_не_принимается()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var шаблон = await ШаблонАsync(db, этапов: 1);
+
+        var ответ = await Контроллер(db).UpdateTemplate(шаблон, new CreateRouteTemplateRequest
+        {
+            Name = "Развилка",
+            DocumentType = DocumentType.Sz,
+            Steps =
+            [
+                new TemplateStepDto
+                {
+                    Order = 1, Mode = StepMode.Parallel, Kind = StepKind.Approval,
+                    Participants =
+                    [
+                        new TemplateParticipantDto {RoleRef = RouteRoles.AuthorHead, Required = false},
+                        new TemplateParticipantDto {RoleRef = RouteRoles.AuthorCurator, Required = false},
+                    ],
+                },
+            ],
+        }, default);
+
+        var плохой = Assert.IsType<BadRequestObjectResult>(ответ);
+        Assert.Contains("развилка без обязательного", плохой.Value!.ToString());
+    }
+
+    [Fact]
+    public async Task Поля_этапа_срок_подпись_методолог_переживают_запись()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var шаблон = await ШаблонАsync(db, этапов: 1);
+
+        await Контроллер(db).UpdateTemplate(шаблон, Запрос(new TemplateStepDto
+        {
+            Order = 1,
+            Kind = StepKind.FinalControl,
+            IsFinalMethodology = true,
+            TimeNormHours = 24,
+            RequiredSignatureLevel = delosfera_server.Modules.Signing.Models.SignatureLevel.Qualified,
+            Participants = [new TemplateParticipantDto {RoleRef = RouteRoles.AuthorHead, Required = true}],
+        }), default);
+
+        var шаг = (await ШагиАsync(db, шаблон)).Single();
+        Assert.True(шаг.IsFinalMethodology);
+        Assert.Equal(24, шаг.TimeNormHours);
+        Assert.Equal(delosfera_server.Modules.Signing.Models.SignatureLevel.Qualified, шаг.RequiredSignatureLevel);
+    }
+
+    [Fact]
+    public async Task Условия_приходят_по_виду_документа()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+
+        // У закупки условные этапы есть, у СЗ — нет.
+        var закупка = Assert.IsType<OkObjectResult>(Контроллер(db).ListRouteConditions("Procurement"));
+        var записка = Assert.IsType<OkObjectResult>(Контроллер(db).ListRouteConditions("Sz"));
+
+        Assert.NotEmpty((System.Collections.IEnumerable) закупка.Value!);
+        Assert.Empty((System.Collections.IEnumerable) записка.Value!);
+    }
+
+    [Fact]
+    public async Task Предпросмотр_роли_разворачивает_руководителя_подразделения()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+
+        var head = new User {FullName = "Иванов И.И.", Email = $"h-{Guid.NewGuid():N}@k.kg", PasswordHash = "x"};
+        db.Users.Add(head);
+        await db.SaveChangesAsync();
+        var unit = new OrganizationUnit {TitleRu = "Управление кредитования", HeadUserId = head.Id};
+        db.OrganizationUnits.Add(unit);
+        await db.SaveChangesAsync();
+
+        var ответ = Assert.IsType<OkObjectResult>(await Контроллер(db).PreviewRoles(new RolePreviewRequest
+        {
+            OrgUnitId = unit.Id,
+            Roles = [RouteRoles.AuthorHead, RouteRoles.TargetUnitHead],
+        }, default));
+
+        var items = Assert.IsType<List<RolePreviewItemResponse>>(ответ.Value);
+        var authorHead = items.Single(i => i.RoleRef == RouteRoles.AuthorHead);
+        Assert.True(authorHead.Resolved);
+        Assert.Equal(head.Id, authorHead.UserId);
+
+        // Роль «из документа» без пробного подразделения не разрешается — это не ошибка справочника.
+        var targetHead = items.Single(i => i.RoleRef == RouteRoles.TargetUnitHead);
+        Assert.False(targetHead.Resolved);
+        Assert.Contains("карточки документа", targetHead.Note);
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private static WorkflowController Контроллер(DelosferaDbContext db)
@@ -131,7 +308,8 @@ public class RouteTemplateEditTests
                 new FakeSignatures(), new RouteRoleResolver(db)),
             new FakeCurrentUser(1, PermissionCode.ManageSystemSettings),
             new TaskInboxService(db, new NoSubstitutions(), new BankClock()),
-            audit, new delosfera_server.Modules.Workflow.Services.TaskDelegationService(db, new NoSubstitutions(), audit));
+            audit, new delosfera_server.Modules.Workflow.Services.TaskDelegationService(db, new NoSubstitutions(), audit),
+            new RouteRoleResolver(db));
     }
 
     private static CreateRouteTemplateRequest Запрос(params TemplateStepDto[] steps) =>

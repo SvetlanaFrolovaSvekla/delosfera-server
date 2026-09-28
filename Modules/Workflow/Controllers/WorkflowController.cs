@@ -30,10 +30,11 @@ public class WorkflowController : ControllerBase
     private readonly IAuditService _audit;
     private readonly ITaskInboxService _inbox;
     private readonly ITaskDelegationService _delegation;
+    private readonly IRouteRoleResolver _roles;
 
     public WorkflowController(
         DelosferaDbContext db, IRouteEngine engine, ICurrentUserService currentUser, ITaskInboxService inbox,
-        IAuditService audit, ITaskDelegationService delegation)
+        IAuditService audit, ITaskDelegationService delegation, IRouteRoleResolver roles)
     {
         _db = db;
         _engine = engine;
@@ -41,6 +42,7 @@ public class WorkflowController : ControllerBase
         _audit = audit;
         _inbox = inbox;
         _delegation = delegation;
+        _roles = roles;
     }
 
     /// <summary>
@@ -87,11 +89,81 @@ public class WorkflowController : ControllerBase
         return Ok(items);
     }
 
+    /// <summary>
+    /// Каталог ролей согласующих с их названиями (RouteRoles.Title) — источник для
+    /// конструктора маршрута, чтобы список ролей задавался на сервере, а не дублировался
+    /// в клиенте и не расходился с движком при добавлении ролей.
+    /// </summary>
+    [HttpGet("route-roles")]
+    public IActionResult ListRouteRoles() =>
+        Ok(RouteRoles.Catalog().Select(r => new { value = r.Value, title = r.Title }).ToList());
+
+    /// <summary>
+    /// Условия включения этапов, доступные в конструкторе для вида документа. У закупки
+    /// свои (хозтовары, порог полномочий), у СЗ и ВНД условных этапов нет. Список задаётся
+    /// на сервере, чтобы конструктор не хардкодил коды и не расходился с контуром.
+    /// </summary>
+    [HttpGet("route-conditions")]
+    public IActionResult ListRouteConditions([FromQuery] string? documentType)
+    {
+        if (!Enum.TryParse<Documents.Models.DocumentType>(documentType, ignoreCase: true, out var type))
+            return Ok(Array.Empty<object>());
+
+        return Ok(RouteConditionCatalog.For(type)
+            .Select(c => new { value = c.Value, title = c.Title }).ToList());
+    }
+
+    /// <summary>
+    /// Предпросмотр разрешения ролей: в кого развернётся роль на документе выбранного
+    /// подразделения-инициатора. Помогает настройщику увидеть, что «руководитель
+    /// подразделения автора» — это конкретный человек, а не пустая роль, ещё до запуска
+    /// маршрута. Роли «из документа» (target-*) разрешаются только если передано пробное
+    /// TargetUnitId — иначе подразделение неизвестно до заполнения карточки.
+    /// </summary>
+    [HttpPost("route-roles/preview")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> PreviewRoles([FromBody] RolePreviewRequest req, CancellationToken ct)
+    {
+        var context = new Services.RouteContext(0, req.OrgUnitId, req.TargetUnitId);
+        var result = new List<RolePreviewItemResponse>();
+
+        foreach (var roleRef in req.Roles.Where(r => !string.IsNullOrWhiteSpace(r)).Distinct())
+        {
+            var userId = await _roles.ResolveAsync(roleRef, context, ct);
+            var fullName = userId is { } uid
+                ? await _db.Users.AsNoTracking().Where(u => u.Id == uid)
+                    .Select(u => u.FullName).FirstOrDefaultAsync(ct)
+                : null;
+
+            var isTargetRole = roleRef is RouteRoles.TargetUnitHead or RouteRoles.TargetUnitCurator;
+            var note = userId is not null
+                ? null
+                : isTargetRole && req.TargetUnitId is null
+                    ? "определяется подразделением из карточки документа при запуске"
+                    : _roles.Explain(roleRef);
+
+            result.Add(new RolePreviewItemResponse
+            {
+                RoleRef = roleRef,
+                Title = RouteRoles.Title(roleRef),
+                UserId = userId,
+                FullName = fullName,
+                Resolved = userId is not null,
+                Note = note,
+            });
+        }
+
+        return Ok(result);
+    }
+
     /// <summary>Создать шаблон маршрута (справочник, TID-06).</summary>
     [HttpPost("templates")]
     [RequirePermission(PermissionCode.ManageSystemSettings)]
     public async Task<ActionResult<int>> CreateTemplate([FromBody] CreateRouteTemplateRequest req)
     {
+        if (ValidateTemplate(req) is { } problem)
+            return BadRequest(new {message = problem});
+
         var tpl = new RouteTemplate
         {
             DocumentType = req.DocumentType,
@@ -105,6 +177,7 @@ public class WorkflowController : ControllerBase
                 Kind = s.Kind,
                 IsFinalMethodology = s.IsFinalMethodology,
                 TimeNormHours = s.TimeNormHours,
+                Quorum = NormalizeQuorum(s),
                 Condition = s.Condition,
                 RequiredSignatureLevel = s.RequiredSignatureLevel,
                 Participants = s.Participants.Select(p => new RouteTemplateParticipant
@@ -167,6 +240,7 @@ public class WorkflowController : ControllerBase
                 Kind = s.Kind.ToString(),
                 IsFinalMethodology = s.IsFinalMethodology,
                 TimeNormHours = s.TimeNormHours,
+                Quorum = s.Quorum,
                 Condition = s.Condition,
                 ParticipantCount = s.Participants.Count,
                 Participants = s.Participants.Select(p => new TemplateParticipantResponse
@@ -203,18 +277,8 @@ public class WorkflowController : ControllerBase
 
         if (tpl is null) return NotFound(new {message = "Шаблон маршрута не найден"});
 
-        if (string.IsNullOrWhiteSpace(req.Name))
-            return BadRequest(new {message = "Укажите название шаблона"});
-
-        if (req.Steps.Count == 0)
-            return BadRequest(new {message = "В маршруте нет ни одного этапа"});
-
-        var пустые = req.Steps.Where(s => s.Participants.Count == 0).Select(s => s.Order).ToList();
-        if (пустые.Count > 0)
-            return BadRequest(new
-            {
-                message = $"На этапе {string.Join(", ", пустые)} нет согласующих — маршрут остановится на нём",
-            });
+        if (ValidateTemplate(req) is { } problem)
+            return BadRequest(new {message = problem});
 
         tpl.Name = req.Name.Trim();
         tpl.DocumentType = req.DocumentType;
@@ -230,6 +294,7 @@ public class WorkflowController : ControllerBase
             Kind = s.Kind,
             IsFinalMethodology = s.IsFinalMethodology,
             TimeNormHours = s.TimeNormHours,
+            Quorum = NormalizeQuorum(s),
             Condition = s.Condition,
             RequiredSignatureLevel = s.RequiredSignatureLevel,
             Participants = s.Participants.Select(p => new RouteTemplateParticipant
@@ -372,6 +437,58 @@ public class WorkflowController : ControllerBase
     /// аутентифицированный пользователь мог двигать чужой документ по маршруту.
     /// Бросает 403 (UnauthorizedAccessException) для вошедшего, 404 если документа нет.
     /// </summary>
+    /// <summary>
+    /// Кворум имеет смысл только на развилке и только если он меньше числа согласующих —
+    /// иначе это обычное «нужны все» и хранится как null. Меньше 1 — тоже null.
+    /// </summary>
+    private static int? NormalizeQuorum(TemplateStepDto s) =>
+        s.Mode == StepMode.Parallel && s.Quorum is int q && q >= 1 && q < s.Participants.Count ? q : null;
+
+    /// <summary>
+    /// Проверки шаблона, общие для создания и правки. Те же, что применит движок при
+    /// запуске, — но здесь настройщик узнаёт о проблеме сразу, а не когда маршрут не
+    /// стартует. Null — ошибок нет.
+    /// </summary>
+    private static string? ValidateTemplate(CreateRouteTemplateRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return "Укажите название шаблона";
+
+        if (req.Steps.Count == 0)
+            return "В маршруте нет ни одного этапа";
+
+        var пустые = req.Steps.Where(s => s.Participants.Count == 0).Select(s => s.Order).ToList();
+        if (пустые.Count > 0)
+            return $"На этапе {string.Join(", ", пустые)} нет согласующих — маршрут остановится на нём";
+
+        // Согласующий без выбранного значения (ни человека, ни подразделения, ни роли)
+        // при запуске никем не станет и повесит этап.
+        var пустойУчастник = req.Steps
+            .Where(s => s.Participants.Any(p => p.UserId is null && p.UnitId is null
+                                               && string.IsNullOrWhiteSpace(p.RoleRef)))
+            .Select(s => s.Order).ToList();
+        if (пустойУчастник.Count > 0)
+            return $"На этапе {string.Join(", ", пустойУчастник)} у согласующего не выбрано значение";
+
+        // Параллельная развилка без обязательного согласующего закроется первым же
+        // решением — это почти всегда ошибка настройки, а не замысел.
+        var развилкаБезОбяз = req.Steps
+            .Where(s => s.Mode == StepMode.Parallel && s.Participants.Count > 0
+                        && !s.Participants.Any(p => p.Required))
+            .Select(s => s.Order).ToList();
+        if (развилкаБезОбяз.Count > 0)
+            return $"На этапе {string.Join(", ", развилкаБезОбяз)} параллельная развилка без обязательного согласующего";
+
+        // Финальный контроль методологии закрывает маршрут — он обязан быть последним
+        // (TID-04/05), иначе движок не запустит маршрут.
+        var steps = req.Steps.OrderBy(s => s.Order).ToList();
+        var finalIdx = steps.FindIndex(s => s.IsFinalMethodology);
+        if (finalIdx >= 0 && finalIdx != steps.Count - 1)
+            return "Этап финального контроля методологии должен быть последним в маршруте";
+
+        return null;
+    }
+
     private async Task EnsureCanManageDocumentRouteAsync(int documentId, string message)
     {
         var authorId = await _db.Documents.AsNoTracking()
@@ -525,6 +642,7 @@ public class WorkflowController : ControllerBase
             {
                 Id = s.Id, Order = s.Order, Mode = s.Mode.ToString(), Kind = s.Kind.ToString(),
                 IsFinalMethodology = s.IsFinalMethodology,
+                Quorum = s.Quorum,
                 RequiredSignatureLevel = s.RequiredSignatureLevel?.ToString(),
                 Participants = s.Participants.OrderBy(p => p.Id).Select(p => new ParticipantResponse
                 {

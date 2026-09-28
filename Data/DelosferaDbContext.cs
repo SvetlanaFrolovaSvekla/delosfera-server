@@ -55,6 +55,10 @@ public class DelosferaDbContext : DbContext
     public DbSet<Substitution> Substitutions => Set<Substitution>(); // Замещение на период отсутствия (GEN-14)
     
     public DbSet<FileAttachment> FileAttachments { get; set; }
+
+    /// <summary>Версии содержимого вложений (COOP-1): история объектов в MinIO при соредактировании.</summary>
+    public DbSet<AttachmentVersion> AttachmentVersions => Set<AttachmentVersion>();
+
     public DbSet<VndRedaction> VndRedactions { get; set; }
     
     public DbSet<VndRedactionAttachment> VndRedactionAttachments { get; set; }
@@ -202,6 +206,13 @@ public class DelosferaDbContext : DbContext
 
     public DbSet<delosfera_server.Modules.Obligations.Models.ObligationPeriod> ObligationPeriods =>
         Set<delosfera_server.Modules.Obligations.Models.ObligationPeriod>();
+
+    /// <summary>
+    /// События операционного риска (RISK-1, 716-П / НБКР): поднимаются с шагов
+    /// согласования и карточек документов, риск-подразделение ведёт по ним реестр.
+    /// </summary>
+    public DbSet<delosfera_server.Modules.RiskEvents.Models.RiskEvent> RiskEvents =>
+        Set<delosfera_server.Modules.RiskEvents.Models.RiskEvent>();
 
     /// <summary>
     /// Книга регистрации корреспонденции: входящие и исходящие письма, запросы

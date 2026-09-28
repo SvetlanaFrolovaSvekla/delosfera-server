@@ -25,6 +25,9 @@ public class TemplateStepDto
     public bool IsFinalMethodology { get; set; }
     public int? TimeNormHours { get; set; }
 
+    /// <summary>Кворум развилки: сколько согласований достаточно; null — нужны все. Только для Parallel.</summary>
+    public int? Quorum { get; set; }
+
     /// <summary>Условие включения этапа (null — всегда). Контур передаёт выполненные условия.</summary>
     public string? Condition { get; set; }
 
@@ -75,6 +78,9 @@ public class StepResponse
     public required string Mode { get; set; }
     public required string Kind { get; set; }
     public bool IsFinalMethodology { get; set; }
+
+    /// <summary>Кворум развилки: сколько согласований достаточно; null — нужны все.</summary>
+    public int? Quorum { get; set; }
 
     /// <summary>
     /// Чем закрывается этап: Simple, Qualified или пусто — без подписи. Клиенту это
@@ -177,6 +183,10 @@ public class RouteTemplateStepResponse
     public required string Kind { get; set; }
     public bool IsFinalMethodology { get; set; }
     public int? TimeNormHours { get; set; }
+
+    /// <summary>Кворум развилки: сколько согласований достаточно; null — нужны все.</summary>
+    public int? Quorum { get; set; }
+
     public string? Condition { get; set; }
     public int ParticipantCount { get; set; }
 
@@ -218,6 +228,44 @@ public class StepSignatureLevelRequest
 {
     /// <summary>Пусто — снять требование подписи с этапа.</summary>
     public Signing.Models.SignatureLevel? Level { get; set; }
+}
+
+/// <summary>
+/// Проверка ролей конструктора: в кого развернётся роль на документе выбранного
+/// подразделения-инициатора. Роли «из документа» (target-*) при настройке шаблона
+/// разрешить нельзя — подразделение берётся из карточки при запуске, поэтому для
+/// предпросмотра можно передать пробное TargetUnitId.
+/// </summary>
+public class RolePreviewRequest
+{
+    /// <summary>Подразделение автора — для author-head, author-curator, hr-officer.</summary>
+    public int? OrgUnitId { get; set; }
+
+    /// <summary>Пробное подразделение «из документа» — для target-head, target-curator.</summary>
+    public int? TargetUnitId { get; set; }
+
+    /// <summary>Ролевые ссылки к проверке (author-head и т. п.).</summary>
+    public List<string> Roles { get; set; } = [];
+}
+
+/// <summary>Результат разрешения одной роли для предпросмотра.</summary>
+public class RolePreviewItemResponse
+{
+    public required string RoleRef { get; set; }
+    public required string Title { get; set; }
+
+    /// <summary>Кого нашли; null — роль не разрешилась в текущем контексте.</summary>
+    public int? UserId { get; set; }
+    public string? FullName { get; set; }
+
+    /// <summary>Разрешилась ли роль в конкретного человека.</summary>
+    public bool Resolved { get; set; }
+
+    /// <summary>
+    /// Пояснение, когда роль не разрешилась: не заполнен справочник, либо роль
+    /// зависит от карточки документа и на этапе настройки её значение неизвестно.
+    /// </summary>
+    public string? Note { get; set; }
 }
 
 /// <summary>Делегирование задачи коллеге (СК-3).</summary>

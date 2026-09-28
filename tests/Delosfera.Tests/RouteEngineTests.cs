@@ -272,6 +272,89 @@ public class RouteEngineTests
 
     // ── стенд ────────────────────────────────────────────────────────────────
 
+    [Fact]
+    public async Task Кворум_развилки_закрывает_этап_не_дожидаясь_остальных()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var engine = NewEngine(db);
+
+        var (instanceId, p1, p2) = await SeedParallelRouteAsync(db, quorum: 1);
+        await engine.StartAsync(instanceId, actorUserId: 0);
+
+        // Один согласовал — при кворуме 1 из 2 этап проходит, второй аннулируется.
+        var user1 = (await db.RouteParticipants.AsNoTracking().SingleAsync(p => p.Id == p1)).UserId!.Value;
+        await engine.ResolveAsync(p1, ResolutionType.Approved, null, user1);
+
+        var first = await db.RouteParticipants.AsNoTracking().SingleAsync(p => p.Id == p1);
+        var second = await db.RouteParticipants.AsNoTracking().SingleAsync(p => p.Id == p2);
+        var inst = await db.RouteInstances.AsNoTracking().SingleAsync(i => i.Id == instanceId);
+
+        Assert.Equal(ParticipantState.Done, first.State);
+        Assert.Equal(ParticipantState.Cancelled, second.State);
+        Assert.Equal(RouteInstanceStatus.Approved, inst.Status);
+    }
+
+    [Fact]
+    public async Task Кворум_не_набран_этап_ждёт_остальных()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var engine = NewEngine(db);
+
+        var (instanceId, p1, p2) = await SeedParallelRouteAsync(db, quorum: 2);
+        await engine.StartAsync(instanceId, actorUserId: 0);
+
+        var user1 = (await db.RouteParticipants.AsNoTracking().SingleAsync(p => p.Id == p1)).UserId!.Value;
+        await engine.ResolveAsync(p1, ResolutionType.Approved, null, user1);
+
+        var second = await db.RouteParticipants.AsNoTracking().SingleAsync(p => p.Id == p2);
+        var inst = await db.RouteInstances.AsNoTracking().SingleAsync(i => i.Id == instanceId);
+
+        // Кворум 2 из 2 — после одного решения второй ещё активен, маршрут идёт.
+        Assert.Equal(ParticipantState.Active, second.State);
+        Assert.Equal(RouteInstanceStatus.Running, inst.Status);
+    }
+
+    /// <summary>Маршрут из одного параллельного этапа с двумя согласующими и заданным кворумом.</summary>
+    private static async Task<(int InstanceId, int P1, int P2)> SeedParallelRouteAsync(
+        DelosferaDbContext db, int quorum)
+    {
+        var u1 = new User {FullName = "Согл.1", Email = $"q1-{Guid.NewGuid():N}@k.kg", PasswordHash = "x"};
+        var u2 = new User {FullName = "Согл.2", Email = $"q2-{Guid.NewGuid():N}@k.kg", PasswordHash = "x"};
+        db.Users.AddRange(u1, u2);
+        await db.SaveChangesAsync();
+
+        var doc = new Document
+        {
+            Type = DocumentType.Sz, Title = "Кворум-тест", StatusCode = "OnApproval", AuthorId = u1.Id,
+        };
+        db.Documents.Add(doc);
+        await db.SaveChangesAsync();
+
+        var p1 = new RouteParticipant {UserId = u1.Id, State = ParticipantState.Pending, Required = true};
+        var p2 = new RouteParticipant {UserId = u2.Id, State = ParticipantState.Pending, Required = true};
+
+        var instance = new RouteInstance
+        {
+            DocumentId = doc.Id,
+            Status = RouteInstanceStatus.Draft,
+            Steps =
+            [
+                new RouteStep
+                {
+                    Order = 1,
+                    Mode = StepMode.Parallel,
+                    Kind = StepKind.Approval,
+                    Quorum = quorum,
+                    Participants = [p1, p2],
+                },
+            ],
+        };
+        db.RouteInstances.Add(instance);
+        await db.SaveChangesAsync();
+
+        return (instance.Id, p1.Id, p2.Id);
+    }
+
     private static RouteEngine NewEngine(DelosferaDbContext db) =>
         new(db, new AuditService(db), [], new NoSubstitutions(), new SilentNotifier(),
             new FakeSignatures(), new RouteRoleResolver(db));

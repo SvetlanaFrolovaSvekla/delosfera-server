@@ -53,6 +53,20 @@ public static class RouteRoles
         HrOfficer => "Кадровик УЧР",
         _ => roleRef,
     };
+
+    /// <summary>
+    /// Роли фиксированного назначения — те, что выбираются в конструкторе маршрута
+    /// без указания подразделения. Роли с параметром (unit-head:N, unit-curator:N)
+    /// сюда не входят: их задают через выбор конкретного подразделения-участника.
+    /// </summary>
+    public static IReadOnlyList<string> Fixed { get; } =
+    [
+        AuthorHead, AuthorCurator, TargetUnitHead, TargetUnitCurator, BoardChairman, HrOfficer,
+    ];
+
+    /// <summary>Каталог ролей с человеческими названиями — источник для экрана настройки.</summary>
+    public static IEnumerable<(string Value, string Title)> Catalog() =>
+        Fixed.Select(r => (r, Title(r)));
 }
 
 /// <summary>Что известно о документе в момент сборки маршрута.</summary>

@@ -156,7 +156,8 @@ public class WorkflowAuthorizationTests
         // трактовался бы как 401, а не 403. В контроллерных путях авторизации
         // задач inbox/делегирования нет — их зависимости не задействованы.
         var controller = new WorkflowController(
-            db, engine, currentUser, inbox: null!, new AuditService(db), delegation: null!)
+            db, engine, currentUser, inbox: null!, new AuditService(db), delegation: null!,
+            new RouteRoleResolver(db))
         {
             ControllerContext = new ControllerContext
             {
