@@ -21,7 +21,8 @@ public class VndServiceTests
                 db, new NoopFileStorage(), new NoopNotificationService(),
                 new FakeCurrentUser(currentUserId, perms),
                 NullLogger<VndApprovalService>.Instance, new FakeActivityLog(),
-                new ApprovalSheetGenerator(), new FixedApprovalUnitResolver(db)),
+                new ApprovalSheetGenerator(), new FixedApprovalUnitResolver(db),
+                new FakeWorkCalendar(), new FakeResolutionSignatureService()),
             new delosfera_server.Modules.Documents.Services.NumeratorService(db),
             new delosfera_server.Modules.Documents.VND.Services.DocxLegacyLinkExtractor(),
             new NoopNotificationService(), NullLogger<VndService>.Instance, new delosfera_server.Common.Services.BankClock());

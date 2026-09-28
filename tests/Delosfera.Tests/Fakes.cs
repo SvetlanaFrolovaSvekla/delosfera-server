@@ -238,3 +238,87 @@ internal sealed class SilentNotifier : IWorkflowNotifier
     public Task RouteFinishedAsync(int routeInstanceId, RouteInstanceStatus status, string? comment) =>
         Task.CompletedTask;
 }
+
+/// <summary>Календарь без праздников — только пн–пт 09:00–18:00.</summary>
+internal sealed class FakeWorkCalendar : delosfera_server.Modules.Documents.VND.Services.IVndWorkCalendarCache
+{
+    public Task<delosfera_server.Modules.Documents.VND.Services.VndWorkingCalendar.Rules> GetRulesAsync(
+        CancellationToken ct = default) =>
+        Task.FromResult(delosfera_server.Modules.Documents.VND.Services.VndWorkingCalendar.Rules.Empty);
+
+    public void Invalidate() { }
+}
+
+/// <summary>
+/// Проверка ЭЦП без обращения к ГП «Инфоком»: считает любую подпись проверенной и возвращает
+/// корректную (по FK) запись журнала — чтобы тесты логики согласования шли, как раньше, а заодно
+/// проверяли, что запись журнала сохраняется вместе с решением. Настоящая проверка подписи
+/// покрыта отдельно (ResolutionSignatureServiceTests / ResolutionSignatureHasherTests).
+/// </summary>
+internal sealed class FakeResolutionSignatureService
+    : delosfera_server.Modules.Documents.VND.Services.IResolutionSignatureService
+{
+    public int VerifyCalls { get; private set; }
+
+    public Task<delosfera_server.Modules.Documents.VND.DTO.Response.ResolutionHashResponse> GetHashForStageAsync(
+        int vndId, int stageId, string? comment, int currentUserId, CancellationToken ct = default) =>
+        throw new NotImplementedException();
+
+    public Task<delosfera_server.Modules.Documents.VND.Models.VndResolutionSignature> VerifyForDecisionAsync(
+        delosfera_server.Modules.Documents.VND.Services.ResolutionSignatureInput input, CancellationToken ct = default)
+    {
+        VerifyCalls++;
+        var now = DateTime.UtcNow;
+        return Task.FromResult(new delosfera_server.Modules.Documents.VND.Models.VndResolutionSignature
+        {
+            VndId = input.Process.VndId,
+            ApprovalProcessId = input.Process.Id,
+            RedactionId = input.Process.RedactionId,
+            StageId = input.Stage.Id,
+            Phase = delosfera_server.Modules.Documents.VND.Models.ApprovalStagePhase.Primary,
+            RoundNumber = 1,
+            Decision = input.Decision,
+            UserId = input.UserId,
+            PersonIdnp = "21234567890123",
+            HashSchemaVersion = "v1",
+            Hash = new string('A', 64),
+            CommentText = "Согласовано",
+            CommentHash = new string('B', 64),
+            ContentDigest = "ru=C;kg=-;en=-",
+            VndCode = "TEST",
+            SignatureBase64 = "AA==",
+            SignatureSha256 = (Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N")).ToUpperInvariant(),
+            SignedAt = now,
+            VerifiedAt = now,
+            Verified = true,
+        });
+    }
+
+    public Task<List<delosfera_server.Modules.Documents.VND.DTO.Response.VndResolutionSignatureResponse>> ListAsync(
+        int vndId, int currentUserId, CancellationToken ct = default) =>
+        throw new NotImplementedException();
+
+    public Task<delosfera_server.Modules.Documents.VND.DTO.Response.ResolutionSignatureVerifyResponse> ReverifyAsync(
+        int vndId, int signatureId, int currentUserId, CancellationToken ct = default) =>
+        throw new NotImplementedException();
+}
+
+/// <summary>Клиент ecp-service, которого в тесте быть не должно: любой вызов — провал теста.</summary>
+internal sealed class ThrowingInfocomEcpClient : delosfera_server.Modules.Signing.Services.IInfocomEcpClient
+{
+    private static Task<System.Text.Json.JsonElement> Fail() =>
+        throw new InvalidOperationException("Обращение к ГП «Инфоком» в этом тесте не ожидается");
+
+    public Task<System.Text.Json.JsonElement> UserAuthMethodsAsync(
+        delosfera_server.Modules.Signing.Models.InfocomEcp.InfocomUserAuthMethodsRequest request, CancellationToken ct) => Fail();
+    public Task<System.Text.Json.JsonElement> GetPinCodeAsync(
+        delosfera_server.Modules.Signing.Models.InfocomEcp.InfocomGetPinCodeRequest request, CancellationToken ct) => Fail();
+    public Task<System.Text.Json.JsonElement> AccountAuthAsync(
+        delosfera_server.Modules.Signing.Models.InfocomEcp.InfocomAccountAuthRequest request, CancellationToken ct) => Fail();
+    public Task<System.Text.Json.JsonElement> GetCertInfoAsync(
+        delosfera_server.Modules.Signing.Models.InfocomEcp.InfocomGetCertInfoRequest request, CancellationToken ct) => Fail();
+    public Task<System.Text.Json.JsonElement> SignHashAsync(
+        delosfera_server.Modules.Signing.Models.InfocomEcp.InfocomSignHashRequest request, CancellationToken ct) => Fail();
+    public Task<System.Text.Json.JsonElement> CheckSignAsync(
+        delosfera_server.Modules.Signing.Models.InfocomEcp.InfocomCheckSignRequest request, CancellationToken ct) => Fail();
+}

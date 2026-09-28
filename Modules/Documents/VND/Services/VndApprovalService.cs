@@ -65,6 +65,7 @@ public class VndApprovalService : IVndApprovalService
     private readonly IApprovalSheetGenerator _approvalSheetGenerator;
     private readonly IFixedApprovalUnitResolver _fixedUnits;
     private readonly IVndWorkCalendarCache _workCalendar;
+    private readonly IResolutionSignatureService _resolutionSignatures;
 
     public VndApprovalService(
         DelosferaDbContext db,
@@ -75,7 +76,8 @@ public class VndApprovalService : IVndApprovalService
         IActivityLogService activityLog,
         IApprovalSheetGenerator approvalSheetGenerator,
         IFixedApprovalUnitResolver fixedUnits,
-        IVndWorkCalendarCache workCalendar)
+        IVndWorkCalendarCache workCalendar,
+        IResolutionSignatureService resolutionSignatures)
     {
         _db = db;
         _fileService = fileService;
@@ -86,6 +88,7 @@ public class VndApprovalService : IVndApprovalService
         _approvalSheetGenerator = approvalSheetGenerator;
         _fixedUnits = fixedUnits;
         _workCalendar = workCalendar;
+        _resolutionSignatures = resolutionSignatures;
     }
 
     /// <summary>Пересчитать сохранённые сроки фаз после того, как у процесса сменилась
@@ -463,6 +466,32 @@ public class VndApprovalService : IVndApprovalService
             _ => throw new InvalidOperationException("Неизвестный тип решения")
         };
 
+        // ЭЦП ГП «Инфоком» (SIG-ECP): для "Согласовать" подпись обязательна и проверяется целиком ДО
+        // записи решения — хэш из БД, replay, свежесть, 2.6 check-sign, личность подписанта (см.
+        // ResolutionSignatureService.VerifyForDecisionAsync). Любое несоответствие или недоступность
+        // провайдера — ResolutionSignatureException, решение не сохраняется (fail closed). Запись
+        // журнала добавляется в контекст рядом с полями решения ниже и уходит в БД тем же
+        // SaveChanges, что и само решение, — атомарно. Для остальных решений ничего не меняется.
+        VndResolutionSignature? signature = null;
+        if (decision == ApprovalStageDecision.Approved)
+        {
+            signature = await _resolutionSignatures.VerifyForDecisionAsync(new ResolutionSignatureInput
+            {
+                Process = process,
+                Stage = stage,
+                Decision = decision,
+                UserId = currentUserId,
+                Comment = request.Comment,
+                SignatureBase64 = request.EcpSignatureBase64,
+                Hash = request.EcpHash,
+                PersonIdnp = request.EcpPersonIdnp,
+                CertToken = request.EcpCertToken,
+                ProviderTimestampMs = request.EcpTimestamp,
+                IpAddress = request.RequestIpAddress,
+                UserAgent = request.RequestUserAgent,
+            });
+        }
+
         try
         {
         switch (process.Status)
@@ -476,6 +505,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.PrimaryDecidedAt = DateTime.UtcNow;
                 stage.ParticipatesInRepeat = decision is ApprovalStageDecision.ApprovedWithComment
                     or ApprovalStageDecision.Rejected;
+                if (signature is not null) _db.VndResolutionSignatures.Add(signature);
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Primary, request.Files, currentUserId);
                 AttachDecisionQuotes(stage, ApprovalStagePhase.Primary, quotes, revisionIndex);
@@ -504,6 +534,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.RepeatDecision = decision;
                 stage.RepeatComment = request.Comment;
                 stage.RepeatDecidedAt = DateTime.UtcNow;
+                if (signature is not null) _db.VndResolutionSignatures.Add(signature);
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.Repeat, request.Files, currentUserId);
                 AttachDecisionQuotes(stage, ApprovalStagePhase.Repeat, quotes, revisionIndex);
@@ -531,6 +562,7 @@ public class VndApprovalService : IVndApprovalService
                 stage.FinalHoldDecision = decision;
                 stage.FinalHoldComment = request.Comment;
                 stage.FinalHoldDecidedAt = DateTime.UtcNow;
+                if (signature is not null) _db.VndResolutionSignatures.Add(signature);
 
                 await AttachDecisionFilesAsync(stage, ApprovalStagePhase.FinalHold, request.Files, currentUserId);
                 AttachDecisionQuotes(stage, ApprovalStagePhase.FinalHold, quotes, revisionIndex);
@@ -576,6 +608,15 @@ public class VndApprovalService : IVndApprovalService
             throw new InvalidOperationException(
                 "Не удалось сохранить решение — статус этапа согласования уже изменился " +
                 "(например, истёк срок и применён автоакцепт по таймауту). Обновите страницу.");
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" } pg
+                                           && pg.ConstraintName?.StartsWith("ux_vnd_resolution_signature",
+                                               StringComparison.Ordinal) == true)
+        {
+            // Уникальные индексы журнала подписей: эта резолюция уже подписана (двойное нажатие)
+            // или та же подпись предъявлена повторно. Решение при этом не сохранено.
+            throw new InvalidOperationException(
+                "Резолюция по этому этапу уже подписана и сохранена, либо подпись уже использована. Обновите страницу.");
         }
 
         // --- Уведомление инициатору о конкретном решении согласующего

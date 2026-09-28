@@ -25,9 +25,22 @@ public static class SupportServiceExtensions
         // Облачная ЭП ГП «Инфоком» (ОЭП, INT-03): подпись отпечатка через облако УЦ
         // по пин-коду. Типизированный HttpClient — свой таймаут, Bearer и User-Agent
         // ставятся в самом клиенте. Без Oep:BaseUrl/ServiceToken интеграция выключена.
+        //
+        // ВРЕМЕННО ПАРАЛЛЕЛЬНО с InfocomEcpService ниже: в проекте сейчас две независимые
+        // интеграции с одним и тем же провайдером (cdsapi-test.srs.kg) — эта (Oep, backend
+        // напрямую) и SIG-ECP (backend → delosfera-ecp-service → провайдер). Обе оставлены
+        // включаемыми по конфигу, чтобы не потерять код при слиянии веток — какую оставлять
+        // в проекте, нужно решить отдельно с автором Oep и убрать вторую.
         builder.Services.Configure<OepOptions>(builder.Configuration.GetSection(OepOptions.Section));
         builder.Services.AddHttpClient<IOepSignatureClient, OepSignatureClient>();
         builder.Services.AddScoped<IOepSigningService, OepSigningService>();
+
+        // ЭЦП ГП «Инфоком» (SIG-ECP, тестовый контур). Бекенд обращается не к провайдеру
+        // напрямую, а к delosfera-ecp-service — своему сервису-прокладке (см.
+        // InfocomEcpController / InfocomEcpClient). Адрес и токен — в appsettings:InfocomEcpService.
+        builder.Services.Configure<InfocomEcpServiceOptions>(
+            builder.Configuration.GetSection(InfocomEcpServiceOptions.Section));
+        builder.Services.AddHttpClient<IInfocomEcpClient, InfocomEcpClient>();
 
         // Ознакомление с документами (Б-19): роспись сотрудника под приказом или ВНД
         builder.Services.AddScoped<IAcknowledgementService, AcknowledgementService>();

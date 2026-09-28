@@ -90,6 +90,9 @@ builder.Services.AddSingleton<delosfera_server.Common.Security.IPasswordPolicy,
 builder.Services.AddScoped<IFileStorageService, MinioFileStorageService>();
 builder.Services.AddScoped<IFixedApprovalUnitResolver, FixedApprovalUnitResolver>();
 builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
+// ЭЦП ГП «Инфоком» на резолюции "Согласовать": хэш резолюции, проверка подписи (2.6) и
+// неизменяемый журнал подписей (см. VndResolutionSignature / ResolutionSignatureService).
+builder.Services.AddScoped<IResolutionSignatureService, ResolutionSignatureService>();
 builder.Services.AddSingleton<IApprovalSheetGenerator, ApprovalSheetGenerator>();
 // Разбор легаси-гиперссылок db://documents/{code} и db://attachments/{n} из старой системы
 // (isrib) внутри текста ВНД — не хранит состояния, поэтому синглтон (как ApprovalSheetGenerator выше).
@@ -287,6 +290,36 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             }));
+
+    // ЭЦП ГП «Инфоком» (SIG-ECP): у провайдера свой счётчик попыток пин-кода ("Неверный
+    // ПИН-код! Осталось попыток: N"), но лишний базовый лимит на нашей стороне не помешает -
+    // не долбить их API и не подставлять аккаунт организации под блокировку при случайном
+    // цикле/баге на клиенте. Партиция ПО ПОЛЬЗОВАТЕЛЮ: backend стоит за nginx, и по IP все
+    // пользователи выглядели бы одним адресом (контейнер nginx) — лимит стал бы общим на всю
+    // организацию. Поэтому UseRateLimiter() стоит ПОСЛЕ UseAuthentication() (см. ниже).
+    options.AddPolicy("ecp-pin", httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: EcpRateLimitKey(httpContext),
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
+
+    // Эндпоинты журнала подписей ВНД, которые сами ходят в ГП (2.6 check-sign при повторной
+    // проверке) или качают файлы редакции из MinIO для хэша (resolution-hash) — дорогие
+    // операции, которые не должны крутиться в цикле. Лимит мягче, чем на пин-код: обычный
+    // сценарий — несколько нажатий "Проверить"/"Согласовать" подряд.
+    options.AddPolicy("ecp-verify", httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: EcpRateLimitKey(httpContext),
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
 });
 
 var app = builder.Build();
@@ -452,9 +485,19 @@ if (!app.Environment.IsDevelopment()) app.UseHsts();
 
 app.UseHttpsRedirection(); // Перенаправляет все входящие HTTP-запросы на HTTPS
 app.UseCors("AllowFrontend");
-app.UseRateLimiter();
 app.UseAuthentication();
+// После аутентификации: ЭЦП-лимиты считаются по пользователю (httpContext.User уже заполнен).
+// Политика "auth" (вход) — по-прежнему по IP, там пользователь ещё анонимен.
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health").AllowAnonymous(); // liveness-проба, без авторизации
 app.Run();
+
+
+// Ключ лимита для ЭЦП-эндпоинтов: id пользователя из JWT, иначе IP (анонимный запрос до этих
+// эндпоинтов всё равно не дойдёт — они под [Authorize]).
+static string EcpRateLimitKey(HttpContext httpContext) =>
+    httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value is { Length: > 0 } uid
+        ? "user:" + uid
+        : "ip:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");

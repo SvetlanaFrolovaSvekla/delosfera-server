@@ -1570,6 +1570,13 @@ public class VndService : IVndService
         if (vnd.CreatedByUserId != currentUserId && !IsChiefEditor())
             throw new UnauthorizedAccessException("Удалить ВНД может только его создатель или главный редактор");
 
+        // Журнал подписей ЭЦП неизменяем (FK Restrict + триггер в БД): черновик, по которому уже
+        // есть подписанные резолюции (например, согласование отозвали и документ вернулся в
+        // черновик), удалить нельзя — иначе пропали бы доказательства подписания.
+        if (await _db.VndResolutionSignatures.AnyAsync(s => s.VndId == id))
+            throw new InvalidOperationException(
+                "Удалить нельзя: по документу есть резолюции, подписанные ЭЦП (журнал подписей неизменяем)");
+
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
         var vndCode = vnd.Code;

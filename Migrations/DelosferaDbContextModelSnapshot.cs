@@ -8574,6 +8574,212 @@ namespace delosfera_server.Migrations
                     b.ToTable("vnd_repeat_comment_attachment", (string)null);
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndResolutionSignature", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ApprovalProcessId")
+                        .HasColumnType("integer")
+                        .HasColumnName("approval_process_id");
+
+                    b.Property<string>("CertCommonName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("cert_common_name");
+
+                    b.Property<string>("CertIssuerCommonName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("cert_issuer_common_name");
+
+                    b.Property<string>("CertIssuerOrganizationName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("cert_issuer_organization_name");
+
+                    b.Property<string>("CertKeyIdentifier")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("cert_key_identifier");
+
+                    b.Property<string>("CertValidNotAfter")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("cert_valid_not_after");
+
+                    b.Property<string>("CertValidNotBefore")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("cert_valid_not_before");
+
+                    b.Property<DateTime?>("CmsSigningTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cms_signing_time");
+
+                    b.Property<string>("CommentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("comment_hash");
+
+                    b.Property<string>("CommentText")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("comment_text");
+
+                    b.Property<string>("ContentDigest")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("content_digest");
+
+                    b.Property<int>("Decision")
+                        .HasColumnType("integer")
+                        .HasColumnName("decision");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("hash");
+
+                    b.Property<string>("HashSchemaVersion")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("hash_schema_version");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<string>("OrganizationInn")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("organization_inn");
+
+                    b.Property<string>("OrganizationName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("organization_name");
+
+                    b.Property<string>("PersonFio")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("person_fio");
+
+                    b.Property<string>("PersonIdnp")
+                        .IsRequired()
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)")
+                        .HasColumnName("person_idnp");
+
+                    b.Property<int>("Phase")
+                        .HasColumnType("integer")
+                        .HasColumnName("phase");
+
+                    b.Property<DateTime?>("ProviderCheckTimestamp")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("provider_check_timestamp");
+
+                    b.Property<DateTime?>("ProviderTimestamp")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("provider_timestamp");
+
+                    b.Property<int>("RedactionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("redaction_id");
+
+                    b.Property<int>("RoundNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("round_number");
+
+                    b.Property<string>("SignatureBase64")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("signature_base64");
+
+                    b.Property<string>("SignatureSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("signature_sha256");
+
+                    b.Property<DateTime>("SignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("signed_at");
+
+                    b.Property<int>("StageId")
+                        .HasColumnType("integer")
+                        .HasColumnName("stage_id");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("user_agent");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("VerificationError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("verification_error");
+
+                    b.Property<bool>("Verified")
+                        .HasColumnType("boolean")
+                        .HasColumnName("verified");
+
+                    b.Property<DateTime>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("verified_at");
+
+                    b.Property<string>("VndCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("vnd_code");
+
+                    b.Property<int>("VndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_resolution_signature");
+
+                    b.HasIndex("ApprovalProcessId")
+                        .HasDatabaseName("ix_vnd_resolution_signature_approval_process_id");
+
+                    b.HasIndex("PersonIdnp")
+                        .HasDatabaseName("ix_vnd_resolution_signature_person_idnp");
+
+                    b.HasIndex("RedactionId")
+                        .HasDatabaseName("ix_vnd_resolution_signature_redaction_id");
+
+                    b.HasIndex("SignatureSha256")
+                        .IsUnique()
+                        .HasDatabaseName("ux_vnd_resolution_signature_signature_sha256");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_vnd_resolution_signature_user_id");
+
+                    b.HasIndex("VndId")
+                        .HasDatabaseName("ix_vnd_resolution_signature_vnd_id");
+
+                    b.HasIndex("StageId", "Phase", "RoundNumber", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_vnd_resolution_signature_resolution_user");
+
+                    b.ToTable("vnd_resolution_signature", (string)null);
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Feedback.Models.FeedbackItem", b =>
                 {
                     b.Property<long>("Id")
@@ -16384,6 +16590,54 @@ namespace delosfera_server.Migrations
                     b.Navigation("FileAttachment");
 
                     b.Navigation("VndApprovalProcess");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndResolutionSignature", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", "ApprovalProcess")
+                        .WithMany()
+                        .HasForeignKey("ApprovalProcessId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_resolution_signature_vnd_approval_process_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndRedaction", "Redaction")
+                        .WithMany()
+                        .HasForeignKey("RedactionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_resolution_signature_vnd_redaction_redaction_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalStage", "Stage")
+                        .WithMany()
+                        .HasForeignKey("StageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_resolution_signature_vnd_approval_stage_stage_id");
+
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_resolution_signature_user_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "Vnd")
+                        .WithMany()
+                        .HasForeignKey("VndId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_resolution_signature_vnd_document_vnd_id");
+
+                    b.Navigation("ApprovalProcess");
+
+                    b.Navigation("Redaction");
+
+                    b.Navigation("Stage");
+
+                    b.Navigation("User");
+
+                    b.Navigation("Vnd");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Feedback.Models.FeedbackItem", b =>
