@@ -89,6 +89,10 @@ public class DelosferaDbContext : DbContext
     public DbSet<VndProposalQuote> VndProposalQuotes => Set<VndProposalQuote>();
     public DbSet<VndProposalAttachment> VndProposalAttachments => Set<VndProposalAttachment>();
 
+    // Журнал подписей ЭЦП ГП «Инфоком» под резолюциями "Согласовать" — append-only, см.
+    // VndResolutionSignature и проверку в ApplyAuditInfo ниже.
+    public DbSet<VndResolutionSignature> VndResolutionSignatures => Set<VndResolutionSignature>();
+
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<NotificationSetting> NotificationSettings => Set<NotificationSetting>(); // персональные настройки (УВ-16)
@@ -404,6 +408,16 @@ public class DelosferaDbContext : DbContext
 
     private void ApplyAuditInfo()
     {
+        // Журнал подписей ЭЦП неизменяем: запись можно только добавить. Та же защита стоит в БД
+        // триггером (миграция AddVndResolutionSignatures) — здесь она ловит попытку раньше и с
+        // понятным сообщением.
+        foreach (var signature in ChangeTracker.Entries<VndResolutionSignature>())
+        {
+            if (signature.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException(
+                    "Журнал подписей ЭЦП неизменяем — изменение и удаление записей запрещены");
+        }
+
         // Токен версии карточки обновляем при каждом сохранении: по нему EF отличит
         // «сохраняю то, что видел» от «сохраняю поверх чужой правки» (GEN-05).
         foreach (var document in ChangeTracker.Entries<Document>())

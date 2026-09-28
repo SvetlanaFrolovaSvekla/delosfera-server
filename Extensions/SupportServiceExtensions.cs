@@ -21,6 +21,13 @@ public static class SupportServiceExtensions
         builder.Services.AddHttpClient("timestamp");
         builder.Services.AddScoped<ITimestampService, TimestampService>();
 
+        // ЭЦП ГП «Инфоком» (SIG-ECP, тестовый контур). Бекенд обращается не к провайдеру
+        // напрямую, а к delosfera-ecp-service — своему сервису-прокладке (см.
+        // InfocomEcpController / InfocomEcpClient). Адрес и токен — в appsettings:InfocomEcpService.
+        builder.Services.Configure<InfocomEcpServiceOptions>(
+            builder.Configuration.GetSection(InfocomEcpServiceOptions.Section));
+        builder.Services.AddHttpClient<IInfocomEcpClient, InfocomEcpClient>();
+
         // Ознакомление с документами (Б-19): роспись сотрудника под приказом или ВНД
         builder.Services.AddScoped<IAcknowledgementService, AcknowledgementService>();
 

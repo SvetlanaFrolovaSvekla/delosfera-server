@@ -7,6 +7,7 @@ using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Services;
 using delosfera_server.Modules.Users.Models;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace delosfera_server.Modules.Documents.VND.Controllers;
 
@@ -18,11 +19,15 @@ public class VndApprovalController : ControllerBase
 {
     private readonly IVndApprovalService _service;
     private readonly ICurrentUserService _currentUser;
+    private readonly IResolutionSignatureService _resolutionSignatures;
 
-    public VndApprovalController(IVndApprovalService service, ICurrentUserService currentUser)
+    public VndApprovalController(
+        IVndApprovalService service, ICurrentUserService currentUser,
+        IResolutionSignatureService resolutionSignatures)
     {
         _service = service;
         _currentUser = currentUser;
+        _resolutionSignatures = resolutionSignatures;
     }
 
     /// <summary>Запустить согласование последней редакции ВНД</summary>
@@ -65,8 +70,36 @@ public class VndApprovalController : ControllerBase
         return Ok(await _service.GetHistoryByVndIdAsync(vndId));
     }
 
+    /// <summary>Хэш резолюции для подписи ЭЦП ГП «Инфоком» (2.5 get-sign/for-hash). Клиент
+    /// присылает ТОЛЬКО текст резолюции; содержимое текущей редакции (SHA-256 файлов) и код ВНД
+    /// backend берёт из БД сам — см. ResolutionSignatureHasher (схема v1). Тот же хэш Decide()
+    /// пересчитывает при сохранении и сверяет с подписанным. Отдаётся только назначенному
+    /// согласующему этого этапа на активной фазе. Под rate limit: считает SHA-256 файлов из MinIO.</summary>
+    [HttpPost("stages/{stageId:int}/decision/resolution-hash")]
+    [EnableRateLimiting("ecp-verify")]
+    [ProducesResponseType(typeof(ResolutionHashResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ResolutionHashResponse>> ResolutionHash(
+        int vndId, int stageId, [FromBody] ResolutionHashRequest request, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _resolutionSignatures.GetHashForStageAsync(
+                vndId, stageId, request.Comment, _currentUser.UserId, ct));
+        }
+        catch (ResolutionSignatureException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message, code = ex.Code }); }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+    }
+
     /// <summary>Решение согласующего по своему этапу. multipart/form-data — согласующий
-    /// может приложить файлы к своей резолюции (см. <see cref="ApprovalDecisionRequest.Files"/>).</summary>
+    /// может приложить файлы к своей резолюции (см. <see cref="ApprovalDecisionRequest.Files"/>).
+    ///
+    /// Для Decision == Approve обязательна подпись ЭЦП ГП «Инфоком» (EcpSignatureBase64/EcpHash/
+    /// EcpPersonIdnp, см. <see cref="ApprovalDecisionRequest"/>): VndApprovalService.DecideAsync
+    /// проверяет её целиком до записи решения (ResolutionSignatureService) и сохраняет решение
+    /// вместе с записью журнала подписей. Ошибки проверки отдаются как { message, code } с кодом
+    /// из ResolutionSignatureErrorCodes (например, 409 + "document_changed" — подписать заново).</summary>
     [HttpPost("stages/{stageId:int}/decision")]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(ApprovalProcessResponse), StatusCodes.Status200OK)]
@@ -81,10 +114,16 @@ public class VndApprovalController : ControllerBase
             .Where(f => f.Name == nameof(ApprovalDecisionRequest.Files))
             .ToList();
 
+        // Для журнала подписей ЭЦП (VndResolutionSignature). Поля помечены [BindNever] — из формы
+        // их подставить нельзя. За reverse-proxy без ForwardedHeaders здесь будет адрес прокси.
+        request.RequestIpAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        request.RequestUserAgent = Request.Headers.UserAgent.ToString();
+
         try
         {
             return Ok(await _service.DecideAsync(vndId, stageId, request, _currentUser.UserId));
         }
+        catch (ResolutionSignatureException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message, code = ex.Code }); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }

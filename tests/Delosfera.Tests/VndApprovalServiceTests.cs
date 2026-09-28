@@ -23,7 +23,7 @@ public class VndApprovalServiceTests
         new(db, new NoopFileStorage(), new NoopNotificationService(),
             new FakeCurrentUser(Approver1), NullLogger<VndApprovalService>.Instance,
             new FakeActivityLog(), new ApprovalSheetGenerator(),
-            new FixedApprovalUnitResolver(db), new FixedWorkCalendar());
+            new FixedApprovalUnitResolver(db), new FixedWorkCalendar(), new FakeResolutionSignatureService());
 
     /// <summary>Календарь без праздников — только пн–пт 09:00–18:00.</summary>
     private sealed class FixedWorkCalendar : IVndWorkCalendarCache
@@ -205,5 +205,113 @@ public class VndApprovalServiceTests
         var stage = await db.VndApprovalStages.SingleAsync(s => s.Id == stageId);
         Assert.Equal(ApprovalStageDecision.ApprovedWithComment, stage.PrimaryDecision);
         Assert.True(stage.ParticipatesInRepeat); // с замечанием → участвует в повторном круге
+    }
+
+    // --- ЭЦП ГП «Инфоком»: журнал подписей и обязательность подписи ---------------------------
+
+    private static VndApprovalService NewServiceWithRealSignatureCheck(DelosferaDbContext db) =>
+        new(db, new NoopFileStorage(), new NoopNotificationService(),
+            new FakeCurrentUser(Approver1), NullLogger<VndApprovalService>.Instance,
+            new FakeActivityLog(), new ApprovalSheetGenerator(),
+            new FixedApprovalUnitResolver(db), new FixedWorkCalendar(),
+            new ResolutionSignatureService(db, new NoopFileStorage(), new ThrowingInfocomEcpClient(),
+                new FakeCurrentUser(Approver1), NullLogger<ResolutionSignatureService>.Instance));
+
+    [Fact]
+    public async Task Decide_Approve_SavesSignatureJournalEntryWithDecision()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var seeded = SeedTwoStageProcess(db);
+        var stageId = seeded.Stages.First(s => s.ApproverUserId == Approver1).Id;
+        var svc = NewService(db);
+
+        await svc.DecideAsync(seeded.VndId, stageId, new ApprovalDecisionRequest { Decision = ApprovalDecisionType.Approve }, Approver1);
+
+        var entry = await db.VndResolutionSignatures.AsNoTracking().SingleAsync(s => s.StageId == stageId);
+        Assert.Equal(Approver1, entry.UserId);
+        Assert.Equal(ApprovalStageDecision.Approved, entry.Decision);
+    }
+
+    [Fact]
+    public async Task Decide_ApproveWithComment_DoesNotRequireSignature()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var seeded = SeedTwoStageProcess(db);
+        var stageId = seeded.Stages.First(s => s.ApproverUserId == Approver1).Id;
+        var svc = NewServiceWithRealSignatureCheck(db);
+
+        await svc.DecideAsync(seeded.VndId, stageId,
+            new ApprovalDecisionRequest { Decision = ApprovalDecisionType.ApproveWithComment, Comment = "Правки" }, Approver1);
+
+        Assert.False(await db.VndResolutionSignatures.AnyAsync(s => s.StageId == stageId));
+    }
+
+    [Fact]
+    public async Task Decide_Approve_WithoutSignature_IsRejected_AndNothingSaved()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var seeded = SeedTwoStageProcess(db);
+        var stageId = seeded.Stages.First(s => s.ApproverUserId == Approver1).Id;
+        var svc = NewServiceWithRealSignatureCheck(db);
+
+        var ex = await Assert.ThrowsAsync<ResolutionSignatureException>(() =>
+            svc.DecideAsync(seeded.VndId, stageId, new ApprovalDecisionRequest { Decision = ApprovalDecisionType.Approve }, Approver1));
+        Assert.Equal(ResolutionSignatureErrorCodes.EcpRequired, ex.Code);
+        Assert.Equal(400, ex.StatusCode);
+
+        db.ChangeTracker.Clear();
+        var stage = await db.VndApprovalStages.SingleAsync(s => s.Id == stageId);
+        Assert.Equal(ApprovalStageDecision.Pending, stage.PrimaryDecision);
+    }
+
+    [Theory]
+    [InlineData("1234567890123")]    // 13 цифр
+    [InlineData("123456789012345")]  // 15 цифр
+    [InlineData("1234567890123a")]   // не цифра
+    public async Task Decide_Approve_WithMalformedPin_IsRejectedBeforeProviderCall(string pin)
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var seeded = SeedTwoStageProcess(db);
+        var stageId = seeded.Stages.First(s => s.ApproverUserId == Approver1).Id;
+        var svc = NewServiceWithRealSignatureCheck(db); // ThrowingInfocomEcpClient: вызов ГП провалил бы тест иначе
+
+        var ex = await Assert.ThrowsAsync<ResolutionSignatureException>(() =>
+            svc.DecideAsync(seeded.VndId, stageId, new ApprovalDecisionRequest
+            {
+                Decision = ApprovalDecisionType.Approve,
+                EcpSignatureBase64 = "AAAA",
+                EcpHash = new string('A', 64),
+                EcpPersonIdnp = pin,
+            }, Approver1));
+        Assert.Equal(ResolutionSignatureErrorCodes.InvalidPin, ex.Code);
+    }
+
+    [Fact]
+    public async Task SignatureJournal_IsAppendOnly()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var seeded = SeedTwoStageProcess(db);
+        var stageId = seeded.Stages.First(s => s.ApproverUserId == Approver1).Id;
+        await NewService(db).DecideAsync(seeded.VndId, stageId,
+            new ApprovalDecisionRequest { Decision = ApprovalDecisionType.Approve }, Approver1);
+
+        // Через EF: изменение и удаление запрещены DbContext'ом.
+        var entry = await db.VndResolutionSignatures.SingleAsync(s => s.StageId == stageId);
+        entry.PersonFio = "Подмена";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+        db.ChangeTracker.Clear();
+
+        var toDelete = await db.VndResolutionSignatures.SingleAsync(s => s.StageId == stageId);
+        db.VndResolutionSignatures.Remove(toDelete);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+        db.ChangeTracker.Clear();
+
+        // В обход EF: триггер БД.
+        await Assert.ThrowsAsync<Npgsql.PostgresException>(() =>
+            db.Database.ExecuteSqlRawAsync(
+                "UPDATE vnd_resolution_signature SET person_fio = 'x' WHERE stage_id = {0}", stageId));
+        await Assert.ThrowsAsync<Npgsql.PostgresException>(() =>
+            db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM vnd_resolution_signature WHERE stage_id = {0}", stageId));
     }
 }
