@@ -35,7 +35,7 @@ public class InfocomEcpController : ControllerBase
     /// <summary>2.1 Получение метода авторизации.</summary>
     [HttpPost("auth-methods")]
     public Task<IActionResult> AuthMethods([FromBody] InfocomUserAuthMethodsRequest request, CancellationToken ct) =>
-        Run(() => _client.UserAuthMethodsAsync(request, ct));
+        Run("auth-methods", request.PersonIdnp, () => _client.UserAuthMethodsAsync(request, ct));
 
     /// <summary>2.2 Запрос на отправку пин-кода по выбранному методу. Ограничено (см. "ecp-pin"
     /// в Program.cs) — у провайдера свой счётчик попыток, но не стоит долбить его API запросами
@@ -43,43 +43,58 @@ public class InfocomEcpController : ControllerBase
     [HttpPost("pin-code")]
     [EnableRateLimiting("ecp-pin")]
     public Task<IActionResult> PinCode([FromBody] InfocomGetPinCodeRequest request, CancellationToken ct) =>
-        Run(() => _client.GetPinCodeAsync(request, ct));
+        Run($"pin-code method={request.Method}", request.PersonIdnp, () => _client.GetPinCodeAsync(request, ct));
 
     /// <summary>2.3 Получение токена доступа (живёт ~1 минуту). Тот же лимит, что и на pin-code -
     /// перебор пин-кода идёт именно здесь ("Неверный ПИН-код! Осталось попыток: N").</summary>
     [HttpPost("token")]
     [EnableRateLimiting("ecp-pin")]
     public Task<IActionResult> Token([FromBody] InfocomAccountAuthRequest request, CancellationToken ct) =>
-        Run(() => _client.AccountAuthAsync(request, ct));
+        Run("token", request.PersonIdnp, () => _client.AccountAuthAsync(request, ct));
 
     /// <summary>2.4 Получение сведений о сертификате по токену доступа.</summary>
     [HttpPost("cert-info")]
     public Task<IActionResult> CertInfo([FromBody] InfocomGetCertInfoRequest request, CancellationToken ct) =>
-        Run(() => _client.GetCertInfoAsync(request, ct));
+        Run("cert-info", null, () => _client.GetCertInfoAsync(request, ct));
 
     /// <summary>2.5 Подписание хэша выданным токеном доступа.</summary>
     [HttpPost("sign-hash")]
     public Task<IActionResult> SignHash([FromBody] InfocomSignHashRequest request, CancellationToken ct) =>
-        Run(() => _client.SignHashAsync(request, ct));
+        Run("sign-hash", null, () => _client.SignHashAsync(request, ct));
 
     /// <summary>2.6 Проверка подписи по хэшу.</summary>
     [HttpPost("check-sign")]
     public Task<IActionResult> CheckSign([FromBody] InfocomCheckSignRequest request, CancellationToken ct) =>
-        Run(() => _client.CheckSignAsync(request, ct));
+        Run("check-sign", null, () => _client.CheckSignAsync(request, ct));
 
-    private async Task<IActionResult> Run(Func<Task<System.Text.Json.JsonElement>> action)
+    /// <summary>Пишет в лог: кто (логин из сессии), какая операция, замаскированный ПИН, итог и ответ
+    /// провайдера. Сам ПИН, коды из СМС, токены и хэши в лог не попадают.</summary>
+    private async Task<IActionResult> Run(string operation, string? pin, Func<Task<System.Text.Json.JsonElement>> action)
     {
+        var user = User.Identity?.Name
+                   ?? User.FindFirst("sub")?.Value
+                   ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                   ?? "unknown";
+        var maskedPin = MaskPin(pin);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            return Ok(await action());
+            var result = await action();
+            _logger.LogInformation("ЭЦП {Operation}: user={User} pin={Pin} → OK ({Ms} мс)",
+                operation, user, maskedPin, sw.ElapsedMilliseconds);
+            return Ok(result);
         }
         catch (InfocomEcpException ex)
         {
+            _logger.LogWarning(
+                "ЭЦП {Operation}: user={User} pin={Pin} → отказ провайдера HTTP {Status}, errorCode={ErrorCode}, message={Message} ({Ms} мс)",
+                operation, user, maskedPin, ex.StatusCode, ex.Error.ErrorCode, ex.Error.ErrorMessage, sw.ElapsedMilliseconds);
             return StatusCode(ex.StatusCode == 0 ? 502 : ex.StatusCode, ex.Error);
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "Не удалось обратиться к delosfera-ecp-service");
+            _logger.LogWarning(ex, "ЭЦП {Operation}: user={User} pin={Pin} → не удалось обратиться к delosfera-ecp-service",
+                operation, user, maskedPin);
             return StatusCode(502, new InfocomErrorBody
             {
                 ErrorCode = 502,
@@ -88,8 +103,13 @@ public class InfocomEcpController : ControllerBase
         }
         catch (TaskCanceledException ex)
         {
-            _logger.LogWarning(ex, "Таймаут обращения к delosfera-ecp-service");
+            _logger.LogWarning(ex, "ЭЦП {Operation}: user={User} pin={Pin} → таймаут delosfera-ecp-service ({Ms} мс)",
+                operation, user, maskedPin, sw.ElapsedMilliseconds);
             return StatusCode(504, new InfocomErrorBody { ErrorCode = 504, ErrorMessage = "Таймаут delosfera-ecp-service" });
         }
     }
+
+    /// <summary>Оставляет только последние 4 цифры ПИН — достаточно, чтобы найти запись, но не раскрывает номер.</summary>
+    private static string MaskPin(string? pin) =>
+        string.IsNullOrEmpty(pin) ? "-" : pin.Length <= 4 ? "****" : new string('*', pin.Length - 4) + pin[^4..];
 }
