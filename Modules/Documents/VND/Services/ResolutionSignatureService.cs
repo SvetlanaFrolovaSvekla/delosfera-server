@@ -557,6 +557,15 @@ public class ResolutionSignatureService : IResolutionSignatureService
 
     /// <summary>2.6. null — провайдер/ecp-service недоступен (сеть, таймаут, 5xx); ответ провайдера
     /// "подпись некорректна" (4xx) превращается в Verified=false.</summary>
+    /// <summary>ГП на неверную/испорченную подпись отвечает НЕ 4xx, а errorCode/HTTP 500 с текстом
+    /// "Ошибка при проверке подписи: Подпись не верна" (или "...: java.lang.NullPointerException" для
+    /// битой CMS) — см. документацию 2.6. Это отказ по подписи, а не недоступность провайдера, иначе
+    /// пользователь увидит "сервис недоступен" вместо предложения подписать заново. Любые другие 5xx
+    /// по-прежнему считаются недоступностью (fail closed, решение не сохраняется).</summary>
+    private static bool IsInvalidSignatureError(InfocomEcpException ex) =>
+        ex.StatusCode == 500
+        && ex.Error.ErrorMessage?.Contains("Ошибка при проверке подписи", StringComparison.OrdinalIgnoreCase) == true;
+
     private async Task<InfocomCheckSignResult?> CheckSignAsync(string signatureBase64, string hash, CancellationToken ct)
     {
         try
@@ -565,9 +574,10 @@ public class ResolutionSignatureService : IResolutionSignatureService
                 new InfocomCheckSignRequest { SignBase64 = signatureBase64, Hash = hash }, ct);
             return json.Deserialize<InfocomCheckSignResult>(ProviderJson) ?? new InfocomCheckSignResult();
         }
-        catch (InfocomEcpException ex) when (ex.StatusCode is 400 or 422)
+        catch (InfocomEcpException ex) when (ex.StatusCode is 400 or 422 || IsInvalidSignatureError(ex))
         {
-            _logger.LogWarning("2.6 check-sign: провайдер отклонил подпись (errorCode {ErrorCode})", ex.Error.ErrorCode);
+            _logger.LogWarning("2.6 check-sign: провайдер отклонил подпись (HTTP {Status}, errorCode {ErrorCode})",
+                ex.StatusCode, ex.Error.ErrorCode);
             return new InfocomCheckSignResult { Verified = false };
         }
         catch (InfocomEcpException ex)

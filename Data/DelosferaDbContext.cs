@@ -97,6 +97,9 @@ public class DelosferaDbContext : DbContext
     // VndResolutionSignature и проверку в ApplyAuditInfo ниже.
     public DbSet<VndResolutionSignature> VndResolutionSignatures => Set<VndResolutionSignature>();
 
+    // Сохранённая ЭЦП-идентификация пользователя (ПИН + зашифрованный код из СМС), см. UserEcpCredential.
+    public DbSet<UserEcpCredential> UserEcpCredentials => Set<UserEcpCredential>();
+
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<NotificationSetting> NotificationSettings => Set<NotificationSetting>(); // персональные настройки (УВ-16)

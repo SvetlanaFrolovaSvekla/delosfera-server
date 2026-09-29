@@ -93,6 +93,15 @@ builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 // ЭЦП ГП «Инфоком» на резолюции "Согласовать": хэш резолюции, проверка подписи (2.6) и
 // неизменяемый журнал подписей (см. VndResolutionSignature / ResolutionSignatureService).
 builder.Services.AddScoped<IResolutionSignatureService, ResolutionSignatureService>();
+// Сохранённая ЭЦП-идентификация ("личный кабинет → Электронная подпись"): ПИН и код из СМС хранятся
+// зашифрованно (AES-256-GCM, ключ EcpCredentials:EncryptionKey), сервер сам обменивает код на минутный
+// токен ГП перед каждым подписанием — см. UserEcpCredentialService.
+builder.Services.Configure<delosfera_server.Modules.Signing.Services.EcpCredentialOptions>(
+    builder.Configuration.GetSection(delosfera_server.Modules.Signing.Services.EcpCredentialOptions.Section));
+builder.Services.AddSingleton<delosfera_server.Modules.Signing.Services.IEcpCredentialProtector,
+    delosfera_server.Modules.Signing.Services.EcpCredentialProtector>();
+builder.Services.AddScoped<delosfera_server.Modules.Signing.Services.IUserEcpCredentialService,
+    delosfera_server.Modules.Signing.Services.UserEcpCredentialService>();
 builder.Services.AddSingleton<IApprovalSheetGenerator, ApprovalSheetGenerator>();
 // Разбор легаси-гиперссылок db://documents/{code} и db://attachments/{n} из старой системы
 // (isrib) внутри текста ВНД — не хранит состояния, поэтому синглтон (как ApprovalSheetGenerator выше).

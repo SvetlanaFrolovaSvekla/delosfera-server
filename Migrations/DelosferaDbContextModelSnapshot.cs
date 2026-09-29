@@ -13021,6 +13021,53 @@ namespace delosfera_server.Migrations
                     b.ToTable("user_certificate", (string)null);
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Signing.Models.UserEcpCredential", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EncryptedCode")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("encrypted_code");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_used_at");
+
+                    b.Property<string>("PersonIdnp")
+                        .IsRequired()
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)")
+                        .HasColumnName("person_idnp");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_user_ecp_credential");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_user_ecp_credential_user_id");
+
+                    b.ToTable("user_ecp_credential", (string)null);
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Substitutions.Models.SubstitutionApproval", b =>
                 {
                     b.Property<int>("Id")
@@ -16590,6 +16637,18 @@ namespace delosfera_server.Migrations
                     b.Navigation("FileAttachment");
 
                     b.Navigation("VndApprovalProcess");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Signing.Models.UserEcpCredential", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_user_ecp_credential_user_user_id");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndResolutionSignature", b =>
