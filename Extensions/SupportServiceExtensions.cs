@@ -38,6 +38,7 @@ public static class SupportServiceExtensions
         // ЭЦП ГП «Инфоком» (SIG-ECP, тестовый контур). Бекенд обращается не к провайдеру
         // напрямую, а к delosfera-ecp-service — своему сервису-прокладке (см.
         // InfocomEcpController / InfocomEcpClient). Адрес и токен — в appsettings:InfocomEcpService.
+        builder.Services.Configure<EcpSigningOptions>(builder.Configuration.GetSection(EcpSigningOptions.Section));
         builder.Services.Configure<InfocomEcpServiceOptions>(
             builder.Configuration.GetSection(InfocomEcpServiceOptions.Section));
         builder.Services.AddHttpClient<IInfocomEcpClient, InfocomEcpClient>()

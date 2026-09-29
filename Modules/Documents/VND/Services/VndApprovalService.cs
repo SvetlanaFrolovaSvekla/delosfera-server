@@ -466,23 +466,16 @@ public class VndApprovalService : IVndApprovalService
             _ => throw new InvalidOperationException("Неизвестный тип решения")
         };
 
-        // ЭЦП ГП «Инфоком» (SIG-ECP): для "Согласовать" подпись обязательна и проверяется целиком ДО
+        // ЭЦП ГП «Инфоком» (SIG-ECP): для любого решения подпись обязательна и проверяется целиком ДО
         // записи решения — хэш из БД, replay, свежесть, 2.6 check-sign, личность подписанта (см.
         // ResolutionSignatureService.VerifyForDecisionAsync). Любое несоответствие или недоступность
         // провайдера — ResolutionSignatureException, решение не сохраняется (fail closed). Запись
         // журнала добавляется в контекст рядом с полями решения ниже и уходит в БД тем же
-        // SaveChanges, что и само решение, — атомарно. Для остальных решений ничего не меняется.
+        // SaveChanges, что и само решение, — атомарно.
+        // ТЕСТОВЫЙ режим (request.WithoutEcp): решение без подписи и без записи в журнал. Допустимость
+        // проверяет VndApprovalController по EcpSigning:AllowWithoutEcp.
         VndResolutionSignature? signature = null;
-        if (decision == ApprovalStageDecision.Approved && request.WithoutEcp)
-        {
-            // ТЕСТОВЫЙ режим: "Согласовать" без ЭЦП — только для локальных учётных записей.
-            // Проверяем на сервере, а не доверяем клиенту (доменным пользователям нельзя).
-            var decidingUser = await _db.Users.FindAsync(currentUserId);
-            if (decidingUser is null || decidingUser.Source != UserSource.Local)
-                throw new UnauthorizedAccessException(
-                    "Согласование без ЭЦП доступно только для локальных учётных записей");
-        }
-        else if (decision == ApprovalStageDecision.Approved)
+        if (!request.WithoutEcp)
         {
             signature = await _resolutionSignatures.VerifyForDecisionAsync(new ResolutionSignatureInput
             {

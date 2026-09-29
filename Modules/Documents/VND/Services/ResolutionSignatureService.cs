@@ -68,7 +68,8 @@ public interface IResolutionSignatureService
     /// <summary>Хэш резолюции для подписи: комментарий — из запроса, содержимое редакции и код ВНД —
     /// из БД. Только для назначенного согласующего этого этапа на активной фазе.</summary>
     Task<ResolutionHashResponse> GetHashForStageAsync(
-        int vndId, int stageId, string? comment, int currentUserId, CancellationToken ct = default);
+        int vndId, int stageId, string? comment, ApprovalStageDecision decision, int currentUserId,
+        CancellationToken ct = default);
 
     /// <summary>Полная проверка подписи перед сохранением резолюции "Согласовать" (хэш из БД,
     /// replay, свежесть, 2.6, личность подписанта). Бросает <see cref="ResolutionSignatureException"/>
@@ -148,8 +149,10 @@ public class ResolutionSignatureService : IResolutionSignatureService
     // ----------------------------------------------------------------------------------------
 
     public async Task<ResolutionHashResponse> GetHashForStageAsync(
-        int vndId, int stageId, string? comment, int currentUserId, CancellationToken ct = default)
+        int vndId, int stageId, string? comment, ApprovalStageDecision decision, int currentUserId,
+        CancellationToken ct = default)
     {
+        EnsureSignableDecision(decision);
         if (comment is { Length: > MaxCommentLength })
             throw new InvalidOperationException($"Комментарий не может превышать {MaxCommentLength} символов");
 
@@ -168,11 +171,11 @@ public class ResolutionSignatureService : IResolutionSignatureService
 
         _ = PhaseForStatus(process.Status);
 
-        var components = await BuildComponentsAsync(process.Redaction!, process.Vnd!.Code, comment, ct);
+        var components = await BuildComponentsAsync(process.Redaction!, process.Vnd!.Code, comment, decision, ct);
         return new ResolutionHashResponse
         {
             Hash = ResolutionSignatureHasher.Compute(components),
-            SchemaVersion = ResolutionSignatureHasher.SchemaVersion,
+            SchemaVersion = ResolutionSignatureHasher.VersionOf(components),
         };
     }
 
@@ -222,7 +225,8 @@ public class ResolutionSignatureService : IResolutionSignatureService
         var roundNumber = await CurrentRoundNumberAsync(process.Id, phase, ct);
 
         // 2. Хэш — только из актуальных данных БД.
-        var components = await BuildComponentsAsync(redaction, vnd.Code, input.Comment, ct);
+        EnsureSignableDecision(input.Decision);
+        var components = await BuildComponentsAsync(redaction, vnd.Code, input.Comment, input.Decision, ct);
         var expectedHash = ResolutionSignatureHasher.Compute(components);
         if (!ResolutionSignatureHasher.HashesEqual(expectedHash, input.Hash))
             throw new ResolutionSignatureException(StatusCodes.Status409Conflict,
@@ -305,7 +309,7 @@ public class ResolutionSignatureService : IResolutionSignatureService
             CertIssuerCommonName = Truncate(cert?.CertIssuer?.CommonName, 300),
             CertIssuerOrganizationName = Truncate(cert?.CertIssuer?.OrganizationName, 500),
 
-            HashSchemaVersion = ResolutionSignatureHasher.SchemaVersion,
+            HashSchemaVersion = ResolutionSignatureHasher.VersionOf(components),
             Hash = expectedHash,
             CommentText = components.Comment,
             CommentHash = ResolutionSignatureHasher.Sha256Hex(components.Comment),
@@ -386,7 +390,7 @@ public class ResolutionSignatureService : IResolutionSignatureService
             CheckedAt = DateTime.UtcNow,
         };
 
-        if (entry.HashSchemaVersion != ResolutionSignatureHasher.SchemaVersion)
+        if (entry.HashSchemaVersion is not (ResolutionSignatureHasher.SchemaVersion or ResolutionSignatureHasher.SchemaVersionV2))
         {
             result.Status = "unsupported_schema";
             result.Message = $"Неизвестная версия схемы хэша \"{entry.HashSchemaVersion}\"";
@@ -395,7 +399,10 @@ public class ResolutionSignatureService : IResolutionSignatureService
 
         // Запись журнала сама с собой: хранимые компоненты должны давать хранимый хэш. Если нет —
         // строку правили в обход приложения (триггер это запрещает, но проверка дешёвая).
-        var storedComponents = new ResolutionHashComponents(entry.CommentText, entry.ContentDigest, entry.VndCode);
+        var storedComponents = new ResolutionHashComponents(entry.CommentText, entry.ContentDigest, entry.VndCode,
+            entry.HashSchemaVersion == ResolutionSignatureHasher.SchemaVersionV2
+                ? ResolutionSignatureHasher.DecisionCode(entry.Decision)
+                : null);
         var journalConsistent =
             ResolutionSignatureHasher.HashesEqual(entry.Hash, ResolutionSignatureHasher.Compute(storedComponents))
             && ResolutionSignatureHasher.HashesEqual(entry.CommentHash,
@@ -510,10 +517,18 @@ public class ResolutionSignatureService : IResolutionSignatureService
     }
 
     private async Task<ResolutionHashComponents> BuildComponentsAsync(
-        VndRedaction redaction, string vndCode, string? comment, CancellationToken ct)
+        VndRedaction redaction, string vndCode, string? comment, ApprovalStageDecision decision, CancellationToken ct)
     {
         var content = await BuildContentDigestAsync(redaction, ct);
-        return ResolutionSignatureHasher.CreateComponents(comment, content, vndCode);
+        return ResolutionSignatureHasher.CreateComponents(comment, content, vndCode, decision);
+    }
+
+    /// <summary>Подписываются только решения согласующего: "Согласовать", "с замечаниями", "Отклонить".</summary>
+    private static void EnsureSignableDecision(ApprovalStageDecision decision)
+    {
+        if (decision is not (ApprovalStageDecision.Approved or ApprovalStageDecision.ApprovedWithComment
+            or ApprovalStageDecision.Rejected))
+            throw new InvalidOperationException("Для этого решения подпись ЭЦП не предусмотрена");
     }
 
     private async Task<string> BuildContentDigestAsync(VndRedaction redaction, CancellationToken ct)

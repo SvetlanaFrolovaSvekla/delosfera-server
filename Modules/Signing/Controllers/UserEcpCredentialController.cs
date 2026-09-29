@@ -29,6 +29,10 @@ public class SignResolutionWithStoredEcpRequest
     public int StageId { get; set; }
     /// <summary>Итоговый текст резолюции (так же, как для resolution-hash).</summary>
     public string? Comment { get; set; }
+
+    /// <summary>Решение, под которым ставится подпись (входит в хэш). По умолчанию "Согласовать".</summary>
+    public delosfera_server.Modules.Documents.VND.DTO.Request.ApprovalDecisionType Decision { get; set; }
+        = delosfera_server.Modules.Documents.VND.DTO.Request.ApprovalDecisionType.Approve;
 }
 
 /// <summary>
@@ -71,13 +75,20 @@ public class UserEcpCredentialController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Подписать резолюцию "Согласовать" сохранённой идентификацией. Возвращает поля, которые
+    /// <summary>Подписать резолюцию (любое решение) сохранённой идентификацией. Возвращает поля, которые
     /// клиент прикладывает к POST .../decision. Лимит "ecp-verify" — дорогая операция (хэш файлов + 2 запроса к ГП).</summary>
     [HttpPost("sign-resolution")]
     [EnableRateLimiting("ecp-verify")]
     public Task<IActionResult> SignResolution([FromBody] SignResolutionWithStoredEcpRequest request, CancellationToken ct) =>
         Run(async () => Ok(await _service.SignResolutionAsync(
-            _currentUser.UserId, request.VndId, request.StageId, request.Comment, ct)));
+            _currentUser.UserId, request.VndId, request.StageId, request.Comment,
+            delosfera_server.Modules.Documents.VND.DTO.Request.ApprovalDecisionTypeExtensions.ToStageDecision(request.Decision), ct)));
+
+    /// <summary>Разрешены ли решения без ЭЦП (тестовый режим, EcpSigning:AllowWithoutEcp) — по нему клиент
+    /// показывает кнопки "... (без ЭЦП, тест)".</summary>
+    [HttpGet("test-mode")]
+    public IActionResult TestMode([FromServices] Microsoft.Extensions.Options.IOptions<EcpSigningOptions> options) =>
+        Ok(new { allowWithoutEcp = options.Value.AllowWithoutEcp });
 
     private async Task<IActionResult> Run(Func<Task<IActionResult>> action)
     {

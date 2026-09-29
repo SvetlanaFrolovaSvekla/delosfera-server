@@ -9,7 +9,9 @@ namespace delosfera_server.Modules.Documents.VND.Services;
 /// <param name="Content">Отпечаток содержимого редакции — SHA-256 файлов текста по языкам,
 /// см. <see cref="ResolutionSignatureHasher.BuildContentDigest"/>.</param>
 /// <param name="Code">Код ВНД (VndDocument.Code).</param>
-public sealed record ResolutionHashComponents(string Comment, string Content, string Code);
+/// <param name="Decision">Решение ("approved" / "approved_with_comment" / "rejected") — только в схеме v2;
+/// null — схема v1 (старые подписи, только "Согласовать").</param>
+public sealed record ResolutionHashComponents(string Comment, string Content, string Code, string? Decision = null);
 
 /// <summary>
 /// Хэш резолюции "Согласовать" для ЭЦП ГП «Инфоком» (SIG-ECP) — ЕДИНСТВЕННОЕ место, где задан
@@ -33,10 +35,41 @@ public sealed record ResolutionHashComponents(string Comment, string Content, st
 /// Версия схемы — первая строка: если формат когда-нибудь поменяется, это будет "v2", а старые
 /// подписи продолжат проверяться по своей версии (VndResolutionSignature.HashSchemaVersion).
 /// Менять формат v1 задним числом НЕЛЬЗЯ — все сохранённые подписи перестанут сходиться.
+///
+/// Схема v2 (текущая, с 29.09.2026): ЭЦП требуется для всех решений ("Согласовать", "с замечаниями",
+/// "Отклонить"), поэтому в подписываемую строку первым полем входит само решение — подпись под
+/// "Согласовать" нельзя выдать за подпись под "Отклонить" и наоборот:
+/// <code>
+/// v2
+/// decision:{len}:{approved|approved_with_comment|rejected}
+/// comment:{len}:{value}
+/// content:{len}:{value}
+/// code:{len}:{value}
+/// </code>
 /// </summary>
 public static class ResolutionSignatureHasher
 {
+    /// <summary>Схема v1 (без решения) — только для проверки старых подписей.</summary>
     public const string SchemaVersion = "v1";
+
+    /// <summary>Схема v2 — с решением. Все новые подписи.</summary>
+    public const string SchemaVersionV2 = "v2";
+
+    /// <summary>Версия схемы, которой строятся новые хэши.</summary>
+    public const string CurrentSchemaVersion = SchemaVersionV2;
+
+    /// <summary>Код решения для схемы v2.</summary>
+    public static string DecisionCode(delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision decision) => decision switch
+    {
+        delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision.Approved => "approved",
+        delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision.ApprovedWithComment => "approved_with_comment",
+        delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision.Rejected => "rejected",
+        _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Для этого решения подпись не предусмотрена"),
+    };
+
+    /// <summary>Версия схемы, которой соответствуют компоненты: v2, если в них есть решение.</summary>
+    public static string VersionOf(ResolutionHashComponents components) =>
+        components.Decision is null ? SchemaVersion : SchemaVersionV2;
 
     /// <summary>Подставляется вместо пустого комментария резолюции "Согласовать".</summary>
     public const string EmptyCommentPlaceholder = "Согласовано";
@@ -83,13 +116,21 @@ public static class ResolutionSignatureHasher
     public static ResolutionHashComponents CreateComponents(string? comment, string contentDigest, string? vndCode) =>
         new(NormalizeComment(comment), NormalizeText(contentDigest), NormalizeCode(vndCode));
 
-    /// <summary>Каноническая строка схемы v1 (см. описание класса).</summary>
+    /// <summary>Компоненты схемы v2 — с решением.</summary>
+    public static ResolutionHashComponents CreateComponents(
+        string? comment, string contentDigest, string? vndCode,
+        delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision decision) =>
+        new(NormalizeComment(comment), NormalizeText(contentDigest), NormalizeCode(vndCode), DecisionCode(decision));
+
+    /// <summary>Каноническая строка схемы v1 или v2 (см. описание класса).</summary>
     public static string BuildCanonical(ResolutionHashComponents components)
     {
         ArgumentNullException.ThrowIfNull(components);
 
         var sb = new StringBuilder();
-        sb.Append(SchemaVersion);
+        sb.Append(VersionOf(components));
+        if (components.Decision is not null)
+            AppendField(sb, "decision", components.Decision);
         AppendField(sb, "comment", components.Comment);
         AppendField(sb, "content", components.Content);
         AppendField(sb, "code", components.Code);

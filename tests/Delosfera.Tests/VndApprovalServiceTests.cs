@@ -233,7 +233,21 @@ public class VndApprovalServiceTests
     }
 
     [Fact]
-    public async Task Decide_ApproveWithComment_DoesNotRequireSignature()
+    public async Task Decide_ApproveWithComment_WithoutSignature_IsRejected()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var seeded = SeedTwoStageProcess(db);
+        var stageId = seeded.Stages.First(s => s.ApproverUserId == Approver1).Id;
+        var svc = NewServiceWithRealSignatureCheck(db);
+
+        var ex = await Assert.ThrowsAsync<ResolutionSignatureException>(() => svc.DecideAsync(seeded.VndId, stageId,
+            new ApprovalDecisionRequest { Decision = ApprovalDecisionType.ApproveWithComment, Comment = "Правки" }, Approver1));
+        Assert.Equal(ResolutionSignatureErrorCodes.EcpRequired, ex.Code);
+        Assert.False(await db.VndResolutionSignatures.AnyAsync(s => s.StageId == stageId));
+    }
+
+    [Fact]
+    public async Task Decide_Reject_WithoutEcpTestMode_SavesDecisionWithoutJournal()
     {
         await using var db = await _postgres.NewIsolatedDbAsync();
         var seeded = SeedTwoStageProcess(db);
@@ -241,8 +255,12 @@ public class VndApprovalServiceTests
         var svc = NewServiceWithRealSignatureCheck(db);
 
         await svc.DecideAsync(seeded.VndId, stageId,
-            new ApprovalDecisionRequest { Decision = ApprovalDecisionType.ApproveWithComment, Comment = "Правки" }, Approver1);
+            new ApprovalDecisionRequest { Decision = ApprovalDecisionType.Reject, Comment = "Не согласен", WithoutEcp = true },
+            Approver1);
 
+        db.ChangeTracker.Clear();
+        var stage = await db.VndApprovalStages.SingleAsync(s => s.Id == stageId);
+        Assert.Equal(ApprovalStageDecision.Rejected, stage.PrimaryDecision);
         Assert.False(await db.VndResolutionSignatures.AnyAsync(s => s.StageId == stageId));
     }
 

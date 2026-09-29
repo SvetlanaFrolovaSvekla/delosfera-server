@@ -49,9 +49,9 @@ public class ApprovalDecisionRequest
     /// если в самой CMS нет signingTime.</summary>
     public long? EcpTimestamp { get; set; }
 
-    /// <summary>ТЕСТОВЫЙ режим: "Согласовать" без ЭЦП. Разрешён ТОЛЬКО для локальных учётных
-    /// записей (User.Source == Local) — для доменных (LDAP) сервер ответит 403. Только для
-    /// Decision == Approve; при true подпись не проверяется и запись в журнал VndResolutionSignature
+    /// <summary>ТЕСТОВЫЙ режим: решение без ЭЦП (любое — "Согласовать", "с замечаниями", "Отклонить").
+    /// Разрешено, только если на сервере включено EcpSigning:AllowWithoutEcp (иначе 403, проверяет
+    /// VndApprovalController). При true подпись не проверяется и запись в журнал VndResolutionSignature
     /// не создаётся.</summary>
     public bool WithoutEcp { get; set; }
 
@@ -88,4 +88,16 @@ public enum ApprovalDecisionType
     Approve = 0,
     ApproveWithComment = 1,
     Reject = 2
+}
+
+public static class ApprovalDecisionTypeExtensions
+{
+    public static delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision ToStageDecision(
+        this ApprovalDecisionType type) => type switch
+    {
+        ApprovalDecisionType.Approve => delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision.Approved,
+        ApprovalDecisionType.ApproveWithComment => delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision.ApprovedWithComment,
+        ApprovalDecisionType.Reject => delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision.Rejected,
+        _ => throw new InvalidOperationException("Неизвестный тип решения"),
+    };
 }

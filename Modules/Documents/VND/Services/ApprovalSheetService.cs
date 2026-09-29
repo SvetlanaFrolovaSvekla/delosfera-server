@@ -21,7 +21,7 @@ public static class ApprovalSheetRowBuilder
     public static List<ApprovalSheetRow> Build(
         VndApprovalProcess process,
         IReadOnlyDictionary<int, User> usersById,
-        IReadOnlyDictionary<int, VndResolutionSignature>? latestSignatureByStage,
+        IReadOnlyDictionary<int, List<VndResolutionSignature>>? signaturesByStage,
         TimeZoneInfo zone)
     {
         var rows = new List<ApprovalSheetRow>();
@@ -48,10 +48,17 @@ public static class ApprovalSheetRowBuilder
 
             ApprovalSheetStamp? stamp = null;
             string? signatureNote = null;
-            if (latestSignatureByStage is not null)
+            if (signaturesByStage is not null)
             {
-                if (decision == ApprovalStageDecision.Approved
-                    && latestSignatureByStage.TryGetValue(stage.Id, out var signature))
+                // Подпись под ЭТИМ решением: то же решение и та же фаза (для перенесённого на финальную
+                // выдержку согласования — подпись под исходным "Согласовать" из более ранней фазы).
+                var signature = signaturesByStage.TryGetValue(stage.Id, out var stageSignatures)
+                    ? stageSignatures
+                        .Where(s => s.Decision == decision && (s.Phase == phase || auto))
+                        .OrderByDescending(s => s.SignedAt)
+                        .FirstOrDefault()
+                    : null;
+                if (signature is not null)
                 {
                     stamp = new ApprovalSheetStamp(
                         signature.PersonFio ?? signature.CertCommonName ?? user?.FullName,
@@ -68,9 +75,8 @@ public static class ApprovalSheetRowBuilder
                     {
                         ApprovalStageDecision.Pending => "—",
                         ApprovalStageDecision.Approved when auto => "Без ЭЦП — согласовано автоматически",
-                        ApprovalStageDecision.Approved => "Без ЭЦП",
                         ApprovalStageDecision.AutoApprovedByTimeout => "Без ЭЦП — засчитано по истечении срока",
-                        _ => "ЭЦП для этого решения не требуется",
+                        _ => "Без ЭЦП",
                     };
                 }
             }
@@ -161,7 +167,7 @@ public sealed class ApprovalSheetService : IApprovalSheetService
             .Where(u => approverIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, ct);
 
-        Dictionary<int, VndResolutionSignature>? signatures = null;
+        Dictionary<int, List<VndResolutionSignature>>? signatures = null;
         if (mode == ApprovalSheetMode.Signed)
         {
             var all = await _db.VndResolutionSignatures.AsNoTracking()
@@ -169,7 +175,7 @@ public sealed class ApprovalSheetService : IApprovalSheetService
                 .ToListAsync(ct);
             signatures = all
                 .GroupBy(s => s.StageId)
-                .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.SignedAt).First());
+                .ToDictionary(g => g.Key, g => g.ToList());
         }
 
         var rows = ApprovalSheetRowBuilder.Build(process, usersById, signatures, _clock.Zone);

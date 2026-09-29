@@ -71,7 +71,8 @@ public interface IUserEcpCredentialService
     /// <summary>Подписывает хэш резолюции (его строит backend, см. ResolutionSignatureService) сохранённой
     /// идентификацией: обмен кода на минутный токен (2.3) → 2.5 get-sign/for-hash.</summary>
     Task<StoredEcpSignatureResponse> SignResolutionAsync(
-        int userId, int vndId, int stageId, string? comment, CancellationToken ct = default);
+        int userId, int vndId, int stageId, string? comment,
+        delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision decision, CancellationToken ct = default);
 }
 
 public sealed class UserEcpCredentialService : IUserEcpCredentialService
@@ -154,7 +155,8 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
     }
 
     public async Task<StoredEcpSignatureResponse> SignResolutionAsync(
-        int userId, int vndId, int stageId, string? comment, CancellationToken ct = default)
+        int userId, int vndId, int stageId, string? comment,
+        delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision decision, CancellationToken ct = default)
     {
         EnsureConfigured();
 
@@ -184,7 +186,7 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
         // Хэш строит backend (текст резолюции + содержимое редакции + код ВНД) и заодно проверяет,
         // что пользователь — назначенный согласующий этого этапа на активной фазе. Делаем это ДО
         // обмена кода на токен, чтобы не тратить обращения к ГП зря.
-        var hashResponse = await _resolutionSignatures.GetHashForStageAsync(vndId, stageId, comment, userId, ct);
+        var hashResponse = await _resolutionSignatures.GetHashForStageAsync(vndId, stageId, comment, decision, userId, ct);
 
         string token;
         try

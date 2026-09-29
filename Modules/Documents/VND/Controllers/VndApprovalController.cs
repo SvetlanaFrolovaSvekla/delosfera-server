@@ -8,6 +8,8 @@ using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Services;
 using delosfera_server.Modules.Users.Models;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
+using delosfera_server.Modules.Signing.Services;
 
 namespace delosfera_server.Modules.Documents.VND.Controllers;
 
@@ -20,14 +22,16 @@ public class VndApprovalController : ControllerBase
     private readonly IVndApprovalService _service;
     private readonly ICurrentUserService _currentUser;
     private readonly IResolutionSignatureService _resolutionSignatures;
+    private readonly EcpSigningOptions _ecpSigning;
 
     public VndApprovalController(
         IVndApprovalService service, ICurrentUserService currentUser,
-        IResolutionSignatureService resolutionSignatures)
+        IResolutionSignatureService resolutionSignatures, IOptions<EcpSigningOptions> ecpSigning)
     {
         _service = service;
         _currentUser = currentUser;
         _resolutionSignatures = resolutionSignatures;
+        _ecpSigning = ecpSigning.Value;
     }
 
     /// <summary>Запустить согласование последней редакции ВНД</summary>
@@ -84,7 +88,7 @@ public class VndApprovalController : ControllerBase
         try
         {
             return Ok(await _resolutionSignatures.GetHashForStageAsync(
-                vndId, stageId, request.Comment, _currentUser.UserId, ct));
+                vndId, stageId, request.Comment, request.Decision.ToStageDecision(), _currentUser.UserId, ct));
         }
         catch (ResolutionSignatureException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message, code = ex.Code }); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
@@ -118,6 +122,14 @@ public class VndApprovalController : ControllerBase
         // их подставить нельзя. За reverse-proxy без ForwardedHeaders здесь будет адрес прокси.
         request.RequestIpAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
         request.RequestUserAgent = Request.Headers.UserAgent.ToString();
+
+        // Решение без ЭЦП — только в тестовом режиме (EcpSigning:AllowWithoutEcp).
+        if (request.WithoutEcp && !_ecpSigning.AllowWithoutEcp)
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "Решение без ЭЦП отключено на сервере — подпишите резолюцию электронной подписью",
+                code = "ecp_required",
+            });
 
         try
         {

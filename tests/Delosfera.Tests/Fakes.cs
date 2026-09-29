@@ -261,7 +261,9 @@ internal sealed class FakeResolutionSignatureService
     public int VerifyCalls { get; private set; }
 
     public Task<delosfera_server.Modules.Documents.VND.DTO.Response.ResolutionHashResponse> GetHashForStageAsync(
-        int vndId, int stageId, string? comment, int currentUserId, CancellationToken ct = default) =>
+        int vndId, int stageId, string? comment,
+        delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision decision, int currentUserId,
+        CancellationToken ct = default) =>
         throw new NotImplementedException();
 
     public Task<delosfera_server.Modules.Documents.VND.Models.VndResolutionSignature> VerifyForDecisionAsync(
