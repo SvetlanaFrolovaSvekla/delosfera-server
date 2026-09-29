@@ -36,6 +36,8 @@ public class EcpCredentialStatusResponse
     public bool Enrolled { get; set; }
     /// <summary>ПИН с маскировкой (первые 2 и последние 2 цифры).</summary>
     public string? PersonIdnpMasked { get; set; }
+    /// <summary>ИНН организации, от имени которой подписывают (null — физ. лицо).</summary>
+    public string? OrganizationInn { get; set; }
     public DateTime? CreatedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }
     public DateTime? LastUsedAt { get; set; }
@@ -61,7 +63,8 @@ public interface IUserEcpCredentialService
 
     /// <summary>Проверяет код обменом на токен (2.3) и, если ГП его принял, сохраняет ПИН и код
     /// зашифрованно на срок RetentionDays.</summary>
-    Task<EcpCredentialStatusResponse> SaveAsync(int userId, string personIdnp, string code, CancellationToken ct = default);
+    Task<EcpCredentialStatusResponse> SaveAsync(
+        int userId, string personIdnp, string? organizationInn, string code, CancellationToken ct = default);
 
     Task RevokeAsync(int userId, CancellationToken ct = default);
 
@@ -103,6 +106,7 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
 
         status.Enrolled = true;
         status.PersonIdnpMasked = Mask(cred.PersonIdnp);
+        status.OrganizationInn = cred.OrganizationInn;
         status.CreatedAt = cred.CreatedAt;
         status.ExpiresAt = cred.ExpiresAt;
         status.LastUsedAt = cred.LastUsedAt;
@@ -110,14 +114,15 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
     }
 
     public async Task<EcpCredentialStatusResponse> SaveAsync(
-        int userId, string personIdnp, string code, CancellationToken ct = default)
+        int userId, string personIdnp, string? organizationInn, string code, CancellationToken ct = default)
     {
         EnsureConfigured();
         code = code.Trim();
+        organizationInn = InfocomFieldRules.NormalizeInn(organizationInn);
 
         // Код должен быть принят ГП до сохранения: иначе пользователь узнает об ошибке только при
         // первом подписании. Токен из ответа не нужен и не сохраняется.
-        await ExchangeAsync(personIdnp, code, ct);
+        await ExchangeAsync(personIdnp, organizationInn, code, ct);
 
         var now = DateTime.UtcNow;
         var cred = await _db.UserEcpCredentials.FirstOrDefaultAsync(c => c.UserId == userId, ct);
@@ -128,6 +133,7 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
         }
 
         cred.PersonIdnp = personIdnp;
+        cred.OrganizationInn = organizationInn;
         cred.EncryptedCode = _protector.Protect(userId, personIdnp, code);
         cred.CreatedAt = now;
         cred.ExpiresAt = now.AddDays(RetentionDays);
@@ -183,7 +189,7 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
         string token;
         try
         {
-            token = await ExchangeAsync(cred.PersonIdnp, code, ct);
+            token = await ExchangeAsync(cred.PersonIdnp, cred.OrganizationInn, code, ct);
         }
         catch (EcpCredentialException ex) when (ex.Code == EcpCredentialErrorCodes.Invalid)
         {
@@ -229,12 +235,12 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
     /// <summary>2.3 account/auth: обмен кода на минутный токен. 4xx от ГП ("Неверный ПИН-код! Осталось
     /// попыток: N", учётка не активна и т.п.) → <see cref="EcpCredentialErrorCodes.Invalid"/> с текстом
     /// провайдера; сетевые сбои и 5xx → 502/504.</summary>
-    private async Task<string> ExchangeAsync(string personIdnp, string code, CancellationToken ct)
+    private async Task<string> ExchangeAsync(string personIdnp, string? organizationInn, string code, CancellationToken ct)
     {
         JsonElement json;
         try
         {
-            json = await _infocom.AccountAuthAsync(new InfocomAccountAuthRequest { PersonIdnp = personIdnp, ByPin = code }, ct);
+            json = await _infocom.AccountAuthAsync(new InfocomAccountAuthRequest { PersonIdnp = personIdnp, OrganizationInn = organizationInn, ByPin = code }, ct);
         }
         catch (InfocomEcpException ex) when (ex.StatusCode is >= 400 and < 500)
         {

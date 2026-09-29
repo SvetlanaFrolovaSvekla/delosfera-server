@@ -26,6 +26,9 @@ public class UserEcpCredential
     /// <summary>ПИН физического лица (14 цифр).</summary>
     public string PersonIdnp { get; set; } = "";
 
+    /// <summary>ИНН организации, если подписывают от её имени (представитель юр. лица); null — физ. лицо.</summary>
+    public string? OrganizationInn { get; set; }
+
     /// <summary>base64(nonce || tag || ciphertext) кода из СМС/почты.</summary>
     public string EncryptedCode { get; set; } = "";
 
@@ -45,6 +48,7 @@ public class UserEcpCredentialConfiguration : IEntityTypeConfiguration<UserEcpCr
         b.HasKey(x => x.Id).HasName("pk_user_ecp_credential");
 
         b.Property(x => x.PersonIdnp).HasMaxLength(14);
+        b.Property(x => x.OrganizationInn).HasMaxLength(20);
         b.Property(x => x.EncryptedCode).HasMaxLength(512);
 
         // Одна идентификация на пользователя.

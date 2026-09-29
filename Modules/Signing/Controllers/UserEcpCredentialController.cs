@@ -14,6 +14,10 @@ public class SaveEcpCredentialRequest
     [Required, RegularExpression(InfocomFieldRules.PinPattern, ErrorMessage = InfocomFieldRules.PinError)]
     public required string PersonIdnp { get; set; }
 
+    /// <summary>ИНН организации — необязателен; заполняется, если подписывают от имени организации.</summary>
+    [StringLength(20)]
+    public string? OrganizationInn { get; set; }
+
     /// <summary>Код из СМС/почты (2.2 → 2.3 byPin).</summary>
     [Required, StringLength(32, MinimumLength = 1)]
     public required string Code { get; set; }
@@ -57,7 +61,8 @@ public class UserEcpCredentialController : ControllerBase
     [HttpPut]
     [EnableRateLimiting("ecp-pin")]
     public Task<IActionResult> Save([FromBody] SaveEcpCredentialRequest request, CancellationToken ct) =>
-        Run(async () => Ok(await _service.SaveAsync(_currentUser.UserId, request.PersonIdnp, request.Code, ct)));
+        Run(async () => Ok(await _service.SaveAsync(
+            _currentUser.UserId, request.PersonIdnp, request.OrganizationInn, request.Code, ct)));
 
     [HttpDelete]
     public async Task<IActionResult> Revoke(CancellationToken ct)

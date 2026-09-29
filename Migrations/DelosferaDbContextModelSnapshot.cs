@@ -13048,6 +13048,11 @@ namespace delosfera_server.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_used_at");
 
+                    b.Property<string>("OrganizationInn")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("organization_inn");
+
                     b.Property<string>("PersonIdnp")
                         .IsRequired()
                         .HasMaxLength(14)
