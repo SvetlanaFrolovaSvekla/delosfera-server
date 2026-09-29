@@ -473,7 +473,16 @@ public class VndApprovalService : IVndApprovalService
         // журнала добавляется в контекст рядом с полями решения ниже и уходит в БД тем же
         // SaveChanges, что и само решение, — атомарно. Для остальных решений ничего не меняется.
         VndResolutionSignature? signature = null;
-        if (decision == ApprovalStageDecision.Approved)
+        if (decision == ApprovalStageDecision.Approved && request.WithoutEcp)
+        {
+            // ТЕСТОВЫЙ режим: "Согласовать" без ЭЦП — только для локальных учётных записей.
+            // Проверяем на сервере, а не доверяем клиенту (доменным пользователям нельзя).
+            var decidingUser = await _db.Users.FindAsync(currentUserId);
+            if (decidingUser is null || decidingUser.Source != UserSource.Local)
+                throw new UnauthorizedAccessException(
+                    "Согласование без ЭЦП доступно только для локальных учётных записей");
+        }
+        else if (decision == ApprovalStageDecision.Approved)
         {
             signature = await _resolutionSignatures.VerifyForDecisionAsync(new ResolutionSignatureInput
             {

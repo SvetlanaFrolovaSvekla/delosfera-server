@@ -49,6 +49,12 @@ public class ApprovalDecisionRequest
     /// если в самой CMS нет signingTime.</summary>
     public long? EcpTimestamp { get; set; }
 
+    /// <summary>ТЕСТОВЫЙ режим: "Согласовать" без ЭЦП. Разрешён ТОЛЬКО для локальных учётных
+    /// записей (User.Source == Local) — для доменных (LDAP) сервер ответит 403. Только для
+    /// Decision == Approve; при true подпись не проверяется и запись в журнал VndResolutionSignature
+    /// не создаётся.</summary>
+    public bool WithoutEcp { get; set; }
+
     /// <summary>IP клиента — заполняет контроллер из соединения, из формы НЕ биндится.</summary>
     [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever]
     public string? RequestIpAddress { get; set; }
