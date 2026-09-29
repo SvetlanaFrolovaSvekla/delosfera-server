@@ -1985,19 +1985,17 @@ public class VndApprovalService : IVndApprovalService
             notice, NotificationCategory.Vnd, process.VndId, null, consolidationRecipients.ToArray());
     }
 
-    /// <summary>Формирует и сохраняет Лист согласования редакции (см. ApprovalSheetGenerator),
-    /// заполняя его ФИО/должностью всех согласующих этого процесса (process.Stages - по одной
-    /// строке на согласующего, порядок как в маршрутном листе) и датой этого момента - она общая
-    /// для всех строк, т.к. фиксирует не решение конкретного согласующего, а момент, когда
-    /// редакция в целом стала согласованной.</summary>
+    /// <summary>Формирует и сохраняет Лист согласования редакции (см. ApprovalSheetGenerator) с
+    /// фактическим решением и датой решения каждого согласующего этого процесса (process.Stages, порядок
+    /// как в маршрутном листе; см. ApprovalSheetRowBuilder). Сохранённый лист — обычный, без отметок ЭЦП;
+    /// лист с подписями и актуальный лист во время согласования формируются по запросу
+    /// (VndApprovalSheetController).</summary>
     private async Task GenerateApprovalSheetAsync(VndApprovalProcess process, VndRedaction redaction)
     {
-        // Убранные главным редактором этапы не значатся "согласовавшими" - в Листе согласования
-        // они не должны появляться, как будто фактически участвовали в решении.
         var approverIds = process.Stages
             .Where(s => !s.IsRemovedByEditor)
-            .OrderBy(s => s.Order)
             .Select(s => s.ApproverUserId)
+            .Distinct()
             .ToList();
 
         var usersById = await _db.Users
@@ -2005,11 +2003,7 @@ public class VndApprovalService : IVndApprovalService
             .Where(u => approverIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id);
 
-        var approvers = approverIds
-            .Select(id => usersById.TryGetValue(id, out var u)
-                ? new ApprovalSheetApproverInfo(u.FullName, u.Position?.TitleRu)
-                : new ApprovalSheetApproverInfo("", null))
-            .ToList();
+        var rows = ApprovalSheetRowBuilder.Build(process, usersById, null, new delosfera_server.Common.Services.BankClock().Zone);
 
         var approvedAt = process.CompletedAt ?? DateTime.UtcNow;
 
@@ -2023,7 +2017,7 @@ public class VndApprovalService : IVndApprovalService
         byte[] content;
         try
         {
-            content = _approvalSheetGenerator.Generate(process.Vnd!.TitleRu, approvedAt, approvers, note);
+            content = _approvalSheetGenerator.Generate(process.Vnd!.TitleRu, rows, ApprovalSheetMode.Plain, note);
         }
         catch (Exception ex)
         {

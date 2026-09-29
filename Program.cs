@@ -103,6 +103,8 @@ builder.Services.AddSingleton<delosfera_server.Modules.Signing.Services.IEcpCred
 builder.Services.AddScoped<delosfera_server.Modules.Signing.Services.IUserEcpCredentialService,
     delosfera_server.Modules.Signing.Services.UserEcpCredentialService>();
 builder.Services.AddSingleton<IApprovalSheetGenerator, ApprovalSheetGenerator>();
+// Лист согласования по текущему состоянию процесса (обычный и с отметками ЭЦП) - см. VndApprovalSheetController.
+builder.Services.AddScoped<IApprovalSheetService, ApprovalSheetService>();
 // Разбор легаси-гиперссылок db://documents/{code} и db://attachments/{n} из старой системы
 // (isrib) внутри текста ВНД — не хранит состояния, поэтому синглтон (как ApprovalSheetGenerator выше).
 builder.Services.AddSingleton<IDocxLegacyLinkExtractor, DocxLegacyLinkExtractor>();
