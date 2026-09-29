@@ -11,12 +11,22 @@ public class InfocomEcpServiceOptions
 {
     public const string Section = "InfocomEcpService";
 
-    /// <summary>ecp-service внутри изолированной docker-сети (10.222.10.42 → 185.88.32.25).
-    /// http:// (не https) — допущение, что в этой сети нет посторонних контейнеров/узлов. Если
-    /// сеть когда-нибудь расширится за пределы доверенного периметра (например, ecp-service
-    /// переедет в другой сегмент или появится shared-хостинг), это нужно пересмотреть на TLS.</summary>
+    /// <summary>Адрес delosfera-ecp-service. По этому каналу идут ПИН, коды из СМС, токены сотрудников и
+    /// сервисный токен, поэтому он должен быть https:// (см. <see cref="AllowInsecureHttp"/>). http:// без
+    /// флага допускается только на localhost (локальная разработка).</summary>
     public string BaseUrl { get; set; } = "http://localhost:5190";
     public string AccessToken { get; set; } = "";
+
+    /// <summary>Разрешить http:// не на localhost. Включать ТОЛЬКО осознанно, когда сервер и ecp-service
+    /// общаются внутри одной изолированной docker-сети на одном хосте и трафик не выходит в общую сеть.
+    /// По умолчанию false: запрос к ecp-service по открытому каналу не отправляется вовсе.</summary>
+    public bool AllowInsecureHttp { get; set; }
+
+    /// <summary>SHA-256 отпечаток сертификата ecp-service (hex, двоеточия и пробелы допустимы) — для
+    /// самоподписанного сертификата без корпоративного УЦ. Если задан, принимается ТОЛЬКО сертификат с этим
+    /// отпечатком (certificate pinning), проверка цепочки и имени не выполняется. Пусто — обычная проверка
+    /// сертификата (цепочка до доверенного УЦ + имя хоста).</summary>
+    public string ServerCertificateSha256 { get; set; } = "";
 
     /// <summary>15 c, а не дефолтные 100 c HttpClient: зависший вызов к ecp-service не должен
     /// надолго занимать поток запроса пользователя.</summary>
@@ -49,6 +59,7 @@ public class InfocomEcpException(int statusCode, InfocomErrorBody error) : Excep
 public class InfocomEcpClient : IInfocomEcpClient
 {
     private readonly HttpClient _http;
+    private readonly string? _insecureReason;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public InfocomEcpClient(HttpClient http, IOptions<InfocomEcpServiceOptions> options)
@@ -58,6 +69,16 @@ public class InfocomEcpClient : IInfocomEcpClient
         _http.BaseAddress = new Uri(settings.BaseUrl);
         _http.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.AccessToken);
+        _insecureReason = InsecureChannelReason(_http.BaseAddress, settings.AllowInsecureHttp);
+    }
+
+    /// <summary>null — канал допустим: https://, либо http:// на localhost, либо http:// с явным
+    /// AllowInsecureHttp. Иначе — текст причины отказа.</summary>
+    public static string? InsecureChannelReason(Uri baseAddress, bool allowInsecureHttp)
+    {
+        if (baseAddress.Scheme == Uri.UriSchemeHttps || baseAddress.IsLoopback || allowInsecureHttp) return null;
+        return "Канал к delosfera-ecp-service не защищён: InfocomEcpService:BaseUrl должен быть https:// " +
+               "(или явно разрешите http внутри изолированной docker-сети: InfocomEcpService:AllowInsecureHttp=true)";
     }
 
     public Task<JsonElement> UserAuthMethodsAsync(InfocomUserAuthMethodsRequest request, CancellationToken ct) =>
@@ -80,6 +101,12 @@ public class InfocomEcpClient : IInfocomEcpClient
 
     private async Task<JsonElement> PostAsync<TRequest>(string path, TRequest body, CancellationToken ct)
     {
+        // ПИН, коды и токены по открытому каналу не отправляем вовсе (fail closed). 503 — вызывающий код
+        // трактует это как недоступность сервиса ЭЦП, решение "Согласовать" не сохранится.
+        if (_insecureReason is not null)
+            throw new InfocomEcpException(StatusCodes.Status503ServiceUnavailable,
+                new InfocomErrorBody { ErrorCode = 503, ErrorMessage = _insecureReason });
+
         using var response = await _http.PostAsJsonAsync(path, body, JsonOptions, ct);
         var raw = await response.Content.ReadAsStringAsync(ct);
 

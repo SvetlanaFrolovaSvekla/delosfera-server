@@ -40,7 +40,18 @@ public static class SupportServiceExtensions
         // InfocomEcpController / InfocomEcpClient). Адрес и токен — в appsettings:InfocomEcpService.
         builder.Services.Configure<InfocomEcpServiceOptions>(
             builder.Configuration.GetSection(InfocomEcpServiceOptions.Section));
-        builder.Services.AddHttpClient<IInfocomEcpClient, InfocomEcpClient>();
+        builder.Services.AddHttpClient<IInfocomEcpClient, InfocomEcpClient>()
+            .ConfigurePrimaryHttpMessageHandler(sp => InfocomEcpClientHandler.Create(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<InfocomEcpServiceOptions>>().Value,
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger("InfocomEcpClient")));
+        {
+            // Предупреждаем при старте, а не только при первом запросе к ЭЦП.
+            var ecpOptions = builder.Configuration.GetSection(InfocomEcpServiceOptions.Section).Get<InfocomEcpServiceOptions>()
+                             ?? new InfocomEcpServiceOptions();
+            if (Uri.TryCreate(ecpOptions.BaseUrl, UriKind.Absolute, out var ecpUri)
+                && InfocomEcpClient.InsecureChannelReason(ecpUri, ecpOptions.AllowInsecureHttp) is { } reason)
+                Console.Error.WriteLine($"[ЭЦП] {reason}. Запросы к ecp-service будут отклоняться.");
+        }
 
         // Ознакомление с документами (Б-19): роспись сотрудника под приказом или ВНД
         builder.Services.AddScoped<IAcknowledgementService, AcknowledgementService>();
