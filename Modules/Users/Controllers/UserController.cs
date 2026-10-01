@@ -97,6 +97,7 @@ public class UserController : ControllerBase
     /// <param name="roleIds">Фильтр по ролям (можно указать несколько id)</param>
     /// <param name="source">Фильтр по источнику учётной записи</param>
     /// <param name="isBlocked">Фильтр по статусу блокировки</param>
+    /// <param name="includeSubunits">Учитывать сотрудников вложенных подразделений выбранных СП</param>
     /// <response code="200">Список пользователей получен успешно</response>
     // Полный справочник с ПДн (email, роли, статус блокировки) — только тем, кому он
     // нужен по работе: администратору пользователей и администратору справочников ВНД
@@ -114,12 +115,14 @@ public class UserController : ControllerBase
         [FromQuery] List<int>? positionIds = null,
         [FromQuery] List<int>? roleIds = null,
         [FromQuery] List<UserSource>? sources = null,
-        [FromQuery] bool? isBlocked = null)
+        [FromQuery] bool? isBlocked = null,
+        [FromQuery] bool includeSubunits = false)
     {
         var language = _languageResolver.Resolve(Request);
 
         var result = await _service.GetPageAsync(
-            page, pageSize, sortBy, search, orgUnitIds, positionIds, roleIds, sources, isBlocked, language);
+            page, pageSize, sortBy, search, orgUnitIds, positionIds, roleIds, sources, isBlocked, language,
+            includeSubunits);
 
         return Ok(result);
     }

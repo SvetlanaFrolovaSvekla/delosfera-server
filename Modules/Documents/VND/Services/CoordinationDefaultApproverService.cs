@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OrgUnitSubtree = delosfera_server.Modules.Dictionaries.Services.OrgUnitSubtree;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
@@ -137,9 +138,12 @@ public class CoordinationDefaultApproverService : ICoordinationDefaultApproverSe
         var approver = await _db.Users.FindAsync(approverUserId)
             ?? throw new KeyNotFoundException($"Пользователь с id={approverUserId} не найден");
 
-        if (approver.OrgUnitId != orgUnitId)
+        // Подразделение этапа или любое вложенное в него: после синхронизации оргструктуры
+        // сотрудники числятся в отделах/секторах, а этап заводят на департамент/управление.
+        var allowedUnits = await OrgUnitSubtree.CollectAsync(_db.OrganizationUnits, orgUnitId);
+        if (approver.OrgUnitId is null || !allowedUnits.Contains(approver.OrgUnitId.Value))
             throw new InvalidOperationException(
-                "Согласующий по умолчанию для этапа должен относиться к указанному подразделению");
+                "Согласующий по умолчанию для этапа должен относиться к указанному подразделению или вложенному в него");
     }
 
     /// <summary>Восстанавливает сплошную нумерацию Order (1..N без пропусков) после удаления

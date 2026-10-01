@@ -159,6 +159,49 @@ public class UserPageTests
         Assert.Equal(1, page.Counts.All);
     }
 
+    [Fact]
+    public async Task Отбор_по_СП_с_вложенными_находит_сотрудников_отделов()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var признак = $"Проба{Guid.NewGuid():N}"[..12];
+
+        // Департамент → управление → отдел: после синхронизации оргструктуры люди
+        // числятся в отделах, а в формах выбирают департамент целиком.
+        var департамент = new delosfera_server.Modules.Dictionaries.Models.OrganizationUnit { TitleRu = $"Деп {признак}" };
+        db.OrganizationUnits.Add(департамент);
+        await db.SaveChangesAsync();
+        var управление = new delosfera_server.Modules.Dictionaries.Models.OrganizationUnit { TitleRu = $"Упр {признак}", ParentId = департамент.Id };
+        db.OrganizationUnits.Add(управление);
+        await db.SaveChangesAsync();
+        var отдел = new delosfera_server.Modules.Dictionaries.Models.OrganizationUnit { TitleRu = $"Отд {признак}", ParentId = управление.Id };
+        var чужое = new delosfera_server.Modules.Dictionaries.Models.OrganizationUnit { TitleRu = $"Чужое {признак}" };
+        db.OrganizationUnits.AddRange(отдел, чужое);
+        await db.SaveChangesAsync();
+
+        foreach (var (имя, unitId) in new[] { ("А", управление.Id), ("Б", отдел.Id), ("В", чужое.Id) })
+        {
+            db.Users.Add(new User
+            {
+                FullName = $"{признак} {имя}",
+                Email = $"page-{Guid.NewGuid():N}@keremetbank.kg",
+                PasswordHash = "x",
+                Source = UserSource.Ldap,
+                IsActive = true,
+                OrgUnitId = unitId,
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var точно = await СтраницаАsync(db, page: 1, pageSize: 20, search: признак,
+            orgUnitIds: [департамент.Id]);
+        var сВложенными = await СтраницаАsync(db, page: 1, pageSize: 20, search: признак,
+            orgUnitIds: [департамент.Id], includeSubunits: true);
+
+        Assert.Equal(0, точно.Total);
+        Assert.Equal(2, сВложенными.Total);
+        Assert.DoesNotContain(сВложенными.Items, u => u.FullName.EndsWith(" В"));
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private static async Task<UserPageResponse> СтраницаАsync(
@@ -167,7 +210,9 @@ public class UserPageTests
         int pageSize,
         string? search = null,
         List<UserSource>? sources = null,
-        bool? isBlocked = null)
+        bool? isBlocked = null,
+        List<int>? orgUnitIds = null,
+        bool includeSubunits = false)
     {
         var service = new UserService(
             db,
@@ -180,8 +225,9 @@ public class UserPageTests
 
         return await service.GetPageAsync(
             page, pageSize, UserSortBy.NameAsc, search,
-            orgUnitIds: null, positionIds: null, roleIds: null,
-            sources: sources, isBlocked: isBlocked, languageCode: "ru");
+            orgUnitIds: orgUnitIds, positionIds: null, roleIds: null,
+            sources: sources, isBlocked: isBlocked, languageCode: "ru",
+            includeSubunits: includeSubunits);
     }
 
     /// <summary>

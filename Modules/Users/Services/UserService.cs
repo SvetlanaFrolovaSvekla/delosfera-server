@@ -1,6 +1,7 @@
 ﻿using delosfera_server.Common.Extensions;
 using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
+using OrgUnitSubtree = delosfera_server.Modules.Dictionaries.Services.OrgUnitSubtree;
 using delosfera_server.Data;
 using delosfera_server.Modules.Dictionaries.DTO.Response;
 using delosfera_server.Modules.Users.DTO.Request;
@@ -69,7 +70,8 @@ public class UserService : IUserService
         List<int>? roleIds,
         List<UserSource>? sources,
         bool? isBlocked,
-        string languageCode)
+        string languageCode,
+        bool includeSubunits = false)
     {
         page = page < 1 ? 1 : page;
         pageSize = pageSize is < 1 or > MaxPageSize ? 20 : pageSize;
@@ -93,7 +95,14 @@ public class UserService : IUserService
         }
 
         if (orgUnitIds is { Count: > 0 })
-            query = query.Where(x => x.OrgUnitId.HasValue && orgUnitIds.Contains(x.OrgUnitId.Value));
+        {
+            // includeSubunits: выбранное СП вместе со всеми вложенными - для форм, где выбирают
+            // одно подразделение (департамент/управление), а люди числятся в его отделах.
+            var unitIds = includeSubunits
+                ? (await OrgUnitSubtree.CollectAsync(_db.OrganizationUnits, orgUnitIds)).ToList()
+                : orgUnitIds;
+            query = query.Where(x => x.OrgUnitId.HasValue && unitIds.Contains(x.OrgUnitId.Value));
+        }
 
         if (positionIds is { Count: > 0 })
             query = query.Where(x => x.PositionId.HasValue && positionIds.Contains(x.PositionId.Value));

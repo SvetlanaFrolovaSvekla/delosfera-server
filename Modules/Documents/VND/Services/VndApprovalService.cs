@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using delosfera_server.Common.Services.Authorization;
 using Microsoft.EntityFrameworkCore;
+using OrgUnitSubtree = delosfera_server.Modules.Dictionaries.Services.OrgUnitSubtree;
 using delosfera_server.Data;
 using delosfera_server.Modules.ActivityLog.Models;
 using delosfera_server.Modules.ActivityLog.Services;
@@ -2561,9 +2562,15 @@ public class VndApprovalService : IVndApprovalService
                 : null;
             var expectedOrgUnitId = catalogEntry?.OrgUnitId;
 
-            if (expectedOrgUnitId.HasValue && approver.OrgUnitId != expectedOrgUnitId)
-                throw new InvalidOperationException(
-                    $"Согласующий на этапе {i + 1} ({catalogEntry!.Title}) должен относиться к соответствующему подразделению");
+            // Подразделение обязательного этапа или любое вложенное в него (отделы/секторы
+            // департамента после синхронизации оргструктуры) - как и в справочнике этапов.
+            if (expectedOrgUnitId.HasValue)
+            {
+                var allowedUnits = await OrgUnitSubtree.CollectAsync(_db.OrganizationUnits, expectedOrgUnitId.Value);
+                if (approver.OrgUnitId is null || !allowedUnits.Contains(approver.OrgUnitId.Value))
+                    throw new InvalidOperationException(
+                        $"Согласующий на этапе {i + 1} ({catalogEntry!.Title}) должен относиться к соответствующему подразделению");
+            }
 
             stages.Add(new VndApprovalStage
             {
@@ -2571,7 +2578,9 @@ public class VndApprovalService : IVndApprovalService
                 Kind = catalogEntry is not null ? ApprovalStageKind.Fixed : ApprovalStageKind.Custom,
                 Title = catalogEntry?.Title ?? "Доп. согласующий",
                 CoordinationStageId = catalogEntry?.Id,
-                OrgUnitId = approver.OrgUnitId ?? expectedOrgUnitId
+                // Обязательный этап числится за своим СП (а не за отделом согласующего внутри него) -
+                // для прежних маршрутов, где они совпадали, ничего не меняется.
+                OrgUnitId = expectedOrgUnitId ?? approver.OrgUnitId
                     ?? throw new InvalidOperationException("У согласующего не указано подразделение"),
                 ApproverUserId = approver.Id
             });

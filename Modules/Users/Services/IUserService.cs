@@ -23,7 +23,8 @@ public interface IUserService
         List<int>? roleIds,
         List<UserSource>? sources,
         bool? isBlocked,
-        string languageCode);
+        string languageCode,
+        bool includeSubunits = false);
 
     Task<UserResponse> GetByIdAsync(int id, string languageCode);
     Task<UserResponse> CreateAsync(CreateUserRequest request, string languageCode);
