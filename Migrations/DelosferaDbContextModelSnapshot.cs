@@ -7067,6 +7067,57 @@ namespace delosfera_server.Migrations
                     b.ToTable("vnd_favorite", (string)null);
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndNewRedactionMailingRecipient", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("UserId")
+                        .HasName("pk_vnd_new_redaction_mailing_recipient");
+
+                    b.ToTable("vnd_new_redaction_mailing_recipient", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndNewRedactionMailingSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<bool>("NotifyEmail")
+                        .HasColumnType("boolean")
+                        .HasColumnName("notify_email");
+
+                    b.Property<bool>("NotifyInApp")
+                        .HasColumnType("boolean")
+                        .HasColumnName("notify_in_app");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_vnd_new_redaction_mailing_settings");
+
+                    b.ToTable("vnd_new_redaction_mailing_settings", (string)null);
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndWorkHoursSettings", b =>
                 {
                     b.Property<int>("Id")
@@ -16297,6 +16348,18 @@ namespace delosfera_server.Migrations
                     b.Navigation("User");
 
                     b.Navigation("Vnd");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndNewRedactionMailingRecipient", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_new_redaction_mailing_recipient_users_user_id");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndLink", b =>

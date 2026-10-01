@@ -108,4 +108,41 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
             .Where(un => un.UserId == userId)
             .AnyAsync(un => un.Notification!.AttachmentFileId == fileId, ct);
     }
+
+    /// <summary>
+    /// Скачивание файлов ВНД — тексты редакций (RU/KG/EN), ТИД, листы согласования, матрица
+    /// разногласий, приложения к редакции и их снимки по кругам согласования — только с правом
+    /// <see cref="PermissionCode.ExportVnd"/>. Без него документ можно лишь просмотреть в браузере.
+    /// Свой файл (загруженный самим пользователем) скачать можно всегда; прочие файлы
+    /// (вложения к резолюциям, предложениям, уведомлениям) этим правом не ограничиваются.
+    /// </summary>
+    public async Task<bool> CanCurrentUserExportAsync(int fileId, CancellationToken ct = default)
+    {
+        if (_currentUser.HasPermission(PermissionCode.ExportVnd)) return true;
+
+        var userId = _currentUser.UserId;
+        var isUploader = await _db.FileAttachments
+            .AnyAsync(f => f.Id == fileId && f.UploadedByUserId == userId, ct);
+        if (isUploader) return true;
+
+        var isRedactionFile = await _db.VndRedactions.AnyAsync(r =>
+            r.DocFileRuId == fileId
+            || r.DocFileKgId == fileId
+            || r.DocFileEnId == fileId
+            || r.TidFileId == fileId
+            || r.ApprovalSheetFileId == fileId
+            || r.DisagreementMatrixFileId == fileId
+            || r.ApprovalSheets.Any(s => s.FileAttachmentId == fileId)
+            || r.Attachments.Any(a => a.FileAttachmentId == fileId), ct);
+        if (isRedactionFile) return false;
+
+        var isSnapshotFile = await _db.Set<VndRedactionRevisionSnapshot>().AnyAsync(s =>
+            s.DocFileRuId == fileId
+            || s.DocFileKgId == fileId
+            || s.DocFileEnId == fileId
+            || s.TidFileId == fileId
+            || s.DisagreementMatrixFileId == fileId, ct);
+
+        return !isSnapshotFile;
+    }
 }

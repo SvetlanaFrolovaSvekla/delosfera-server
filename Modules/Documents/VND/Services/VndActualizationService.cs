@@ -26,6 +26,7 @@ public class VndActualizationService : IVndActualizationService
     private readonly IPlanItemSync _planItemSync;
     private readonly IFileStorageService _fileService;
     private readonly delosfera_server.Common.Services.IBankClock _clock;
+    private readonly IVndNewRedactionMailingService? _newRedactionMailing;
 
     public VndActualizationService(
         DelosferaDbContext db,
@@ -35,9 +36,11 @@ public class VndActualizationService : IVndActualizationService
         IActivityLogService activityLog,
         IPlanItemSync planItemSync,
         IFileStorageService fileService,
-        delosfera_server.Common.Services.IBankClock clock
+        delosfera_server.Common.Services.IBankClock clock,
+        IVndNewRedactionMailingService? newRedactionMailing = null
     )
     {
+        _newRedactionMailing = newRedactionMailing;
         _db = db;
         _currentUser = currentUser;
         _notifications = notifications;
@@ -870,6 +873,11 @@ public class VndActualizationService : IVndActualizationService
             VndActualizationNotificationMessages.Published(vnd.TitleRu, request.HadChanges),
             vndId, currentUserId,
             developerHeadId.HasValue ? [developerHeadId.Value] : []);
+
+        // Консолидация завершена: действует новая редакция (или первая редакция нового ВНД) —
+        // рассылка «Новые редакции ВНД» выбранным сотрудникам.
+        if (_newRedactionMailing is not null)
+            await _newRedactionMailing.NotifyNewRedactionAsync(vndId, request.HadChanges);
 
         return await BuildStateResponseAsync(vnd);
     }

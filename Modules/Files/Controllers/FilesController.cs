@@ -19,13 +19,19 @@ public class FilesController : ControllerBase
         _accessAuthorizer = accessAuthorizer;
     }
 
-    /// <summary>Скачать файл по id</summary>
+    /// <summary>Получить файл по id: для просмотра в браузере или (download=true) для скачивания</summary>
+    /// <param name="download">Явное скачивание. Для файлов ВНД требует права «Экспорт ВНД»;
+    /// просмотр (без флага) доступен всем, кому виден документ.</param>
     [HttpGet("{fileId:int}")]
-    public async Task<IActionResult> Download(int fileId, CancellationToken ct)
+    public async Task<IActionResult> Download(int fileId, [FromQuery] bool download = false, CancellationToken ct = default)
     {
         // Проверка доступа до отдачи файла — иначе любой пользователь качает любой файл по id (IDOR).
         if (!await _accessAuthorizer.CanCurrentUserAccessAsync(fileId, ct))
             return Forbid();
+
+        if (download && !await _accessAuthorizer.CanCurrentUserExportAsync(fileId, ct))
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { message = "Нет права на скачивание документов ВНД (право «Экспорт ВНД»)" });
 
         try
         {

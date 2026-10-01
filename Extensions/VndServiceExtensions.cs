@@ -48,6 +48,8 @@ public static class VndServiceExtensions
         // Раздел "Уведомления" → "Настройки рассылок" → "Нормотворчество": ответственные
         // сотрудники СП за актуализацию и ежемесячная сводка им 1-го числа
         builder.Services.AddScoped<IActualizationNotificationService, ActualizationNotificationService>();
+        // Рассылка «Новые редакции ВНД» — письмо выбранным сотрудникам при каждой консолидации.
+        builder.Services.AddScoped<IVndNewRedactionMailingService, VndNewRedactionMailingService>();
         builder.Services.AddHostedService<ActualizationNotificationWorker>();
 
         // Предложения по ВНД от сотрудников главному редактору ("+ Предложения по ВНД" на

@@ -103,8 +103,11 @@ public class UserController : ControllerBase
     // нужен по работе: администратору пользователей и администратору справочников ВНД
     // (назначение ответственных за актуализацию). Для выбора человека в формах есть
     // облегчённый lookup без ПДн, он остаётся открытым.
+    // ManageVndActualizationMailing — выбор получателей рассылок ВНД (раздел «Рассылка с
+    // уведомлением о новых редакциях») с теми же фильтрами, что на странице «Пользователи».
     [HttpGet]
-    [RequirePermission(PermissionCode.ManageUsers, PermissionCode.ManageVndDictionaries)]
+    [RequirePermission(PermissionCode.ManageUsers, PermissionCode.ManageVndDictionaries,
+        PermissionCode.ManageVndActualizationMailing)]
     [ProducesResponseType(typeof(UserPageResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<UserPageResponse>> GetPage(
         [FromQuery] int page = 1,

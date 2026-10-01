@@ -9,4 +9,11 @@ namespace delosfera_server.Modules.Files.Services;
 public interface IFileAccessAuthorizer
 {
     Task<bool> CanCurrentUserAccessAsync(int fileId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Можно ли текущему пользователю именно СКАЧАТЬ файл (а не только просмотреть его в браузере).
+    /// Проверяется дополнительно к <see cref="CanCurrentUserAccessAsync"/>, когда клиент явно
+    /// запрашивает скачивание (?download=true). По умолчанию — без ограничений.
+    /// </summary>
+    Task<bool> CanCurrentUserExportAsync(int fileId, CancellationToken ct = default) => Task.FromResult(true);
 }

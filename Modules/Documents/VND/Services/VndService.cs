@@ -31,6 +31,7 @@ public class VndService : IVndService
     private readonly IDocxLegacyLinkExtractor _legacyLinkExtractor;
     private readonly INotificationService _notifications;
     private readonly ILogger<VndService> _logger;
+    private readonly IVndNewRedactionMailingService? _newRedactionMailing;
     private readonly delosfera_server.Common.Services.IBankClock _clock;
 
     public VndService(
@@ -39,8 +40,10 @@ public class VndService : IVndService
         IVndApprovalService approvalService, INumeratorService numerator,
         IDocxLegacyLinkExtractor legacyLinkExtractor,
         INotificationService notifications, ILogger<VndService> logger,
-        delosfera_server.Common.Services.IBankClock clock)
+        delosfera_server.Common.Services.IBankClock clock,
+        IVndNewRedactionMailingService? newRedactionMailing = null)
     {
+        _newRedactionMailing = newRedactionMailing;
         _db = db;
         _fileService = fileService;
         _currentUser = currentUser;
@@ -1296,6 +1299,10 @@ public class VndService : IVndService
             $"/base-vnd/{vndId}");
         await _db.SaveChangesAsync();
 
+        // Редакция сразу стала действующей (без консолидации) — после коммита разошлём
+        // уведомление о новой редакции (рассылка «Новые редакции ВНД»).
+        var becameActive = false;
+
         if (!effectiveRequiresApproval && !blockedByMissingTid)
         {
             vnd.CurrentRedactionId = redaction.Id;
@@ -1307,6 +1314,7 @@ public class VndService : IVndService
             // документа без согласования, без консолидации) - сразу становится действующим, как раньше.
             var enteringConsolidation = vnd.Status == VndStatus.OnActualization;
             vnd.Status = enteringConsolidation ? VndStatus.Consolidation : VndStatus.Active;
+            becameActive = !enteringConsolidation;
 
             if (enteringConsolidation)
                 await StampConsolidationStartedAsync(vndId);
@@ -1335,6 +1343,9 @@ public class VndService : IVndService
         }
 
         await transaction.CommitAsync();
+
+        if (becameActive && _newRedactionMailing is not null)
+            await _newRedactionMailing.NotifyNewRedactionAsync(vndId);
 
         return ToRedactionResponse(redaction, vnd);
     }
@@ -1533,6 +1544,10 @@ public class VndService : IVndService
             await NotifyAsync(
                 VndApprovalNotificationMessages.PublishedWithoutApprovalByOther(actorName, redaction.Code, vnd.TitleRu),
                 vndId, currentUserId, vnd.CreatedByUserId.Value);
+
+        // Редакция стала действующей сразу, без консолидации — рассылка «Новые редакции ВНД».
+        if (!enteringConsolidation && _newRedactionMailing is not null)
+            await _newRedactionMailing.NotifyNewRedactionAsync(vndId);
 
         return ToRedactionResponse(redaction, vnd);
     }
@@ -2821,6 +2836,7 @@ public class VndService : IVndService
         // ТИД (см. blockedByMissingTid в AddRedactionAsync) — теперь, когда ТИД приложен,
         // нужно довыполнить тот же переход, что случился бы сразу при загрузке, будь ТИД уже
         // на месте: сделать редакцию текущей и перевести ВНД в консолидацию/действующий.
+        var tidMadeActive = false;
         if (!lastRedaction.RequiresApproval && vnd.CurrentRedactionId != lastRedaction.Id)
         {
             lastRedaction.ApprovalStatus = RedactionApprovalStatus.NotRequired;
@@ -2829,6 +2845,7 @@ public class VndService : IVndService
 
             var enteringConsolidation = vnd.Status == VndStatus.OnActualization;
             vnd.Status = enteringConsolidation ? VndStatus.Consolidation : VndStatus.Active;
+            tidMadeActive = !enteringConsolidation;
 
             if (enteringConsolidation)
                 await StampConsolidationStartedAsync(vndId);
@@ -2854,6 +2871,9 @@ public class VndService : IVndService
         }
 
         await _db.SaveChangesAsync();
+
+        if (tidMadeActive && _newRedactionMailing is not null)
+            await _newRedactionMailing.NotifyNewRedactionAsync(vndId);
 
         return ToRedactionResponse(lastRedaction, vnd);
     }

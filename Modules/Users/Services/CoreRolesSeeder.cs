@@ -46,6 +46,21 @@ public static class CoreRolesSeeder
         ("Секретарь коллегиальных органов", "Collegial Bodies Secretary"),
     ];
 
+    /// <summary>
+    /// Роли, заведённые изначально (миграцией): Администратор, Рядовой пользователь,
+    /// Редактор ВНД, Главный редактор ВНД.
+    /// </summary>
+    private static readonly int[] SeededRoleIds = [1, 2, 3, 4];
+
+    /// <summary>
+    /// Системная роль — заведена миграцией или этим сидером. Удалять и переименовывать её
+    /// нельзя: на названия завязаны раздача прав по умолчанию (RolePermissionDefaults),
+    /// синхронизация с каталогом (роль по умолчанию) и процессы органов банка.
+    /// </summary>
+    public static bool IsSystem(Role role) =>
+        SeededRoleIds.Contains(role.Id)
+        || Roles.Any(r => string.Equals(r.TitleRu, role.TitleRu, StringComparison.OrdinalIgnoreCase));
+
     public static async Task ApplyAsync(DelosferaDbContext db, ILogger logger, CancellationToken ct = default)
     {
         var existing = await db.Roles.Select(r => r.TitleRu).ToListAsync(ct);

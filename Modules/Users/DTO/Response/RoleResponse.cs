@@ -21,6 +21,16 @@ public class RoleResponse
     /// <summary>Расшифрованные права роли — код + описание (для отображения)</summary>
     public List<PermissionResponse> Permissions { get; set; } = [];
 
+    /// <summary>
+    /// Системная роль (Администратор, Рядовой пользователь, редакторы ВНД, роли органов банка) —
+    /// её нельзя удалить и переименовать: на её название завязаны процессы и синхронизация.
+    /// Права системной роли менять можно.
+    /// </summary>
+    public bool IsSystem { get; set; }
+
+    /// <summary>Сколько пользователей сейчас имеют эту роль</summary>
+    public int UsersCount { get; set; }
+
     /// <summary>Дата создания записи</summary>
     public DateTime CreatedAt { get; set; }
 

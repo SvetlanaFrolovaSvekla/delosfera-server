@@ -33,8 +33,14 @@ public class VndApprovalSheetController : ControllerBase
     /// <summary>DOCX листа согласования процесса. <paramref name="mode"/>: plain (по умолчанию) или signed.</summary>
     [HttpGet("{processId:int}")]
     [RequirePermission(PermissionCode.ViewVnd)]
-    public async Task<IActionResult> Get(int vndId, int processId, [FromQuery] string? mode, CancellationToken ct)
+    public async Task<IActionResult> Get(int vndId, int processId, [FromQuery] string? mode,
+        [FromQuery] bool download, CancellationToken ct)
     {
+        // Явное скачивание листа (а не просмотр в окне) — только с правом «Экспорт ВНД».
+        if (download && !_currentUser.HasPermission(PermissionCode.ExportVnd))
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { message = "Нет права на скачивание документов ВНД (право «Экспорт ВНД»)" });
+
         var sheetMode = string.Equals(mode, "signed", StringComparison.OrdinalIgnoreCase)
             ? ApprovalSheetMode.Signed
             : ApprovalSheetMode.Plain;

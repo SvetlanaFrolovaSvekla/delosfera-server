@@ -68,6 +68,8 @@ public class DelosferaDbContext : DbContext
     public DbSet<VndDocument> VndDocuments => Set<VndDocument>();
     public DbSet<VndLink> VndLinks => Set<VndLink>();
     public DbSet<VndFavorite> VndFavorites => Set<VndFavorite>();
+    public DbSet<VndNewRedactionMailingSettings> VndNewRedactionMailingSettings => Set<VndNewRedactionMailingSettings>();
+    public DbSet<VndNewRedactionMailingRecipient> VndNewRedactionMailingRecipients => Set<VndNewRedactionMailingRecipient>();
     
     public DbSet<VndApprovalProcess> VndApprovalProcesses => Set<VndApprovalProcess>();
 
