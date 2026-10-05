@@ -44,7 +44,12 @@ public class DigestEmailWorker : BackgroundService
                 var clock = scope.ServiceProvider.GetRequiredService<IBankClock>();
                 var today = clock.Today;
 
-                if (_lastRunOn != today && TimeOnly.FromDateTime(clock.Now) >= SendAt)
+                // В субботу и воскресенье дайджест не рассылаем: в выходные никто не работает с
+                // задачами, а письмо «на сегодня» только шумит. _lastRunOn не трогаем — в
+                // понедельник today уже будет другим, и рассылка уйдёт как обычно.
+                var isWeekend = today.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+
+                if (!isWeekend && _lastRunOn != today && TimeOnly.FromDateTime(clock.Now) >= SendAt)
                 {
                     var service = scope.ServiceProvider.GetRequiredService<IDigestEmailService>();
                     await service.SendDailyAsync(stoppingToken);

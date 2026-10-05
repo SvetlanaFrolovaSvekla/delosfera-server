@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Security.Cryptography.Pkcs;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
@@ -81,7 +82,29 @@ public interface IResolutionSignatureService
 
     Task<ResolutionSignatureVerifyResponse> ReverifyAsync(
         int vndId, int signatureId, int currentUserId, CancellationToken ct = default);
+
+    /// <summary>Отпечаток текущего текста редакции — ровно тот компонент "content", который входит в
+    /// хэш каждой резолюции (SHA-256 реальных байтов файлов RU/KG/EN из хранилища). Общий для всех,
+    /// кто подписывал эту версию текста, — по нему Лист согласования проверяет, что все подписи стоят
+    /// под одной и той же итоговой версией. Подмена файла в хранилище —
+    /// <see cref="ResolutionSignatureException"/> с кодом StorageIntegrity.</summary>
+    Task<string> GetContentDigestAsync(VndRedaction redaction, CancellationToken ct = default);
+
+    /// <summary>Файлы для проверки подписи вне системы: сама CMS-подпись (base64, как её вернул
+    /// провайдер) и подписанные данные — каноническая строка резолюции (UTF-8 без BOM), SHA-256 которой
+    /// и есть подписанный хэш. Перед выдачей запись журнала сверяется сама с собой: если компоненты не
+    /// дают сохранённый хэш (данные правили в обход системы), файлы не выдаются.</summary>
+    Task<ResolutionSignatureFiles> GetSignatureFilesAsync(
+        int vndId, int signatureId, int currentUserId, CancellationToken ct = default);
 }
+
+/// <summary>Файлы подписи резолюции для внешней проверки (см.
+/// IResolutionSignatureService.GetSignatureFilesAsync).</summary>
+/// <param name="BaseName">Имя без расширения: "{код ВНД}-resolution-{id}".</param>
+/// <param name="SignedData">Подписанные данные — каноническая строка резолюции, UTF-8 без BOM.</param>
+/// <param name="SignatureBase64">CMS-подпись в base64 — ровно как сохранена в журнале.</param>
+/// <param name="Hash">Подписанный хэш: SHA-256 <paramref name="SignedData"/>, hex upper-case.</param>
+public sealed record ResolutionSignatureFiles(string BaseName, byte[] SignedData, string SignatureBase64, string Hash);
 
 /// <summary>
 /// ЭЦП ГП «Инфоком» на резолюции "Согласовать" (SIG-ECP): хэш резолюции, проверка подписи при
@@ -473,6 +496,47 @@ public class ResolutionSignatureService : IResolutionSignatureService
         }
 
         return result;
+    }
+
+    public Task<string> GetContentDigestAsync(VndRedaction redaction, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(redaction);
+        return BuildContentDigestAsync(redaction, ct);
+    }
+
+    public async Task<ResolutionSignatureFiles> GetSignatureFilesAsync(
+        int vndId, int signatureId, int currentUserId, CancellationToken ct = default)
+    {
+        await EnsureCanViewAsync(vndId, currentUserId, ct);
+
+        var entry = await _db.VndResolutionSignatures
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.Id == signatureId && s.VndId == vndId, ct)
+                    ?? throw new KeyNotFoundException($"Подпись с id={signatureId} не найдена");
+
+        if (entry.HashSchemaVersion is not (ResolutionSignatureHasher.SchemaVersion or ResolutionSignatureHasher.SchemaVersionV2))
+            throw new InvalidOperationException($"Неизвестная версия схемы хэша \"{entry.HashSchemaVersion}\"");
+
+        // Подписанные данные восстанавливаются из компонентов журнала — тем же способом, что при
+        // повторной проверке (ReverifyAsync). Если они не дают сохранённый хэш, запись правили в обход
+        // системы: такие "подписанные данные" выдавать нельзя.
+        var components = new ResolutionHashComponents(entry.CommentText, entry.ContentDigest, entry.VndCode,
+            entry.HashSchemaVersion == ResolutionSignatureHasher.SchemaVersionV2
+                ? ResolutionSignatureHasher.DecisionCode(entry.Decision)
+                : null);
+        var canonical = ResolutionSignatureHasher.BuildCanonical(components);
+        if (!ResolutionSignatureHasher.HashesEqual(entry.Hash, ResolutionSignatureHasher.Sha256Hex(canonical)))
+            throw new InvalidOperationException(
+                "Запись журнала подписей не согласована сама с собой — данные изменены в обход системы, файлы не выданы");
+
+        var safeCode = string.Concat(entry.VndCode.Select(c =>
+            char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_'));
+
+        return new ResolutionSignatureFiles(
+            $"{safeCode}-resolution-{entry.Id}",
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(canonical),
+            entry.SignatureBase64,
+            entry.Hash.ToUpperInvariant());
     }
 
     // ----------------------------------------------------------------------------------------

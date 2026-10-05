@@ -1004,8 +1004,9 @@ public class VndApprovalService : IVndApprovalService
         {
             // PartiallyAgree или FullyDisagree - в обоих случаях составлена матрица разногласий,
             // повторное согласование пропускаем, сразу идём на финальную выдержку (решение
-            // по-прежнему требуется только от тех, кто ещё не давал чистого согласования этой
-            // редакции - см. ResetFinalHoldDecisionsAsync). При PartiallyAgree редакция при этом могла
+            // требуется от тех, кто ещё не давал чистого согласования, и от тех, чьё согласование
+            // относится к тексту, заменённому этой или прошлой отправкой - см.
+            // ResetFinalHoldDecisionsAsync). При PartiallyAgree редакция при этом могла
             // быть обновлена файлами выше - по маршруту согласования разницы с FullyDisagree нет.
             process.Status = ApprovalProcessStatus.FinalHold;
             await ResetFinalHoldDecisionsAsync(process);
@@ -1017,16 +1018,9 @@ public class VndApprovalService : IVndApprovalService
 
             await _db.SaveChangesAsync();
 
-            // См. тот же фильтр в CompleteRepeatPhaseAsync - убранные главным редактором этапы
-            // не участвуют в финальной выдержке и не получают уведомление о ней.
-            var stageApproverIds = process.Stages
-                .Where(s => !s.IsRemovedByEditor)
-                .Select(s => s.ApproverUserId)
-                .ToArray();
-
-            await NotifyAsync(
-                VndApprovalNotificationMessages.FinalHoldForApprovers(redaction.Code, process.Vnd!.TitleRu),
-                NotificationCategory.Vnd, vndId, currentUserId, stageApproverIds);
+            // См. тот же блок в CompleteRepeatPhaseAsync: от кого ждём подписи — задача, остальным —
+            // ознакомление; убранные главным редактором этапы уведомление не получают.
+            await NotifyFinalHoldApproversAsync(process, currentUserId);
 
             await NotifyAsync(
                 VndApprovalNotificationMessages.SentToFinalHold(redaction.Code),
@@ -1781,18 +1775,10 @@ public class VndApprovalService : IVndApprovalService
         // его решение тоже проставляется автоматически, иначе оно "висит" до просрочки.
         AutoApproveInitiatorStages(process, ApprovalStagePhase.FinalHold);
 
-        // Убранные главным редактором этапы не участвуют в финальной выдержке - см. фикс в
-        // ResetFinalHoldDecisionsAsync выше, здесь дополнительно не рассылаем им уведомление о
-        // ней, у них уже нет задачи по этому согласованию.
-        var stageApproverIds = process.Stages
-            .Where(s => !s.IsRemovedByEditor)
-            .Select(s => s.ApproverUserId)
-            .ToArray();
-
-        // --- Всем согласующим: документ ушёл на финальную выдержку
-        await NotifyAsync(
-            VndApprovalNotificationMessages.FinalHoldForApprovers(process.Redaction!.Code, process.Vnd!.TitleRu),
-            NotificationCategory.Vnd, process.VndId, null, stageApproverIds);
+        // --- Согласующим: документ ушёл на финальную выдержку (от кого ждём подписи под итоговой
+        // версией — задача, остальным — ознакомление; убранные главным редактором этапы не участвуют
+        // в финальной выдержке — см. ResetFinalHoldDecisionsAsync — и уведомление не получают).
+        await NotifyFinalHoldApproversAsync(process, null);
 
         // --- Инициатору: его редакция отправлена на финальную выдержку
         await NotifyAsync(
@@ -1809,6 +1795,36 @@ public class VndApprovalService : IVndApprovalService
         }
 
         if (save) await _db.SaveChangesAsync();
+    }
+
+    /// <summary>Уведомления согласующим о входе в финальную выдержку. Тем, от кого ждём решения
+    /// (оставляли замечания или текст изменился после их согласования — см.
+    /// ResetFinalHoldDecisionsAsync), — задача подписать итоговую версию; тем, чьё согласование уже
+    /// стоит под итоговым текстом, — ознакомление. Вызывать после ResetFinalHoldDecisionsAsync и
+    /// AutoApproveInitiatorStages, когда решения финальной выдержки уже расставлены.</summary>
+    private async Task NotifyFinalHoldApproversAsync(VndApprovalProcess process, int? triggeredByUserId)
+    {
+        var activeStages = process.Stages.Where(s => !s.IsRemovedByEditor).ToList();
+
+        var decisionRequiredIds = activeStages
+            .Where(s => s.FinalHoldDecision is null or ApprovalStageDecision.Pending)
+            .Select(s => s.ApproverUserId)
+            .Distinct()
+            .ToArray();
+
+        var reviewOnlyIds = activeStages
+            .Select(s => s.ApproverUserId)
+            .Distinct()
+            .Except(decisionRequiredIds)
+            .ToArray();
+
+        await NotifyAsync(
+            VndApprovalNotificationMessages.FinalHoldDecisionRequired(process.Redaction!.Code, process.Vnd!.TitleRu),
+            NotificationCategory.Vnd, process.VndId, triggeredByUserId, decisionRequiredIds);
+
+        await NotifyAsync(
+            VndApprovalNotificationMessages.FinalHoldForApprovers(process.Redaction!.Code, process.Vnd!.TitleRu),
+            NotificationCategory.Vnd, process.VndId, triggeredByUserId, reviewOnlyIds);
     }
 
     /// <summary>Кто-то на финальной выдержке оставил замечание (не отклонение - оно прекращает
@@ -2161,17 +2177,62 @@ public class VndApprovalService : IVndApprovalService
     private static ApprovalStageDecision? LatestDecisionBeforeFinalHold(VndApprovalStage stage) =>
         stage.FinalHoldDecision ?? stage.RepeatDecision ?? stage.PrimaryDecision;
 
+    /// <summary>Когда принято решение, которое возвращает <see cref="LatestDecisionBeforeFinalHold"/>
+    /// (та же очерёдность фаз). Для перенесённого на прошлом круге финальной выдержки согласования —
+    /// момент того переноса: перенос делался только при неизменном тексте, поэтому текст на этот момент
+    /// совпадает с тем, под которым согласующий реально подписывался.</summary>
+    private static DateTime? LatestDecisionAtBeforeFinalHold(VndApprovalStage stage) =>
+        stage.FinalHoldDecision is not null ? stage.FinalHoldDecidedAt
+        : stage.RepeatDecision is not null ? stage.RepeatDecidedAt
+        : stage.PrimaryDecidedAt;
+
+    /// <summary>Снимки файлов редакции этого процесса (см. VndRedactionRevisionSnapshot) — для
+    /// FinalHoldCarryOver. ResubmitAfterRevisionAsync добавляет снимок в контекст и вызывает
+    /// ResetFinalHoldDecisionsAsync ДО SaveChangesAsync — поэтому к сохранённым добавляются и ещё не
+    /// сохранённые снимки из ChangeTracker, иначе последняя замена файлов осталась бы незамеченной.</summary>
+    private async Task<List<RedactionTextSnapshot>> LoadTextSnapshotsAsync(int processId)
+    {
+        var saved = await _db.Set<VndRedactionRevisionSnapshot>()
+            .AsNoTracking()
+            .Where(s => s.ApprovalProcessId == processId)
+            .Select(s => new { s.CreatedAt, s.DocFileRuId, s.DocFileKgId, s.DocFileEnId })
+            .ToListAsync();
+
+        var result = saved
+            .Select(s => new RedactionTextSnapshot(
+                s.CreatedAt, new RedactionTextVersion(s.DocFileRuId, s.DocFileKgId, s.DocFileEnId)))
+            .ToList();
+
+        result.AddRange(_db.ChangeTracker.Entries<VndRedactionRevisionSnapshot>()
+            .Where(e => e.State == EntityState.Added && e.Entity.ApprovalProcessId == processId)
+            .Select(e => new RedactionTextSnapshot(
+                e.Entity.CreatedAt,
+                new RedactionTextVersion(e.Entity.DocFileRuId, e.Entity.DocFileKgId, e.Entity.DocFileEnId))));
+
+        return result;
+    }
+
     /// <summary>Готовит решения этапов к (пере)входу в финальную выдержку. Если согласующий уже
-    /// дал по этой редакции чистое согласование без замечаний (не участвовал в повторном
-    /// согласовании — т.е. его первичное решение было Approved/автоакцепт по таймауту, либо он
-    /// уже чисто согласовал на предыдущем круге финальной выдержки) — его решение проставляется
-    /// автоматически, и жать "Согласовать" ещё раз ему не нужно. Формального решения снова ждём
-    /// только от тех, кто на этой редакции ранее оставлял замечания или отклонял её.
+    /// дал чистое согласование без замечаний (его последнее решение — Approved/автоакцепт по
+    /// таймауту) И С ТЕХ ПОР ТЕКСТ НЕ МЕНЯЛСЯ (те же файлы RU/KG/EN — см. FinalHoldCarryOver) — его
+    /// решение проставляется автоматически, и жать "Согласовать" ещё раз ему не нужно: его подпись
+    /// уже стоит под итоговой версией.
+    ///
+    /// Если же после его решения инициатор при доработке заменил файлы документа, решение снова
+    /// запрашивается — под итоговой версией, в рамках этой финальной выдержки, параллельно с теми,
+    /// кто оставлял замечания. Иначе в Листе согласования он значился бы под текстом, которого не
+    /// видел и не подписывал. Итог: к моменту утверждения у всех согласующих решение (и ЭЦП) — под
+    /// одним и тем же текстом.
     /// Вызывать сразу после назначения process.Status = FinalHold, до SaveChangesAsync.</summary>
     private async Task ResetFinalHoldDecisionsAsync(VndApprovalProcess process)
     {
         const string comment = "Согласовано автоматически";
         var now = DateTime.UtcNow;
+
+        var redaction = process.Redaction
+                        ?? throw new InvalidOperationException("Процесс согласования загружен без редакции");
+        var currentText = new RedactionTextVersion(redaction.DocFileRuId, redaction.DocFileKgId, redaction.DocFileEnId);
+        var textSnapshots = await LoadTextSnapshotsAsync(process.Id);
 
         // Этапы, у которых сейчас реально начинается новый круг финальной выдержки (т.е. их
         // FinalHold*-поля будут перезаписаны ниже) - собираем отдельно от "чистых" этапов,
@@ -2205,8 +2266,12 @@ public class VndApprovalService : IVndApprovalService
                                             && stage.FinalHoldDecision is null
                                             && stage.PrimaryComment == SkippedPhaseComment;
 
+            // Чистое согласование засчитывается, только если принято по тому же тексту, что
+            // уходит на утверждение (см. описание метода).
             var wasClean = !joinedLateWithoutDecision
-                           && latest is ApprovalStageDecision.Approved or ApprovalStageDecision.AutoApprovedByTimeout;
+                           && latest is ApprovalStageDecision.Approved or ApprovalStageDecision.AutoApprovedByTimeout
+                           && FinalHoldCarryOver.DecidedOnCurrentText(
+                               LatestDecisionAtBeforeFinalHold(stage), currentText, textSnapshots);
 
             if (wasClean)
             {

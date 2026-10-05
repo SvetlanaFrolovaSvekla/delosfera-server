@@ -48,6 +48,28 @@ public static class VndApprovalNotificationMessages
                 "акыркы кармоодо турат (таанышуу үчүн, чечим талап кылынбайт).",
         Severity: NotificationSeverity.Info); // просто ознакомление, действие не требуется
 
+    /// <summary>Финальная выдержка: от согласующего требуется решение и ЭЦП под итоговой версией —
+    /// он оставлял замечания, либо текст документа изменился после его согласования (см.
+    /// VndApprovalService.ResetFinalHoldDecisionsAsync). Остальные согласующие получают
+    /// <see cref="FinalHoldForApprovers"/> — им действие не требуется.</summary>
+    public static NotificationText FinalHoldDecisionRequired(string redactionCode, string vndTitle) => new(
+        TitleRu: "Подпишите итоговую версию редакции",
+        TitleEn: "Sign the final version of the revision",
+        TitleKg: "Редакциянын акыркы версиясына кол коюңуз",
+        BodyRu: $"Редакция {redactionCode} документа «{vndTitle}» находится на финальной выдержке. Чтобы все " +
+                "согласующие подписали один и тот же текст, требуется ваше решение и подпись ЭЦП под итоговой " +
+                "версией документа (с учётом внесённых исправлений). Если решение не будет принято до окончания " +
+                "срока выдержки, согласование будет засчитано автоматически, без ЭЦП.",
+        BodyEn: $"Revision {redactionCode} of the document \"{vndTitle}\" is in the final hold period. So that all " +
+                "approvers sign the same text, your decision and digital signature on the final version of the " +
+                "document (including the corrections made) are required. If no decision is made before the hold " +
+                "period ends, the approval will be counted automatically, without a digital signature.",
+        BodyKg: $"«{vndTitle}» документинин {redactionCode} редакциясы акыркы кармоодо турат. Бардык " +
+                "макулдашуучулар бир эле текстке кол коюшу үчүн, документтин акыркы версиясына (киргизилген " +
+                "оңдоолорду эске алуу менен) сиздин чечимиңиз жана ЭЦП менен колуңуз талап кылынат. Кармоо " +
+                "мөөнөтү бүткөнгө чейин чечим кабыл алынбаса, макулдашуу ЭЦПсыз автоматтык түрдө эсептелет.",
+        Severity: NotificationSeverity.Urgent); // задача, требующая действия
+
     public static NotificationText ApprovedByUser(string approverName, string redactionCode, string vndTitle) => new(
         TitleRu: "Редакцию согласовали",
         TitleEn: "Revision approved",

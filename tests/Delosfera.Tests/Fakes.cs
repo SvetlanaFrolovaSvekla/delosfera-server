@@ -303,6 +303,15 @@ internal sealed class FakeResolutionSignatureService
     public Task<delosfera_server.Modules.Documents.VND.DTO.Response.ResolutionSignatureVerifyResponse> ReverifyAsync(
         int vndId, int signatureId, int currentUserId, CancellationToken ct = default) =>
         throw new NotImplementedException();
+
+    /// <summary>Тот же отпечаток, что пишет VerifyForDecisionAsync выше, — для тестов листа согласования.</summary>
+    public Task<string> GetContentDigestAsync(
+        delosfera_server.Modules.Documents.VND.Models.VndRedaction redaction, CancellationToken ct = default) =>
+        Task.FromResult("ru=C;kg=-;en=-");
+
+    public Task<delosfera_server.Modules.Documents.VND.Services.ResolutionSignatureFiles> GetSignatureFilesAsync(
+        int vndId, int signatureId, int currentUserId, CancellationToken ct = default) =>
+        throw new NotImplementedException();
 }
 
 /// <summary>Клиент ecp-service, которого в тесте быть не должно: любой вызов — провал теста.</summary>
