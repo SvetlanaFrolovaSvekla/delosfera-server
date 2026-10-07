@@ -61,36 +61,4 @@ public class VndResolutionSignaturesController : ControllerBase
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
     }
-
-    /// <summary>
-    /// Файлы для проверки подписи вне системы (например, на сайте провайдера ЭЦП):
-    /// <c>file=signature</c> (по умолчанию) — CMS-подпись в base64, "{код}-resolution-{id}.sig.b64";
-    /// <c>file=data</c> — подписанные данные, "{код}-resolution-{id}.txt": каноническая строка резолюции
-    /// (решение, комментарий, отпечаток текста редакции, код ВНД), SHA-256 которой и подписан.
-    ///
-    /// Подпись — открытое доказательство: подписать ею что-то другое или предъявить её в системе повторно
-    /// нельзя (журнал отклоняет повтор и старые подписи). Но в CMS лежит сертификат подписанта с его
-    /// персональными данными, поэтому скачивание — только с правом «Экспорт ВНД», как и у Листа
-    /// согласования, плюс правило видимости черновиков.
-    /// </summary>
-    [HttpGet("{signatureId:int}/download")]
-    [RequirePermission(PermissionCode.ExportVnd)]
-    [EnableRateLimiting("ecp-verify")]
-    public async Task<IActionResult> Download(
-        int vndId, int signatureId, [FromQuery] string? file, CancellationToken ct)
-    {
-        try
-        {
-            var files = await _service.GetSignatureFilesAsync(vndId, signatureId, _currentUser.UserId, ct);
-
-            if (string.Equals(file, "data", StringComparison.OrdinalIgnoreCase))
-                return File(files.SignedData, "text/plain; charset=utf-8", $"{files.BaseName}.txt");
-
-            return File(System.Text.Encoding.ASCII.GetBytes(files.SignatureBase64), "application/octet-stream",
-                $"{files.BaseName}.sig.b64");
-        }
-        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
-        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-    }
 }

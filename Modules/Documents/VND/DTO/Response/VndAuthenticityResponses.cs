@@ -156,7 +156,6 @@ public class VndAuthenticitySignature
     public string? OrganizationName { get; set; }
     public string? CertCommonName { get; set; }
     public string? CertIssuerCommonName { get; set; }
-    public string? CertValidNotAfter { get; set; }
 
     public DateTime SignedAt { get; set; }
 

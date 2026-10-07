@@ -206,7 +206,6 @@ public static class VndAuthenticityMatcher
         OrganizationName = s.OrganizationName,
         CertCommonName = s.CertCommonName,
         CertIssuerCommonName = s.CertIssuerCommonName,
-        CertValidNotAfter = s.CertValidNotAfter,
         SignedAt = s.SignedAt,
         CmsSigningTime = s.CmsSigningTime,
         Verified = s.Verified,

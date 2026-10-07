@@ -28,13 +28,10 @@ public class VndResolutionSignatureResponse
     public int UserId { get; set; }
     public string? UserFullName { get; set; }
 
-    public required string PersonIdnp { get; set; }
     public string? PersonFio { get; set; }
     public string? OrganizationName { get; set; }
 
     public string? CertCommonName { get; set; }
-    public string? CertKeyIdentifier { get; set; }
-    public string? CertValidNotAfter { get; set; }
     public string? CertIssuerCommonName { get; set; }
 
     public required string HashSchemaVersion { get; set; }

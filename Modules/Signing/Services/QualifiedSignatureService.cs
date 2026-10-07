@@ -530,6 +530,17 @@ public class QualifiedSignatureService : IQualifiedSignatureService
         return rows.Select(s => ToDto(s, names.GetValueOrDefault(s.UserId), null, null, null)).ToList();
     }
 
+    /// <summary>Из DN сертификата убираем персональные идентификаторы (SERIALNUMBER / ИДНП): штамп их не показывает.</summary>
+    private static string? StripIdentifiers(string? subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject)) return subject;
+        var parts = subject.Split(',')
+            .Where(p => { var t = p.Trim(); return !t.StartsWith("SERIALNUMBER=", StringComparison.OrdinalIgnoreCase)
+                && !t.StartsWith("OID.2.5.4.5=", StringComparison.OrdinalIgnoreCase)
+                && !t.StartsWith("2.5.4.5=", StringComparison.OrdinalIgnoreCase); });
+        return string.Join(",", parts).Trim();
+    }
+
     private static SignatureInfoDto ToDto(
         Signature s, string? userName, X509Certificate2? certificate,
         TrustResult? trust, TimestampResult? timestamp)
@@ -550,9 +561,7 @@ public class QualifiedSignatureService : IQualifiedSignatureService
 
         if (certificate is not null)
         {
-            dto.CertificateSubject = certificate.Subject;
-            dto.CertificateSerial = certificate.SerialNumber;
-            dto.CertificateValidTo = certificate.NotAfter.ToUniversalTime();
+            dto.CertificateSubject = StripIdentifiers(certificate.Subject);
             dto.TrustAuthority = trust?.AuthorityTitle;
             dto.TrustNotChecked = trust?.NotChecked ?? false;
             dto.RevocationChecked = trust?.RevocationChecked ?? false;
@@ -571,10 +580,7 @@ public class QualifiedSignatureService : IQualifiedSignatureService
             using var doc = JsonDocument.Parse(s.StampMeta);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("subject", out var subject)) dto.CertificateSubject = subject.GetString();
-            if (root.TryGetProperty("serial", out var serial)) dto.CertificateSerial = serial.GetString();
-            if (root.TryGetProperty("validTo", out var validTo) && validTo.TryGetDateTime(out var to))
-                dto.CertificateValidTo = to;
+            if (root.TryGetProperty("subject", out var subject)) dto.CertificateSubject = StripIdentifiers(subject.GetString());
             if (root.TryGetProperty("trustAuthority", out var authority))
                 dto.TrustAuthority = authority.GetString();
             if (root.TryGetProperty("trustNotChecked", out var notChecked) &&
