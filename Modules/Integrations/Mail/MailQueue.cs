@@ -29,6 +29,17 @@ public interface IMailQueue
 /// </summary>
 public class MailQueue : IMailQueue
 {
+    /// <summary>
+    /// Служебные адреса, на которые СЭД не пишет вовсе: у учётки администратора СЭД нет почтового
+    /// ящика, а admin@ зарезервирован за администратором домена. Уведомления по-прежнему
+    /// создаются в системе — отключается только отправка письма.
+    /// </summary>
+    private static readonly string[] NoMailAddresses =
+    {
+        "edoadmin@keremetbank.kg",
+        "admin@keremetbank.kg",
+    };
+
     private readonly DelosferaDbContext _db;
     private readonly IMailSettingsService _settings;
     private readonly delosfera_server.Common.Security.ISecretProtector _protector;
@@ -68,7 +79,8 @@ public class MailQueue : IMailQueue
         // Заблокированным и деактивированным не пишем: уведомление о задаче человеку,
         // которому закрыт доступ, — лишний повод для вопросов службе безопасности.
         var recipients = await _db.Users
-            .Where(u => ids.Contains(u.Id) && u.IsActive && u.BlockedAt == null && u.Email != "")
+            .Where(u => ids.Contains(u.Id) && u.IsActive && u.BlockedAt == null && u.Email != ""
+                        && !NoMailAddresses.Contains(u.Email.ToLower()))
             .Select(u => new {u.Email, u.FullName})
             .ToListAsync(ct);
 
