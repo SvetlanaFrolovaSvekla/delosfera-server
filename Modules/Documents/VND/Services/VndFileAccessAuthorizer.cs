@@ -24,6 +24,37 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
     private readonly DelosferaDbContext _db;
     private readonly ICurrentUserService _currentUser;
 
+    // Файл редакции (или её снимка по кругу согласования) секретного ВНД, к которому у пользователя
+    // нет допуска, не отдаётся — даже тому, кто загрузил этот файл раньше (см. VndSecrecy).
+    private async Task<bool> BelongsToDeniedSecretVndAsync(int fileId, CancellationToken ct)
+    {
+        if (VndSecrecy.HasFullAccess(_currentUser)) return false;
+
+        var redactionVndIds = _db.VndRedactions
+            .Where(r => r.DocFileRuId == fileId
+                        || r.DocFileKgId == fileId
+                        || r.DocFileEnId == fileId
+                        || r.TidFileId == fileId
+                        || r.ApprovalSheetFileId == fileId
+                        || r.DisagreementMatrixFileId == fileId
+                        || r.ApprovalSheets.Any(s => s.FileAttachmentId == fileId)
+                        || r.Attachments.Any(a => a.FileAttachmentId == fileId))
+            .Select(r => r.VndId);
+
+        var snapshotVndIds = _db.Set<VndRedactionRevisionSnapshot>()
+            .Where(s => s.DocFileRuId == fileId
+                        || s.DocFileKgId == fileId
+                        || s.DocFileEnId == fileId
+                        || s.TidFileId == fileId
+                        || s.DisagreementMatrixFileId == fileId)
+            .Select(s => s.VndRedaction!.VndId);
+
+        var ownerIds = await redactionVndIds.Union(snapshotVndIds).ToListAsync(ct);
+        if (ownerIds.Count == 0) return false;
+
+        return (await VndSecrecy.GetDeniedIdsAsync(_db, _currentUser, ownerIds, ct)).Count > 0;
+    }
+
     public VndFileAccessAuthorizer(DelosferaDbContext db, ICurrentUserService currentUser)
     {
         _db = db;
@@ -33,6 +64,8 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
     public async Task<bool> CanCurrentUserAccessAsync(int fileId, CancellationToken ct = default)
     {
         var userId = _currentUser.UserId;
+
+        if (await BelongsToDeniedSecretVndAsync(fileId, ct)) return false;
 
         // Загрузивший файл всегда имеет к нему доступ (например, вложения ещё не привязанного черновика).
         var isUploader = await _db.FileAttachments

@@ -247,11 +247,18 @@ public class VndService : IVndService
                 .Select(f => f.VndId)
                 .ToHashSetAsync();
 
+        // Секретные документы остаются в реестре (с замочком), но тем, у кого нет допуска,
+        // помечаем их как закрытые — открыть такой документ фронт не даёт, а сервер не пустит.
+        var deniedSecretIds = userId is null
+            ? new HashSet<int>()
+            : await VndSecrecy.GetDeniedIdsAsync(_db, _currentUser, entities.Where(e => e.IsSecret).Select(e => e.Id));
+
         return entities
             .Select(x =>
             {
                 var response = ToResponse(x, languageCode, today, canViewExtended, relationsByVndId?.GetValueOrDefault(x.Id));
                 response.IsFavorite = favoriteIds.Contains(x.Id);
+                response.SecretAccessDenied = deniedSecretIds.Contains(x.Id);
                 return response;
             })
             .ToList();
@@ -509,6 +516,12 @@ public class VndService : IVndService
             throw new UnauthorizedAccessException(
                 "Открыть чужой черновик ВНД может только его автор или пользователь с правом " +
                 "просмотра чужих черновиков");
+
+        // Секретный документ открывают только обладатели права ManageVndSecrecy и допущенные
+        // (пользователи/группы). Фильтр VndSecrecyGuard на контроллере отсекает это раньше, а здесь
+        // - страховка для вызовов не через контроллер.
+        if (entity.IsSecret && !await VndSecrecy.CanViewAsync(_db, _currentUser, entity.Id))
+            throw new UnauthorizedAccessException(VndSecrecy.DeniedMessage);
 
         var today = _clock.Today;
         var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
@@ -809,6 +822,7 @@ public class VndService : IVndService
         List<string>? linkedToMeRelations = null) => new()
     {
         Id = x.Id,
+        IsSecret = x.IsSecret,
         Code = x.Code,
         Name = x.ResolveTitle(languageCode),
         TitleRu = x.TitleRu,

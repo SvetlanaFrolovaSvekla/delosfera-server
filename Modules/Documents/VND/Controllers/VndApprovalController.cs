@@ -17,6 +17,7 @@ namespace delosfera_server.Modules.Documents.VND.Controllers;
 [Route("/api/vnd/{vndId:int}/approval")]
 [Tags("ВНД — Согласование")]
 [Authorize]
+[VndSecrecyGuard()]
 public class VndApprovalController : ControllerBase
 {
     private readonly IVndApprovalService _service;

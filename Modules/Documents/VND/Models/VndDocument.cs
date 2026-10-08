@@ -114,6 +114,19 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
     public ICollection<Keyword> Keywords { get; set; } = new List<Keyword>();
     public ICollection<UserGroup> UserGroups { get; set; } = new List<UserGroup>();
 
+    // --- Секретность (право ManageVndSecrecy)
+    /// <summary>Секретный документ: в реестре виден всем (с замочком), а открыть его, файлы, историю
+    /// и согласование могут только обладатели права ManageVndSecrecy, пользователи из
+    /// <see cref="SecretAccessUsers"/> и участники групп из <see cref="SecretAccessGroups"/>.
+    /// Не путать с SecrecyLevelId (справочный "уровень секретности" — реквизит содержания).</summary>
+    public bool IsSecret { get; set; }
+
+    /// <summary>Группы пользователей, которым открыт секретный документ.</summary>
+    public ICollection<UserGroup> SecretAccessGroups { get; set; } = new List<UserGroup>();
+
+    /// <summary>Отдельные пользователи, которым открыт секретный документ.</summary>
+    public ICollection<User> SecretAccessUsers { get; set; } = new List<User>();
+
     public ICollection<VndRedaction> Redactions { get; set; } = new List<VndRedaction>();
 
     public int? CurrentRedactionId { get; set; }

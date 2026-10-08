@@ -38,10 +38,12 @@ public static class RolePermissionDefaults
             PermissionCode.ManageRiskEvents,
             // Удаление ВНД на любом статусе (мягкое): администратор и главный редактор ВНД.
             PermissionCode.DeleteAnyVnd,
+            // Настройки секретности ВНД: администратор и главный редактор.
+            PermissionCode.ManageVndSecrecy,
         ]),
 
         // Главный редактор ВНД: удалять ВНД на любом статусе.
-        ("Главный редактор", [PermissionCode.DeleteAnyVnd]),
+        ("Главный редактор", [PermissionCode.DeleteAnyVnd, PermissionCode.ManageVndSecrecy]),
 
         // Делопроизводство: книга регистрации — их основная работа. Реестр записок
         // целиком нужен им по той же причине: они его и ведут.

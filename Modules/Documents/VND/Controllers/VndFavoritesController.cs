@@ -12,6 +12,7 @@ namespace delosfera_server.Modules.Documents.VND.Controllers;
 [Route("api/vnd/{vndId:int}/favorite")]
 [Tags("ВНД — Избранное")]
 [Authorize]
+[VndSecrecyGuard()]
 public class VndFavoritesController : ControllerBase
 {
     private readonly IVndFavoriteService _service;

@@ -19,6 +19,7 @@ namespace delosfera_server.Modules.Documents.VND.Controllers;
 [Route("/api/vnd/{vndId:int}/signatures")]
 [Tags("ВНД — Журнал подписей ЭЦП")]
 [Authorize]
+[VndSecrecyGuard()]
 public class VndResolutionSignaturesController : ControllerBase
 {
     private readonly IResolutionSignatureService _service;

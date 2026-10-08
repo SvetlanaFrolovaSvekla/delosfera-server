@@ -17,6 +17,7 @@ namespace delosfera_server.Modules.Documents.VND.Controllers;
 [Route("/api/vnd/{vndId:int}/approval-sheet")]
 [Tags("ВНД — Лист согласования")]
 [Authorize]
+[VndSecrecyGuard()]
 public class VndApprovalSheetController : ControllerBase
 {
     private const string WordContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";

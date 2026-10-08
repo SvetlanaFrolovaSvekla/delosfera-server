@@ -15,6 +15,7 @@ namespace delosfera_server.Modules.Documents.VND.Controllers;
 [Route("api/vnd")]
 [Tags("ВНД")]
 [Authorize]
+[VndSecrecyGuard(true)]
 public class VndController : ControllerBase
 {
     private readonly IVndService _service;

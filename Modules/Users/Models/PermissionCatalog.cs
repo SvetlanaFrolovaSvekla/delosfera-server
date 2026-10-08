@@ -246,6 +246,13 @@ public static class PermissionCatalog
             TitleKg = "ВНДди каалаган статустa өчүрүү (жумшак өчүрүү: кол тамгалар журналы сакталат)"
         },
 
+        [PermissionCode.ManageVndSecrecy] = new PermissionDescription
+        {
+            TitleRu = "Настройки секретности ВНД: ограничивать доступ к документу группам и отдельным пользователям (всегда видит все секретные ВНД)",
+            TitleEn = "VND secrecy settings: restrict a document to chosen groups and users (always sees all secret VNDs)",
+            TitleKg = "ВНДнин купуялуулук жөндөөлөрү: документке кирүүнү тандалган топторго жана колдонуучуларга чектөө"
+        },
+
         // Системные настройки
         [PermissionCode.ManageSystemSettings] = new PermissionDescription
         {

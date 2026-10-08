@@ -13,6 +13,7 @@ namespace delosfera_server.Modules.Documents.VND.Controllers;
 [Route("/api/vnd/{vndId:int}/actualization")]
 [Tags("ВНД — Актуализация")]
 [Authorize]
+[VndSecrecyGuard()]
 public class VndActualizationController : ControllerBase
 {
     private readonly IVndActualizationService _service;

@@ -7599,6 +7599,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_deleted");
 
+                    b.Property<bool>("IsSecret")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_secret");
+
                     b.Property<DateOnly?>("LastActualizationDate")
                         .HasColumnType("date")
                         .HasColumnName("last_actualization_date");
@@ -7715,6 +7719,7 @@ namespace delosfera_server.Migrations
                             DueActualizationDate = new DateOnly(2026, 8, 9),
                             EffectiveDate = new DateOnly(2023, 2, 16),
                             IsDeleted = false,
+                            IsSecret = false,
                             LastActualizationDate = new DateOnly(2025, 8, 9),
                             LastActualizationHadChanges = true,
                             OrganId = 3,
@@ -7744,6 +7749,7 @@ namespace delosfera_server.Migrations
                             DueActualizationDate = new DateOnly(2026, 7, 22),
                             EffectiveDate = new DateOnly(2021, 4, 1),
                             IsDeleted = false,
+                            IsSecret = false,
                             LastActualizationDate = new DateOnly(2025, 7, 22),
                             LastActualizationHadChanges = false,
                             OrganId = 7,
@@ -7773,6 +7779,7 @@ namespace delosfera_server.Migrations
                             DueActualizationDate = new DateOnly(2026, 7, 25),
                             EffectiveDate = new DateOnly(2020, 2, 1),
                             IsDeleted = false,
+                            IsSecret = false,
                             LastActualizationDate = new DateOnly(2025, 7, 25),
                             LastActualizationHadChanges = true,
                             OrganId = 3,
@@ -7802,6 +7809,7 @@ namespace delosfera_server.Migrations
                             DueActualizationDate = new DateOnly(2026, 9, 28),
                             EffectiveDate = new DateOnly(2019, 6, 1),
                             IsDeleted = false,
+                            IsSecret = false,
                             LastActualizationDate = new DateOnly(2025, 9, 28),
                             LastActualizationHadChanges = false,
                             OrganId = 2,
@@ -7834,6 +7842,7 @@ namespace delosfera_server.Migrations
                             DeveloperId = 22,
                             EffectiveDate = new DateOnly(2019, 2, 1),
                             IsDeleted = false,
+                            IsSecret = false,
                             LastActualizationHadChanges = false,
                             OrganId = 3,
                             Period = 2,
@@ -7858,6 +7867,7 @@ namespace delosfera_server.Migrations
                             DeveloperId = 52,
                             DueActualizationDate = new DateOnly(2027, 8, 4),
                             IsDeleted = false,
+                            IsSecret = false,
                             LastActualizationDate = new DateOnly(2026, 8, 4),
                             LastActualizationHadChanges = false,
                             OrganId = 2,
@@ -15727,6 +15737,44 @@ namespace delosfera_server.Migrations
                     b.ToTable("vnd_rubric", (string)null);
                 });
 
+            modelBuilder.Entity("vnd_secret_group", b =>
+                {
+                    b.Property<int>("UserGroupId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_group_id");
+
+                    b.Property<int>("VndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_id");
+
+                    b.HasKey("UserGroupId", "VndId")
+                        .HasName("pk_vnd_secret_group");
+
+                    b.HasIndex("VndId")
+                        .HasDatabaseName("ix_vnd_secret_group_vnd_id");
+
+                    b.ToTable("vnd_secret_group", (string)null);
+                });
+
+            modelBuilder.Entity("vnd_secret_user", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("VndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_id");
+
+                    b.HasKey("UserId", "VndId")
+                        .HasName("pk_vnd_secret_user");
+
+                    b.HasIndex("VndId")
+                        .HasDatabaseName("ix_vnd_secret_user_vnd_id");
+
+                    b.ToTable("vnd_secret_user", (string)null);
+                });
+
             modelBuilder.Entity("vnd_user_group", b =>
                 {
                     b.Property<int>("UserGroupId")
@@ -18519,6 +18567,40 @@ namespace delosfera_server.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_vnd_rubric_vnd_document_vnd_id");
+                });
+
+            modelBuilder.Entity("vnd_secret_group", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.UserGroup", null)
+                        .WithMany()
+                        .HasForeignKey("UserGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_secret_group_dictionary_user_group_user_group_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", null)
+                        .WithMany()
+                        .HasForeignKey("VndId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_secret_group_vnd_document_vnd_id");
+                });
+
+            modelBuilder.Entity("vnd_secret_user", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_secret_user_user_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", null)
+                        .WithMany()
+                        .HasForeignKey("VndId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_secret_user_vnd_document_vnd_id");
                 });
 
             modelBuilder.Entity("vnd_user_group", b =>

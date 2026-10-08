@@ -97,6 +97,14 @@ public class VndResponse
     /// на поиск, где фильтр не запрашивался).</summary>
     public List<string> LinkedToMeRelations { get; set; } = [];
 
+    /// <summary>Секретный документ (замочек в реестре). Название и код видны всем, а открыть
+    /// документ можно только с доступом — см. <see cref="SecretAccessDenied"/>.</summary>
+    public bool IsSecret { get; set; }
+
+    /// <summary>Документ секретный, и у текущего пользователя НЕТ доступа к нему (закрытый замочек;
+    /// открыть документ он не сможет). Для обладателей права ManageVndSecrecy всегда false.</summary>
+    public bool SecretAccessDenied { get; set; }
+
     /// <summary>Документ в "Избранном" текущего пользователя (звёздочка).</summary>
     public bool IsFavorite { get; set; }
 }

@@ -352,8 +352,12 @@ public sealed class VndAuthenticityService : IVndAuthenticityService
             .ToListAsync(ct);
         var canSeeDrafts = _currentUser.HasPermission(PermissionCode.ViewOtherUsersDrafts);
 
+        // Секретные документы без допуска в результатах не показываем (как чужие черновики).
+        var deniedSecretIds = await VndSecrecy.GetDeniedIdsAsync(_db, _currentUser, vndIds, ct);
+
         bool Visible(VndDocument? vnd) =>
             vnd is not null
+            && !deniedSecretIds.Contains(vnd.Id)
             && (vnd.Status != VndStatus.Draft
                 || vnd.CreatedByUserId == currentUserId
                 || canSeeDrafts

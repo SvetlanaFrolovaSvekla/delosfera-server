@@ -18,6 +18,7 @@ namespace delosfera_server.Modules.Documents.VND.Controllers;
 [ApiController]
 [Authorize]
 [Tags("ВНД — Предложения")]
+[delosfera_server.Modules.Documents.VND.Services.VndSecrecyGuard]
 public class VndProposalsController : ControllerBase
 {
     private readonly IVndProposalService _service;

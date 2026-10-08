@@ -109,6 +109,23 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 j => j.HasOne<VndDocument>().WithMany().HasForeignKey("VndId"),
                 j => { j.ToTable("vnd_user_group"); });
 
+        // ─── Секретность: кому открыт секретный документ (группы и отдельные пользователи) ───
+        builder.HasMany(x => x.SecretAccessGroups)
+            .WithMany()
+            .UsingEntity<Dictionary<string, object>>(
+                "vnd_secret_group",
+                j => j.HasOne<Dictionaries.Models.UserGroup>().WithMany().HasForeignKey("UserGroupId"),
+                j => j.HasOne<VndDocument>().WithMany().HasForeignKey("VndId"),
+                j => { j.ToTable("vnd_secret_group"); });
+
+        builder.HasMany(x => x.SecretAccessUsers)
+            .WithMany()
+            .UsingEntity<Dictionary<string, object>>(
+                "vnd_secret_user",
+                j => j.HasOne<Users.Models.User>().WithMany().HasForeignKey("UserId"),
+                j => j.HasOne<VndDocument>().WithMany().HasForeignKey("VndId"),
+                j => { j.ToTable("vnd_secret_user"); });
+
         var seedDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         // DeveloperId ниже пересчитаны под реальную оргструктуру банка (см.
@@ -142,6 +159,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
                 IsDeleted = false,
+                IsSecret = false,
                 SecrecyLevelId = 3,
                 CreatedByUserId = (int?)14,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -167,6 +185,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
                 IsDeleted = false,
+                IsSecret = false,
                 SecrecyLevelId = 2,
                 CreatedByUserId = (int?)14,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -192,6 +211,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
                 IsDeleted = false,
+                IsSecret = false,
                 SecrecyLevelId = 1,
                 CreatedByUserId = (int?)7,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -217,6 +237,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
                 IsDeleted = false,
+                IsSecret = false,
                 SecrecyLevelId = 1,
                 CreatedByUserId = (int?)15,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -243,6 +264,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
                 IsDeleted = false,
+                IsSecret = false,
                 SecrecyLevelId = 2,
                 CreatedByUserId = (int?)12,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -268,6 +290,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
                 IsDeleted = false,
+                IsSecret = false,
                 SecrecyLevelId = 3,
                 CreatedByUserId = (int?)17,
                 CreatedAt = seedDate, UpdatedAt = seedDate
