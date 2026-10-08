@@ -2,6 +2,7 @@ using delosfera_server.Common.Authorization;
 using delosfera_server.Common.Services;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.VND.Services;
+using delosfera_server.Modules.Users.Services;
 using delosfera_server.Modules.Users.Models;
 using Microsoft.AspNetCore.Mvc;
 using delosfera_server.Modules.Documents.VND.DTO.Request;
@@ -19,9 +20,11 @@ public class VndController : ControllerBase
     private readonly IVndService _service;
     private readonly ILanguageResolver _languageResolver;
     private readonly ICurrentUserService _currentUser;
+    private readonly IAuthService _auth;
 
-    public VndController(IVndService service, ILanguageResolver languageResolver, ICurrentUserService currentUser)
+    public VndController(IVndService service, ILanguageResolver languageResolver, ICurrentUserService currentUser, IAuthService auth)
     {
+        _auth = auth;
         _service = service;
         _languageResolver = languageResolver;
         _currentUser = currentUser;
@@ -104,16 +107,74 @@ public class VndController : ControllerBase
         }
     }
 
-    /// <summary>Удаление ВНД (только черновик, создателем или главным редактором)</summary>
+    /// <summary>Мягко удалённые ВНД — вкладка «Черновики» → «Удалённые» (главный редактор, администратор)</summary>
+    [HttpGet("deleted")]
+    [RequirePermission(PermissionCode.DeleteAnyVnd)]
+    [ProducesResponseType(typeof(List<DeletedVndResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<DeletedVndResponse>>> GetDeleted()
+    {
+        return Ok(await _service.GetDeletedAsync());
+    }
+
+    /// <summary>Восстановить мягко удалённую ВНД: возвращается в черновики</summary>
+    /// <response code="204">ВНД восстановлена</response>
+    /// <response code="409">Код документа уже занят другим документом</response>
+    [HttpPost("{id:int}/restore")]
+    [RequirePermission(PermissionCode.DeleteAnyVnd)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Restore(int id)
+    {
+        try
+        {
+            await _service.RestoreAsync(id, _currentUser.UserId);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    /// <summary>Проверка пароля текущего пользователя — первый шаг подтверждения удаления
+    /// (дальше клиент просит повторное подтверждение; сам DELETE проверит пароль ещё раз).</summary>
+    /// <response code="204">Пароль верный</response>
+    /// <response code="400">Пароль пустой или неверный</response>
+    [HttpPost("verify-password")]
+    [RequirePermission(PermissionCode.DeleteVnd)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> VerifyPassword([FromBody] DeleteVndRequest? request)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Password))
+            return BadRequest(new { message = "Введите пароль для подтверждения удаления" });
+        try
+        {
+            await _auth.VerifyCurrentPasswordAsync(_currentUser.UserId, request.Password);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    /// <summary>Удаление ВНД: черновик без подписей — физически (создателем или главным редактором); любой другой статус или черновик с подписями ЭЦП — мягко, только с правом DeleteAnyVnd</summary>
     /// <response code="204">ВНД удалён</response>
-    /// <response code="409">Удалять можно только черновик</response>
+    /// <response code="409">Без права DeleteAnyVnd удалять можно только черновик без подписей</response>
     [HttpDelete("{id:int}")]
     [RequirePermission(PermissionCode.DeleteVnd)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, [FromBody] DeleteVndRequest? request)
     {
+        if (string.IsNullOrWhiteSpace(request?.Password))
+            return BadRequest(new { message = "Введите пароль для подтверждения удаления" });
+
+        try
+        {
+            await _auth.VerifyCurrentPasswordAsync(_currentUser.UserId, request.Password);
+        }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+
         try
         {
             await _service.DeleteAsync(id, _currentUser.UserId);

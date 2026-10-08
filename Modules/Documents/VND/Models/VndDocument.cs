@@ -125,6 +125,12 @@ public class VndDocument : IAuditableEntity, ITranslatableEntity
 
     /// <summary>Пользователь, создавший этот ВНД (ИНИЦИАТОР) — используется для разграничения видимости
     /// черновиков ("Мои черновики" / "Черновики других пользователей")</summary>
+    /// <summary>Мягкое удаление (право DeleteAnyVnd): документ скрыт глобальным фильтром запросов, но строка,
+    /// редакции и неизменяемый журнал подписей ЭЦП остаются в БД.</summary>
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+    public int? DeletedByUserId { get; set; }
+
     public int? CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
 

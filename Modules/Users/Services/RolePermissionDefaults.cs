@@ -36,7 +36,12 @@ public static class RolePermissionDefaults
             // роль риск-подразделения не заведена в справочнике отдельно.
             PermissionCode.ViewRiskEvents,
             PermissionCode.ManageRiskEvents,
+            // Удаление ВНД на любом статусе (мягкое): администратор и главный редактор ВНД.
+            PermissionCode.DeleteAnyVnd,
         ]),
+
+        // Главный редактор ВНД: удалять ВНД на любом статусе.
+        ("Главный редактор", [PermissionCode.DeleteAnyVnd]),
 
         // Делопроизводство: книга регистрации — их основная работа. Реестр записок
         // целиком нужен им по той же причине: они его и ведут.

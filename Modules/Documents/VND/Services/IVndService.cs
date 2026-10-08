@@ -18,6 +18,10 @@ public interface IVndService
     Task<VndResponse> GetByIdAsync(int id, string languageCode);
     Task<VndResponse> CreateAsync(CreateVndRequest request, int currentUserId, string languageCode);
     Task DeleteAsync(int id, int currentUserId);
+    /// <summary>Мягко удалённые ВНД (право DeleteAnyVnd).</summary>
+    Task<List<DeletedVndResponse>> GetDeletedAsync();
+    /// <summary>Восстановить мягко удалённую ВНД со всеми редакциями и журналом подписей.</summary>
+    Task RestoreAsync(int id, int currentUserId);
     /// <summary>Архивировать (отменить) ВНД — кнопка "Архивировать" (см. PermissionCode.CancelVnd).
     /// Недоступно для черновика (его можно только удалить) и для уже архивированного документа.
     /// Если документ на согласовании — согласование отзывается автоматически в рамках той же

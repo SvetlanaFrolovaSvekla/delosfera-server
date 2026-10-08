@@ -17,4 +17,10 @@ public interface IAuthService
     Task<AuthResult> LoginWithDirectoryAsync(DomainLoginRequest request, string languageCode);
     Task<AuthResult> RefreshAsync(string refreshToken, string languageCode);
     Task LogoutAsync(string refreshToken);
+
+    /// <summary>Повторная проверка пароля уже вошедшего пользователя перед опасным действием
+    /// (например, удалением ВНД). Тот же способ проверки и тот же счётчик неудачных попыток, что
+    /// при входе. Неверный пароль, пустой пароль и временная блокировка — InvalidOperationException
+    /// с текстом для пользователя.</summary>
+    Task VerifyCurrentPasswordAsync(int userId, string? password);
 }

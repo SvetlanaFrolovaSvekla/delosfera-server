@@ -1568,9 +1568,12 @@ public class VndService : IVndService
     }
 
     /// <summary>
-    /// Удаление ВНД. Разрешено только для черновика (действующие/архивные/на согласовании
-    /// удалять нельзя) и только создателю или главному редактору. Явно чистит связанные
-    /// редакции, вложения, ссылки, процессы согласования и файлы в хранилище.
+    /// Удаление ВНД. Черновик без подписей ЭЦП удаляется физически (создателем или главным редактором)
+    /// вместе с редакциями, вложениями, ссылками, процессами согласования и файлами в хранилище.
+    /// Любой другой документ (действующий, архивный, на согласовании, а также черновик с подписанными
+    /// резолюциями) удаляется мягко — только с правом DeleteAnyVnd: он помечается удалённым и
+    /// пропадает из реестра, поиска и карточек (глобальный фильтр), а строка, редакции и неизменяемый
+    /// журнал подписей остаются в БД.
     /// </summary>
     public async Task DeleteAsync(int id, int currentUserId)
     {
@@ -1579,18 +1582,22 @@ public class VndService : IVndService
                       .FirstOrDefaultAsync(x => x.Id == id)
                   ?? throw new KeyNotFoundException($"ВНД с id={id} не найден");
 
-        if (vnd.Status != VndStatus.Draft)
-            throw new InvalidOperationException("Удалить можно только ВНД в статусе черновика");
+        var canDeleteAny = _currentUser.HasPermission(PermissionCode.DeleteAnyVnd);
+        var hasSignatures = await _db.VndResolutionSignatures.AnyAsync(s => s.VndId == id);
 
-        if (vnd.CreatedByUserId != currentUserId && !IsChiefEditor())
+        if (vnd.Status != VndStatus.Draft || hasSignatures)
+        {
+            if (!canDeleteAny)
+                throw new InvalidOperationException(vnd.Status != VndStatus.Draft
+                    ? "Удалить можно только ВНД в статусе черновика"
+                    : "Удалить нельзя: по документу есть резолюции, подписанные ЭЦП (журнал подписей неизменяем)");
+
+            await SoftDeleteAsync(vnd, currentUserId);
+            return;
+        }
+
+        if (vnd.CreatedByUserId != currentUserId && !IsChiefEditor() && !canDeleteAny)
             throw new UnauthorizedAccessException("Удалить ВНД может только его создатель или главный редактор");
-
-        // Журнал подписей ЭЦП неизменяем (FK Restrict + триггер в БД): черновик, по которому уже
-        // есть подписанные резолюции (например, согласование отозвали и документ вернулся в
-        // черновик), удалить нельзя — иначе пропали бы доказательства подписания.
-        if (await _db.VndResolutionSignatures.AnyAsync(s => s.VndId == id))
-            throw new InvalidOperationException(
-                "Удалить нельзя: по документу есть резолюции, подписанные ЭЦП (журнал подписей неизменяем)");
 
         var actor = await _db.Users.FindAsync(currentUserId);
         var actorName = actor?.FullName ?? "—";
@@ -1655,6 +1662,108 @@ public class VndService : IVndService
             try { await _fileService.DeleteAsync(fileId); }
             catch { /* файл уже удалён или хранилище недоступно — не критично */ }
         }
+    }
+
+    /// <summary>Мягко удалённые ВНД, свежие сверху. Глобальный фильтр запросов обходится явно.</summary>
+    public async Task<List<DeletedVndResponse>> GetDeletedAsync()
+    {
+        var rows = await _db.VndDocuments
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(x => x.IsDeleted)
+            .OrderByDescending(x => x.DeletedAt)
+            .Select(x => new
+            {
+                x.Id, x.Code, x.TitleRu, x.TitleEn, x.TitleKg, x.Status, x.DeletedAt, x.DeletedByUserId,
+            })
+            .ToListAsync();
+
+        var userIds = rows.Where(r => r.DeletedByUserId != null).Select(r => r.DeletedByUserId!.Value)
+            .Distinct().ToList();
+        var names = await _db.Users
+            .Where(u => userIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        return rows.Select(r => new DeletedVndResponse
+        {
+            Id = r.Id,
+            Code = r.Code,
+            TitleRu = r.TitleRu,
+            TitleEn = r.TitleEn,
+            TitleKg = r.TitleKg,
+            Status = MapStatusBack(r.Status),
+            DeletedAt = r.DeletedAt,
+            DeletedByName = r.DeletedByUserId is { } uid ? names.GetValueOrDefault(uid) : null,
+        }).ToList();
+    }
+
+    /// <summary>Восстановление мягко удалённой ВНД: снимает пометку, документ возвращается в черновики
+    /// (статус «Черновик»), со всеми редакциями и журналом подписей. Если код за это время занят другим
+    /// документом — восстановить нельзя.</summary>
+    public async Task RestoreAsync(int id, int currentUserId)
+    {
+        var vnd = await _db.VndDocuments
+                      .IgnoreQueryFilters()
+                      .FirstOrDefaultAsync(x => x.Id == id && x.IsDeleted)
+                  ?? throw new KeyNotFoundException($"Удалённая ВНД с id={id} не найдена");
+
+        // Глобальный фильтр оставляет только неудалённые документы — это и нужная проверка.
+        if (await _db.VndDocuments.AnyAsync(x => x.Code == vnd.Code))
+            throw new InvalidOperationException(
+                $"Восстановить нельзя: код {vnd.Code} уже занят другим документом");
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+
+        vnd.IsDeleted = false;
+        vnd.DeletedAt = null;
+        vnd.DeletedByUserId = null;
+
+        // Восстановленный документ возвращается в черновики, а не в прежний статус: так он не
+        // появляется сразу у всех в реестре (черновик видят создатель, главный редактор и
+        // администратор), и редактор сам решает, что с ним делать дальше.
+        vnd.Status = VndStatus.Draft;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.Other, vnd.Id, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} восстановил(а) ВНД {vnd.Code} «{vnd.TitleRu}» (в черновики)",
+                $"{actorName} restored VND {vnd.Code} \"{vnd.TitleRu}\"",
+                $"{actorName} {vnd.Code} «{vnd.TitleRu}» ВНДисин калыбына келтирди"),
+            $"/base-vnd/{vnd.Id}");
+
+        await _db.SaveChangesAsync();
+    }
+
+    /// <summary>Мягкое удаление: см. DeleteAsync. Согласование на лету отзывается (как при архивации),
+    /// открытый цикл актуализации закрывается; записи и журнал подписей не трогаются.</summary>
+    private async Task SoftDeleteAsync(VndDocument vnd, int currentUserId)
+    {
+        if (vnd.Status == VndStatus.Review)
+            await _approvalService.WithdrawForCancelAsync(vnd.Id, currentUserId);
+
+        var actor = await _db.Users.FindAsync(currentUserId);
+        var actorName = actor?.FullName ?? "—";
+
+        vnd.IsDeleted = true;
+        vnd.DeletedAt = DateTime.UtcNow;
+        vnd.DeletedByUserId = currentUserId;
+
+        vnd.ActualizationResponsibleUserId = null;
+        vnd.ActualizationRequiresApproval = false;
+        vnd.ActualizationShiftNextPeriod = false;
+        vnd.ActualizationPlannedNoChanges = false;
+        vnd.ActualizationPerformed = false;
+
+        _activityLog.Log(
+            ActivityModules.Vnd, ActivityEventKind.DraftDeleted, vnd.Id, vnd.Code, currentUserId,
+            new ActivityText(
+                $"{actorName} удалил(а) ВНД {vnd.Code} «{vnd.TitleRu}»",
+                $"{actorName} deleted VND {vnd.Code} \"{vnd.TitleRu}\"",
+                $"{actorName} {vnd.Code} «{vnd.TitleRu}» ВНДисин өчүрдү"),
+            "/base-vnd");
+
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>

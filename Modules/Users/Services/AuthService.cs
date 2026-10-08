@@ -101,6 +101,48 @@ public class AuthService : IAuthService
             refreshToken);
     }
 
+    public async Task VerifyCurrentPasswordAsync(int userId, string? password)
+    {
+        if (string.IsNullOrEmpty(password))
+            throw new InvalidOperationException("Введите пароль для подтверждения");
+
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId)
+                   ?? throw new InvalidOperationException("Пользователь не найден");
+
+        if (user.LockedUntil is { } lockedUntil && lockedUntil > DateTime.UtcNow)
+        {
+            var minutes = Math.Max(1, (int)Math.Ceiling((lockedUntil - DateTime.UtcNow).TotalMinutes));
+            throw new InvalidOperationException(
+                $"Подтверждение временно заблокировано после неудачных попыток. Повторите через {minutes} мин.");
+        }
+
+        // Как при входе: у доменной учётной записи пароль проверяет каталог, у локальной — хеш.
+        var passwordOk = user.Source == UserSource.Ldap
+            ? !string.IsNullOrWhiteSpace(user.LdapLogin)
+              && await _ldapAuthenticator.VerifyPasswordAsync(user.LdapLogin, password)
+            : _passwordHasher.Verify(user.PasswordHash, password);
+
+        if (!passwordOk)
+        {
+            user.FailedLoginAttempts++;
+
+            if (user.FailedLoginAttempts >= _passwordPolicy.MaxFailedAttempts)
+            {
+                user.LockedUntil = DateTime.UtcNow.Add(_passwordPolicy.LockoutDuration);
+                user.FailedLoginAttempts = 0;
+            }
+
+            await _db.SaveChangesAsync();
+            throw new InvalidOperationException("Неверный пароль");
+        }
+
+        if (user.FailedLoginAttempts != 0)
+        {
+            user.FailedLoginAttempts = 0;
+            await _db.SaveChangesAsync();
+        }
+    }
+
     public async Task<AuthResult> LoginWithDirectoryAsync(DomainLoginRequest request, string languageCode)
     {
         if (!await _directory.IsEnabledAsync())

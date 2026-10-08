@@ -239,6 +239,13 @@ public static class PermissionCatalog
             TitleKg = "ВНДди архивдөө (жокко чыгаруу) — черновиктен жана мурунтан эле архивделгенден башка бардык статуста"
         },
 
+        [PermissionCode.DeleteAnyVnd] = new PermissionDescription
+        {
+            TitleRu = "Удалять ВНД на любом статусе (мягкое удаление: журнал подписей сохраняется)",
+            TitleEn = "Delete a VND at any status (soft delete: the signature journal is kept)",
+            TitleKg = "ВНДди каалаган статустa өчүрүү (жумшак өчүрүү: кол тамгалар журналы сакталат)"
+        },
+
         // Системные настройки
         [PermissionCode.ManageSystemSettings] = new PermissionDescription
         {

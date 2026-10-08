@@ -10,7 +10,9 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
     {
         builder.ToTable("vnd_document");
 
-        builder.HasIndex(x => x.Code).IsUnique();
+        // Удалённый (мягко) документ не держит код: такой же код можно завести заново.
+        builder.HasIndex(x => x.Code).IsUnique().HasFilter("is_deleted = false");
+        builder.HasQueryFilter(x => !x.IsDeleted);
 
         // Полнотекстовый поиск по коду и названию. Вычисляемая колонка, а не поле,
         // которое надо помнить обновлять; словарь константой — иначе выражение не
@@ -139,6 +141,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationShiftNextPeriod = false,
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
+                IsDeleted = false,
                 SecrecyLevelId = 3,
                 CreatedByUserId = (int?)14,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -163,6 +166,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationShiftNextPeriod = false,
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
+                IsDeleted = false,
                 SecrecyLevelId = 2,
                 CreatedByUserId = (int?)14,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -187,6 +191,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationShiftNextPeriod = false,
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
+                IsDeleted = false,
                 SecrecyLevelId = 1,
                 CreatedByUserId = (int?)7,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -211,6 +216,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationShiftNextPeriod = false,
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
+                IsDeleted = false,
                 SecrecyLevelId = 1,
                 CreatedByUserId = (int?)15,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -236,6 +242,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationShiftNextPeriod = false,
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
+                IsDeleted = false,
                 SecrecyLevelId = 2,
                 CreatedByUserId = (int?)12,
                 CreatedAt = seedDate, UpdatedAt = seedDate
@@ -260,6 +267,7 @@ public class VndDocumentConfiguration : IEntityTypeConfiguration<VndDocument>
                 ActualizationShiftNextPeriod = false,
                 ActualizationPlannedNoChanges = false,
                 ActualizationPerformed = false,
+                IsDeleted = false,
                 SecrecyLevelId = 3,
                 CreatedByUserId = (int?)17,
                 CreatedAt = seedDate, UpdatedAt = seedDate
