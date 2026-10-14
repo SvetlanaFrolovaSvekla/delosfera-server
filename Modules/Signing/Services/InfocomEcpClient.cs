@@ -82,22 +82,22 @@ public class InfocomEcpClient : IInfocomEcpClient
     }
 
     public Task<JsonElement> UserAuthMethodsAsync(InfocomUserAuthMethodsRequest request, CancellationToken ct) =>
-        PostAsync("/api/user-auth-methods", request, ct);
+        PostAsync("api/user-auth-methods", request, ct);
 
     public Task<JsonElement> GetPinCodeAsync(InfocomGetPinCodeRequest request, CancellationToken ct) =>
-        PostAsync("/api/get-pin-code", request, ct);
+        PostAsync("api/get-pin-code", request, ct);
 
     public Task<JsonElement> AccountAuthAsync(InfocomAccountAuthRequest request, CancellationToken ct) =>
-        PostAsync("/api/account/auth", request, ct);
+        PostAsync("api/account/auth", request, ct);
 
     public Task<JsonElement> GetCertInfoAsync(InfocomGetCertInfoRequest request, CancellationToken ct) =>
-        PostAsync("/api/get-cert-info", request, ct);
+        PostAsync("api/get-cert-info", request, ct);
 
     public Task<JsonElement> SignHashAsync(InfocomSignHashRequest request, CancellationToken ct) =>
-        PostAsync("/api/get-sign/for-hash", request, ct);
+        PostAsync("api/get-sign/for-hash", request, ct);
 
     public Task<JsonElement> CheckSignAsync(InfocomCheckSignRequest request, CancellationToken ct) =>
-        PostAsync("/api/check-sign/for-hash", request, ct);
+        PostAsync("api/check-sign/for-hash", request, ct);
 
     private async Task<JsonElement> PostAsync<TRequest>(string path, TRequest body, CancellationToken ct)
     {
