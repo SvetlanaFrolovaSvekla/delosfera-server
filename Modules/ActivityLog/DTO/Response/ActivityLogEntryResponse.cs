@@ -10,6 +10,13 @@ public class ActivityLogEntryResponse
     /// <summary>"check" | "x" | "doc" | "clock" | "info" - иконка типа действия</summary>
     public required string Icon { get; set; }
 
+    /// <summary>Точный тип события из журнала ВНД (ActivityEventKind в camelCase: "created",
+    /// "itemAdded", "processStarted", "approved", "revisionNeeded", "published"...) — Icon выше
+    /// сворачивает их в несколько групп для дашборда, а вкладке «История» ВНД нужен свой цвет
+    /// на каждый тип (см. AuditLogPanel на фронте). Null — запись выведена из технического
+    /// аудита (СЗ/закупки), у неё есть только Icon.</summary>
+    public string? Kind { get; set; }
+
     public required string Text { get; set; }
     public required string Url { get; set; }
     public DateTime CreatedAt { get; set; }

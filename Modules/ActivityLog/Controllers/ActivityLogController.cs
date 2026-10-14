@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using delosfera_server.Common.Services;
+using delosfera_server.Modules.ActivityLog.DTO.Request;
 using delosfera_server.Modules.ActivityLog.DTO.Response;
 using delosfera_server.Modules.ActivityLog.Services;
 
@@ -34,6 +35,16 @@ public class ActivityLogController : ControllerBase
     {
         var language = _languageResolver.Resolve(Request);
         return Ok(await _service.GetRecentAsync(Math.Clamp(limit, 1, 50), language, module));
+    }
+
+    /// <summary>Лента "Активность на портале" с поиском, периодом и типом события - по страницам
+    /// (NextCursor из ответа передаётся в Cursor следующего запроса).</summary>
+    [HttpGet("feed")]
+    [ProducesResponseType(typeof(ActivityFeedResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ActivityFeedResponse>> GetFeed([FromQuery] ActivityFeedRequest request, CancellationToken ct)
+    {
+        var language = _languageResolver.Resolve(Request);
+        return Ok(await _service.GetFeedAsync(request, language, ct));
     }
 
     /// <summary>

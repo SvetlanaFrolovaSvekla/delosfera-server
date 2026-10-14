@@ -42,6 +42,14 @@ public class HrForm
 {
     public required string HrKindTitle { get; set; }
 
+    /// <summary>
+    /// Id вида в справочнике sz_hr_kind. Виды 1–9 заводит сам сервер (HasData в
+    /// SzHrKindConfiguration) с этими id, поэтому по id форма находится, даже если
+    /// делопроизводство переименует вид. Для видов, заведённых вручную, — null:
+    /// их по-прежнему сопоставляем по названию.
+    /// </summary>
+    public int? HrKindId { get; set; }
+
     /// <summary>Можно ли указать нескольких сотрудников.</summary>
     public bool AllowMultipleEmployees { get; set; }
 
@@ -102,6 +110,7 @@ public static class HrFormSchema
             ["Изменение оклада"] = new()
             {
                 HrKindTitle = "Изменение оклада",
+                HrKindId = 1,
                 AllowMultipleEmployees = true,
                 Fields = [SalaryOld, Salary, EffectiveFrom, Reason],
             },
@@ -109,6 +118,7 @@ public static class HrFormSchema
             ["Командировка"] = new()
             {
                 HrKindTitle = "Командировка",
+                HrKindId = 2,
                 AllowMultipleEmployees = true,
                 Fields =
                 [
@@ -128,6 +138,7 @@ public static class HrFormSchema
             ["Перемещение с изменением оклада"] = new()
             {
                 HrKindTitle = "Перемещение с изменением оклада",
+                HrKindId = 3,
                 Fields =
                 [
                     new() {Code = "positionNew", Label = "Новая должность", Type = HrFieldType.Text, Required = true},
@@ -139,6 +150,7 @@ public static class HrFormSchema
             ["Перемещение без изменения оклада"] = new()
             {
                 HrKindTitle = "Перемещение без изменения оклада",
+                HrKindId = 4,
                 Fields =
                 [
                     new() {Code = "positionNew", Label = "Новая должность", Type = HrFieldType.Text, Required = true},
@@ -150,6 +162,7 @@ public static class HrFormSchema
             ["Приём на работу"] = new()
             {
                 HrKindTitle = "Приём на работу",
+                HrKindId = 5,
                 AllowMultipleEmployees = true,
                 EmployeeMayBeExternal = true,
                 Fields =
@@ -173,6 +186,7 @@ public static class HrFormSchema
             ["Приём стажёров с оплатой"] = new()
             {
                 HrKindTitle = "Приём стажёров с оплатой",
+                HrKindId = 6,
                 AllowMultipleEmployees = true,
                 EmployeeMayBeExternal = true,
                 Fields =
@@ -189,6 +203,7 @@ public static class HrFormSchema
             ["Приём стажёров без оплаты"] = new()
             {
                 HrKindTitle = "Приём стажёров без оплаты",
+                HrKindId = 7,
                 AllowMultipleEmployees = true,
                 EmployeeMayBeExternal = true,
                 Fields =
@@ -203,6 +218,7 @@ public static class HrFormSchema
             ["Работа в выходной день"] = new()
             {
                 HrKindTitle = "Работа в выходной день",
+                HrKindId = 8,
                 AllowMultipleEmployees = true,
                 Fields =
                 [
@@ -217,6 +233,7 @@ public static class HrFormSchema
             ["Другое"] = new()
             {
                 HrKindTitle = "Другое",
+                HrKindId = 9,
                 AllowMultipleEmployees = true,
                 Fields = [EffectiveFrom, Reason],
             },
@@ -228,4 +245,18 @@ public static class HrFormSchema
     /// </summary>
     public static HrForm? For(string? hrKindTitle) =>
         string.IsNullOrWhiteSpace(hrKindTitle) ? null : Forms.GetValueOrDefault(hrKindTitle.Trim());
+
+    /// <summary>
+    /// Форма по виду: сначала по id из справочника (не зависит от названия), затем,
+    /// как раньше, по названию — для видов, которые завели вручную.
+    /// </summary>
+    public static HrForm? For(int? hrKindId, string? hrKindTitle)
+    {
+        if (hrKindId is { } id)
+        {
+            var byId = Forms.Values.FirstOrDefault(f => f.HrKindId == id);
+            if (byId is not null) return byId;
+        }
+        return For(hrKindTitle);
+    }
 }

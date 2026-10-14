@@ -44,6 +44,8 @@ public static class VndServiceExtensions
         builder.Services.AddSingleton<IVndWorkCalendarCache, VndWorkCalendarCache>();
         builder.Services.AddScoped<IVndWorkCalendarService, VndWorkCalendarService>();
         builder.Services.AddScoped<IVndFavoriteService, VndFavoriteService>();
+        // "Сформировать документ для печати" в шапке ВНД - склейка выбранных файлов редакции в один .docx
+        builder.Services.AddScoped<IVndPrintBundleService, VndPrintBundleService>();
 
         // Раздел "Уведомления" → "Настройки рассылок" → "Нормотворчество": ответственные
         // сотрудники СП за актуализацию и ежемесячная сводка им 1-го числа

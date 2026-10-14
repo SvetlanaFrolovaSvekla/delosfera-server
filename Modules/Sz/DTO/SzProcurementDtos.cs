@@ -41,4 +41,10 @@ public class SzProcurementResponse
 
     /// <summary>Чего не хватает для передачи; пусто — можно передавать.</summary>
     public List<string> Blockers { get; set; } = [];
+
+    /// <summary>
+    /// Текущий пользователь вправе запустить закупку. Смотреть состояние может любой,
+    /// кто видит записку, — кнопку запуска клиент показывает по этому признаку.
+    /// </summary>
+    public bool CanManage { get; set; }
 }

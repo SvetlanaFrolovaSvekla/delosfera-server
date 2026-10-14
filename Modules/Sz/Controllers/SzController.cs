@@ -62,10 +62,27 @@ public class SzController : ControllerBase
             $"Реестр СЗ {stamp}.xlsx");
     }
 
+    /// <summary>
+    /// Закрыть доступ к чужой записке: карточку, журнал и путь записки отдаём только
+    /// тем, кому она видна в реестре (<see cref="SzVisibility"/>). null — можно.
+    /// </summary>
+    private async Task<IActionResult?> DenyIfHiddenAsync(int id)
+    {
+        if (!await _db.SzDocuments.AnyAsync(x => x.Id == id))
+            return NotFound(new { message = "Служебная записка не найдена" });
+
+        if (!await _sz.CanViewAsync(id, _currentUser.UserId))
+            return StatusCode(403, new { message = "Нет доступа к этой служебной записке" });
+
+        return null;
+    }
+
     /// <summary>Карточка служебной записки.</summary>
     [HttpGet("{id:int}")]
     public async Task<IActionResult> Get(int id)
     {
+        if (await DenyIfHiddenAsync(id) is { } denied) return denied;
+
         var sz = await _sz.GetAsync(id);
         return sz is null ? NotFound(new { message = "Служебная записка не найдена" }) : Ok(sz);
     }
@@ -74,6 +91,8 @@ public class SzController : ControllerBase
     [HttpGet("{id:int}/history")]
     public async Task<IActionResult> History(int id)
     {
+        if (await DenyIfHiddenAsync(id) is { } denied) return denied;
+
         var sz = await _sz.GetAsync(id);
         if (sz is null) return NotFound(new { message = "Служебная записка не найдена" });
 
@@ -94,6 +113,8 @@ public class SzController : ControllerBase
     [HttpGet("{id:int}/trace")]
     public async Task<IActionResult> Trace(int id)
     {
+        if (await DenyIfHiddenAsync(id) is { } denied) return denied;
+
         var trace = await _sz.GetTraceAsync(id);
         return trace is null ? NotFound(new { message = "Служебная записка не найдена" }) : Ok(trace);
     }
@@ -386,6 +407,9 @@ public class SzController : ControllerBase
             x => x.Key,
             x => new
             {
+                // Ключ словаря остаётся названием вида — старый клиент работает как раньше;
+                // новый ищет схему по hrKindId и не ломается при переименовании вида.
+                x.Value.HrKindId,
                 x.Value.AllowMultipleEmployees,
                 x.Value.EmployeeMayBeExternal,
                 fields = x.Value.Fields.Select(f => new
@@ -417,10 +441,15 @@ public class SzController : ControllerBase
 
         var byStatus = rows.ToDictionary(r => r.status, r => r.count);
 
+        // Отозванная записка возвращается автору на правку — во вкладке «Черновики»
+        // она лежит рядом с его черновиками, и счётчик учитывает только его отозванные.
+        var withdrawnMine = await _db.SzDocuments.AsNoTracking()
+            .CountAsync(x => x.Document!.StatusCode == SzStatus.Withdrawn && x.Document.AuthorId == userId);
+
         return Ok(new
         {
             all = SzStatus.Active.Sum(s => byStatus.TryGetValue(s, out var c) ? c : 0),
-            drafts = byStatus.TryGetValue(SzStatus.Draft, out var d) ? d : 0,
+            drafts = (byStatus.TryGetValue(SzStatus.Draft, out var d) ? d : 0) + withdrawnMine,
             pendingRegistration = byStatus.TryGetValue(SzStatus.PendingRegistration, out var p) ? p : 0,
             archived = byStatus.TryGetValue(SzStatus.Archived, out var a) ? a : 0,
             byStatus

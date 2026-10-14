@@ -294,6 +294,10 @@ builder.Services.AddHttpLogging(o =>
 
 // Ограничение частоты запросов к аутентификации — защита от перебора паролей.
 // Ключ — IP-адрес: не более 10 попыток в минуту на адрес.
+// В Development лимит снят практически полностью: при локальном запуске страница входа сама
+// шлёт refresh, demo-accounts и login (в StrictMode — по два раза), и десяти запросов в минуту
+// не хватает даже при верном пароле — приходит 429.
+var authPermitLimit = builder.Environment.IsDevelopment() ? 1000 : 10;
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -302,7 +306,7 @@ builder.Services.AddRateLimiter(options =>
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
-                PermitLimit = 10,
+                PermitLimit = authPermitLimit,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             }));

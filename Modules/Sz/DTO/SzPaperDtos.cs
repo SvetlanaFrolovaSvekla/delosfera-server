@@ -35,6 +35,12 @@ public class SzOriginalResponse
     /// <summary>Возврат просрочен.</summary>
     public bool IsOverdue { get; set; }
     public int? DaysLeft { get; set; }
+
+    /// <summary>
+    /// Текущий пользователь вправе выдавать и принимать оригинал. Смотреть состояние
+    /// может любой, кто видит записку, — кнопки действий клиент показывает по этому признаку.
+    /// </summary>
+    public bool CanManage { get; set; }
 }
 
 /// <summary>Печатная форма записки с листом согласования (SZ-PAP).</summary>

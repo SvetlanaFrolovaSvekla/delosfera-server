@@ -85,6 +85,11 @@ internal sealed class FakeActivityLog : delosfera_server.Modules.ActivityLog.Ser
     public Task<List<delosfera_server.Modules.ActivityLog.DTO.Response.ActivityLogEntryResponse>> GetByEntityAsync(
         string module, int entityId, string languageCode) =>
         Task.FromResult(new List<delosfera_server.Modules.ActivityLog.DTO.Response.ActivityLogEntryResponse>());
+
+    public Task<delosfera_server.Modules.ActivityLog.DTO.Response.ActivityFeedResponse> GetFeedAsync(
+        delosfera_server.Modules.ActivityLog.DTO.Request.ActivityFeedRequest request, string languageCode,
+        CancellationToken ct = default) =>
+        Task.FromResult(new delosfera_server.Modules.ActivityLog.DTO.Response.ActivityFeedResponse());
 }
 
 /// <summary>

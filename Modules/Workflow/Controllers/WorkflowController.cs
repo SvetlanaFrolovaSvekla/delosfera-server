@@ -48,10 +48,11 @@ public class WorkflowController : ControllerBase
     /// <summary>
     /// Сводный реестр задач текущего пользователя по всем контурам (GEN-11),
     /// включая полученные по замещению. Фильтр documentType — Sz, Procurement, Vnd.
+    /// includeOwn — добавить свои записки инициатора, которые ждут других.
     /// </summary>
     [HttpGet("inbox")]
-    public async Task<IActionResult> Inbox([FromQuery] string? documentType = null) =>
-        Ok(await _inbox.GetAsync(_currentUser.UserId, documentType));
+    public async Task<IActionResult> Inbox([FromQuery] string? documentType = null, [FromQuery] bool includeOwn = false) =>
+        Ok(await _inbox.GetAsync(_currentUser.UserId, documentType, includeOwn));
 
     /// <summary>Статистика по моим задачам: срез по контурам, типам и срокам (ЗД-1).</summary>
     [HttpGet("inbox/stats")]

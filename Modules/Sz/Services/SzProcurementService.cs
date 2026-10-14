@@ -63,8 +63,19 @@ public class SzProcurementService : ISzProcurementService
     public async Task<SzProcurementResponse> GetAsync(int szId)
     {
         var sz = await LoadAsync(szId);
-        await EnsureAccessAsync(sz);
-        return await BuildAsync(sz);
+
+        // Смотреть состояние закупки может каждый, кто видит записку (согласующий,
+        // адресат); запускать — только автор и Сектор закупок (EnsureAccessAsync).
+        var canView = await SzVisibility.CanViewAsync(
+            _db, sz.Id, _currentUser.UserId,
+            canSeeAll: CanManageAll,
+            canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
+        if (!canView)
+            throw new UnauthorizedAccessException("Нет доступа к этой записке");
+
+        var response = await BuildAsync(sz);
+        response.CanManage = await SzVisibility.CanAccessAsync(_db, sz, _currentUser.UserId, CanManageAll);
+        return response;
     }
 
     public async Task<SzProcurementResponse> HandOverAsync(
@@ -102,7 +113,9 @@ public class SzProcurementService : ISzProcurementService
         await _audit.LogAsync("Sz", sz.Id, "HandedToProcurement", actorUserId,
             new { procurementDocumentId = procurement.Id, amount = sz.Amount, hasBudget = sz.HasBudget, note = req.Note });
 
-        return await BuildAsync(await LoadAsync(szId));
+        var result = await BuildAsync(await LoadAsync(szId));
+        result.CanManage = true; // прошёл EnsureAccessAsync выше
+        return result;
     }
 
     // --- вспомогательное ---

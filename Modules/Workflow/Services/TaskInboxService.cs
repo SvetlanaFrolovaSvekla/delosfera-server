@@ -3,6 +3,8 @@ using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.VND.Models;
+using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Users.Services;
 using delosfera_server.Modules.Workflow.DTO;
 using delosfera_server.Modules.Workflow.Models;
@@ -11,8 +13,15 @@ namespace delosfera_server.Modules.Workflow.Services;
 
 public interface ITaskInboxService
 {
-    /// <summary>Открытые задачи пользователя по всем контурам (GEN-11).</summary>
-    Task<TaskInboxDto> GetAsync(int userId, string? documentType = null);
+    /// <summary>
+    /// Открытые задачи пользователя по всем контурам (GEN-11).
+    ///
+    /// includeOwn — добавить в список записки, где пользователь инициатор и которые
+    /// сейчас ждут других (регистрации, согласования, подписи...). Это не задачи, а
+    /// отслеживание, поэтому по умолчанию выключено: дайджест, рабочий стол и
+    /// статистика считают только реальную работу.
+    /// </summary>
+    Task<TaskInboxDto> GetAsync(int userId, string? documentType = null, bool includeOwn = false);
 
     /// <summary>Статистика по открытым задачам пользователя (ЗД-1).</summary>
     Task<TaskStatsDto> StatsAsync(int userId);
@@ -39,7 +48,7 @@ public class TaskInboxService : ITaskInboxService
         _clock = clock;
     }
 
-    public async Task<TaskInboxDto> GetAsync(int userId, string? documentType = null)
+    public async Task<TaskInboxDto> GetAsync(int userId, string? documentType = null, bool includeOwn = false)
     {
         var actingFor = await _substitutions.GetActingForUserIdsAsync(userId);
         var assignees = actingFor.Append(userId).Distinct().ToList();
@@ -70,6 +79,7 @@ public class TaskInboxService : ITaskInboxService
                 RegNumber = d.RegNumber,
                 Title = d.Title,
                 DocType = d.Type,
+                DocStatus = d.StatusCode,
                 DelegatedByUserId = t.DelegatedByUserId,
             }).ToListAsync();
 
@@ -96,6 +106,7 @@ public class TaskInboxService : ITaskInboxService
                 RegNumber = d.RegNumber,
                 Title = d.Title,
                 DocType = d.Type,
+                DocStatus = d.StatusCode,
                 DelegatedByUserId = t.DelegatedByUserId,
             }).ToListAsync();
 
@@ -139,7 +150,56 @@ public class TaskInboxService : ITaskInboxService
                  && (s.FinalHoldDecision == null || s.FinalHoldDecision == ApprovalStageDecision.Pending)))
             .ToListAsync();
 
+        // Регистрация СЗ: очередь Сектора делопроизводства, а не задача движка — записка
+        // ждёт любого, у кого есть право регистрировать, а не конкретного человека. Без
+        // этого записка «на регистрации» была видна только в реестре, и делопроизводство
+        // узнавало о ней, лишь открыв нужную вкладку.
+        var registrationRows = await HasPermissionAsync(userId, PermissionCode.RegisterSz)
+            ? await _db.SzDocuments
+                .Where(x => x.Document!.StatusCode == SzStatus.PendingRegistration)
+                .Select(x => new RegistrationRow(x.Id, x.DocumentId, x.Document!.Title, x.Document.UpdatedAt))
+                .ToListAsync()
+            : new List<RegistrationRow>();
+
+        // Задачи контура СЗ, оставшиеся от прежнего статуса записки: «Устранение
+        // замечаний» после отзыва, «Решение по записке» после ручного перевода статуса.
+        // Их закрывают не все пути смены статуса, поэтому сверяемся с текущим: задача
+        // показывается, только пока записка в том состоянии, ради которого её выдали.
+        directRows = directRows
+            .Where(r => r.DocType != DocumentType.Sz
+                        || r.TaskType switch
+                        {
+                            "RemarksResolution" => r.DocStatus == SzStatus.OnRevision,
+                            "AddresseeDecision" => r.DocStatus == SzStatus.OnAddresseeDecision,
+                            _ => true,
+                        })
+            .ToList();
+
         var rows = routeRows.Concat(directRows).ToList();
+
+        // Резолюция по подписанной записке: после подписи записка сразу «на исполнении»,
+        // и следующий шаг — резолюция адресата (он же подписант), отписка исполнителям.
+        // Отдельной задачи на это движок не создаёт, и без этой строки подписанная
+        // записка пропадала из «Моих задач» ровно тогда, когда от адресата ждут работы.
+        // Если адресат уже вынес решение по существу (путь без подписания) — резолюция
+        // не обязательна, строку не показываем.
+        var resolutionRows = await _db.SzDocuments
+            .Where(x => x.Document!.StatusCode == SzStatus.OnExecution
+                        && x.ExecutionResolution == null
+                        && x.AddresseeDecision == null
+                        && x.AddresseeUserId != null
+                        && assignees.Contains(x.AddresseeUserId.Value))
+            .Select(x => new
+            {
+                SzId = x.Id,
+                x.DocumentId,
+                x.Document!.Title,
+                x.Document.RegNumber,
+                AddresseeUserId = x.AddresseeUserId!.Value,
+                x.DueDate,
+                x.Document.UpdatedAt,
+            })
+            .ToListAsync();
 
         // Имена тех, кто делегировал задачи (СК-3): в реестре у делегата стоит «от кого».
         var delegatedByIds = rows
@@ -229,6 +289,58 @@ public class TaskInboxService : ITaskInboxService
             };
         });
 
+        var registrationTasks = registrationRows.Select(r => new InboxTaskDto
+        {
+            TaskId = r.SzId,
+            ParticipantId = null,
+            DocumentId = r.DocumentId,
+            EntityId = r.SzId,
+            RegNumber = null,
+            DocumentTitle = r.Title,
+            DocumentType = DocumentType.Sz.ToString(),
+            DocumentTypeTitle = DocumentTypeTitle(DocumentType.Sz),
+            TaskType = "Регистрация",
+            StepOrder = null,
+            StepKind = null,
+            Stage = SzStage.Registration,
+            // Норматив регистрации не задан: срок исполнения записке назначается
+            // только при регистрации, до неё сроку взяться неоткуда.
+            DueAt = null,
+            IsOverdue = false,
+            OnBehalfOf = null,
+            // Когда записку отправили на регистрацию — последнее изменение документа.
+            CreatedAt = r.SentAt,
+        });
+
+        // Свои записки инициатора, которые сейчас ждут других. Без них автор видел
+        // свою записку только в реестре СЗ и не понимал, на каком она шаге — ждёт ли
+        // регистрации, кто её согласует, дошла ли до подписи.
+        var ownTasks = includeOwn && (documentType is null || documentType == DocumentType.Sz.ToString())
+            ? await OwnSzTasksAsync(userId, rows, registrationRows,
+                resolutionRows.Where(r => r.AddresseeUserId == userId).Select(r => r.DocumentId))
+            : new List<InboxTaskDto>();
+
+        var resolutionTasks = resolutionRows.Select(r => new InboxTaskDto
+        {
+            TaskId = r.SzId,
+            ParticipantId = null,
+            DocumentId = r.DocumentId,
+            EntityId = r.SzId,
+            RegNumber = r.RegNumber,
+            DocumentTitle = r.Title,
+            DocumentType = DocumentType.Sz.ToString(),
+            DocumentTypeTitle = DocumentTypeTitle(DocumentType.Sz),
+            TaskType = "Резолюция по записке",
+            StepOrder = null,
+            StepKind = null,
+            Stage = SzStage.Decision,
+            DueAt = AckDue(r.DueDate),
+            IsOverdue = AckDue(r.DueDate) is { } rd && rd < now,
+            OnBehalfOf = r.AddresseeUserId != userId && names.TryGetValue(r.AddresseeUserId, out var rn) ? rn : null,
+            // С момента, когда записка ушла на исполнение, — последнее изменение документа.
+            CreatedAt = r.UpdatedAt,
+        });
+
         var tasks = rows
             .Select(r => new InboxTaskDto
             {
@@ -240,9 +352,10 @@ public class TaskInboxService : ITaskInboxService
                 DocumentTitle = r.Title,
                 DocumentType = r.DocType.ToString(),
                 DocumentTypeTitle = DocumentTypeTitle(r.DocType),
-                TaskType = TaskTypeTitle(r.TaskType),
+                TaskType = TaskTypeTitle(r.TaskType, r.Kind),
                 StepOrder = r.Order,
                 StepKind = r.Kind?.ToString(),
+                Stage = r.DocType == DocumentType.Sz ? SzStageOf(r.TaskType, r.Kind) : null,
                 DueAt = r.DueAt,
                 IsOverdue = r.DueAt is { } due && due < now,
                 OnBehalfOf = r.AssigneeUserId != userId && names.TryGetValue(r.AssigneeUserId, out var name)
@@ -256,6 +369,9 @@ public class TaskInboxService : ITaskInboxService
             })
             .Concat(ackTasks)
             .Concat(vndTasks)
+            .Concat(registrationTasks)
+            .Concat(resolutionTasks)
+            .Concat(ownTasks)
             .Where(t => documentType is null || t.DocumentType == documentType)
             // Просроченные наверх, затем по сроку: реестр должен начинаться с того,
             // что горит, а не с того, что пришло первым.
@@ -263,14 +379,114 @@ public class TaskInboxService : ITaskInboxService
             .ThenBy(t => t.DueAt ?? DateTime.MaxValue)
             .ToList();
 
+        // Счётчики — по реальной работе: свои записки на отслеживании считаются
+        // отдельно, иначе «Всего задач» росло бы от того, что пользователь сам написал.
+        var work = tasks.Where(t => !t.IsOwn).ToList();
+
         return new TaskInboxDto
         {
             Tasks = tasks,
-            Total = tasks.Count,
-            Overdue = tasks.Count(t => t.IsOverdue),
-            Delegated = tasks.Count(t => t.OnBehalfOf is not null),
+            Total = work.Count,
+            Overdue = work.Count(t => t.IsOverdue),
+            Delegated = work.Count(t => t.OnBehalfOf is not null),
+            Own = tasks.Count - work.Count,
         };
     }
+
+    /// <summary>
+    /// Статусы записки, в которых она ждёт кого-то, кроме автора, — и как это
+    /// подписать инициатору. Черновик и завершённые статусы сюда не входят: черновик
+    /// ждёт самого автора, а исполненная или отозванная записка уже ничего не ждёт.
+    /// </summary>
+    private static readonly Dictionary<string, (string Stage, string Title)> OwnSzStatuses = new()
+    {
+        [SzStatus.PendingRegistration] = (SzStage.Registration, "Ожидает регистрации"),
+        [SzStatus.OnApproval] = (SzStage.Approval, "На согласовании"),
+        // Прежний «Зарегистрирована» означал то же самое: номер есть, идёт согласование.
+        [SzStatus.Registered] = (SzStage.Approval, "На согласовании"),
+        [SzStatus.OnSigning] = (SzStage.Signing, "На подписании"),
+        [SzStatus.OnRevision] = (SzStage.Revision, "Возвращена на доработку"),
+        [SzStatus.OnAddresseeDecision] = (SzStage.Decision, "Ожидает решения адресата"),
+        [SzStatus.OnBoardReview] = (SzStage.Board, "На рассмотрении коллегиального органа"),
+        [SzStatus.OnExecution] = (SzStage.Execution, "На исполнении"),
+    };
+
+    /// <summary>
+    /// Записки, где пользователь — инициатор, со статусом «ждёт других». Если по той
+    /// же записке у него уже есть настоящая задача (он сам согласующий, регистратор
+    /// или устраняет замечания), строка отслеживания не добавляется — иначе одна
+    /// записка висела бы в списке дважды.
+    /// </summary>
+    private async Task<List<InboxTaskDto>> OwnSzTasksAsync(
+        int userId, List<Row> rows, List<RegistrationRow> registrationRows, IEnumerable<int> otherBusyDocumentIds)
+    {
+        var statuses = OwnSzStatuses.Keys.ToList();
+
+        var own = await _db.SzDocuments
+            .Where(x => x.Document!.AuthorId == userId && statuses.Contains(x.Document.StatusCode))
+            .Select(x => new
+            {
+                SzId = x.Id,
+                x.DocumentId,
+                x.Document!.Title,
+                x.Document.RegNumber,
+                x.Document.StatusCode,
+                x.Document.UpdatedAt,
+            })
+            .ToListAsync();
+
+        var busy = rows.Where(r => r.AssigneeUserId == userId).Select(r => r.DocumentId)
+            .Concat(registrationRows.Select(r => r.DocumentId))
+            .Concat(otherBusyDocumentIds)
+            .ToHashSet();
+
+        return own
+            .Where(x => !busy.Contains(x.DocumentId))
+            .Select(x =>
+            {
+                var (stage, title) = OwnSzStatuses[x.StatusCode];
+                return new InboxTaskDto
+                {
+                    // Своей задачи нет — строка идёт под id записки, как у регистрации;
+                    // ключ на клиенте различает их по типу задачи (см. taskKey).
+                    TaskId = x.SzId,
+                    ParticipantId = null,
+                    DocumentId = x.DocumentId,
+                    EntityId = x.SzId,
+                    RegNumber = x.RegNumber,
+                    DocumentTitle = x.Title,
+                    DocumentType = DocumentType.Sz.ToString(),
+                    DocumentTypeTitle = DocumentTypeTitle(DocumentType.Sz),
+                    TaskType = title,
+                    StepOrder = null,
+                    StepKind = null,
+                    Stage = stage,
+                    IsOwn = true,
+                    // Срок здесь — не срок автора: ему нечего просрочить, пока записка
+                    // у других. Поэтому без срока и без «просрочено».
+                    DueAt = null,
+                    IsOverdue = false,
+                    OnBehalfOf = null,
+                    // Когда записка перешла в текущий статус — последнее изменение документа.
+                    CreatedAt = x.UpdatedAt,
+                };
+            })
+            .ToList();
+    }
+
+    /// <summary>Этап записки, к которому относится задача движка, — для вкладок «Мои задачи».</summary>
+    private static string SzStageOf(string taskType, StepKind? kind) => taskType switch
+    {
+        "RemarksResolution" => SzStage.Revision,
+        "AddresseeDecision" => SzStage.Decision,
+        "Assignment" => SzStage.Execution,
+        _ => kind switch
+        {
+            StepKind.Signing => SzStage.Signing,
+            StepKind.Board => SzStage.Board,
+            _ => SzStage.Approval,
+        },
+    };
 
     public async Task<TaskStatsDto> StatsAsync(int userId)
     {
@@ -309,6 +525,24 @@ public class TaskInboxService : ITaskInboxService
         };
     }
 
+    /// <summary>
+    /// Есть ли право у пользователя — по его ролям в базе, а не по токену текущего
+    /// запроса: реестр собирается и для дайджеста (DigestService), где запрос чужой.
+    /// </summary>
+    private async Task<bool> HasPermissionAsync(int userId, PermissionCode code)
+    {
+        var roleCodes = await _db.Users
+            .Where(u => u.Id == userId)
+            .SelectMany(u => u.Roles)
+            .Select(r => r.PermissionCodes)
+            .ToListAsync();
+
+        return roleCodes.Any(codes => codes.Contains((int)code));
+    }
+
+    /// <summary>Записка, ждущая регистрации, — строка очереди делопроизводства.</summary>
+    private sealed record RegistrationRow(int SzId, int DocumentId, string Title, DateTime SentAt);
+
     private static string DocumentTypeTitle(DocumentType type) => type switch
     {
         DocumentType.Sz => "Служебная записка",
@@ -317,6 +551,18 @@ public class TaskInboxService : ITaskInboxService
         DocumentType.Procurement => "Закупка",
         DocumentType.Contract => "Договор",
         _ => type.ToString(),
+    };
+
+    /// <summary>
+    /// Название задачи маршрута с учётом этапа: движок всем участникам выдаёт задачу
+    /// «Approval», и без этапа подписант видел у себя «Согласование» вместо подписи.
+    /// </summary>
+    private static string TaskTypeTitle(string type, StepKind? kind) => (type, kind) switch
+    {
+        ("Approval", StepKind.Signing) => "Подписание",
+        ("Approval", StepKind.FinalControl) => "Финальный контроль",
+        ("Approval", StepKind.Board) => "Рассмотрение на коллегиальном органе",
+        _ => TaskTypeTitle(type),
     };
 
     private static string TaskTypeTitle(string type) => type switch
@@ -346,6 +592,7 @@ public class TaskInboxService : ITaskInboxService
         public string? RegNumber { get; init; }
         public required string Title { get; init; }
         public DocumentType DocType { get; init; }
+        public string? DocStatus { get; init; }
         public int? DelegatedByUserId { get; init; }
     }
 }

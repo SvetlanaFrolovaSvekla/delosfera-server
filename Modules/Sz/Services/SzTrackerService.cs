@@ -1,31 +1,39 @@
 using Microsoft.EntityFrameworkCore;
 using delosfera_server.Common.Services;
+using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Sz.Services;
 
 public interface ISzTrackerService
 {
-    /// <summary>Доска записок по стадиям (РС-4).</summary>
-    Task<List<SzTrackerColumnDto>> GetBoardAsync();
+    /// <summary>Доска записок по стадиям (РС-4) — только записки, видимые пользователю.</summary>
+    Task<List<SzTrackerColumnDto>> GetBoardAsync(int currentUserId);
 }
 
 /// <summary>
 /// Доска записок (РС-4): активные записки по стадиям жизненного цикла. Реестр отвечает
 /// «какие записки есть», доска — «на какой стадии каждая и где затор». Завершённые и
 /// отклонённые не показываются — доска про работу.
+///
+/// Видимость — та же, что у реестра (<see cref="SzVisibility"/>): каждый видит на доске
+/// свои записки и те, к которым причастен; право «видеть все записки» открывает всю доску,
+/// чужие черновики — только администратору системы.
 /// </summary>
 public class SzTrackerService : ISzTrackerService
 {
     private readonly DelosferaDbContext _db;
     private readonly IBankClock _clock;
+    private readonly ICurrentUserService _currentUser;
 
-    public SzTrackerService(DelosferaDbContext db, IBankClock clock)
+    public SzTrackerService(DelosferaDbContext db, IBankClock clock, ICurrentUserService currentUser)
     {
         _db = db;
         _clock = clock;
+        _currentUser = currentUser;
     }
 
     private static readonly (string Code, string Title)[] Stages =
@@ -39,11 +47,16 @@ public class SzTrackerService : ISzTrackerService
         (SzStatus.OnExecution, "На исполнении"),
     ];
 
-    public async Task<List<SzTrackerColumnDto>> GetBoardAsync()
+    public async Task<List<SzTrackerColumnDto>> GetBoardAsync(int currentUserId)
     {
         var codes = Stages.Select(s => s.Code).ToArray();
 
-        var rows = await _db.SzDocuments
+        var visible = await SzVisibility.ApplyAsync(
+            _db.SzDocuments.AsNoTracking(), _db, currentUserId,
+            canSeeAll: _currentUser.HasPermission(PermissionCode.ViewAllSz),
+            canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
+
+        var rows = await visible
             .Where(s => codes.Contains(s.Document!.StatusCode))
             .Select(s => new
             {

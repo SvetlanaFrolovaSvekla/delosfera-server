@@ -220,6 +220,18 @@ public class FeedbackController : ControllerBase
         return Ok(new { byStatus, byKind, byPage });
     }
 
+    /// <summary>Сколько сообщений ещё не разобрано (статус «Новое») — красная точка у
+    /// «Настройки системы» в боковом меню и у пункта «Пожелания и замечания». Право то же,
+    /// что у самой страницы разбора.</summary>
+    [HttpGet("new-count")]
+    [RequirePermission(PermissionCode.ManageSystemSettings)]
+    public async Task<IActionResult> NewCount(CancellationToken ct)
+    {
+        var count = await _db.FeedbackItems.AsNoTracking()
+            .CountAsync(f => f.Status == FeedbackStatus.New, ct);
+        return Ok(new { count });
+    }
+
     /// <summary>Разобрать сообщение: сменить состояние и ответить автору.</summary>
     [HttpPatch("{id:long}")]
     [RequirePermission(PermissionCode.ManageSystemSettings)]

@@ -17,38 +17,53 @@ public class NumeratorService : INumeratorService
         DocumentType type, string scope, string scopeKey, string pattern,
         IReadOnlyDictionary<string, string>? tokens = null)
     {
+        // Регистрация уже идёт в транзакции (например, СЗ: номер + запуск согласования
+        // одним действием) → берём номер в ней же. Вложенную транзакцию Npgsql открыть
+        // не даст, а при откате внешней откатится и счётчик — номер не пропадёт зря.
+        // Так же устроен AuditService.
+        if (_db.Database.CurrentTransaction is not null)
+            return await NextLockedAsync(type, scope, scopeKey, pattern, tokens);
+
         // Атомарная выдача номера: блокировка строки нумератора (FOR UPDATE),
         // чтобы параллельные регистрации не выдали одинаковый seq.
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
             await using var tx = await _db.Database.BeginTransactionAsync();
-
-            var typeName = type.ToString();
-            var num = await _db.Numerators
-                .FromSqlInterpolated(
-                    $@"SELECT * FROM numerator
-                       WHERE document_type = {typeName} AND scope = {scope} AND scope_key = {scopeKey}
-                       FOR UPDATE")
-                .FirstOrDefaultAsync();
-
-            if (num is null)
-            {
-                num = new Numerator
-                {
-                    DocumentType = type, Scope = scope, ScopeKey = scopeKey, Pattern = pattern, NextSeq = 1
-                };
-                _db.Numerators.Add(num);
-                await _db.SaveChangesAsync();
-            }
-
-            var seq = num.NextSeq;
-            num.NextSeq = seq + 1;
-            await _db.SaveChangesAsync();
+            var number = await NextLockedAsync(type, scope, scopeKey, pattern, tokens);
             await tx.CommitAsync();
-
-            return Format(num.Pattern, seq, scopeKey, tokens);
+            return number;
         });
+    }
+
+    /// <summary>Выдать номер. Требует активной транзакции: FOR UPDATE держится до её конца.</summary>
+    private async Task<string> NextLockedAsync(
+        DocumentType type, string scope, string scopeKey, string pattern,
+        IReadOnlyDictionary<string, string>? tokens)
+    {
+        var typeName = type.ToString();
+        var num = await _db.Numerators
+            .FromSqlInterpolated(
+                $@"SELECT * FROM numerator
+                   WHERE document_type = {typeName} AND scope = {scope} AND scope_key = {scopeKey}
+                   FOR UPDATE")
+            .FirstOrDefaultAsync();
+
+        if (num is null)
+        {
+            num = new Numerator
+            {
+                DocumentType = type, Scope = scope, ScopeKey = scopeKey, Pattern = pattern, NextSeq = 1
+            };
+            _db.Numerators.Add(num);
+            await _db.SaveChangesAsync();
+        }
+
+        var seq = num.NextSeq;
+        num.NextSeq = seq + 1;
+        await _db.SaveChangesAsync();
+
+        return Format(num.Pattern, seq, scopeKey, tokens);
     }
 
     // Год в номере берём из года документа (явный токен "year"), затем из год-скоупа

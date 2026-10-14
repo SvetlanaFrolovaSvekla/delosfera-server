@@ -51,6 +51,24 @@ public static class SzVisibility
     }
 
     /// <summary>
+    /// Видит ли пользователь конкретную записку — то же правило, что у реестра
+    /// (<see cref="ApplyAsync"/>): согласующий, адресат, подписант, исполнитель
+    /// поручения видят записку, хотя работать с ней (<see cref="CanAccessAsync"/>) не вправе.
+    ///
+    /// Нужна для чтения сопутствующих данных — печатной формы, состояния оригинала,
+    /// состояния закупки. Раньше их закрывала проверка на работу с запиской, и
+    /// согласующий получал отказ там, где автору всё открывалось.
+    /// </summary>
+    public static async Task<bool> CanViewAsync(
+        DelosferaDbContext db, int szId, int currentUserId, bool canSeeAll, bool canSeeOthersDrafts)
+    {
+        var query = await ApplyAsync(
+            db.SzDocuments.AsNoTracking().Where(x => x.Id == szId),
+            db, currentUserId, canSeeAll, canSeeOthersDrafts);
+        return await query.AnyAsync();
+    }
+
+    /// <summary>
     /// Вправе ли пользователь работать с конкретной запиской вне маршрута
     /// согласования: бумажный оригинал, архив, передача в закупку, печатная форма.
     /// Круг тот же, что и видимость в реестре, но уже: автор и руководитель

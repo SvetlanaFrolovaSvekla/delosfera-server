@@ -37,7 +37,7 @@ public class SzSaveRequest
     public List<int> ApproverUserIds { get; set; } = [];
 
     /// <summary>Кого автор предлагает в исполнители — подсказка адресату.</summary>
-    public List<int> ProposedAssigneeUserIds { get; set; } = [];
+    public List<int>? ProposedAssigneeUserIds { get; set; }
 
     /// <summary>Согласование параллельное; иначе — по очереди.</summary>
     public bool ApprovalIsParallel { get; set; }

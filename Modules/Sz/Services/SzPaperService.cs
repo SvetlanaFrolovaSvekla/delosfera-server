@@ -60,6 +60,22 @@ public class SzPaperService : ISzPaperService
             throw new UnauthorizedAccessException("Нет доступа к бумажному контуру этой записки");
     }
 
+    /// <summary>
+    /// Смотреть (печатная форма, состояние оригинала) может каждый, кто видит записку:
+    /// согласующему печатная форма нужна не меньше, чем автору. Выдавать и принимать
+    /// оригинал — по-прежнему только <see cref="EnsureAccessAsync"/>.
+    /// </summary>
+    private async Task EnsureCanViewAsync(SzDocument sz)
+    {
+        var canView = await SzVisibility.CanViewAsync(
+            _db, sz.Id, _currentUser.UserId,
+            canSeeAll: CanManageAll,
+            canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
+
+        if (!canView)
+            throw new UnauthorizedAccessException("Нет доступа к этой записке");
+    }
+
     public async Task<SzOriginalResponse> HandOverAsync(int szId, SzHandoverRequest req, int actorUserId)
     {
         var sz = await LoadAsync(szId);
@@ -112,8 +128,12 @@ public class SzPaperService : ISzPaperService
     public async Task<SzOriginalResponse> GetOriginalAsync(int szId)
     {
         var sz = await LoadAsync(szId);
-        await EnsureAccessAsync(sz);
-        return Map(sz);
+        await EnsureCanViewAsync(sz);
+
+        var response = Map(sz);
+        // Клиент по этому признаку прячет «Выдать оригинал» / «Принять возврат».
+        response.CanManage = await SzVisibility.CanAccessAsync(_db, sz, _currentUser.UserId, CanManageAll);
+        return response;
     }
 
     public async Task<List<SzOriginalResponse>> OutstandingAsync(bool overdueOnly = false)
@@ -152,7 +172,7 @@ public class SzPaperService : ISzPaperService
             .FirstOrDefaultAsync(x => x.Id == szId)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
-        await EnsureAccessAsync(sz);
+        await EnsureCanViewAsync(sz);
 
         var form = new SzPrintFormResponse
         {

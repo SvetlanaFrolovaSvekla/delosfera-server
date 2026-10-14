@@ -36,6 +36,18 @@ public class InboxTaskDto
     public int? StepOrder { get; set; }
     public string? StepKind { get; set; }
 
+    /// <summary>
+    /// Этап служебной записки, к которому относится задача (см. <see cref="SzStage"/>),
+    /// — по нему на «Мои задачи» строятся вкладки раздела СЗ. У других контуров пусто.
+    /// </summary>
+    public string? Stage { get; set; }
+
+    /// <summary>
+    /// Не задача, а своя записка инициатора, которая ждёт других (регистрации,
+    /// согласования, подписи...). Действия от автора не требуется — только отслеживание.
+    /// </summary>
+    public bool IsOwn { get; set; }
+
     public DateTime? DueAt { get; set; }
     public bool IsOverdue { get; set; }
 
@@ -63,6 +75,21 @@ public class TaskInboxDto
 
     /// <summary>Сколько задач получено по замещению.</summary>
     public int Delegated { get; set; }
+
+    /// <summary>Сколько своих записок на отслеживании (в Total не входят).</summary>
+    public int Own { get; set; }
+}
+
+/// <summary>Этапы служебной записки для вкладок раздела СЗ в «Моих задачах».</summary>
+public static class SzStage
+{
+    public const string Registration = "Registration";
+    public const string Approval = "Approval";
+    public const string Signing = "Signing";
+    public const string Revision = "Revision";
+    public const string Decision = "Decision";
+    public const string Board = "Board";
+    public const string Execution = "Execution";
 }
 
 /// <summary>Группа в статистике задач: контур или тип задачи, со счётчиком и просрочкой.</summary>

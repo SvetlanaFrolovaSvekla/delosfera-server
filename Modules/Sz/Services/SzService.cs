@@ -25,6 +25,14 @@ public interface ISzService
 
     Task<SzDetails?> GetAsync(int id);
 
+    /// <summary>
+    /// Видна ли записка пользователю — по тем же правилам, что и в реестре
+    /// (<see cref="SzVisibility"/>). Карточку, журнал и путь записки открывают
+    /// только через эту проверку: иначе любой сотрудник читал любую записку,
+    /// просто перебирая id в адресной строке.
+    /// </summary>
+    Task<bool> CanViewAsync(int id, int currentUserId);
+
     /// <summary>Путь записки по статусам с длительностью каждого этапа (СЗ-8).</summary>
     Task<List<SzTraceStep>?> GetTraceAsync(int id);
 
@@ -479,6 +487,13 @@ public class SzService : ISzService
         return details;
     }
 
+    public async Task<bool> CanViewAsync(int id, int currentUserId)
+    {
+        var query = await ApplyVisibilityAsync(
+            _db.SzDocuments.AsNoTracking().Where(x => x.Id == id), currentUserId);
+        return await query.AnyAsync();
+    }
+
     /// <summary>
     /// Базовая проверка полей записки до записи. Пустой (или из одних пробелов)
     /// заголовок и отрицательная сумма раньше молча сохранялись.
@@ -518,7 +533,7 @@ public class SzService : ISzService
         await _db.SaveChangesAsync();
 
         await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
-        await ReplaceProposedAssigneesAsync(sz.Id, request.ProposedAssigneeUserIds);
+        await ReplaceProposedAssigneesAsync(sz.Id, request.ProposedAssigneeUserIds ?? []);
         await ReplaceEmployeesAsync(sz.Id, request.Employees);
 
         await _audit.LogAsync("Sz", sz.Id, "Created", authorId, new { kind = kind.TitleRu });
@@ -539,9 +554,11 @@ public class SzService : ISzService
 
         ValidateSaveRequest(request);
 
-        // Правка полей разрешена, пока записка не ушла дальше автора.
-        if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision))
-            throw new InvalidOperationException("Изменять можно только черновик или записку на доработке");
+        // Правка полей разрешена, пока записка не ушла дальше автора. Отозванная —
+        // тоже у автора: её отзывают как раз затем, чтобы поправить и отправить снова.
+        if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision or SzStatus.Withdrawn))
+            throw new InvalidOperationException(
+                "Изменять можно только черновик, записку на доработке или отозванную");
 
         sz.Document.Title = request.Title;
         if (request.IsPaperCarrier is bool paper)
@@ -560,7 +577,13 @@ public class SzService : ISzService
         ApplyFields(sz, request);
         await ApplyRubricsAsync(sz, request.RubricIds);
         await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
-        await ReplaceProposedAssigneesAsync(sz.Id, request.ProposedAssigneeUserIds);
+
+        // Предлагаемых исполнителей форма карточки не показывает и не присылает.
+        // Пустой список здесь стирал их при каждом сохранении черновика — теперь
+        // null значит «не трогать», а заменяем только присланный явно.
+        if (request.ProposedAssigneeUserIds is { } proposed)
+            await ReplaceProposedAssigneesAsync(sz.Id, proposed);
+
         await ReplaceEmployeesAsync(sz.Id, request.Employees);
 
         await _db.SaveChangesAsync();
@@ -816,7 +839,7 @@ public class SzService : ISzService
         EnsureAuthorOrPrivileged(sz, actorUserId,
             "Нет прав на изменение согласующих этой служебной записки");
 
-        if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision))
+        if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision or SzStatus.Withdrawn))
             throw new InvalidOperationException(
                 "Состав согласующих меняется до отправки: маршрут уже запущен");
 
@@ -982,23 +1005,35 @@ public class SzService : ISzService
             throw new InvalidOperationException(
                 "Регистрируется отправленная записка: она ещё не отправлена на регистрацию");
 
-        var number = await _documents.RegisterAsync(
-            sz.DocumentId, "Sz", "global", NumberPattern, actorUserId);
+        // Номер и запуск согласования — одно действие. Раньше номер сохранялся
+        // отдельно, и если маршрут не стартовал (нет согласующих, не настроен шаблон
+        // вида), записка оставалась «на регистрации» уже с номером, а повторная
+        // регистрация выдавала ей второй. Теперь при сбое откатывается всё вместе.
+        await using var tx = await _db.Database.BeginTransactionAsync();
 
-        sz.RegisteredOn = Today;
-        sz.RegisteredByUserId = actorUserId;
-        // Норматив исполнения берётся из вида записки (по инструкции — 14 дней).
-        sz.DueDate = sz.RegisteredOn.Value.AddDays(sz.Kind?.ExecutionDays ?? 14);
+        // Номер уже есть (запись прошлой попытки) — второй не выдаём.
+        if (sz.Document.RegNumber is null)
+        {
+            var number = await _documents.RegisterAsync(
+                sz.DocumentId, "Sz", "global", NumberPattern, actorUserId);
 
-        await _db.SaveChangesAsync();
+            sz.RegisteredOn = Today;
+            sz.RegisteredByUserId = actorUserId;
+            // Норматив исполнения берётся из вида записки (по инструкции — 14 дней).
+            sz.DueDate = sz.RegisteredOn.Value.AddDays(sz.Kind?.ExecutionDays ?? 14);
 
-        await _audit.LogAsync("Sz", sz.Id, "Registered", actorUserId,
-            new { number, registeredOn = sz.RegisteredOn, dueDate = sz.DueDate });
+            await _db.SaveChangesAsync();
+
+            await _audit.LogAsync("Sz", sz.Id, "Registered", actorUserId,
+                new { number, registeredOn = sz.RegisteredOn, dueDate = sz.DueDate });
+        }
 
         // После регистрации записка уходит на согласование: номер получает то, что
         // ещё будут согласовывать и подписывать. По завершении маршрута согласования
         // обработчик сам отправит записку на подпись адресату (руководству).
         await StartApprovalRouteAsync(sz, actorUserId);
+
+        await tx.CommitAsync();
         return (await GetAsync(sz.Id))!;
     }
 
@@ -1031,6 +1066,10 @@ public class SzService : ISzService
         }
 
         sz.WithdrawReason = reason.Trim();
+
+        // Отозвана с доработки — задача автора «Устранение замечаний» больше не нужна:
+        // иначе она висела бы в «Моих задачах» у записки, которой уже нет в работе.
+        await CloseRevisionTasksAsync(sz.DocumentId);
 
         // Записка получает статус «Отозвана», а не возвращается черновиком.
         // Раньше отзыв вёл в черновик, и статус «Отозвана» не выставлялся нигде:
@@ -1172,11 +1211,16 @@ public class SzService : ISzService
         sz.HasBudget = r.HasBudget;
         sz.Amount = r.Amount;
         sz.TravelExpenses = r.TravelExpenses;
-        sz.PlanItemId = r.PlanItemId;
+        // Позицию плана закупок проставляет кадровик УЧР (SetTrainingBudgetAsync), а не
+        // автор: форма автора её не присылает, и сохранение черновика её стирало.
+        if (r.PlanItemId is not null)
+            sz.PlanItemId = r.PlanItemId;
 
-        sz.ExtraFields = r.ExtraFields is JsonElement extra
-            ? JsonDocument.Parse(extra.GetRawText())
-            : null;
+        // Общие поля кадровой записки. null — «не прислали», значения не трогаем:
+        // иначе любое сохранение без них (другой вид, старый клиент) их стирало.
+        if (r.ExtraFields is JsonElement extra
+            && extra.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+            sz.ExtraFields = JsonDocument.Parse(extra.GetRawText());
     }
 
     /// <summary>
