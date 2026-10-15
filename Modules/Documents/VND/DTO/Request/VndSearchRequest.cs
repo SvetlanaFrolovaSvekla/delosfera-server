@@ -3,6 +3,11 @@
 public class VndSearchRequest
 {
     public string? Code { get; set; }
+
+    /// <summary>Только документы с этими id (пусто = без фильтра). Используется "Доской ВНД"
+    /// (VndBoardService), чтобы получить карточки своих документов через тот же поиск — с теми же
+    /// правилами видимости, что и в реестре.</summary>
+    public List<int> Ids { get; set; } = [];
     public string? Name { get; set; }
     public string? RevisionText { get; set; }
 

@@ -68,6 +68,7 @@ public class DelosferaDbContext : DbContext
     public DbSet<VndDocument> VndDocuments => Set<VndDocument>();
     public DbSet<VndLink> VndLinks => Set<VndLink>();
     public DbSet<VndFavorite> VndFavorites => Set<VndFavorite>();
+    public DbSet<VndBoardItem> VndBoardItems => Set<VndBoardItem>(); // «Доска ВНД»: ручные поправки состава
     public DbSet<VndNewRedactionMailingSettings> VndNewRedactionMailingSettings => Set<VndNewRedactionMailingSettings>();
     public DbSet<VndNewRedactionMailingRecipient> VndNewRedactionMailingRecipients => Set<VndNewRedactionMailingRecipient>();
     
@@ -98,6 +99,10 @@ public class DelosferaDbContext : DbContext
     // Журнал подписей ЭЦП ГП «Инфоком» под резолюциями "Согласовать" — append-only, см.
     // VndResolutionSignature и проверку в ApplyAuditInfo ниже.
     public DbSet<VndResolutionSignature> VndResolutionSignatures => Set<VndResolutionSignature>();
+
+    // Журнал подписей ЭЦП ГП «Инфоком» под резолюциями согласующих служебных записок — append-only,
+    // см. SzResolutionSignature и проверку в ApplyAuditInfo ниже.
+    public DbSet<SzResolutionSignature> SzResolutionSignatures => Set<SzResolutionSignature>();
 
     // Сохранённая ЭЦП-идентификация пользователя (ПИН + зашифрованный код из СМС), см. UserEcpCredential.
     public DbSet<UserEcpCredential> UserEcpCredentials => Set<UserEcpCredential>();
@@ -294,6 +299,7 @@ public class DelosferaDbContext : DbContext
     public DbSet<SzAssignment> SzAssignments => Set<SzAssignment>();
     public DbSet<SzApprover> SzApprovers => Set<SzApprover>(); // согласующие, выбранные автором записки
     public DbSet<SzTemplate> SzTemplates => Set<SzTemplate>(); // личные шаблоны записок (СЗ-6)
+    public DbSet<SzFavorite> SzFavorites => Set<SzFavorite>(); // личное «Избранное» в реестре СЗ
     public DbSet<SzProposedAssignee> SzProposedAssignees => Set<SzProposedAssignee>(); // кого автор предлагает в исполнители
 
     // --- Заседания Правления, КПА и комитетов (ТЗ «Исполнение решений КПА, Правления и Комитетов») ---
@@ -428,6 +434,12 @@ public class DelosferaDbContext : DbContext
         // триггером (миграция AddVndResolutionSignatures) — здесь она ловит попытку раньше и с
         // понятным сообщением.
         foreach (var signature in ChangeTracker.Entries<VndResolutionSignature>())
+        {
+            if (signature.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException(
+                    "Журнал подписей ЭЦП неизменяем — изменение и удаление записей запрещены");
+        }
+        foreach (var signature in ChangeTracker.Entries<SzResolutionSignature>())
         {
             if (signature.State is EntityState.Modified or EntityState.Deleted)
                 throw new InvalidOperationException(

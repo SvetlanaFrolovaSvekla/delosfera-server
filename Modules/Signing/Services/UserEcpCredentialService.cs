@@ -73,6 +73,12 @@ public interface IUserEcpCredentialService
     Task<StoredEcpSignatureResponse> SignResolutionAsync(
         int userId, int vndId, int stageId, string? comment,
         delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision decision, CancellationToken ct = default);
+
+    /// <summary>Подписывает сохранённой идентификацией хэш, который строит вызывающий контур (например,
+    /// резолюцию служебной записки — SzResolutionSignatureService.GetHashAsync). <paramref name="buildHash"/>
+    /// вызывается ДО обмена кода на токен и заодно проверяет права — так обращения к ГП не тратятся зря.</summary>
+    Task<StoredEcpSignatureResponse> SignPreparedHashAsync(
+        int userId, Func<CancellationToken, Task<string>> buildHash, CancellationToken ct = default);
 }
 
 public sealed class UserEcpCredentialService : IUserEcpCredentialService
@@ -154,10 +160,19 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
         _logger.LogInformation("ЭЦП-идентификация отозвана: userId={UserId}", userId);
     }
 
-    public async Task<StoredEcpSignatureResponse> SignResolutionAsync(
+    public Task<StoredEcpSignatureResponse> SignResolutionAsync(
         int userId, int vndId, int stageId, string? comment,
-        delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision decision, CancellationToken ct = default)
+        delosfera_server.Modules.Documents.VND.Models.ApprovalStageDecision decision, CancellationToken ct = default) =>
+        // Хэш строит backend (текст резолюции + содержимое редакции + код ВНД) и заодно проверяет,
+        // что пользователь — назначенный согласующий этого этапа на активной фазе.
+        SignPreparedHashAsync(userId,
+            async c => (await _resolutionSignatures.GetHashForStageAsync(vndId, stageId, comment, decision, userId, c)).Hash,
+            ct);
+
+    public async Task<StoredEcpSignatureResponse> SignPreparedHashAsync(
+        int userId, Func<CancellationToken, Task<string>> buildHash, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(buildHash);
         EnsureConfigured();
 
         var cred = await _db.UserEcpCredentials.FirstOrDefaultAsync(c => c.UserId == userId, ct)
@@ -183,10 +198,9 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
                 "Сохранённая идентификация недействительна — пройдите её заново");
         }
 
-        // Хэш строит backend (текст резолюции + содержимое редакции + код ВНД) и заодно проверяет,
-        // что пользователь — назначенный согласующий этого этапа на активной фазе. Делаем это ДО
-        // обмена кода на токен, чтобы не тратить обращения к ГП зря.
-        var hashResponse = await _resolutionSignatures.GetHashForStageAsync(vndId, stageId, comment, decision, userId, ct);
+        // Хэш строит вызывающий контур и заодно проверяет права на решение. Делаем это ДО обмена
+        // кода на токен, чтобы не тратить обращения к ГП зря.
+        var hash = await buildHash(ct);
 
         string token;
         try
@@ -205,7 +219,7 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
         JsonElement signJson;
         try
         {
-            signJson = await _infocom.SignHashAsync(new InfocomSignHashRequest { Hash = hashResponse.Hash, UserToken = token }, ct);
+            signJson = await _infocom.SignHashAsync(new InfocomSignHashRequest { Hash = hash, UserToken = token }, ct);
         }
         catch (InfocomEcpException ex)
         {
@@ -227,7 +241,7 @@ public sealed class UserEcpCredentialService : IUserEcpCredentialService
         return new StoredEcpSignatureResponse
         {
             SignatureBase64 = sign,
-            Hash = hashResponse.Hash,
+            Hash = hash,
             PersonIdnp = cred.PersonIdnp,
             Timestamp = timestamp,
             CertToken = token,

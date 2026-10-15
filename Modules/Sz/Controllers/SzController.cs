@@ -428,7 +428,7 @@ public class SzController : ControllerBase
 
     /// <summary>Счётчики по статусам для табов реестра.</summary>
     [HttpGet("counters")]
-    public async Task<IActionResult> Counters()
+    public async Task<IActionResult> Counters([FromServices] ISzPaperService paper)
     {
         var userId = _currentUser.UserId;
 
@@ -452,7 +452,30 @@ public class SzController : ControllerBase
             drafts = (byStatus.TryGetValue(SzStatus.Draft, out var d) ? d : 0) + withdrawnMine,
             pendingRegistration = byStatus.TryGetValue(SzStatus.PendingRegistration, out var p) ? p : 0,
             archived = byStatus.TryGetValue(SzStatus.Archived, out var a) ? a : 0,
-            byStatus
+            byStatus,
+            // Счётчики особых вкладок — по тем же фильтрам, что и сами списки, чтобы
+            // число в кружке совпадало со строками. Каждый — один COUNT, строки не выбираются.
+            mine = await _sz.CountAsync(new SzSearchRequest { MineOnly = true }, userId),
+            favorites = await _sz.CountAsync(new SzSearchRequest { FavoritesOnly = true }, userId),
+            inbox = await _sz.InboxCountAsync(userId),
+            assignments = await _execution.CountMyAsync(userId),
+            originals = await CountOriginalsAsync(paper)
         });
+    }
+
+    /// <summary>
+    /// Реестр оригиналов доступен только делопроизводству: остальным счётчик
+    /// не отдаём (null), а не роняем весь запрос счётчиков.
+    /// </summary>
+    private static async Task<int?> CountOriginalsAsync(ISzPaperService paper)
+    {
+        try
+        {
+            return await paper.CountOutstandingAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 }

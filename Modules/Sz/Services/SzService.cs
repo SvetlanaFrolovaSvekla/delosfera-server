@@ -33,6 +33,10 @@ public interface ISzService
     /// </summary>
     Task<bool> CanViewAsync(int id, int currentUserId);
 
+    /// <summary>Какие из переданных записок видны пользователю — то же правило, что и
+    /// <see cref="CanViewAsync"/>, но одним запросом на весь список (массовые операции).</summary>
+    Task<List<int>> VisibleIdsAsync(IReadOnlyCollection<int> ids, int currentUserId);
+
     /// <summary>Путь записки по статусам с длительностью каждого этапа (СЗ-8).</summary>
     Task<List<SzTraceStep>?> GetTraceAsync(int id);
 
@@ -77,6 +81,12 @@ public interface ISzService
 
     /// <summary>Записки, где текущий пользователь — активный согласующий («СЗ, согласую я»).</summary>
     Task<PagedResult<SzListItem>> InboxAsync(int currentUserId, int page, int pageSize);
+
+    /// <summary>Сколько строк найдёт поиск — один COUNT, без выборки строк (счётчики вкладок).</summary>
+    Task<int> CountAsync(SzSearchRequest request, int currentUserId);
+
+    /// <summary>Сколько записок во «СЗ, согласую я» — один COUNT, без выборки строк.</summary>
+    Task<int> InboxCountAsync(int currentUserId);
 
     /// <summary>
     /// Перевести записку в произвольный статус — право администратора.
@@ -156,12 +166,15 @@ public class SzService : ISzService
 
         return new PagedResult<SzListItem>
         {
-            Items = items.Select(ToListItem).ToList(),
+            Items = await WithFavoritesAsync(items.Select(ToListItem).ToList(), currentUserId),
             Total = total,
             Page = page,
             PageSize = pageSize
         };
     }
+
+    public async Task<int> CountAsync(SzSearchRequest request, int currentUserId) =>
+        await (await FilteredQueryAsync(request, currentUserId)).CountAsync();
 
     public async Task<byte[]> ExportAsync(SzSearchRequest request, int currentUserId)
     {
@@ -203,6 +216,36 @@ public class SzService : ISzService
         return XlsxWorkbook.Build(sheet);
     }
 
+    /// <summary>
+    /// Текст поискового поля без управляющих символов (NUL и т.п. роняют ILike в Postgres)
+    /// и без спецсимволов LIKE, чтобы «%» и «_» в коде искались буквально.
+    /// </summary>
+    private static string CleanSearch(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var cleaned = new string(value.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        return EscapeLike(cleaned);
+    }
+
+    private static string EscapeLike(string value) =>
+        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+
+    /// <summary>
+    /// Слова общей строки поиска для LIKE: управляющие символы (в т.ч. NUL) заменены пробелом,
+    /// «%» и «_» экранированы, слов не больше восьми. Запись подходит, если нашлись ВСЕ слова.
+    /// </summary>
+    private static List<string> SearchTerms(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return [];
+        var cleaned = new string(value.Select(c => char.IsControl(c) ? ' ' : c).ToArray());
+        return cleaned
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .Select(EscapeLike)
+            .ToList();
+    }
+
     /// <summary>Фильтр реестра — общий для страничного поиска и полной выгрузки.</summary>
     private async Task<IQueryable<SzDocument>> FilteredQueryAsync(
         SzSearchRequest request, int currentUserId)
@@ -214,21 +257,29 @@ public class SzService : ISzService
         else
             query = await ApplyVisibilityAsync(query, currentUserId);
 
+        // По умолчанию реестр — неархивные записки. «Избранное» — исключение: пользователь
+        // сам отметил записку, и она не должна пропадать оттуда после сдачи в архив.
         var statuses = request.Statuses.Count > 0
             ? request.Statuses.Where(s => SzStatus.All.Contains(s)).ToArray()
-            : SzStatus.Active;
+            : request.FavoritesOnly ? SzStatus.All : SzStatus.Active;
         query = query.Where(x => statuses.Contains(x.Document!.StatusCode));
 
-        if (!string.IsNullOrWhiteSpace(request.Query))
+        // Видимость (ApplyVisibilityAsync) уже применена выше: если доступ к записке
+        // пропал, из «Избранного» она тоже исчезает.
+        if (request.FavoritesOnly)
+            query = query.Where(x => _db.SzFavorites.Any(f => f.UserId == currentUserId && f.SzDocumentId == x.Id));
+
+        // Общая строка поиска: слова ищутся порознь (должны найтись все, в любом порядке),
+        // каждое - в теме, рег. номере, авторе или тексте записки. Управляющие символы
+        // (NUL роняет ILike в Postgres) и «%»/«_» обрабатывает SearchTerms.
+        foreach (var term in SearchTerms(request.Query))
         {
-            // Управляющие символы (в т.ч. NUL 0x00) в тексте поиска роняли запрос:
-            // Postgres не хранит NUL в text и падал на ILike. Чистим их до запроса.
-            var q = new string(request.Query.Where(c => !char.IsControl(c)).ToArray()).Trim();
-            if (q.Length > 0)
+            var pattern = $"%{term}%";
             query = query.Where(x =>
-                EF.Functions.ILike(x.Document!.Title, $"%{q}%") ||
-                (x.Document!.RegNumber != null && EF.Functions.ILike(x.Document!.RegNumber!, $"%{q}%")) ||
-                (x.Body != null && EF.Functions.ILike(x.Body, $"%{q}%")));
+                EF.Functions.ILike(x.Document!.Title, pattern) ||
+                (x.Document!.RegNumber != null && EF.Functions.ILike(x.Document!.RegNumber!, pattern)) ||
+                (x.Document!.Author != null && EF.Functions.ILike(x.Document!.Author!.FullName, pattern)) ||
+                (x.Body != null && EF.Functions.ILike(x.Body, pattern)));
         }
 
         // Ручной выбор (СЗ-7) сужает выборку до отмеченных строк — для массового
@@ -241,6 +292,25 @@ public class SzService : ISzService
 
         if (request.AuthorId is int author)
             query = query.Where(x => x.Document!.AuthorId == author);
+
+        // Расширенный поиск: код (рег. номер), тема, авторы, срок исполнения.
+        var regNumber = CleanSearch(request.RegNumber);
+        if (regNumber.Length > 0)
+            query = query.Where(x => x.Document!.RegNumber != null
+                                     && EF.Functions.ILike(x.Document!.RegNumber!, $"%{regNumber}%"));
+
+        var title = CleanSearch(request.Title);
+        if (title.Length > 0)
+            query = query.Where(x => EF.Functions.ILike(x.Document!.Title, $"%{title}%"));
+
+        if (request.AuthorIds.Count > 0)
+            query = query.Where(x => request.AuthorIds.Contains(x.Document!.AuthorId));
+
+        if (request.DueFrom is DateOnly dueFrom)
+            query = query.Where(x => x.DueDate >= dueFrom);
+
+        if (request.DueTo is DateOnly dueTo)
+            query = query.Where(x => x.DueDate <= dueTo);
 
         if (request.CorrespondentUnitId is int unit)
             query = query.Where(x => x.CorrespondentUnitId == unit);
@@ -260,6 +330,10 @@ public class SzService : ISzService
             query = query.Where(x => x.DueDate != null && x.DueDate < today
                                   && x.Document!.StatusCode != SzStatus.Executed);
         }
+
+        // Расширенный поиск: только записки на бумажном носителе (оригинал живёт на бумаге).
+        if (request.PaperCarrierOnly)
+            query = query.Where(x => x.Document!.IsPaperCarrier);
 
         return query;
     }
@@ -451,6 +525,10 @@ public class SzService : ISzService
 
         var details = ToDetails(sz);
 
+        // Звёздочка «Избранное» в карточке. Без HTTP-пользователя (фоновые задачи) — просто false.
+        if (TryGetCurrentUserId() is int userId)
+            details.IsFavorite = await _db.SzFavorites.AnyAsync(f => f.UserId == userId && f.SzDocumentId == id);
+
         // Включена ли записка в повестку. Спрашиваем только для карточки, а не для
         // реестра: в списке это лишний запрос на каждую строку, а нужно оно лишь
         // затем, чтобы не предлагать менять отметку, когда вопрос уже заведён.
@@ -492,6 +570,15 @@ public class SzService : ISzService
         var query = await ApplyVisibilityAsync(
             _db.SzDocuments.AsNoTracking().Where(x => x.Id == id), currentUserId);
         return await query.AnyAsync();
+    }
+
+    public async Task<List<int>> VisibleIdsAsync(IReadOnlyCollection<int> ids, int currentUserId)
+    {
+        if (ids.Count == 0) return [];
+
+        var query = await ApplyVisibilityAsync(
+            _db.SzDocuments.AsNoTracking().Where(x => ids.Contains(x.Id)), currentUserId);
+        return await query.Select(x => x.Id).ToListAsync();
     }
 
     /// <summary>
@@ -718,6 +805,10 @@ public class SzService : ISzService
 
         await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnApproval, actorUserId);
         await _db.SaveChangesAsync();
+
+        // Автор получает задачу «Моя СЗ на согласовании»: без неё записка, ушедшая
+        // согласующим, пропадала из его задач и с главной до самого исхода согласования.
+        await _addresseeTasks.CreateApprovalTrackingTaskAsync(sz);
 
         await _audit.LogAsync("Sz", sz.Id, "SubmittedForApproval", actorUserId, new
         {
@@ -1034,6 +1125,18 @@ public class SzService : ISzService
         await StartApprovalRouteAsync(sz, actorUserId);
 
         await tx.CommitAsync();
+
+        // Системное уведомление автору: записка зарегистрирована и ушла на согласование.
+        // Уже после фиксации: недоступная почта не должна откатывать регистрацию.
+        try
+        {
+            await _addresseeTasks.NotifyAuthorRegisteredAsync(sz, actorUserId);
+        }
+        catch (Exception)
+        {
+            // Номер выдан и маршрут запущен — неотправленное уведомление этого не отменяет.
+        }
+
         return (await GetAsync(sz.Id))!;
     }
 
@@ -1066,6 +1169,9 @@ public class SzService : ISzService
         }
 
         sz.WithdrawReason = reason.Trim();
+
+        // Записка больше не на согласовании — снимаем задачу автора «Моя СЗ на согласовании».
+        await _addresseeTasks.CloseApprovalTrackingTaskAsync(sz.DocumentId);
 
         // Отозвана с доработки — задача автора «Устранение замечаний» больше не нужна:
         // иначе она висела бы в «Моих задачах» у записки, которой уже нет в работе.
@@ -1137,12 +1243,7 @@ public class SzService : ISzService
         page = page < 1 ? 1 : page;
         pageSize = pageSize is < 1 or > 200 ? 25 : pageSize;
 
-        // Активные задачи согласования текущего пользователя.
-        var documentIds = _db.RouteParticipants
-            .Where(p => p.UserId == currentUserId && p.State == ParticipantState.Active)
-            .Select(p => p.RouteStep!.RouteInstance!.DocumentId);
-
-        var query = BaseQuery().Where(x => documentIds.Contains(x.DocumentId));
+        var query = InboxQuery(currentUserId);
 
         var total = await query.CountAsync();
         var items = await query
@@ -1153,7 +1254,7 @@ public class SzService : ISzService
 
         return new PagedResult<SzListItem>
         {
-            Items = items.Select(ToListItem).ToList(),
+            Items = await WithFavoritesAsync(items.Select(ToListItem).ToList(), currentUserId),
             Total = total,
             Page = page,
             PageSize = pageSize
@@ -1171,6 +1272,51 @@ public class SzService : ISzService
 
         return await _db.OrganizationUnits.AsNoTracking()
             .AnyAsync(u => u.Id == unitId && u.RequiresPaperSz);
+    }
+
+    public Task<int> InboxCountAsync(int currentUserId) => InboxQuery(currentUserId).CountAsync();
+
+    /// <summary>
+    /// Проставить IsFavorite строкам реестра — один лёгкий запрос по PK избранного,
+    /// только по id текущей страницы.
+    /// </summary>
+    private async Task<List<SzListItem>> WithFavoritesAsync(List<SzListItem> items, int currentUserId)
+    {
+        if (items.Count == 0) return items;
+
+        var ids = items.Select(i => i.Id).ToList();
+        var favoriteIds = await _db.SzFavorites
+            .Where(f => f.UserId == currentUserId && ids.Contains(f.SzDocumentId))
+            .Select(f => f.SzDocumentId)
+            .ToHashSetAsync();
+
+        foreach (var item in items)
+            item.IsFavorite = favoriteIds.Contains(item.Id);
+        return items;
+    }
+
+    /// <summary>Текущий пользователь или null, если вызов идёт без HTTP-пользователя (фоновые задачи).</summary>
+    private int? TryGetCurrentUserId()
+    {
+        try
+        {
+            return _currentUser.UserId;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>«СЗ, согласую я» — общий фильтр для списка и счётчика.</summary>
+    private IQueryable<SzDocument> InboxQuery(int currentUserId)
+    {
+        // Активные задачи согласования текущего пользователя.
+        var documentIds = _db.RouteParticipants
+            .Where(p => p.UserId == currentUserId && p.State == ParticipantState.Active)
+            .Select(p => p.RouteStep!.RouteInstance!.DocumentId);
+
+        return BaseQuery().Where(x => documentIds.Contains(x.DocumentId));
     }
 
     // --- вспомогательное ---

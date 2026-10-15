@@ -171,6 +171,9 @@ public class TaskInboxService : ITaskInboxService
                         {
                             "RemarksResolution" => r.DocStatus == SzStatus.OnRevision,
                             "AddresseeDecision" => r.DocStatus == SzStatus.OnAddresseeDecision,
+                            // Задача автора «Моя СЗ на согласовании» — только пока идёт согласование.
+                            "SzApprovalTracking" => r.DocStatus == SzStatus.OnApproval
+                                                    || r.DocStatus == SzStatus.Registered,
                             _ => true,
                         })
             .ToList();
@@ -356,6 +359,10 @@ public class TaskInboxService : ITaskInboxService
                 StepOrder = r.Order,
                 StepKind = r.Kind?.ToString(),
                 Stage = r.DocType == DocumentType.Sz ? SzStageOf(r.TaskType, r.Kind) : null,
+                // «Моя СЗ на согласовании» — задача автора на отслеживание: действия от
+                // него не ждут, поэтому она идёт как своя записка (без делегирования,
+                // в «Всего задач» не считается), но приходит всегда, а не только с includeOwn.
+                IsOwn = r.TaskType == "SzApprovalTracking",
                 DueAt = r.DueAt,
                 IsOverdue = r.DueAt is { } due && due < now,
                 OnBehalfOf = r.AssigneeUserId != userId && names.TryGetValue(r.AssigneeUserId, out var name)
@@ -479,6 +486,7 @@ public class TaskInboxService : ITaskInboxService
     {
         "RemarksResolution" => SzStage.Revision,
         "AddresseeDecision" => SzStage.Decision,
+        "SzApprovalTracking" => SzStage.Approval,
         "Assignment" => SzStage.Execution,
         _ => kind switch
         {
@@ -570,6 +578,7 @@ public class TaskInboxService : ITaskInboxService
         "Approval" => "Согласование",
         "RemarksResolution" => "Устранение замечаний",
         "AddresseeDecision" => "Решение по записке",
+        "SzApprovalTracking" => "Моя СЗ на согласовании",
         "Assignment" => "Поручение",
         _ => type,
     };

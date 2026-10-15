@@ -96,7 +96,7 @@ public class SzAddresseeDecisionRequest
 /// <summary>Фильтры реестра СЗ.</summary>
 public class SzSearchRequest
 {
-    /// <summary>Поиск по номеру, заголовку и тексту.</summary>
+    /// <summary>Поиск по теме, номеру, автору и тексту (слова ищутся порознь, должны найтись все).</summary>
     public string? Query { get; set; }
 
     /// <summary>Коды статусов; пусто — неархивные (реестр по умолчанию).</summary>
@@ -111,17 +111,40 @@ public class SzSearchRequest
 
     public List<int> KindIds { get; set; } = [];
     public int? AuthorId { get; set; }
+
+    /// <summary>Расширенный поиск: авторы записки (любой из списка).</summary>
+    public List<int> AuthorIds { get; set; } = [];
+
+    /// <summary>Расширенный поиск: подстрока регистрационного номера (кода) записки.</summary>
+    public string? RegNumber { get; set; }
+
+    /// <summary>Расширенный поиск: подстрока темы (заголовка) записки.</summary>
+    public string? Title { get; set; }
+
     public int? CorrespondentUnitId { get; set; }
     public int? RubricId { get; set; }
 
     /// <summary>Только записки текущего пользователя («СЗ, инициирую я» + черновики).</summary>
     public bool MineOnly { get; set; }
 
+    /// <summary>Только записки из «Избранного» текущего пользователя (см. SzFavorite).
+    /// Без явных статусов показывает записки в любом статусе, включая архив.</summary>
+    public bool FavoritesOnly { get; set; }
+
     public DateOnly? RegisteredFrom { get; set; }
     public DateOnly? RegisteredTo { get; set; }
 
+    /// <summary>Срок исполнения — с (включительно).</summary>
+    public DateOnly? DueFrom { get; set; }
+
+    /// <summary>Срок исполнения — по (включительно).</summary>
+    public DateOnly? DueTo { get; set; }
+
     /// <summary>Только просроченные по сроку исполнения.</summary>
     public bool OverdueOnly { get; set; }
+
+    /// <summary>Расширенный поиск: только записки на бумажном носителе.</summary>
+    public bool PaperCarrierOnly { get; set; }
 
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 25;
@@ -144,6 +167,9 @@ public class SzListItem
     public int? DaysLeft { get; set; }
     public bool IsOverdue { get; set; }
     public bool IsPaperCarrier { get; set; }
+
+    /// <summary>Записка в «Избранном» текущего пользователя.</summary>
+    public bool IsFavorite { get; set; }
 }
 
 /// <summary>Согласующий, подставленный из шаблона вида записки (предпросмотр).</summary>

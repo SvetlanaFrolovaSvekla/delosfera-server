@@ -112,6 +112,9 @@ public class VndService : IVndService
             .Include(x => x.CreatedByUser)
             .Include(x => x.ActualizationResponsibleUser);
 
+        if (request.Ids.Count > 0)
+            query = query.Where(x => request.Ids.Contains(x.Id));
+
         if (!string.IsNullOrWhiteSpace(request.Code))
             query = query.Where(x => EF.Functions.ILike(x.Code, $"%{request.Code}%"));
 

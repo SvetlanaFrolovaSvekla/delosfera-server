@@ -12,6 +12,13 @@ public class SzBulkArchiveRequest
     public int? StorageTermId { get; set; }
 }
 
+/// <summary>Массовая операция над отмеченными записками, которой кроме списка id ничего не нужно
+/// (например, «Избранное»).</summary>
+public class SzBulkIdsRequest
+{
+    public List<int> Ids { get; set; } = [];
+}
+
 /// <summary>
 /// Итог массовой операции: обработали столько-то, часть могла не пройти. Ошибки
 /// перечислены поимённо — массовое действие не должно молча терять записки.

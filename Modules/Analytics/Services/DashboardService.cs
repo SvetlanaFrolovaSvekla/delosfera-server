@@ -55,7 +55,9 @@ public class DashboardService : IDashboardService
         var assignees = actingFor.Select(s => s.UserId).Append(userId).Distinct().ToList();
 
         var openTasks = await _db.WorkflowTasks
-            .Where(t => assignees.Contains(t.AssigneeUserId) && t.State == WorkflowTaskState.Open)
+            .Where(t => assignees.Contains(t.AssigneeUserId) && t.State == WorkflowTaskState.Open
+                        // «Моя СЗ на согласовании» — отслеживание автора, не работа.
+                        && t.Type != "SzApprovalTracking")
             .Select(t => new { t.DueAt })
             .ToListAsync();
 

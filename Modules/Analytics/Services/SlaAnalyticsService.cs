@@ -91,7 +91,7 @@ public class SlaAnalyticsService : ISlaAnalyticsService
 
         var wfRows = await (
             from t in _db.WorkflowTasks
-            where t.State == WorkflowTaskState.Open
+            where t.State == WorkflowTaskState.Open && t.Type != "SzApprovalTracking"
             select new { t.AssigneeUserId, t.DueAt }).ToListAsync();
         owners.AddRange(wfRows.Select(x => (x.AssigneeUserId, x.DueAt)));
 
@@ -161,7 +161,7 @@ public class SlaAnalyticsService : ISlaAnalyticsService
         var directRows = await (
             from t in _db.WorkflowTasks
             join d in _db.Documents on t.DocumentId equals d.Id
-            where t.State == WorkflowTaskState.Open && t.RouteParticipantId == null
+            where t.State == WorkflowTaskState.Open && t.Type != "SzApprovalTracking" && t.RouteParticipantId == null
             select new { d.Type, t.DueAt }).ToListAsync();
 
         foreach (var r in routeRows.Concat(directRows))

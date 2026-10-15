@@ -7453,6 +7453,33 @@ namespace delosfera_server.Migrations
                     b.ToTable("vnd_approval_stage_quote", (string)null);
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndBoardItem", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("VndId")
+                        .HasColumnType("integer")
+                        .HasColumnName("vnd_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("integer")
+                        .HasColumnName("mode");
+
+                    b.HasKey("UserId", "VndId")
+                        .HasName("pk_vnd_board_item");
+
+                    b.HasIndex("VndId")
+                        .HasDatabaseName("ix_vnd_board_item_vnd_id");
+
+                    b.ToTable("vnd_board_item", (string)null);
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndDisagreementMatrixRow", b =>
                 {
                     b.Property<int>("Id")
@@ -14088,6 +14115,29 @@ namespace delosfera_server.Migrations
                     b.ToTable("sz_employee", (string)null);
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Sz.Models.SzFavorite", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("SzDocumentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("sz_document_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("UserId", "SzDocumentId")
+                        .HasName("pk_sz_favorite");
+
+                    b.HasIndex("SzDocumentId")
+                        .HasDatabaseName("ix_sz_favorite_sz_document_id");
+
+                    b.ToTable("sz_favorite", (string)null);
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Sz.Models.SzHrKind", b =>
                 {
                     b.Property<int>("Id")
@@ -14365,6 +14415,197 @@ namespace delosfera_server.Migrations
                     b.ToTable("sz_proposed_assignee", (string)null);
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Sz.Models.SzResolutionSignature", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CertCommonName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("cert_common_name");
+
+                    b.Property<string>("CertIssuerCommonName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("cert_issuer_common_name");
+
+                    b.Property<string>("CertIssuerOrganizationName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("cert_issuer_organization_name");
+
+                    b.Property<string>("CertKeyIdentifier")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("cert_key_identifier");
+
+                    b.Property<string>("CertValidNotAfter")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("cert_valid_not_after");
+
+                    b.Property<string>("CertValidNotBefore")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("cert_valid_not_before");
+
+                    b.Property<DateTime?>("CmsSigningTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cms_signing_time");
+
+                    b.Property<string>("CommentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("comment_hash");
+
+                    b.Property<string>("CommentText")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("comment_text");
+
+                    b.Property<string>("ContentDigest")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("content_digest");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("decision");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("document_id");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("hash");
+
+                    b.Property<string>("HashSchemaVersion")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("hash_schema_version");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<string>("OrganizationInn")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("organization_inn");
+
+                    b.Property<string>("OrganizationName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("organization_name");
+
+                    b.Property<string>("PersonFio")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("person_fio");
+
+                    b.Property<string>("PersonIdnp")
+                        .IsRequired()
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)")
+                        .HasColumnName("person_idnp");
+
+                    b.Property<DateTime?>("ProviderCheckTimestamp")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("provider_check_timestamp");
+
+                    b.Property<DateTime?>("ProviderTimestamp")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("provider_timestamp");
+
+                    b.Property<int>("RouteParticipantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("route_participant_id");
+
+                    b.Property<string>("SignatureBase64")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("signature_base64");
+
+                    b.Property<int>("SignatureId")
+                        .HasColumnType("integer")
+                        .HasColumnName("signature_id");
+
+                    b.Property<string>("SignatureSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("signature_sha256");
+
+                    b.Property<DateTime>("SignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("signed_at");
+
+                    b.Property<int>("SzDocumentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("sz_document_id");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("user_agent");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("VerificationError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("verification_error");
+
+                    b.Property<bool>("Verified")
+                        .HasColumnType("boolean")
+                        .HasColumnName("verified");
+
+                    b.Property<DateTime>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("verified_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_sz_resolution_signature");
+
+                    b.HasIndex("PersonIdnp")
+                        .HasDatabaseName("ix_sz_resolution_signature_person_idnp");
+
+                    b.HasIndex("RouteParticipantId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sz_resolution_signature_route_participant_id");
+
+                    b.HasIndex("SignatureId")
+                        .HasDatabaseName("ix_sz_resolution_signature_signature_id");
+
+                    b.HasIndex("SignatureSha256")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sz_resolution_signature_signature_sha256");
+
+                    b.HasIndex("SzDocumentId")
+                        .HasDatabaseName("ix_sz_resolution_signature_sz_document_id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_sz_resolution_signature_user_id");
+
+                    b.ToTable("sz_resolution_signature", (string)null);
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Sz.Models.SzTemplate", b =>
                 {
                     b.Property<int>("Id")
@@ -14447,7 +14688,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 1,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65 },
                             TitleEn = "Administrator",
                             TitleKg = "Администратор",
                             TitleRu = "Администратор",
@@ -14477,7 +14718,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 4,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65 },
                             TitleEn = "Chief VND Editor",
                             TitleKg = "ВНД башкы редактору",
                             TitleRu = "Главный редактор ВНД",
@@ -16487,6 +16728,27 @@ namespace delosfera_server.Migrations
                     b.Navigation("VndApprovalStage");
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndBoardItem", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_board_item_users_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", "Vnd")
+                        .WithMany()
+                        .HasForeignKey("VndId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_board_item_vnd_document_vnd_id");
+
+                    b.Navigation("User");
+
+                    b.Navigation("Vnd");
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndDisagreementMatrixRow", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndApprovalProcess", "ApprovalProcess")
@@ -18264,6 +18526,27 @@ namespace delosfera_server.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Sz.Models.SzFavorite", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Sz.Models.SzDocument", "SzDocument")
+                        .WithMany()
+                        .HasForeignKey("SzDocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_sz_favorite_sz_document_sz_document_id");
+
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_sz_favorite_user_user_id");
+
+                    b.Navigation("SzDocument");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Sz.Models.SzProposedAssignee", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Sz.Models.SzDocument", "SzDocument")
@@ -18279,6 +18562,45 @@ namespace delosfera_server.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_sz_proposed_assignee_users_user_id");
+
+                    b.Navigation("SzDocument");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Sz.Models.SzResolutionSignature", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Workflow.Models.RouteParticipant", "RouteParticipant")
+                        .WithMany()
+                        .HasForeignKey("RouteParticipantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_sz_resolution_signature_route_participant_route_participant_id");
+
+                    b.HasOne("delosfera_server.Modules.Signing.Models.Signature", "Signature")
+                        .WithMany()
+                        .HasForeignKey("SignatureId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_sz_resolution_signature_signature_signature_id");
+
+                    b.HasOne("delosfera_server.Modules.Sz.Models.SzDocument", "SzDocument")
+                        .WithMany()
+                        .HasForeignKey("SzDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_sz_resolution_signature_sz_document_sz_document_id");
+
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_sz_resolution_signature_user_user_id");
+
+                    b.Navigation("RouteParticipant");
+
+                    b.Navigation("Signature");
 
                     b.Navigation("SzDocument");
 
@@ -18593,7 +18915,7 @@ namespace delosfera_server.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_vnd_secret_user_user_user_id");
+                        .HasConstraintName("fk_vnd_secret_user_users_user_id");
 
                     b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndDocument", null)
                         .WithMany()

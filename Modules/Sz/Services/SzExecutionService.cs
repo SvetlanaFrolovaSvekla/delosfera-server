@@ -20,6 +20,9 @@ public interface ISzExecutionService
     /// <summary>Очередь «Мои поручения»: незакрытые поручения текущего пользователя.</summary>
     Task<List<SzAssignmentResponse>> MyAsync(int currentUserId, bool includeClosed = false);
 
+    /// <summary>Сколько незакрытых поручений у пользователя — один COUNT (счётчик вкладки).</summary>
+    Task<int> CountMyAsync(int currentUserId);
+
     /// <summary>Исполнитель сдаёт отчёт по поручению.</summary>
     Task<SzAssignmentResponse> ReportAsync(int assignmentId, string reportText, int actorUserId);
 
@@ -171,15 +174,25 @@ public class SzExecutionService : ISzExecutionService
 
     public async Task<List<SzAssignmentResponse>> MyAsync(int currentUserId, bool includeClosed = false)
     {
-        var query = BaseQuery().Where(a => a.AssigneeUserId == currentUserId);
-        if (!includeClosed)
-            query = query.Where(a => a.State == SzAssignmentState.Open || a.State == SzAssignmentState.Reported);
+        var query = MyQuery(BaseQuery(), currentUserId, includeClosed);
 
         var items = await query
             .OrderBy(a => a.DueDate ?? DateOnly.MaxValue).ThenBy(a => a.Id)
             .ToListAsync();
 
         return items.Select(Map).ToList();
+    }
+
+    public Task<int> CountMyAsync(int currentUserId) =>
+        MyQuery(_db.SzAssignments.AsNoTracking(), currentUserId, includeClosed: false).CountAsync();
+
+    /// <summary>«Мои поручения» — общий фильтр для списка и счётчика.</summary>
+    private static IQueryable<SzAssignment> MyQuery(IQueryable<SzAssignment> source, int currentUserId, bool includeClosed)
+    {
+        var query = source.Where(a => a.AssigneeUserId == currentUserId);
+        if (!includeClosed)
+            query = query.Where(a => a.State == SzAssignmentState.Open || a.State == SzAssignmentState.Reported);
+        return query;
     }
 
     public async Task<SzAssignmentResponse> ReportAsync(int assignmentId, string reportText, int actorUserId)

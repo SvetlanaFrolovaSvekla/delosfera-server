@@ -10,6 +10,13 @@ public static class SzServiceExtensions
         builder.Services.AddScoped<ISzService, SzService>();
         builder.Services.AddScoped<ISzExecutionService, SzExecutionService>();
         builder.Services.AddScoped<ISzPaperService, SzPaperService>();
+
+        // Личное «Избранное» в реестре СЗ
+        builder.Services.AddScoped<ISzFavoriteService, SzFavoriteService>();
+
+        // ЭЦП ГП «Инфоком» на резолюциях согласующих записки: хэш, проверка подписи (2.6) и
+        // неизменяемый журнал подписей (см. SzResolutionSignature / SzResolutionSignatureService).
+        builder.Services.AddScoped<ISzResolutionSignatureService, SzResolutionSignatureService>();
         builder.Services.AddScoped<ISzArchiveService, SzArchiveService>();
         builder.Services.AddScoped<ISzProcurementService, SzProcurementService>();
 

@@ -44,6 +44,8 @@ public static class VndServiceExtensions
         builder.Services.AddSingleton<IVndWorkCalendarCache, VndWorkCalendarCache>();
         builder.Services.AddScoped<IVndWorkCalendarService, VndWorkCalendarService>();
         builder.Services.AddScoped<IVndFavoriteService, VndFavoriteService>();
+        // «Доска ВНД»: документы, связанные с СП пользователя, + добавленные вручную
+        builder.Services.AddScoped<IVndBoardService, VndBoardService>();
         // "Сформировать документ для печати" в шапке ВНД - склейка выбранных файлов редакции в один .docx
         builder.Services.AddScoped<IVndPrintBundleService, VndPrintBundleService>();
 

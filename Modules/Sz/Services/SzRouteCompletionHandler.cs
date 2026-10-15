@@ -30,6 +30,15 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
     /// </summary>
     public const string RemarksResolutionTask = "RemarksResolution";
 
+    /// <summary>
+    /// Задача автору «Моя СЗ на согласовании»: записка зарегистрирована и ушла
+    /// согласующим. Действия от автора не требует — это отслеживание, но в списке
+    /// задач (и на главной) оно должно быть, иначе автор не видит, что записка в работе.
+    /// Снимается, как только согласование закончилось (согласована, отклонена,
+    /// возвращена на доработку, отозвана).
+    /// </summary>
+    public const string ApprovalTrackingTask = "SzApprovalTracking";
+
     private readonly DelosferaDbContext _db;
     private readonly IDocumentService _documents;
     private readonly IAuditService _audit;
@@ -71,6 +80,11 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
             .FirstOrDefaultAsync(x => x.DocumentId == documentId && x.Document!.Type == DocumentType.Sz);
 
         if (sz is null) return;
+
+        // Согласование закончилось (любым исходом) — задача автора «Моя СЗ на
+        // согласовании» больше не нужна.
+        if (routeStatus != RouteInstanceStatus.Running)
+            await CloseApprovalTrackingTaskAsync(documentId);
 
         // Статус записки ведётся за маршрутом: иначе документ оставался бы «Зарегистрирован»,
         // пока согласующие уже вернули его на доработку.
@@ -178,6 +192,82 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
         });
 
         await _db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Задача автору «Моя СЗ на согласовании» — ставится, когда записку зарегистрировали
+    /// и отправили на согласование (и при повторной отправке с доработки).
+    /// </summary>
+    public async Task CreateApprovalTrackingTaskAsync(SzDocument sz)
+    {
+        var exists = await _db.WorkflowTasks.AnyAsync(t =>
+            t.DocumentId == sz.DocumentId
+            && t.Type == ApprovalTrackingTask
+            && t.State == WorkflowTaskState.Open);
+        if (exists) return;
+
+        _db.WorkflowTasks.Add(new WorkflowTask
+        {
+            DocumentId = sz.DocumentId,
+            SourceEntityId = sz.Id,
+            AssigneeUserId = sz.Document!.AuthorId,
+            Type = ApprovalTrackingTask,
+            // Срока у автора нет: пока записка у согласующих, ему нечего просрочить.
+            DueAt = null,
+            State = WorkflowTaskState.Open,
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        await _db.SaveChangesAsync();
+    }
+
+    /// <summary>Снимает задачу автора «Моя СЗ на согласовании».</summary>
+    public async Task CloseApprovalTrackingTaskAsync(int documentId)
+    {
+        var open = await _db.WorkflowTasks
+            .Where(t => t.DocumentId == documentId
+                        && t.Type == ApprovalTrackingTask
+                        && t.State == WorkflowTaskState.Open)
+            .ToListAsync();
+
+        if (open.Count == 0) return;
+
+        foreach (var task in open)
+            task.State = WorkflowTaskState.Done;
+
+        await _db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Системное уведомление автору: записку зарегистрировали (присвоен номер) и
+    /// отправили на согласование. Сбой рассылки не должен откатывать регистрацию —
+    /// вызывающий зовёт это уже после фиксации транзакции.
+    /// </summary>
+    public async Task NotifyAuthorRegisteredAsync(SzDocument sz, int actorUserId)
+    {
+        // Номер берём из базы: регистрация могла записать его в обход отслеживаемой сущности.
+        var number = await _db.Documents.AsNoTracking()
+            .Where(d => d.Id == sz.DocumentId)
+            .Select(d => d.RegNumber)
+            .FirstOrDefaultAsync() ?? sz.Document!.RegNumber;
+        var numberRu = string.IsNullOrWhiteSpace(number) ? "" : $" № {number}";
+        var dateRu = sz.RegisteredOn is { } regOn ? $" от {regOn:dd.MM.yyyy}" : "";
+
+        await _notifications.CreateAsync(new CreateNotificationRequest
+        {
+            TitleRu = "Служебная записка зарегистрирована",
+            TitleKg = "Кызматтык кат катталды",
+            TitleEn = "Memo registered",
+            BodyRu = $"«{sz.Document!.Title}» зарегистрирована{numberRu}{dateRu} и отправлена на согласование.",
+            BodyKg = $"«{sz.Document.Title}» катталды{numberRu}{dateRu} жана макулдашууга жөнөтүлдү.",
+            BodyEn = $"“{sz.Document.Title}” has been registered{(string.IsNullOrWhiteSpace(number) ? "" : $" as No. {number}")} and sent for approval.",
+            Category = NotificationCategory.Sz,
+            Severity = NotificationSeverity.Success,
+            EntityType = "Sz",
+            EntityId = sz.Id,
+            Url = $"/sz/{sz.Id}",
+            UserIds = [sz.Document.AuthorId],
+        }, actorUserId);
     }
 
     /// <summary>

@@ -25,6 +25,9 @@ public interface ISzPaperService
     /// <summary>Реестр невозвращённых оригиналов — по нему делопроизводство собирает бумагу.</summary>
     Task<List<SzOriginalResponse>> OutstandingAsync(bool overdueOnly = false);
 
+    /// <summary>Сколько оригиналов на руках — один COUNT. Права — как у реестра оригиналов.</summary>
+    Task<int> CountOutstandingAsync();
+
     /// <summary>Печатная форма записки с листом согласования.</summary>
     Task<SzPrintFormResponse> PrintFormAsync(int szId);
 }
@@ -143,10 +146,9 @@ public class SzPaperService : ISzPaperService
         if (!CanManageAll)
             throw new UnauthorizedAccessException("Реестр оригиналов доступен делопроизводству");
 
-        var query = _db.SzDocuments.AsNoTracking()
+        var query = OutstandingQuery(_db.SzDocuments.AsNoTracking()
             .Include(x => x.Document)
-            .Include(x => x.OriginalHolderUser)
-            .Where(x => x.OriginalHandedAt != null && x.OriginalReturnedAt == null);
+            .Include(x => x.OriginalHolderUser));
 
         if (overdueOnly)
             query = query.Where(x => x.OriginalDueBackOn != null && x.OriginalDueBackOn < Today);
@@ -157,6 +159,18 @@ public class SzPaperService : ISzPaperService
 
         return items.Select(Map).ToList();
     }
+
+    public Task<int> CountOutstandingAsync()
+    {
+        if (!CanManageAll)
+            throw new UnauthorizedAccessException("Реестр оригиналов доступен делопроизводству");
+
+        return OutstandingQuery(_db.SzDocuments.AsNoTracking()).CountAsync();
+    }
+
+    /// <summary>Оригиналы на руках — общий фильтр для списка и счётчика.</summary>
+    private static IQueryable<SzDocument> OutstandingQuery(IQueryable<SzDocument> source) =>
+        source.Where(x => x.OriginalHandedAt != null && x.OriginalReturnedAt == null);
 
     public async Task<SzPrintFormResponse> PrintFormAsync(int szId)
     {
@@ -184,13 +198,9 @@ public class SzPaperService : ISzPaperService
             HrKind = sz.HrKind?.TitleRu,
             AuthorName = sz.Document.Author?.FullName,
             AuthorUnit = sz.AuthorUnit?.TitleRu ?? sz.Document.Author?.OrgUnit?.TitleRu,
-            // Адресат на бумаге — тот, кому записка направлена: сначала конкретный
-            // человек из «Кому», и лишь при его отсутствии — подразделение.
-            CorrespondentUnit = sz.AddresseeUser is null
-                ? sz.CorrespondentUnit?.TitleRu
-                : sz.CorrespondentUnit is null
-                    ? sz.AddresseeUser.FullName
-                    : $"{sz.AddresseeUser.FullName}, {sz.CorrespondentUnit.TitleRu}",
+            // Только подразделение адресата. ФИО из «Кому» идёт отдельно (AddresseeName),
+            // строку «Кому: ФИО, подразделение» собирает печатная форма — иначе ФИО дублируется.
+            CorrespondentUnit = sz.CorrespondentUnit?.TitleRu,
             DueDate = sz.DueDate,
             IsPaperCarrier = sz.Document.IsPaperCarrier,
             ExecutionResolution = sz.ExecutionResolution,
@@ -215,7 +225,9 @@ public class SzPaperService : ISzPaperService
         if (sz.Amount is decimal amount) Add("Сумма", amount.ToString("N2"));
         if (sz.TravelExpenses is bool travel) Add("Командировочные расходы", travel ? "Да" : "Нет");
 
-        form.Approvals = await BuildApprovalSheetAsync(sz.DocumentId);
+        // Отпечаток текущего содержимого: лист с ЭЦП сверяет с ним каждую подпись.
+        form.ContentDigest = await SzEcpSheetData.ContentDigestAsync(_db, sz);
+        form.Approvals = await BuildApprovalSheetAsync(sz.DocumentId, form.ContentDigest);
 
         form.Assignments = await _db.SzAssignments.AsNoTracking()
             .Include(a => a.AssigneeUser)
@@ -239,7 +251,7 @@ public class SzPaperService : ISzPaperService
     /// Лист согласования собирается по всем маршрутам документа, а не только по текущему:
     /// на бумаге должна остаться история виз, включая прошлые круги согласования.
     /// </summary>
-    private async Task<List<SzPrintApprovalResponse>> BuildApprovalSheetAsync(int documentId)
+    private async Task<List<SzPrintApprovalResponse>> BuildApprovalSheetAsync(int documentId, string? currentContentDigest)
     {
         var steps = await _db.RouteSteps.AsNoTracking()
             .Include(s => s.RouteInstance)
@@ -269,6 +281,9 @@ public class SzPaperService : ISzPaperService
                 .Where(s => signatureIds.Contains(s.Id))
                 .ToDictionaryAsync(s => s.Id);
 
+        // Подробности ЭЦП ГП «Инфоком» (владелец по сертификату, хэш, отпечаток) — из журнала СЗ.
+        var ecpStamps = await SzEcpSheetData.StampsAsync(_db, signatureIds);
+
         var sheet = new List<SzPrintApprovalResponse>();
         foreach (var step in steps)
         {
@@ -287,7 +302,7 @@ public class SzPaperService : ISzPaperService
                     Resolution = p.Resolution?.Type.ToString(),
                     Comment = p.Resolution?.Comment,
                     ResolvedAt = p.Resolution?.At,
-                    Signature = PrintStamp(p.Resolution?.SignatureId, signatures)
+                    Signature = PrintStamp(p.Resolution?.SignatureId, signatures, ecpStamps, currentContentDigest)
                 });
             }
         }
@@ -300,7 +315,8 @@ public class SzPaperService : ISzPaperService
     /// должно стоять то, кем человек был в день подписания, а не сегодня.
     /// </summary>
     private static SzPrintSignatureResponse? PrintStamp(
-        int? signatureId, IReadOnlyDictionary<int, Signature> signatures)
+        int? signatureId, IReadOnlyDictionary<int, Signature> signatures,
+        IReadOnlyDictionary<int, SzEcpStampInfo> ecpStamps, string? currentContentDigest)
     {
         if (signatureId is not { } id || !signatures.TryGetValue(id, out var signature))
             return null;
@@ -322,7 +338,7 @@ public class SzPaperService : ISzPaperService
             }
         }
 
-        return new SzPrintSignatureResponse
+        var stamp = new SzPrintSignatureResponse
         {
             LevelTitle = levelTitle ?? (signature.Level == SignatureLevel.Qualified
                 ? "Квалифицированная электронная подпись"
@@ -334,6 +350,25 @@ public class SzPaperService : ISzPaperService
             Revoked = signature.Revoked,
             RevokedReason = signature.RevokedReason,
         };
+
+        if (ecpStamps.TryGetValue(id, out var ecp))
+        {
+            stamp.IsEcp = true;
+            stamp.IsTest = ecp.IsTest;
+            // ФИО владельца — из сертификата (ответ провайдера), а не из справочника пользователей.
+            stamp.FullName = ecp.PersonFio ?? stamp.FullName;
+            stamp.OrganizationName = ecp.OrganizationName;
+            stamp.CertValidNotAfter = ecp.CertValidNotAfter;
+            stamp.IssuerName = ecp.CertIssuerCommonName;
+            stamp.DocumentHash = ecp.Hash;
+            stamp.SignatureSha256 = ecp.SignatureSha256;
+            stamp.At = ecp.SignedAt;
+            stamp.MatchesCurrentContent = currentContentDigest is null
+                ? null
+                : string.Equals(ecp.ContentDigest, currentContentDigest, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return stamp;
 
         static string? Text(JsonElement element, string name) =>
             element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String

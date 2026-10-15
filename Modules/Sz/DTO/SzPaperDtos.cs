@@ -72,6 +72,13 @@ public class SzPrintFormResponse
     public string? AddresseeName { get; set; }
     public string? AddresseeDecision { get; set; }
     public DateTime? AddresseeDecisionAt { get; set; }
+
+    /// <summary>
+    /// Отпечаток ТЕКУЩЕГО содержимого записки (SHA-256, тот же компонент "content", что входит в хэш
+    /// каждой подписи ЭЦП). Лист с подписями показывает его в подвале: по нему видно, под какой
+    /// версией текста стоит каждая подпись.
+    /// </summary>
+    public string? ContentDigest { get; set; }
 }
 
 public class SzPrintFieldResponse
@@ -112,6 +119,33 @@ public class SzPrintSignatureResponse
     public string? Fingerprint { get; set; }
     public bool Revoked { get; set; }
     public string? RevokedReason { get; set; }
+
+    // --- ЭЦП ГП «Инфоком» (журнал SzResolutionSignature) — заполнено, только если IsEcp ---
+
+    /// <summary>Подпись поставлена ЭЦП ГП «Инфоком» и проверена у провайдера при сохранении резолюции.</summary>
+    public bool IsEcp { get; set; }
+
+    /// <summary>Тестовая имитация ЭЦП (EcpSigning:AllowSzTestEcp) — не подпись; печатается с пометкой «ТЕСТ».</summary>
+    public bool IsTest { get; set; }
+
+    /// <summary>Организация из ответа провайдера (если подписывали от её имени).</summary>
+    public string? OrganizationName { get; set; }
+
+    /// <summary>Срок действия сертификата — как его вернул провайдер.</summary>
+    public string? CertValidNotAfter { get; set; }
+
+    /// <summary>Издатель сертификата.</summary>
+    public string? IssuerName { get; set; }
+
+    /// <summary>Подписанный хэш резолюции (SHA-256, hex).</summary>
+    public string? DocumentHash { get; set; }
+
+    /// <summary>SHA-256 самой CMS-подписи (hex) — отпечаток подписи.</summary>
+    public string? SignatureSha256 { get; set; }
+
+    /// <summary>Подпись стоит под текущей версией содержимого записки. false — записку меняли после
+    /// подписания (например, на прошлом круге согласования); null — сверка неприменима.</summary>
+    public bool? MatchesCurrentContent { get; set; }
 }
 
 public class SzPrintAssignmentResponse
