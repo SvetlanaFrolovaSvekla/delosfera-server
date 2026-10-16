@@ -766,6 +766,17 @@ public class SzService : ISzService
             await _db.SaveChangesAsync();
 
             await _audit.LogAsync("Sz", sz.Id, "SubmittedForRegistration", actorUserId, new { });
+
+            // Уведомляем делопроизводителей: у них появилась новая задача на регистрацию.
+            // Сбой рассылки (почта и т.п.) не должен откатывать отправку записки.
+            try
+            {
+                await _addresseeTasks.NotifyClerksPendingRegistrationAsync(sz, actorUserId);
+            }
+            catch (Exception)
+            {
+                // Записка уже на регистрации — неотправленное уведомление этого не отменяет.
+            }
         }
         else
         {
@@ -832,7 +843,10 @@ public class SzService : ISzService
                         && t.State == WorkflowTaskState.Open)
             .ToListAsync();
         foreach (var task in revisionTasks)
+        {
             task.State = WorkflowTaskState.Done;
+            task.CompletedAt = DateTime.UtcNow;
+        }
     }
 
     /// <summary>
@@ -1005,7 +1019,11 @@ public class SzService : ISzService
             && t.Type == SzRouteCompletionHandler.AddresseeDecisionTask
             && t.State == WorkflowTaskState.Open);
 
-        if (task is not null) task.State = WorkflowTaskState.Done;
+        if (task is not null)
+        {
+            task.State = WorkflowTaskState.Done;
+            task.CompletedAt = DateTime.UtcNow;
+        }
 
         await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, actorUserId);
         await _db.SaveChangesAsync();

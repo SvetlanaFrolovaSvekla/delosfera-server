@@ -7,6 +7,7 @@ using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Sz.Models;
+using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Workflow.Models;
 using delosfera_server.Modules.Workflow.Services;
 
@@ -233,9 +234,57 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
         if (open.Count == 0) return;
 
         foreach (var task in open)
+        {
             task.State = WorkflowTaskState.Done;
+            task.CompletedAt = DateTime.UtcNow;
+        }
 
         await _db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Системное уведомление делопроизводителям (все активные пользователи с правом
+    /// регистрации СЗ): появилась записка, ожидающая регистрации. Без него новая задача
+    /// у Сектора делопроизводства появлялась молча. Сбой рассылки не должен откатывать
+    /// отправку — вызывающий оборачивает вызов в try/catch.
+    /// </summary>
+    public async Task NotifyClerksPendingRegistrationAsync(SzDocument sz, int actorUserId)
+    {
+        var registerCode = (int)PermissionCode.RegisterSz;
+        var clerkIds = await _db.Users.AsNoTracking()
+            .Where(u => u.IsActive && u.Roles.Any(r => r.PermissionCodes.Contains(registerCode)))
+            .Select(u => u.Id)
+            .ToListAsync();
+
+        // Автор сам себя не уведомляет, если он же и делопроизводитель.
+        clerkIds.Remove(actorUserId);
+        if (clerkIds.Count == 0) return;
+
+        var title = sz.Document?.Title
+                    ?? await _db.Documents.AsNoTracking()
+                        .Where(d => d.Id == sz.DocumentId).Select(d => d.Title).FirstOrDefaultAsync()
+                    ?? "";
+        var authorName = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == actorUserId).Select(u => u.FullName).FirstOrDefaultAsync();
+        var byRu = string.IsNullOrWhiteSpace(authorName) ? "" : $" Отправил: {authorName}.";
+        var byEn = string.IsNullOrWhiteSpace(authorName) ? "" : $" Submitted by {authorName}.";
+        var byKg = string.IsNullOrWhiteSpace(authorName) ? "" : $" Жөнөттү: {authorName}.";
+
+        await _notifications.CreateAsync(new CreateNotificationRequest
+        {
+            TitleRu = "Новая СЗ на регистрацию",
+            TitleKg = "Каттоого жаңы кызматтык кат",
+            TitleEn = "New memo awaiting registration",
+            BodyRu = $"Служебная записка «{title}» ожидает регистрации.{byRu}",
+            BodyKg = $"«{title}» кызматтык каты каттоону күтүүдө.{byKg}",
+            BodyEn = $"Memo “{title}” is awaiting registration.{byEn}",
+            Category = NotificationCategory.Sz,
+            Severity = NotificationSeverity.Info,
+            EntityType = "Sz",
+            EntityId = sz.Id,
+            Url = $"/sz/{sz.Id}",
+            UserIds = clerkIds,
+        }, actorUserId);
     }
 
     /// <summary>
@@ -286,7 +335,10 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
         if (open.Count == 0) return;
 
         foreach (var task in open)
+        {
             task.State = WorkflowTaskState.Done;
+            task.CompletedAt = DateTime.UtcNow;
+        }
 
         await _db.SaveChangesAsync();
     }

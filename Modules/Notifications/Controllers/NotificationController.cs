@@ -39,6 +39,27 @@ public class NotificationController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Все id (и флаги) уведомлений по фильтру — для «выбрать всё по фильтру», не только на странице.</summary>
+    [HttpPost("search-selection")]
+    [ProducesResponseType(typeof(List<NotificationSelectionItem>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<NotificationSelectionItem>>> SearchSelection([FromBody] NotificationFilterRequest request) =>
+        Ok(await _service.SearchSelectionAsync(request, _currentUser.UserId));
+
+    /// <summary>Отметить выбранные уведомления прочитанными</summary>
+    [HttpPost("bulk/read")]
+    public async Task<IActionResult> BulkRead([FromBody] NotificationBulkRequest request) =>
+        Ok(new { affected = await _service.BulkMarkAsReadAsync(request.Ids, _currentUser.UserId) });
+
+    /// <summary>Добавить выбранные уведомления в избранное или убрать из него</summary>
+    [HttpPost("bulk/favorite")]
+    public async Task<IActionResult> BulkFavorite([FromBody] NotificationBulkRequest request) =>
+        Ok(new { affected = await _service.BulkSetFavoriteAsync(request.Ids, request.Favorite, _currentUser.UserId) });
+
+    /// <summary>Удалить выбранные уведомления из своего списка (мягкое удаление)</summary>
+    [HttpPost("bulk/delete")]
+    public async Task<IActionResult> BulkDelete([FromBody] NotificationBulkRequest request) =>
+        Ok(new { affected = await _service.BulkDeleteAsync(request.Ids, _currentUser.UserId) });
+
     /// <summary>Список доступных категорий уведомлений</summary>
     [HttpGet("categories")]
     [ProducesResponseType(typeof(List<NotificationCategoryResponse>), StatusCodes.Status200OK)]

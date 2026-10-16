@@ -113,6 +113,20 @@ public class WorkflowNotifier : IWorkflowNotifier
         var document = await LoadDocumentAsync(instance.DocumentId);
         if (document is null) return;
 
+        // Служебная записка, отклонённая на любом этапе (в том числе подписантом), уходит
+        // в статус «Забракована», а не на доработку — автору говорим именно это. Общий текст
+        // «Документ отклонён» не называл исхода, и по нему не было понятно, что записку
+        // нужно создавать заново.
+        if (document.Type == DocumentType.Sz && status == RouteInstanceStatus.Rejected)
+        {
+            await SafeSendAsync(
+                await OutcomeRecipientsAsync(document),
+                $"Служебная записка забракована: {Describe(document)}",
+                $"Служебная записка «{document.Title}» забракована." + Reason(comment),
+                document, NotificationSeverity.Urgent);
+            return;
+        }
+
         var (title, body, severity) = status switch
         {
             RouteInstanceStatus.Approved => (

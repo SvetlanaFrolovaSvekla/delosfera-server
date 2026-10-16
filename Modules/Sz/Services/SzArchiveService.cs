@@ -179,7 +179,18 @@ public class SzArchiveService : ISzArchiveService
     public async Task<SzArchiveResponse> GetAsync(int szId)
     {
         var sz = await LoadAsync(szId);
-        await EnsureAccessAsync(sz);
+
+        // Смотреть карточку хранения может каждый, кто видит записку (согласующий,
+        // подписант, адресат, исполнитель): иначе в карточке записки у них красная
+        // ошибка 403. Подшивать и возвращать из архива по-прежнему вправе только
+        // автор, руководитель подразделения и делопроизводство (EnsureAccessAsync).
+        var canView = await SzVisibility.CanViewAsync(
+            _db, sz.Id, _currentUser.UserId,
+            canSeeAll: CanManageAll,
+            canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
+        if (!canView)
+            throw new UnauthorizedAccessException("Нет доступа к архивному хранению этой записки");
+
         return Map(sz);
     }
 

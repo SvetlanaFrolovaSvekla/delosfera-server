@@ -125,6 +125,7 @@ public class FeedbackController : ControllerBase
                 f.Text,
                 f.RoutePath,
                 f.PageTitle,
+                ScreenTitle = SectionMap.ScreenTitle(f.RoutePath),
                 f.CreatedAt,
                 Status = f.Status.ToString(),
                 f.HandlerComment,
@@ -168,6 +169,7 @@ public class FeedbackController : ControllerBase
                 f.RoutePath,
                 f.EntityId,
                 f.PageTitle,
+                ScreenTitle = SectionMap.ScreenTitle(f.RoutePath),
                 f.CreatedAt,
                 Status = f.Status.ToString(),
                 f.HandlerComment,
@@ -204,18 +206,27 @@ public class FeedbackController : ControllerBase
             .Select(g => new { Kind = g.Key.ToString(), Count = g.Count() })
             .ToListAsync(ct);
 
-        var byPage = await _db.FeedbackItems.AsNoTracking()
-            .GroupBy(f => new { f.RoutePath, f.PageTitle })
+        // Группируем по маршруту, а не по паре «маршрут + заголовок вкладки»: заголовок у
+        // всех экранов один, а при смене его формулировки один экран распадался бы на два.
+        var pages = await _db.FeedbackItems.AsNoTracking()
+            .GroupBy(f => f.RoutePath)
             .Select(g => new
             {
-                g.Key.RoutePath,
-                g.Key.PageTitle,
+                RoutePath = g.Key,
                 Count = g.Count(),
                 Problems = g.Count(f => f.Kind == FeedbackKind.Problem),
             })
             .OrderByDescending(x => x.Count)
             .Take(20)
             .ToListAsync(ct);
+
+        var byPage = pages.Select(p => new
+        {
+            p.RoutePath,
+            ScreenTitle = SectionMap.ScreenTitle(p.RoutePath),
+            p.Count,
+            p.Problems,
+        }).ToList();
 
         return Ok(new { byStatus, byKind, byPage });
     }

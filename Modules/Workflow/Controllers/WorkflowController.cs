@@ -54,6 +54,11 @@ public class WorkflowController : ControllerBase
     public async Task<IActionResult> Inbox([FromQuery] string? documentType = null, [FromQuery] bool includeOwn = false) =>
         Ok(await _inbox.GetAsync(_currentUser.UserId, documentType, includeOwn));
 
+    /// <summary>Выполненные мной задачи по служебным запискам — вкладка «Выполненные».</summary>
+    [HttpGet("inbox/done")]
+    public async Task<IActionResult> InboxDone([FromQuery] int limit = 200) =>
+        Ok(await _inbox.GetDoneSzAsync(_currentUser.UserId, limit));
+
     /// <summary>Статистика по моим задачам: срез по контурам, типам и срокам (ЗД-1).</summary>
     [HttpGet("inbox/stats")]
     public async Task<IActionResult> InboxStats() =>

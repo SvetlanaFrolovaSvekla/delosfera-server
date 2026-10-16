@@ -15610,6 +15610,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("assignee_user_id");
 
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");

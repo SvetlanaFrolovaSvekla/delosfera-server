@@ -91,27 +91,7 @@ public class NotificationService : INotificationService
             .Include(x => x.Notification!).ThenInclude(n => n.AttachmentFile)
             .Where(x => x.UserId == currentUserId && !x.IsDeleted);
 
-        if (request.Categories.Count > 0)
-            query = query.Where(x => request.Categories.Contains(x.Notification!.Category));
-
-        if (request.IsRead.HasValue)
-            query = query.Where(x => x.IsRead == request.IsRead.Value);
-
-        if (request.IsFavorite.HasValue)
-            query = query.Where(x => x.IsFavorite == request.IsFavorite.Value);
-
-        if (request.Severities.Count > 0)
-            query = query.Where(x => request.Severities.Contains(x.Notification!.Severity));
-
-        if (!string.IsNullOrWhiteSpace(request.Search))
-        {
-            var term = request.Search.Trim();
-            query = query.Where(x =>
-                EF.Functions.ILike(x.Notification!.TitleRu, $"%{term}%") ||
-                EF.Functions.ILike(x.Notification!.BodyRu, $"%{term}%") ||
-                (x.Notification.TitleEn != null && EF.Functions.ILike(x.Notification.TitleEn, $"%{term}%")) ||
-                (x.Notification.TitleKg != null && EF.Functions.ILike(x.Notification.TitleKg, $"%{term}%")));
-        }
+        query = ApplyFilter(query, request);
 
         var totalCount = await query.CountAsync();
 
@@ -150,6 +130,86 @@ public class NotificationService : INotificationService
             Page = page,
             PageSize = pageSize
         };
+    }
+
+    /// <summary>Фильтры списка уведомлений — общие для страницы и для «выбрать всё по фильтру».</summary>
+    private static IQueryable<UserNotification> ApplyFilter(
+        IQueryable<UserNotification> query, NotificationFilterRequest request)
+    {
+        if (request.Categories.Count > 0)
+            query = query.Where(x => request.Categories.Contains(x.Notification!.Category));
+
+        if (request.IsRead.HasValue)
+            query = query.Where(x => x.IsRead == request.IsRead.Value);
+
+        if (request.IsFavorite.HasValue)
+            query = query.Where(x => x.IsFavorite == request.IsFavorite.Value);
+
+        if (request.Severities.Count > 0)
+            query = query.Where(x => request.Severities.Contains(x.Notification!.Severity));
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var term = request.Search.Trim();
+            query = query.Where(x =>
+                EF.Functions.ILike(x.Notification!.TitleRu, $"%{term}%") ||
+                EF.Functions.ILike(x.Notification!.BodyRu, $"%{term}%") ||
+                (x.Notification.TitleEn != null && EF.Functions.ILike(x.Notification.TitleEn, $"%{term}%")) ||
+                (x.Notification.TitleKg != null && EF.Functions.ILike(x.Notification.TitleKg, $"%{term}%")));
+        }
+
+        return query;
+    }
+
+    public async Task<List<NotificationSelectionItem>> SearchSelectionAsync(
+        NotificationFilterRequest request, int currentUserId)
+    {
+        var query = ApplyFilter(
+            _db.UserNotifications.Where(x => x.UserId == currentUserId && !x.IsDeleted), request);
+
+        // Потолок защищает от выборки на сотни тысяч строк одним запросом.
+        return await query
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(SelectionLimit)
+            .Select(x => new NotificationSelectionItem
+            {
+                Id = x.Id,
+                IsRead = x.IsRead,
+                IsFavorite = x.IsFavorite,
+            })
+            .ToListAsync();
+    }
+
+    private const int SelectionLimit = 5000;
+
+    public async Task<int> BulkMarkAsReadAsync(IReadOnlyCollection<int> ids, int currentUserId)
+    {
+        if (ids.Count == 0) return 0;
+        var now = DateTime.UtcNow;
+        return await _db.UserNotifications
+            .Where(x => x.UserId == currentUserId && !x.IsDeleted && !x.IsRead && ids.Contains(x.Id))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsRead, true)
+                .SetProperty(x => x.ReadAt, now));
+    }
+
+    public async Task<int> BulkSetFavoriteAsync(IReadOnlyCollection<int> ids, bool favorite, int currentUserId)
+    {
+        if (ids.Count == 0) return 0;
+        DateTime? favoritedAt = favorite ? DateTime.UtcNow : null;
+        return await _db.UserNotifications
+            .Where(x => x.UserId == currentUserId && !x.IsDeleted && x.IsFavorite != favorite && ids.Contains(x.Id))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsFavorite, favorite)
+                .SetProperty(x => x.FavoritedAt, favoritedAt));
+    }
+
+    public async Task<int> BulkDeleteAsync(IReadOnlyCollection<int> ids, int currentUserId)
+    {
+        if (ids.Count == 0) return 0;
+        return await _db.UserNotifications
+            .Where(x => x.UserId == currentUserId && !x.IsDeleted && ids.Contains(x.Id))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsDeleted, true));
     }
 
     public async Task<NotificationResponse> GetByIdAsync(int userNotificationId, int currentUserId, string languageCode)

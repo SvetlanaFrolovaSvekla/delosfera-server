@@ -402,14 +402,22 @@ public class SzExecutionService : ISzExecutionService
     private async Task CloseTaskAsync(SzAssignment assignment)
     {
         var task = await FindTaskAsync(assignment, WorkflowTaskState.Open);
-        if (task is not null) task.State = WorkflowTaskState.Done;
+        if (task is not null)
+        {
+            task.State = WorkflowTaskState.Done;
+            task.CompletedAt = DateTime.UtcNow;
+        }
     }
 
     /// <summary>Вернуть поручение в список задач исполнителя.</summary>
     private async Task ReopenTaskAsync(SzAssignment assignment)
     {
         var task = await FindTaskAsync(assignment, WorkflowTaskState.Done);
-        if (task is not null) task.State = WorkflowTaskState.Open;
+        if (task is not null)
+        {
+            task.State = WorkflowTaskState.Open;
+            task.CompletedAt = null;
+        }
     }
 
     private Task<WorkflowTask?> FindTaskAsync(SzAssignment assignment, WorkflowTaskState state) =>

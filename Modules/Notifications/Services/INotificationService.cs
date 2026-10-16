@@ -10,6 +10,10 @@ public interface INotificationService
     Task<NotificationResponse> GetByIdAsync(int userNotificationId, int currentUserId, string languageCode);
     Task<NotificationResponse> MarkAsReadAsync(int userNotificationId, int currentUserId, string languageCode);
     Task<NotificationResponse> MarkAsUnreadAsync(int userNotificationId, int currentUserId, string languageCode);
+    Task<List<NotificationSelectionItem>> SearchSelectionAsync(NotificationFilterRequest request, int currentUserId);
+    Task<int> BulkMarkAsReadAsync(IReadOnlyCollection<int> ids, int currentUserId);
+    Task<int> BulkSetFavoriteAsync(IReadOnlyCollection<int> ids, bool favorite, int currentUserId);
+    Task<int> BulkDeleteAsync(IReadOnlyCollection<int> ids, int currentUserId);
     Task<int> MarkAllAsReadAsync(int currentUserId, Models.NotificationCategory? category);
     Task<NotificationResponse> ToggleFavoriteAsync(int userNotificationId, int currentUserId, string languageCode);
     Task DeleteForUserAsync(int userNotificationId, int currentUserId);

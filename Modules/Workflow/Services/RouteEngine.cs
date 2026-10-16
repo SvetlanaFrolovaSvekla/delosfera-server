@@ -755,6 +755,10 @@ public class RouteEngine : IRouteEngine
     {
         var task = _db.WorkflowTasks.Local.FirstOrDefault(t => t.RouteParticipantId == participantId && t.State == WorkflowTaskState.Open)
                    ?? _db.WorkflowTasks.FirstOrDefault(t => t.RouteParticipantId == participantId && t.State == WorkflowTaskState.Open);
-        if (task != null) task.State = state;
+        if (task != null)
+        {
+            task.State = state;
+            task.CompletedAt = DateTime.UtcNow;
+        }
     }
 }

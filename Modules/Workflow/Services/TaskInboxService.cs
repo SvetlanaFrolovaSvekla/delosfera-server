@@ -23,6 +23,12 @@ public interface ITaskInboxService
     /// </summary>
     Task<TaskInboxDto> GetAsync(int userId, string? documentType = null, bool includeOwn = false);
 
+    /// <summary>
+    /// Выполненные задачи пользователя по служебным запискам (вкладка «Выполненные»):
+    /// закрытые задачи движка и записки, которые он зарегистрировал. Свежие первыми.
+    /// </summary>
+    Task<TaskInboxDto> GetDoneSzAsync(int userId, int limit = 200);
+
     /// <summary>Статистика по открытым задачам пользователя (ЗД-1).</summary>
     Task<TaskStatsDto> StatsAsync(int userId);
 }
@@ -496,6 +502,135 @@ public class TaskInboxService : ITaskInboxService
         },
     };
 
+    public async Task<TaskInboxDto> GetDoneSzAsync(int userId, int limit = 200)
+    {
+        limit = Math.Clamp(limit, 1, 500);
+
+        // Закрытые задачи самого пользователя (не замещаемых): выполненное по замещению
+        // числится за тем, кого замещали. Задача «Моя СЗ на согласовании» — отслеживание,
+        // а не работа, поэтому в выполненные не попадает.
+        var routeRows = await (
+            from t in _db.WorkflowTasks
+            join p in _db.RouteParticipants on t.RouteParticipantId equals p.Id
+            join st in _db.RouteSteps on p.RouteStepId equals st.Id
+            join ri in _db.RouteInstances on st.RouteInstanceId equals ri.Id
+            join d in _db.Documents on ri.DocumentId equals d.Id
+            where t.AssigneeUserId == userId && t.State == WorkflowTaskState.Done
+                  && d.Type == DocumentType.Sz && t.Type != "SzApprovalTracking"
+            orderby (t.CompletedAt ?? t.CreatedAt) descending
+            select new Row
+            {
+                Id = t.Id,
+                ParticipantId = p.Id,
+                AssigneeUserId = t.AssigneeUserId,
+                TaskType = t.Type,
+                DueAt = t.DueAt,
+                CreatedAt = t.CreatedAt,
+                Order = st.Order,
+                Kind = (StepKind?)st.Kind,
+                DocumentId = d.Id,
+                RegNumber = d.RegNumber,
+                Title = d.Title,
+                DocType = d.Type,
+                DocStatus = d.StatusCode,
+                DelegatedByUserId = t.DelegatedByUserId,
+                CompletedAt = t.CompletedAt,
+            }).Take(limit).ToListAsync();
+
+        var directRows = await (
+            from t in _db.WorkflowTasks
+            join d in _db.Documents on t.DocumentId equals d.Id
+            where t.AssigneeUserId == userId && t.State == WorkflowTaskState.Done
+                  && t.RouteParticipantId == null
+                  && d.Type == DocumentType.Sz && t.Type != "SzApprovalTracking"
+            orderby (t.CompletedAt ?? t.CreatedAt) descending
+            select new Row
+            {
+                Id = t.Id,
+                ParticipantId = null,
+                AssigneeUserId = t.AssigneeUserId,
+                TaskType = t.Type,
+                DueAt = t.DueAt,
+                CreatedAt = t.CreatedAt,
+                Order = null,
+                Kind = null,
+                DocumentId = d.Id,
+                RegNumber = d.RegNumber,
+                Title = d.Title,
+                DocType = d.Type,
+                DocStatus = d.StatusCode,
+                DelegatedByUserId = t.DelegatedByUserId,
+                CompletedAt = t.CompletedAt,
+            }).Take(limit).ToListAsync();
+
+        var rows = routeRows.Concat(directRows).ToList();
+        var documentIds = rows.Select(r => r.DocumentId).Distinct().ToList();
+        var entityIds = await _db.SzDocuments
+            .Where(x => documentIds.Contains(x.DocumentId))
+            .ToDictionaryAsync(x => x.DocumentId, x => x.Id);
+
+        var tasks = rows.Select(r => new InboxTaskDto
+        {
+            TaskId = r.Id,
+            ParticipantId = r.ParticipantId,
+            DocumentId = r.DocumentId,
+            EntityId = entityIds.TryGetValue(r.DocumentId, out var entityId) ? entityId : null,
+            RegNumber = r.RegNumber,
+            DocumentTitle = r.Title,
+            DocumentType = r.DocType.ToString(),
+            DocumentTypeTitle = DocumentTypeTitle(r.DocType),
+            TaskType = TaskTypeTitle(r.TaskType, r.Kind),
+            StepOrder = r.Order,
+            StepKind = r.Kind?.ToString(),
+            Stage = SzStageOf(r.TaskType, r.Kind),
+            DueAt = r.DueAt,
+            IsOverdue = false,
+            CreatedAt = r.CreatedAt,
+            // Закрыта до появления поля — честного времени нет, показываем создание.
+            CompletedAt = r.CompletedAt ?? r.CreatedAt,
+        }).ToList();
+
+        // Регистрация — очередь Сектора делопроизводства, а не задача движка: выполненной
+        // она считается по записке, которую пользователь зарегистрировал.
+        var registered = await _db.SzDocuments
+            .Where(x => x.RegisteredByUserId == userId && x.RegisteredOn != null)
+            .OrderByDescending(x => x.RegisteredOn)
+            .Take(limit)
+            .Select(x => new {x.Id, x.DocumentId, x.Document!.Title, x.Document.RegNumber, x.RegisteredOn})
+            .ToListAsync();
+
+        // Время регистрации — из журнала аудита (в записке хранится только дата).
+        var registeredIds = registered.Select(r => r.Id).ToList();
+        var registeredAt = (await _db.AuditEntries
+                .Where(a => a.EntityType == "Sz" && a.Action == "Registered" && registeredIds.Contains(a.EntityId))
+                .GroupBy(a => a.EntityId)
+                .Select(g => new {SzId = g.Key, At = g.Max(a => a.At)})
+                .ToListAsync())
+            .ToDictionary(x => x.SzId, x => x.At);
+
+        tasks.AddRange(registered.Select(r => new InboxTaskDto
+        {
+            TaskId = r.Id,
+            DocumentId = r.DocumentId,
+            EntityId = r.Id,
+            RegNumber = r.RegNumber,
+            DocumentTitle = r.Title,
+            DocumentType = DocumentType.Sz.ToString(),
+            DocumentTypeTitle = DocumentTypeTitle(DocumentType.Sz),
+            TaskType = "Регистрация",
+            Stage = SzStage.Registration,
+            IsOverdue = false,
+            CreatedAt = r.RegisteredOn!.Value.ToDateTime(TimeOnly.MinValue),
+            CompletedAt = registeredAt.TryGetValue(r.Id, out var at)
+                ? at
+                : r.RegisteredOn!.Value.ToDateTime(TimeOnly.MinValue),
+        }));
+
+        tasks = tasks.OrderByDescending(t => t.CompletedAt ?? t.CreatedAt).Take(limit).ToList();
+
+        return new TaskInboxDto {Tasks = tasks, Total = tasks.Count};
+    }
+
     public async Task<TaskStatsDto> StatsAsync(int userId)
     {
         var inbox = await GetAsync(userId);
@@ -603,5 +738,6 @@ public class TaskInboxService : ITaskInboxService
         public DocumentType DocType { get; init; }
         public string? DocStatus { get; init; }
         public int? DelegatedByUserId { get; init; }
+        public DateTime? CompletedAt { get; init; }
     }
 }

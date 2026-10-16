@@ -128,6 +128,9 @@ public class DocumentAttachmentService : IDocumentAttachmentService
         }).ToList();
     }
 
+    /// <summary>Предел числа вложений у служебной записки.</summary>
+    public const int SzMaxAttachments = 10;
+
     public async Task<AttachmentDto> AddAsync(
         int documentId, IFormFile file, int userId, bool isPrimary = false)
     {
@@ -136,6 +139,15 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         EnsureAuthorOrPrivileged(document.AuthorId, userId,
             "Прикреплять файлы к документу может только его автор");
+
+        // У служебной записки число вложений ограничено. Предел проверяем здесь, а не только
+        // в форме: форму можно обойти, а записка с сотней файлов тяжела и в согласовании, и в печати.
+        if (await _db.SzDocuments.AnyAsync(s => s.DocumentId == documentId)
+            && await _db.DocumentAttachments.CountAsync(a => a.DocumentId == documentId) >= SzMaxAttachments)
+        {
+            throw new InvalidOperationException(
+                $"К служебной записке можно приложить не более {SzMaxAttachments} файлов");
+        }
 
         RequireFile(file);
 

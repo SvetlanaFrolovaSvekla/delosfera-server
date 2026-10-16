@@ -64,6 +64,12 @@ public class InboxTaskDto
     public string? DelegatedBy { get; set; }
 
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// Когда задача выполнена — заполняется только во вкладке «Выполненные». У задач, закрытых
+    /// до появления поля, берётся дата создания.
+    /// </summary>
+    public DateTime? CompletedAt { get; set; }
 }
 
 /// <summary>Сводка по реестру задач.</summary>

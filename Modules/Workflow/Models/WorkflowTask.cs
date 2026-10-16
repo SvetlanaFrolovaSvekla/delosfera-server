@@ -44,4 +44,11 @@ public class WorkflowTask
     public int? DelegatedByUserId { get; set; }
 
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// Когда задача закрыта (выполнена, снята или отменена). Пусто у открытых задач и у
+    /// закрытых до появления поля. Нужно вкладке «Выполненные» в «Моих задачах»: без него
+    /// там нечего показать, кроме даты создания.
+    /// </summary>
+    public DateTime? CompletedAt { get; set; }
 }

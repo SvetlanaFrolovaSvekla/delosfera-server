@@ -61,6 +61,38 @@ public static class SectionMap
     ];
 
     /// <summary>
+    /// Название экрана для списка сообщений: раздел и, что именно в нём открыто.
+    ///
+    /// Раздела мало: список, карточка и создание записки — три разных экрана, а
+    /// называть их одинаково значило бы снова не понять, о каком из них написали.
+    /// Заголовок вкладки браузера здесь не помощник: он у всех экранов один —
+    /// «СЭД - Делосфера».
+    /// </summary>
+    public static string ScreenTitle(string routePath)
+    {
+        var section = Title(routePath);
+        if (routePath == "/" || string.IsNullOrWhiteSpace(routePath) || section == routePath)
+            return section;
+
+        foreach (var (prefix, _) in Sections)
+        {
+            if (routePath != prefix && !routePath.StartsWith(prefix + "/", StringComparison.Ordinal))
+                continue;
+
+            var rest = routePath[prefix.Length..].Trim('/');
+            return rest switch
+            {
+                "" => section,
+                ":id" => $"{section} · карточка",
+                "new" or "create" => $"{section} · создание",
+                _ => $"{section} · {rest}",
+            };
+        }
+
+        return section;
+    }
+
+    /// <summary>
     /// Раздел по маршруту. Корень — «Главная»; неизвестный маршрут возвращается
     /// как есть, чтобы новый экран не потерялся в куче «прочего», а был виден
     /// и попал в этот список при следующей правке.
