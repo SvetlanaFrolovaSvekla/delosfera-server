@@ -191,6 +191,12 @@ public class SzController : ControllerBase
     {
         try
         {
+            // Решение и поручения — одно действие: если поручения не прошли проверку
+            // (нет исполнителя, исполнитель указан дважды), решение тоже не должно
+            // сохраниться. Иначе оно записывалось, а повторная попытка получала
+            // «Решение уже вынесено», и выдать поручения тем же действием было нельзя.
+            await using var tx = await _db.Database.BeginTransactionAsync();
+
             var decided = await _sz.DecideAsAddresseeAsync(id, req.Decision, _currentUser.UserId);
 
             // Поручения выдаются тем же действием: решение адресата и есть резолюция,
@@ -206,6 +212,7 @@ public class SzController : ControllerBase
                 decided = (await _sz.GetAsync(id))!;
             }
 
+            await tx.CommitAsync();
             return Ok(decided);
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
@@ -432,24 +439,20 @@ public class SzController : ControllerBase
     {
         var userId = _currentUser.UserId;
 
-        var rows = await _db.SzDocuments.AsNoTracking()
-            .Include(x => x.Document)
-            .Where(x => x.Document!.StatusCode != SzStatus.Draft || x.Document!.AuthorId == userId)
-            .GroupBy(x => x.Document!.StatusCode)
-            .Select(g => new { status = g.Key, count = g.Count() })
-            .ToListAsync();
-
-        var byStatus = rows.ToDictionary(r => r.status, r => r.count);
-
-        // Отозванная записка возвращается автору на правку — во вкладке «Черновики»
-        // она лежит рядом с его черновиками, и счётчик учитывает только его отозванные.
-        var withdrawnMine = await _db.SzDocuments.AsNoTracking()
-            .CountAsync(x => x.Document!.StatusCode == SzStatus.Withdrawn && x.Document.AuthorId == userId);
+        // По статусам считаем только видимые пользователю записки — по тому же правилу,
+        // что и списки вкладок. Раньше счёт шёл по всему банку: в кружке «Архив (340)»,
+        // а в списке три строки.
+        var byStatus = await _sz.CountByStatusAsync(userId);
 
         return Ok(new
         {
             all = SzStatus.Active.Sum(s => byStatus.TryGetValue(s, out var c) ? c : 0),
-            drafts = (byStatus.TryGetValue(SzStatus.Draft, out var d) ? d : 0) + withdrawnMine,
+            // «Черновики» — свои черновики и отозванные (отозванная возвращается автору
+            // на правку): тот же фильтр, что у самой вкладки.
+            drafts = await _sz.CountAsync(new SzSearchRequest
+            {
+                MineOnly = true, Statuses = [SzStatus.Draft, SzStatus.Withdrawn],
+            }, userId),
             pendingRegistration = byStatus.TryGetValue(SzStatus.PendingRegistration, out var p) ? p : 0,
             archived = byStatus.TryGetValue(SzStatus.Archived, out var a) ? a : 0,
             byStatus,

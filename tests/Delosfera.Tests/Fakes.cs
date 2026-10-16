@@ -35,6 +35,10 @@ internal class NoopNotificationService : INotificationService
     // CreateAsync — единственный метод, который дёргает тестируемый путь (уведомления при переходах).
     public virtual Task<int> CreateAsync(CreateNotificationRequest request, int? currentUserId) => Task.FromResult(0);
     public Task DeleteForUserAsync(int id, int currentUserId) => Task.CompletedTask;
+    public Task<List<NotificationSelectionItem>> SearchSelectionAsync(NotificationFilterRequest request, int currentUserId) => throw new NotImplementedException();
+    public Task<int> BulkMarkAsReadAsync(IReadOnlyCollection<int> ids, int currentUserId) => Task.FromResult(0);
+    public Task<int> BulkSetFavoriteAsync(IReadOnlyCollection<int> ids, bool favorite, int currentUserId) => Task.FromResult(0);
+    public Task<int> BulkDeleteAsync(IReadOnlyCollection<int> ids, int currentUserId) => Task.FromResult(0);
     public Task<int> MarkAllAsReadAsync(int currentUserId, NotificationCategory? category) => Task.FromResult(0);
     public Task<PagedNotificationResponse> SearchAsync(NotificationFilterRequest request, int currentUserId, string languageCode) => throw new NotImplementedException();
     public Task<NotificationResponse> GetByIdAsync(int id, int currentUserId, string languageCode) => throw new NotImplementedException();
@@ -200,6 +204,19 @@ internal sealed class SilentNotifications : INotificationService
         throw new NotSupportedException();
 
     public Task DeleteForUserAsync(int id, int currentUserId) => throw new NotSupportedException();
+
+    public Task<List<NotificationSelectionItem>> SearchSelectionAsync(
+        NotificationFilterRequest request, int currentUserId) =>
+        throw new NotSupportedException();
+
+    public Task<int> BulkMarkAsReadAsync(IReadOnlyCollection<int> ids, int currentUserId) =>
+        throw new NotSupportedException();
+
+    public Task<int> BulkSetFavoriteAsync(IReadOnlyCollection<int> ids, bool favorite, int currentUserId) =>
+        throw new NotSupportedException();
+
+    public Task<int> BulkDeleteAsync(IReadOnlyCollection<int> ids, int currentUserId) =>
+        throw new NotSupportedException();
 
     public Task<NotificationCountsResponse> GetCountsAsync(int currentUserId) =>
         throw new NotSupportedException();

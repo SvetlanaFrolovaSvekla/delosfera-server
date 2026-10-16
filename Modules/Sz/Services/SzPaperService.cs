@@ -401,7 +401,7 @@ public class SzPaperService : ISzPaperService
             HandoverCount = sz.OriginalHandoverCount,
             IsOut = isOut,
             IsOverdue = isOut && sz.OriginalDueBackOn != null && sz.OriginalDueBackOn < Today,
-            DaysLeft = sz.OriginalDueBackOn == null ? null : sz.OriginalDueBackOn.Value.DayNumber - Today.DayNumber
+            DaysLeft = !isOut || sz.OriginalDueBackOn == null ? null : sz.OriginalDueBackOn.Value.DayNumber - Today.DayNumber
         };
     }
 }

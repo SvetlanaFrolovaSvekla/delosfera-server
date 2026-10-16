@@ -89,6 +89,12 @@ public interface ISzService
     Task<int> InboxCountAsync(int currentUserId);
 
     /// <summary>
+    /// Число записок по статусам — среди тех, что пользователю видны (<see cref="SzVisibility"/>).
+    /// Счётчики вкладок реестра строятся отсюда, чтобы число в кружке совпадало со строками.
+    /// </summary>
+    Task<Dictionary<string, int>> CountByStatusAsync(int currentUserId);
+
+    /// <summary>
     /// Перевести записку в произвольный статус — право администратора.
     /// Обходит процесс, поэтому требует обоснования и остаётся в журнале действий.
     /// </summary>
@@ -279,7 +285,9 @@ public class SzService : ISzService
                 EF.Functions.ILike(x.Document!.Title, pattern) ||
                 (x.Document!.RegNumber != null && EF.Functions.ILike(x.Document!.RegNumber!, pattern)) ||
                 (x.Document!.Author != null && EF.Functions.ILike(x.Document!.Author!.FullName, pattern)) ||
-                (x.Body != null && EF.Functions.ILike(x.Body, pattern)));
+                // Текст ищем по BodyText — тексту без разметки. Поиск по Body (HTML)
+                // находил по «strong», «span», «style» почти все записки.
+                (x.BodyText != null && EF.Functions.ILike(x.BodyText, pattern)));
         }
 
         // Ручной выбор (СЗ-7) сужает выборку до отмеченных строк — для массового
@@ -327,8 +335,9 @@ public class SzService : ISzService
         if (request.OverdueOnly)
         {
             var today = Today;
+            var closed = SzStatus.Closed;
             query = query.Where(x => x.DueDate != null && x.DueDate < today
-                                  && x.Document!.StatusCode != SzStatus.Executed);
+                                  && !closed.Contains(x.Document!.StatusCode));
         }
 
         // Расширенный поиск: только записки на бумажном носителе (оригинал живёт на бумаге).
@@ -1294,6 +1303,16 @@ public class SzService : ISzService
 
     public Task<int> InboxCountAsync(int currentUserId) => InboxQuery(currentUserId).CountAsync();
 
+    public async Task<Dictionary<string, int>> CountByStatusAsync(int currentUserId)
+    {
+        var visible = await ApplyVisibilityAsync(_db.SzDocuments.AsNoTracking(), currentUserId);
+
+        return await visible
+            .GroupBy(x => x.Document!.StatusCode)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Status, x => x.Count);
+    }
+
     /// <summary>
     /// Проставить IsFavorite строкам реестра — один лёгкий запрос по PK избранного,
     /// только по id текущей страницы.
@@ -1491,7 +1510,7 @@ public class SzService : ISzService
         sz.Rubrics.Clear();
         if (rubricIds.Count == 0) return;
 
-        var rubrics = await _db.Rubrics.Where(r => rubricIds.Contains(r.Id)).ToListAsync();
+        var rubrics = await _db.SzRubrics.Where(r => rubricIds.Contains(r.Id)).ToListAsync();
         foreach (var rubric in rubrics) sz.Rubrics.Add(rubric);
     }
 
@@ -1586,7 +1605,12 @@ public class SzService : ISzService
     private SzListItem Fill(SzListItem item, SzDocument x)
     {
         var today = Today;
-        var daysLeft = x.DueDate is DateOnly due ? due.DayNumber - today.DayNumber : (int?)null;
+        var status = x.Document?.StatusCode ?? SzStatus.Draft;
+
+        // У закрытой записки (исполнена, забракована, отозвана, в архиве) срок уже
+        // ничего не значит: ни «−12 дн», ни «через −12 дн» в реестре быть не должно.
+        var inWork = !SzStatus.Closed.Contains(status);
+        var daysLeft = inWork && x.DueDate is DateOnly due ? due.DayNumber - today.DayNumber : (int?)null;
 
         item.Id = x.Id;
         item.DocumentId = x.DocumentId;
@@ -1600,7 +1624,7 @@ public class SzService : ISzService
         item.RegisteredOn = x.RegisteredOn;
         item.DueDate = x.DueDate;
         item.DaysLeft = daysLeft;
-        item.IsOverdue = daysLeft < 0 && x.Document?.StatusCode != SzStatus.Executed;
+        item.IsOverdue = daysLeft < 0;
         item.IsPaperCarrier = x.Document?.IsPaperCarrier ?? false;
 
         return item;

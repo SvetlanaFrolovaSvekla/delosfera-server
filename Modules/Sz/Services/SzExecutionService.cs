@@ -14,8 +14,11 @@ public interface ISzExecutionService
     /// <summary>Резолюция руководителя: текст + поручения исполнителям.</summary>
     Task<List<SzAssignmentResponse>> ResolveAsync(int szId, SzResolutionRequest req, int actorUserId);
 
-    /// <summary>Поручения по записке.</summary>
-    Task<List<SzAssignmentResponse>> ListAsync(int szId);
+    /// <summary>
+    /// Поручения по записке — только тому, кому видна сама записка (<see cref="SzVisibility"/>).
+    /// Нет записки — KeyNotFoundException, нет доступа — UnauthorizedAccessException.
+    /// </summary>
+    Task<List<SzAssignmentResponse>> ListAsync(int szId, int currentUserId);
 
     /// <summary>Очередь «Мои поручения»: незакрытые поручения текущего пользователя.</summary>
     Task<List<SzAssignmentResponse>> MyAsync(int currentUserId, bool includeClosed = false);
@@ -117,6 +120,10 @@ public class SzExecutionService : ISzExecutionService
             if (string.IsNullOrWhiteSpace(a.Text))
                 throw new InvalidOperationException("У каждого поручения должен быть текст");
 
+            // Срок в прошлом выполнить нельзя: поручение было бы просрочено в момент выдачи.
+            if (a.DueDate is { } due && due < Today)
+                throw new InvalidOperationException("Срок поручения не может быть в прошлом");
+
             var assignment = new SzAssignment
             {
                 SzDocumentId = sz.Id,
@@ -160,10 +167,29 @@ public class SzExecutionService : ISzExecutionService
         await _audit.LogAsync("Sz", sz.Id, "Resolution", actorUserId,
             new { assignments = req.Assignments.Count });
 
-        return await ListAsync(szId);
+        return await LoadListAsync(szId);
     }
 
-    public async Task<List<SzAssignmentResponse>> ListAsync(int szId)
+    public async Task<List<SzAssignmentResponse>> ListAsync(int szId, int currentUserId)
+    {
+        if (!await _db.SzDocuments.AnyAsync(x => x.Id == szId))
+            throw new KeyNotFoundException("Служебная записка не найдена");
+
+        // Поручения раскрывают тему и номер записки, тексты поручений и отчёты
+        // исполнителей. Раньше ручка отдавала их любому вошедшему по одному {id} —
+        // правило видимости реестра здесь не действовало.
+        var canView = await SzVisibility.CanViewAsync(
+            _db, szId, currentUserId,
+            canSeeAll: _currentUser.HasPermission(PermissionCode.ViewAllSz),
+            canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
+        if (!canView)
+            throw new UnauthorizedAccessException("Нет доступа к этой служебной записке");
+
+        return await LoadListAsync(szId);
+    }
+
+    /// <summary>Поручения по записке без проверки доступа — для вызовов, где она уже пройдена.</summary>
+    private async Task<List<SzAssignmentResponse>> LoadListAsync(int szId)
     {
         var items = await BaseQuery().Where(a => a.SzDocumentId == szId)
             .OrderByDescending(a => a.IsPrimary).ThenBy(a => a.Id)
@@ -453,7 +479,8 @@ public class SzExecutionService : ISzExecutionService
             ClosedAt = a.ClosedAt,
             ReturnReason = a.ReturnReason,
             IsOverdue = live && a.DueDate != null && a.DueDate < Today,
-            DaysLeft = a.DueDate == null ? null : a.DueDate.Value.DayNumber - Today.DayNumber,
+            // Закрытому поручению срок не грозит — остатка дней у него нет.
+            DaysLeft = !live || a.DueDate == null ? null : a.DueDate.Value.DayNumber - Today.DayNumber,
             SzRegNumber = a.SzDocument?.Document?.RegNumber,
             SzTitle = a.SzDocument?.Document?.Title
         };

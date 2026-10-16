@@ -100,7 +100,7 @@ public class SzDocumentConfiguration : IEntityTypeConfiguration<SzDocument>
 
         // Рубрикатор — мультипапка: записка лежит в нескольких рубриках сразу.
         b.HasMany(x => x.Rubrics).WithMany()
-            .UsingEntity(j => j.ToTable("sz_document_rubric"));
+            .UsingEntity(j => j.ToTable("sz_document_sz_rubric"));
 
         b.HasIndex(x => x.KindId);
         b.HasIndex(x => x.DueDate);

@@ -24,7 +24,7 @@ namespace delosfera_server.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("RubricSzDocument", b =>
+            modelBuilder.Entity("SzDocumentSzRubric", b =>
                 {
                     b.Property<int>("RubricsId")
                         .HasColumnType("integer")
@@ -35,12 +35,12 @@ namespace delosfera_server.Migrations
                         .HasColumnName("sz_document_id");
 
                     b.HasKey("RubricsId", "SzDocumentId")
-                        .HasName("pk_sz_document_rubric");
+                        .HasName("pk_sz_document_sz_rubric");
 
                     b.HasIndex("SzDocumentId")
-                        .HasDatabaseName("ix_sz_document_rubric_sz_document_id");
+                        .HasDatabaseName("ix_sz_document_sz_rubric_sz_document_id");
 
-                    b.ToTable("sz_document_rubric", (string)null);
+                    b.ToTable("sz_document_sz_rubric", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.ActivityLog.Models.ActivityLogEntry", b =>
@@ -16039,21 +16039,21 @@ namespace delosfera_server.Migrations
                     b.ToTable("vnd_user_group", (string)null);
                 });
 
-            modelBuilder.Entity("RubricSzDocument", b =>
+            modelBuilder.Entity("SzDocumentSzRubric", b =>
                 {
-                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.Rubric", null)
+                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.SzRubric", null)
                         .WithMany()
                         .HasForeignKey("RubricsId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_sz_document_rubric_dictionary_rubric_rubrics_id");
+                        .HasConstraintName("fk_sz_document_sz_rubric_dictionary_sz_rubric_rubrics_id");
 
                     b.HasOne("delosfera_server.Modules.Sz.Models.SzDocument", null)
                         .WithMany()
                         .HasForeignKey("SzDocumentId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_sz_document_rubric_sz_document_sz_document_id");
+                        .HasConstraintName("fk_sz_document_sz_rubric_sz_document_sz_document_id");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.ActivityLog.Models.ActivityLogEntry", b =>

@@ -165,13 +165,14 @@ public class SzArchiveService : ISzArchiveService
         doc.ArchivedOn = null;
         doc.DestroyAfterYear = null;
 
-        // Возвращаем в то состояние, из которого записка ушла в дело: исполненную —
-        // в исполненные. Точный прежний статус не храним, поэтому берём «Исполнена»
-        // как единственное состояние, из которого документ мог попасть в дело штатно.
-        await _documents.ChangeStatusAsync(doc.Id, SzStatus.Executed, actorUserId);
+        // Возвращаем в то состояние, из которого записка ушла в дело. Раньше всегда
+        // ставилось «Исполнена» — и забракованная или отозванная записка после
+        // возврата из архива числилась исполненной, в реестре и в статистике.
+        var restored = await StatusBeforeArchiveAsync(doc.Id);
+        await _documents.ChangeStatusAsync(doc.Id, restored, actorUserId);
         await _db.SaveChangesAsync();
 
-        await _audit.LogAsync("Sz", sz.Id, "RestoredFromArchive", actorUserId);
+        await _audit.LogAsync("Sz", sz.Id, "RestoredFromArchive", actorUserId, new { status = restored });
 
         return await GetAsync(szId);
     }
@@ -210,6 +211,39 @@ public class SzArchiveService : ISzArchiveService
     }
 
     // --- вспомогательное ---
+
+    /// <summary>
+    /// Статус, из которого записка ушла в архив, — из журнала смены статусов
+    /// (последний переход «→ В архиве»). Сдаются в дело только исполненная,
+    /// забракованная и отозванная записки; если журнал ничего такого не знает
+    /// (записку перевели в архив вручную до появления журнала), — «Исполнена».
+    /// </summary>
+    private async Task<string> StatusBeforeArchiveAsync(int documentId)
+    {
+        var entries = await _documents.GetAuditAsync(documentId);
+
+        foreach (var e in entries.Where(e => e.Action == "StatusChanged" && e.PayloadJson is not null)
+                     .OrderByDescending(e => e.At).ThenByDescending(e => e.Id))
+        {
+            try
+            {
+                var root = System.Text.Json.JsonDocument.Parse(e.PayloadJson!).RootElement;
+                var to = root.TryGetProperty("to", out var t) ? t.GetString() : null;
+                if (to != SzStatus.Archived) continue;
+
+                var from = root.TryGetProperty("from", out var f) ? f.GetString() : null;
+                return from is SzStatus.Executed or SzStatus.Rejected or SzStatus.Withdrawn
+                    ? from
+                    : SzStatus.Executed;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Сломанная запись журнала не должна мешать возврату из архива.
+            }
+        }
+
+        return SzStatus.Executed;
+    }
 
     /// <summary>
     /// Срок хранения отсчитывается от года закрытия дела (делопроизводственная практика),

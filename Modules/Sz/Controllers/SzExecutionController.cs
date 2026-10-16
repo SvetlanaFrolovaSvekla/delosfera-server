@@ -33,7 +33,8 @@ public class SzExecutionController : ControllerBase
 
     /// <summary>Поручения по записке.</summary>
     [HttpGet("{id:int}/assignments")]
-    public async Task<IActionResult> List(int id) => Ok(await _execution.ListAsync(id));
+    public async Task<IActionResult> List(int id) =>
+        await Run(() => _execution.ListAsync(id, _currentUser.UserId));
 
     /// <summary>Резолюция руководителя: текст + поручения исполнителям.</summary>
     [HttpPost("{id:int}/resolution")]

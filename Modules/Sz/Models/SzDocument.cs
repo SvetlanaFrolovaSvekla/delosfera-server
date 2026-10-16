@@ -174,8 +174,12 @@ public class SzDocument : IAuditableEntity
     /// <summary>Сколько раз оригинал выдавали — записка может ходить по нескольким подписантам.</summary>
     public int OriginalHandoverCount { get; set; }
 
-    /// <summary>Рубрикатор — записка может лежать в нескольких рубриках (мультипапка).</summary>
-    public ICollection<Rubric> Rubrics { get; set; } = new List<Rubric>();
+    /// <summary>
+    /// Рубрикатор СЗ — записка может лежать в нескольких рубриках (мультипапка).
+    /// Свой справочник (<see cref="SzRubric"/>), а не рубрикатор ВНД: раньше связь шла
+    /// на рубрики ВНД, и справочник «Рубрики СЗ» ни на что не влиял.
+    /// </summary>
+    public ICollection<SzRubric> Rubrics { get; set; } = new List<SzRubric>();
 
     // --- поля кадровых СЗ ---
 

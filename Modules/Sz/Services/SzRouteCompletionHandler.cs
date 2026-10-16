@@ -127,9 +127,16 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
 
         var status = routeStatus switch
         {
-            // Подписано — записка на исполнении: подписывает тот, кому она адресована,
-            // и он же отписывает её исполнителям резолюцией. Отдельного решения между
-            // подписью и резолюцией нет — это одно действие одного человека.
+            // Подписано отдельным подписантом — записка идёт к адресату за решением по
+            // существу. Раньше она в этом случае уходила сразу на исполнение: адресат
+            // не получал ни задачи, ни уведомления, и записка, адресованная ему,
+            // исполнялась мимо него.
+            RouteInstanceStatus.Approved when наПодписи && NeedsSeparateAddresseeDecision(sz)
+                => SzStatus.OnAddresseeDecision,
+
+            // Подписал сам адресат — записка на исполнении: он же отписывает её
+            // исполнителям резолюцией. Отдельного решения между подписью и резолюцией
+            // нет — это одно действие одного человека.
             RouteInstanceStatus.Approved when наПодписи => SzStatus.OnExecution,
 
             // Подписанта нет (адресат не указан) — записка идёт к адресату за решением
@@ -162,6 +169,17 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
         else
             await CloseRevisionTaskAsync(sz.DocumentId);
     }
+
+    /// <summary>
+    /// Подписант назван отдельно и это не адресат: подпись поставил другой человек,
+    /// и решение по существу за адресатом ещё не вынесено. Когда подписанта не
+    /// назвали, подписывает сам адресат (см. выбор подписанта выше) — тогда
+    /// отдельного шага нет.
+    /// </summary>
+    private static bool NeedsSeparateAddresseeDecision(SzDocument sz) =>
+        sz.AddresseeUserId is { } addressee
+        && sz.SignerUserId is { } signer
+        && signer != addressee;
 
     /// <summary>
     /// Задача автору на устранение замечаний в общий список задач. Одного уведомления
@@ -385,8 +403,10 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
         {
             TitleRu = "Служебная записка ждёт вашего решения",
             TitleKg = "Кызматтык кат чечимиңизди күтүүдө",
+            TitleEn = "Memo awaits your decision",
             BodyRu = $"«{sz.Document!.Title}» согласована. Вынесите решение по существу.",
             BodyKg = $"«{sz.Document.Title}» макулдашылды. Маңызы боюнча чечим чыгарыңыз.",
+            BodyEn = $"“{sz.Document.Title}” has been approved. Please make a decision on the merits.",
             Category = NotificationCategory.Sz,
             EntityType = "Sz",
             EntityId = sz.Id,
