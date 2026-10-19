@@ -5,6 +5,7 @@ using delosfera_server.Modules.Documents.Services;
 using delosfera_server.Modules.Sz.DTO;
 using delosfera_server.Modules.Sz.Models;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Modules.Users.Services;
 using delosfera_server.Modules.Workflow.Models;
 
 namespace delosfera_server.Modules.Sz.Services;
@@ -77,15 +78,21 @@ public class SzExecutionService : ISzExecutionService
     /// записки». Прежде проверки не было — любой аутентифицированный мог выдать резолюцию,
     /// продлить срок или закрыть чужую записку на исполнении.
     /// </summary>
-    private void EnsureCanControl(SzDocument sz, int actorUserId)
+    private async Task EnsureCanControlAsync(SzDocument sz, int actorUserId)
     {
         if (_currentUser.HasPermission(PermissionCode.ViewAllSz)) return;
         if (sz.Document!.AuthorId == actorUserId) return;
-        if (sz.AddresseeUserId == actorUserId) return;
-        if (sz.ExecutionResolutionByUserId == actorUserId) return;
+        // Адресат и автор резолюции передают это право замещающему вместе с задачами
+        // (GEN-14): резолюция по записке — их задача, и в отпуске её выполняет замещающий.
+        if (await ActsForAsync(actorUserId, sz.AddresseeUserId)) return;
+        if (await ActsForAsync(actorUserId, sz.ExecutionResolutionByUserId)) return;
         throw new UnauthorizedAccessException(
-            "Распоряжаться исполнением записки может её адресат, автор или делопроизводство");
+            "Распоряжаться исполнением записки может её адресат (или его замещающий), автор или делопроизводство");
     }
+
+    /// <summary>Пользователь — это <paramref name="principalUserId"/> или его действующий замещающий (GEN-14).</summary>
+    private Task<bool> ActsForAsync(int actorUserId, int? principalUserId) =>
+        ActingFor.ActsForAsync(_db, actorUserId, principalUserId, Today);
 
     public async Task<List<SzAssignmentResponse>> ResolveAsync(
         int szId, SzResolutionRequest req, int actorUserId)
@@ -98,7 +105,7 @@ public class SzExecutionService : ISzExecutionService
             throw new InvalidOperationException("Ответственный исполнитель может быть только один");
 
         var sz = await LoadAsync(szId);
-        EnsureCanControl(sz, actorUserId);
+        await EnsureCanControlAsync(sz, actorUserId);
 
         // Поручения выдаются по согласованной записке: до этого исполнять нечего.
         if (sz.Document!.StatusCode != SzStatus.OnExecution)
@@ -200,7 +207,10 @@ public class SzExecutionService : ISzExecutionService
 
     public async Task<List<SzAssignmentResponse>> MyAsync(int currentUserId, bool includeClosed = false)
     {
-        var query = MyQuery(BaseQuery(), currentUserId, includeClosed);
+        // В «Моих поручениях» — и поручения тех, кого пользователь замещает (GEN-14):
+        // в общем реестре задач они у него уже есть, и списки должны совпадать.
+        var actors = await ActingFor.SelfAndAbsentAsync(_db, currentUserId, Today);
+        var query = MyQuery(BaseQuery(), actors, includeClosed);
 
         var items = await query
             .OrderBy(a => a.DueDate ?? DateOnly.MaxValue).ThenBy(a => a.Id)
@@ -209,13 +219,16 @@ public class SzExecutionService : ISzExecutionService
         return items.Select(Map).ToList();
     }
 
-    public Task<int> CountMyAsync(int currentUserId) =>
-        MyQuery(_db.SzAssignments.AsNoTracking(), currentUserId, includeClosed: false).CountAsync();
+    public async Task<int> CountMyAsync(int currentUserId)
+    {
+        var actors = await ActingFor.SelfAndAbsentAsync(_db, currentUserId, Today);
+        return await MyQuery(_db.SzAssignments.AsNoTracking(), actors, includeClosed: false).CountAsync();
+    }
 
     /// <summary>«Мои поручения» — общий фильтр для списка и счётчика.</summary>
-    private static IQueryable<SzAssignment> MyQuery(IQueryable<SzAssignment> source, int currentUserId, bool includeClosed)
+    private static IQueryable<SzAssignment> MyQuery(IQueryable<SzAssignment> source, List<int> assigneeIds, bool includeClosed)
     {
-        var query = source.Where(a => a.AssigneeUserId == currentUserId);
+        var query = source.Where(a => assigneeIds.Contains(a.AssigneeUserId));
         if (!includeClosed)
             query = query.Where(a => a.State == SzAssignmentState.Open || a.State == SzAssignmentState.Reported);
         return query;
@@ -228,8 +241,8 @@ public class SzExecutionService : ISzExecutionService
 
         var a = await LoadAssignmentAsync(assignmentId);
 
-        if (a.AssigneeUserId != actorUserId)
-            throw new InvalidOperationException("Отчитаться по поручению может только его исполнитель");
+        if (!await ActsForAsync(actorUserId, a.AssigneeUserId))
+            throw new InvalidOperationException("Отчитаться по поручению может только его исполнитель или его замещающий");
         if (a.State is not (SzAssignmentState.Open or SzAssignmentState.Reported))
             throw new InvalidOperationException("Поручение уже закрыто");
 
@@ -244,7 +257,8 @@ public class SzExecutionService : ISzExecutionService
         await CloseTaskAsync(a);
 
         await _db.SaveChangesAsync();
-        await _audit.LogAsync("SzAssignment", a.Id, "Reported", actorUserId);
+        await _audit.LogAsync("SzAssignment", a.Id, "Reported", actorUserId,
+            a.AssigneeUserId != actorUserId ? new { onBehalfOf = a.AssigneeUserId } : null);
 
         return Map(await LoadAssignmentAsync(assignmentId));
     }
@@ -252,7 +266,7 @@ public class SzExecutionService : ISzExecutionService
     public async Task<SzAssignmentResponse> AcceptAsync(int assignmentId, int actorUserId)
     {
         var a = await LoadAssignmentAsync(assignmentId);
-        EnsureController(a, actorUserId);
+        await EnsureControllerAsync(a, actorUserId);
 
         if (a.State != SzAssignmentState.Reported)
             throw new InvalidOperationException("Принять можно только сданное поручение");
@@ -275,7 +289,7 @@ public class SzExecutionService : ISzExecutionService
             throw new InvalidOperationException("Укажите причину возврата");
 
         var a = await LoadAssignmentAsync(assignmentId);
-        EnsureController(a, actorUserId);
+        await EnsureControllerAsync(a, actorUserId);
 
         if (a.State != SzAssignmentState.Reported)
             throw new InvalidOperationException("Вернуть можно только сданное поручение");
@@ -295,7 +309,7 @@ public class SzExecutionService : ISzExecutionService
     public async Task<SzAssignmentResponse> CancelAsync(int assignmentId, int actorUserId)
     {
         var a = await LoadAssignmentAsync(assignmentId);
-        EnsureController(a, actorUserId);
+        await EnsureControllerAsync(a, actorUserId);
 
         if (a.State == SzAssignmentState.Done)
             throw new InvalidOperationException("Исполненное поручение снять нельзя");
@@ -322,7 +336,7 @@ public class SzExecutionService : ISzExecutionService
             throw new InvalidOperationException("Укажите обоснование продления срока");
 
         var sz = await LoadAsync(szId);
-        EnsureCanControl(sz, actorUserId);
+        await EnsureCanControlAsync(sz, actorUserId);
 
         if (sz.Document!.StatusCode != SzStatus.OnExecution)
             throw new InvalidOperationException("Срок продлевается у записки на исполнении");
@@ -357,7 +371,7 @@ public class SzExecutionService : ISzExecutionService
             throw new InvalidOperationException("Укажите итог исполнения");
 
         var sz = await LoadAsync(szId);
-        EnsureCanControl(sz, actorUserId);
+        await EnsureCanControlAsync(sz, actorUserId);
 
         // Закрывается записка на исполнении, а также вынесенная на коллегиальный орган:
         // после рассмотрения органом её тоже нужно довести до «Исполнена» и в архив,
@@ -406,13 +420,16 @@ public class SzExecutionService : ISzExecutionService
         await _audit.LogAsync("Sz", sz.Id, "Executed", actorUserId, new { summary });
     }
 
-    /// <summary>Принимает и снимает поручения автор резолюции или автор записки.</summary>
-    private static void EnsureController(SzAssignment a, int actorUserId)
+    /// <summary>
+    /// Принимает и снимает поручения автор резолюции или автор записки. Автор резолюции
+    /// в отпуске передаёт это замещающему (GEN-14): иначе отчёты висели бы до его выхода.
+    /// </summary>
+    private async Task EnsureControllerAsync(SzAssignment a, int actorUserId)
     {
-        var allowed = a.CreatedByUserId == actorUserId
-                      || a.SzDocument?.Document?.AuthorId == actorUserId;
+        var allowed = a.SzDocument?.Document?.AuthorId == actorUserId
+                      || await ActsForAsync(actorUserId, a.CreatedByUserId);
         if (!allowed)
-            throw new InvalidOperationException("Принимать отчёты может автор резолюции или автор записки");
+            throw new InvalidOperationException("Принимать отчёты может автор резолюции (или его замещающий) или автор записки");
     }
 
     private IQueryable<SzAssignment> BaseQuery() => _db.SzAssignments.AsNoTracking()

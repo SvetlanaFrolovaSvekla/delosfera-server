@@ -5,6 +5,11 @@ namespace delosfera_server.Modules.Substitutions.DTO;
 /// <summary>Член комиссии приёма-передачи в запросе/ответе.</summary>
 public class ApprovalStepDto
 {
+    public int Id { get; set; }
+
+    /// <summary>Круг согласования (1 — первая отправка, 2 — после отклонения…). Действующий — последний.</summary>
+    public int Round { get; set; } = 1;
+
     public int Order { get; set; }
     public string RoleLabel { get; set; } = "";
     public int UserId { get; set; }
@@ -12,6 +17,9 @@ public class ApprovalStepDto
     public string State { get; set; } = "";
     public string? Comment { get; set; }
     public DateTime? DecidedAt { get; set; }
+
+    /// <summary>Кто фактически вынес решение — отличается от UserId, если решал замещающий (GEN-14).</summary>
+    public int? DecidedByUserId { get; set; }
 }
 
 public class CommissionMemberDto
@@ -123,8 +131,17 @@ public class SubstitutionDetails : SubstitutionListItem
     /// <summary>Предупреждение: паспорт истекает раньше окончания замещения (КСЗ-20).</summary>
     public bool PassportExpiresBeforeEnd { get; set; }
 
-    /// <summary>Маршрут согласования: директор филиала → Опер. управление → УЧР.</summary>
+    /// <summary>
+    /// Маршрут согласования: директор филиала → Опер. управление → УЧР — все круги по
+    /// порядку (Round, Order); действующий маршрут — последний круг.
+    /// </summary>
     public List<ApprovalStepDto> Approvals { get; set; } = [];
+
+    /// <summary>За кого текущий пользователь действует по замещению (GEN-14) — его этапы он тоже согласует.</summary>
+    public List<int> ActingForUserIds { get; set; } = [];
+
+    /// <summary>Как фактически решавших зовут: id → ФИО (для «согласовал Б за А»).</summary>
+    public Dictionary<int, string> DeciderNames { get; set; } = new();
 }
 
 public class SubstitutionPage

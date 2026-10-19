@@ -5,6 +5,7 @@ using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Substitutions.Models;
+using ActingFor = delosfera_server.Modules.Users.Services.ActingFor;
 
 namespace delosfera_server.Modules.Substitutions.Services;
 
@@ -84,6 +85,9 @@ public class SubstitutionReminderNotifier : ISubstitutionReminderNotifier
 
             // Текущий согласующий — главный адресат; инициатор в копии, чтобы видел, что заявка стоит.
             var recipients = new HashSet<int> { r.Active.UserId, r.InitiatorUserId };
+            // И действующему замещающему согласующего (GEN-14): этап может решить он.
+            foreach (var substitute in await ActingFor.SubstituteIdsAsync(_db, r.Active.UserId, today))
+                recipients.Add(substitute);
 
             await _notifications.CreateAsync(new CreateNotificationRequest
             {

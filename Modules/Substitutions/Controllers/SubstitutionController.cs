@@ -37,16 +37,45 @@ public class SubstitutionController : ControllerBase
         [FromQuery] string? query, [FromQuery] string? status, [FromQuery] bool mineOnly = false,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
     {
-        // Кто не ведёт кадровые СЗ, видит только свои заявки.
-        if (!_currentUser.HasPermission(PermissionCode.ViewAllSz)) mineOnly = true;
-        return Ok(await _service.SearchAsync(query, status, mineOnly, _currentUser.UserId, page, pageSize, ct));
+        // Кто не ведёт кадровые СЗ, видит свои заявки и те, где он согласующий:
+        // иначе директор филиала не находил заявку, пришедшую ему на согласование.
+        var participantOnly = !CanSeeAll;
+        return Ok(await _service.SearchAsync(query, status, mineOnly, _currentUser.UserId, page, pageSize,
+            participantOnly, ct));
+    }
+
+    /// <summary>Полный реестр заявок: УЧР (ведение кадровых СЗ) и администратор системы.</summary>
+    private bool CanSeeAll =>
+        _currentUser.HasPermission(PermissionCode.ViewAllSz)
+        || _currentUser.HasPermission(PermissionCode.ManageSystemSettings);
+
+    /// <summary>
+    /// Закрыть чужую заявку: в карточке паспорт, ИНН и адреса замещающего, а печатные
+    /// формы — приказ и договор о материальной ответственности. Раньше и то и другое
+    /// отдавалось любому вошедшему по одному {id}. null — можно.
+    /// </summary>
+    private async Task<IActionResult?> DenyIfHiddenAsync(int id, CancellationToken ct)
+    {
+        if (await _service.CanViewAsync(id, _currentUser.UserId, CanSeeAll, ct)) return null;
+
+        // Несуществующую и чужую заявку не различаем по коду ответа — иначе перебором
+        // id можно узнать, какие заявки есть. Держателю полного реестра несуществующая
+        // заявка по-прежнему отвечает 404 из самого метода.
+        return StatusCode(403, new { message = "Нет доступа к этой заявке на замещение" });
     }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> Get(int id, CancellationToken ct)
     {
+        if (await DenyIfHiddenAsync(id, ct) is { } denied) return denied;
+
         var d = await _service.GetAsync(id, ct);
-        return d is null ? NotFound(new { message = "Заявка на замещение не найдена" }) : Ok(d);
+        if (d is null) return NotFound(new { message = "Заявка на замещение не найдена" });
+
+        // Кого пользователь замещает: по этому списку карточка показывает ему кнопки
+        // согласования этапа отсутствующего (GEN-14).
+        d.ActingForUserIds = await _service.ActingForUserIdsAsync(_currentUser.UserId, ct);
+        return Ok(d);
     }
 
     [HttpPost]
@@ -103,6 +132,23 @@ public class SubstitutionController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
+    public record ReassignRequest(int UserId, string? Reason);
+
+    /// <summary>
+    /// Переназначить непройденный этап действующего маршрута другому сотруднику — когда
+    /// согласующий заблокирован, уволен или надолго отсутствует без замещения. УЧР и администратор.
+    /// </summary>
+    [HttpPost("{id:int}/approvals/{approvalId:int}/reassign")]
+    public async Task<IActionResult> Reassign(int id, int approvalId, [FromBody] ReassignRequest req, CancellationToken ct)
+    {
+        if (!CanSeeAll)
+            return StatusCode(403, new { message = "Переназначать этапы могут УЧР и администратор" });
+
+        try { return Ok(await _service.ReassignStepAsync(id, approvalId, req.UserId, req.Reason ?? "", _currentUser.UserId, ct)); }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
     [HttpPost("{id:int}/withdraw")]
     public async Task<IActionResult> Withdraw(int id, CancellationToken ct)
     {
@@ -115,6 +161,8 @@ public class SubstitutionController : ControllerBase
     [HttpGet("{id:int}/print/{form}")]
     public async Task<IActionResult> Print(int id, string form, CancellationToken ct)
     {
+        if (await DenyIfHiddenAsync(id, ct) is { } denied) return denied;
+
         try
         {
             var (bytes, name) = await _service.PrintAsync(id, form, ct);

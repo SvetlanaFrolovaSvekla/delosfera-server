@@ -5,6 +5,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
 using delosfera_server.Modules.Users.Models;
+using ActingFor = delosfera_server.Modules.Users.Services.ActingFor;
 
 namespace delosfera_server.Modules.Documents.VND.Services;
 
@@ -43,10 +44,21 @@ public class TasksService : ITasksService
     /// а сама задача в "Мои задачи" не появлялась.</summary>
     public async Task<List<VndTaskResponse>> GetCoordinationTasksAsync(int userId)
     {
+        // Этапы тех, кого пользователь сейчас замещает (GEN-14), — тоже его задачи: решение
+        // по ним он вправе вынести (VndApprovalService.DecideAsync), и в общем реестре задач
+        // они у него уже есть. Без этого вкладка «ВНД» и счётчик с реестром расходились.
+        var actingFor = await ActingFor.AbsentUserIdsAsync(_db, userId, _clock.Today);
+        var approvers = actingFor.Append(userId).Distinct().ToList();
+        var absentNames = actingFor.Count == 0
+            ? new Dictionary<int, string>()
+            : await _db.Users.AsNoTracking()
+                .Where(u => actingFor.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
         var stages = await _db.Set<VndApprovalStage>()
             .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Vnd)
             .Include(s => s.ApprovalProcess).ThenInclude(p => p!.Redaction)
-            .Where(s => s.ApproverUserId == userId)
+            .Where(s => approvers.Contains(s.ApproverUserId))
             // Убранный главным редактором этап (см. VndApprovalStage.IsRemovedByEditor) не
             // должен висеть у согласующего задачей - задача с него уже снята.
             .Where(s => !s.IsRemovedByEditor)
@@ -90,6 +102,9 @@ public class TasksService : ITasksService
                     _ => null
                 },
                 InitiatorName = initiators.GetValueOrDefault(process.InitiatorUserId, "—"),
+                OnBehalfOf = s.ApproverUserId != userId
+                    ? absentNames.GetValueOrDefault(s.ApproverUserId, "—")
+                    : null,
                 DeadlineMinutes = phase switch
                 {
                     "primary" => process.PrimaryDeadlineMinutes,
@@ -841,8 +856,10 @@ public class TasksService : ITasksService
         // доходили до ответа: контроллер вернул бы 500, а useVndTaskCounts на фронте по любой
         // ошибке молча подставляет нули везде (см. её комментарий). Считаем каждый счётчик
         // независимо — отказ одного не должен обнулять остальные, которые ни при чём.
+        var coordinationApprovers = (await ActingFor.AbsentUserIdsAsync(_db, userId, _clock.Today))
+            .Append(userId).Distinct().ToList();
         var coordinationCount = await CountSafeAsync("coordination", () => _db.Set<VndApprovalStage>()
-            .Where(s => s.ApproverUserId == userId)
+            .Where(s => coordinationApprovers.Contains(s.ApproverUserId))
             // См. тот же фильтр в GetCoordinationTasksAsync выше - убранный главным редактором
             // этап не считается ждущим решения.
             .Where(s => !s.IsRemovedByEditor)

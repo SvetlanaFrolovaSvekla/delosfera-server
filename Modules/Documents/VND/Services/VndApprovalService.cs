@@ -14,6 +14,8 @@ using delosfera_server.Modules.Notifications.DTO.Request;
 using delosfera_server.Modules.Notifications.Models;
 using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Users.Models;
+using ActingFor = delosfera_server.Modules.Users.Services.ActingFor;
+using WorkingCalendar = delosfera_server.Common.Services.WorkingCalendar;
 using ActivityText = delosfera_server.Modules.ActivityLog.Models.ActivityText;
 
 namespace delosfera_server.Modules.Documents.VND.Services;
@@ -389,7 +391,14 @@ public class VndApprovalService : IVndApprovalService
                           .FirstOrDefaultAsync()
                       ?? throw new KeyNotFoundException("Для последней редакции согласование не запускалось");
 
-        return await LoadResponseAsync(process.Id);
+        var response = await LoadResponseAsync(process.Id);
+
+        // Кого текущий пользователь замещает (GEN-14): по этому списку вкладка «Согласование»
+        // показывает замещающему панель резолюции по этапу отсутствующего.
+        response.ActingForUserIds = await ActingFor.AbsentUserIdsAsync(
+            _db, _currentUser.UserId, WorkingCalendar.Today);
+
+        return response;
     }
 
     /// <summary>История ВСЕХ процессов согласования этого ВНД — по всем редакциям и циклам
@@ -417,8 +426,12 @@ public class VndApprovalService : IVndApprovalService
         var stage = process.Stages.FirstOrDefault(x => x.Id == stageId)
                     ?? throw new KeyNotFoundException($"Этап согласования с id={stageId} не найден");
 
-        if (stage.ApproverUserId != currentUserId)
-            throw new UnauthorizedAccessException("Вы не назначены согласующим на этом этапе");
+        // Решение выносит назначенный согласующий либо тот, кто его сейчас замещает (GEN-14):
+        // этап отсутствующего уже стоит в реестре задач замещающего, и без этого он видел
+        // задачу, но решение у него не принималось. Подпись ЭЦП при этом ставит сам
+        // замещающий своей ЭЦП (UserId в журнале подписей — его), а за кого — видно по этапу.
+        if (!await ActingFor.ActsForAsync(_db, currentUserId, stage.ApproverUserId, WorkingCalendar.Today))
+            throw new UnauthorizedAccessException("Вы не назначены согласующим на этом этапе и не замещаете его");
 
         if (stage.IsRemovedByEditor)
             throw new InvalidOperationException(
@@ -641,6 +654,15 @@ public class VndApprovalService : IVndApprovalService
         // (общее для первичного, повторного и финального этапов - decision уже посчитан выше)
         var approver = await _db.Users.FindAsync(currentUserId);
         var approverName = approver?.FullName ?? "—";
+        // Решение за отсутствующего (GEN-14): в ленте и уведомлении — кто и за кого.
+        if (stage.ApproverUserId != currentUserId)
+        {
+            var absent = await _db.Users.AsNoTracking()
+                .Where(u => u.Id == stage.ApproverUserId)
+                .Select(u => u.FullName)
+                .FirstOrDefaultAsync();
+            approverName = $"{approverName} (за {absent ?? "—"})";
+        }
         var redactionCode = process.Redaction!.Code;
         var vndTitle = process.Vnd!.TitleRu;
 

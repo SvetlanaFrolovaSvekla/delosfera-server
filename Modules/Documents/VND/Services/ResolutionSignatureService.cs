@@ -13,6 +13,8 @@ using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Signing.Models.InfocomEcp;
 using delosfera_server.Modules.Signing.Services;
 using delosfera_server.Modules.Users.Models;
+using ActingFor = delosfera_server.Modules.Users.Services.ActingFor;
+using WorkingCalendar = delosfera_server.Common.Services.WorkingCalendar;
 
 namespace delosfera_server.Modules.Documents.VND.Services;
 
@@ -194,8 +196,10 @@ public class ResolutionSignatureService : IResolutionSignatureService
 
         // Хэш отдаём только тому, кто реально может подписать эту резолюцию: он зависит от
         // содержимого документа, посторонним он ни к чему.
-        if (stage.ApproverUserId != currentUserId)
-            throw new UnauthorizedAccessException("Вы не назначены согласующим на этом этапе");
+        // Хэш получает и замещающий согласующего (GEN-14): решение за отсутствующего он
+        // подписывает своей ЭЦП (см. VndApprovalService.DecideAsync).
+        if (!await ActingFor.ActsForAsync(_db, currentUserId, stage.ApproverUserId, WorkingCalendar.Today))
+            throw new UnauthorizedAccessException("Вы не назначены согласующим на этом этапе и не замещаете его");
         if (stage.IsRemovedByEditor)
             throw new InvalidOperationException(
                 "Вы исключены из маршрута согласования главным редактором — решение принять нельзя");
@@ -861,8 +865,9 @@ public class ResolutionSignatureService : IResolutionSignatureService
             || _currentUser.HasPermission(PermissionCode.ViewOtherUsersDrafts))
             return;
 
+        var actors = await ActingFor.SelfAndAbsentAsync(_db, currentUserId, WorkingCalendar.Today);
         var isParticipant = await _db.VndApprovalStages
-            .AnyAsync(s => s.ApprovalProcess!.VndId == vndId && s.ApproverUserId == currentUserId, ct);
+            .AnyAsync(s => s.ApprovalProcess!.VndId == vndId && actors.Contains(s.ApproverUserId), ct);
         if (!isParticipant)
             throw new UnauthorizedAccessException("Нет доступа к документу");
     }

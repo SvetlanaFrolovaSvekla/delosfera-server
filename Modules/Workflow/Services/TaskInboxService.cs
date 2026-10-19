@@ -3,6 +3,7 @@ using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.VND.Models;
+using delosfera_server.Modules.Substitutions.Models;
 using delosfera_server.Modules.Sz.Models;
 using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Users.Services;
@@ -156,6 +157,33 @@ public class TaskInboxService : ITaskInboxService
                  && (s.FinalHoldDecision == null || s.FinalHoldDecision == ApprovalStageDecision.Pending)))
             .ToListAsync();
 
+        // Согласование заявок на замещение (КСЗ-В9): у них свой маршрут этапов, не движок
+        // задач, и в реестр они не попадали вовсе — согласующий узнавал о заявке только из
+        // напоминания о просрочке. Этапы тех, кого пользователь замещает (GEN-14), — тоже
+        // его: согласовать за отсутствующего он вправе.
+        var substitutionRows = await _db.SubstitutionApprovals.AsNoTracking()
+            .Where(a => assignees.Contains(a.UserId)
+                        && a.State == SubstitutionApprovalState.Active
+                        && a.Request!.Status == SubstitutionStatus.OnApproval)
+            .Select(a => new
+            {
+                a.Id,
+                a.RequestId,
+                a.RoleLabel,
+                a.UserId,
+                a.ActivatedAt,
+                a.Request!.RegNumber,
+                a.Request.Subject,
+            })
+            .ToListAsync();
+
+        // Норматив этапа (ЗМ-SLA) — тот же, по которому шлются напоминания.
+        var substitutionSlaDays = substitutionRows.Count == 0
+            ? 0
+            : await _db.SubstitutionSlaSettings.AsNoTracking()
+                  .Select(x => (int?)x.ApprovalStepSlaDays)
+                  .FirstOrDefaultAsync() ?? DefaultSubstitutionSlaDays;
+
         // Регистрация СЗ: очередь Сектора делопроизводства, а не задача движка — записка
         // ждёт любого, у кого есть право регистрировать, а не конкретного человека. Без
         // этого записка «на регистрации» была видна только в реестре, и делопроизводство
@@ -298,6 +326,32 @@ public class TaskInboxService : ITaskInboxService
             };
         });
 
+        var substitutionTasks = substitutionRows.Select(a =>
+        {
+            var due = a.ActivatedAt is { } activated
+                ? SubstitutionStepDueUtc(activated, substitutionSlaDays)
+                : (DateTime?)null;
+            return new InboxTaskDto
+            {
+                TaskId = a.Id,
+                ParticipantId = null,
+                // Карточка заявки открывается по её id: /substitutions/{id} (см. taskLink).
+                DocumentId = 0,
+                EntityId = a.RequestId,
+                RegNumber = a.RegNumber,
+                DocumentTitle = a.Subject,
+                DocumentType = SubstitutionDocumentType,
+                DocumentTypeTitle = "Заявка на замещение",
+                TaskType = $"Согласование: {a.RoleLabel}",
+                StepOrder = null,
+                StepKind = null,
+                DueAt = due,
+                IsOverdue = due is { } d && d < now,
+                OnBehalfOf = a.UserId != userId && names.TryGetValue(a.UserId, out var absentName) ? absentName : null,
+                CreatedAt = a.ActivatedAt ?? now,
+            };
+        });
+
         var registrationTasks = registrationRows.Select(r => new InboxTaskDto
         {
             TaskId = r.SzId,
@@ -382,6 +436,7 @@ public class TaskInboxService : ITaskInboxService
             })
             .Concat(ackTasks)
             .Concat(vndTasks)
+            .Concat(substitutionTasks)
             .Concat(registrationTasks)
             .Concat(resolutionTasks)
             .Concat(ownTasks)
@@ -404,6 +459,30 @@ public class TaskInboxService : ITaskInboxService
             Delegated = work.Count(t => t.OnBehalfOf is not null),
             Own = tasks.Count - work.Count,
         };
+    }
+
+    /// <summary>Контур заявок на замещение в реестре задач — по нему клиент строит ссылку.</summary>
+    public const string SubstitutionDocumentType = "Substitution";
+
+    /// <summary>Норматив этапа заявки на замещение, пока администратор его не задал (как в SubstitutionService).</summary>
+    private const int DefaultSubstitutionSlaDays = 3;
+
+    /// <summary>
+    /// Срок этапа заявки на замещение: конец N-го рабочего дня (пн–пт) после открытия
+    /// этапа по времени банка — с того же дня напоминание считает этап просроченным
+    /// (SubstitutionReminderNotifier). Праздники не учитываются (COND-1).
+    /// </summary>
+    private DateTime SubstitutionStepDueUtc(DateTime activatedUtc, int slaDays)
+    {
+        var day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(activatedUtc, _clock.Zone));
+        for (var left = slaDays; left > 0;)
+        {
+            day = day.AddDays(1);
+            if (day.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday)) left--;
+        }
+
+        var endOfDayLocal = DateTime.SpecifyKind(day.ToDateTime(new TimeOnly(23, 59, 59)), DateTimeKind.Unspecified);
+        return TimeZoneInfo.ConvertTimeToUtc(endOfDayLocal, _clock.Zone);
     }
 
     /// <summary>

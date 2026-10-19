@@ -84,7 +84,14 @@ public class SzController : ControllerBase
         if (await DenyIfHiddenAsync(id) is { } denied) return denied;
 
         var sz = await _sz.GetAsync(id);
-        return sz is null ? NotFound(new { message = "Служебная записка не найдена" }) : Ok(sz);
+        if (sz is null) return NotFound(new { message = "Служебная записка не найдена" });
+
+        // Кого пользователь замещает: по этому списку карточка показывает ему действия
+        // за отсутствующего (GEN-14).
+        sz.ActingForUserIds = await delosfera_server.Modules.Users.Services.ActingFor.AbsentUserIdsAsync(
+            _db, _currentUser.UserId, delosfera_server.Common.Services.WorkingCalendar.Today);
+
+        return Ok(sz);
     }
 
     /// <summary>Журнал действий по записке (аудит единой карточки документа).</summary>

@@ -4,20 +4,48 @@ using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
+using delosfera_server.Modules.Notifications.DTO.Request;
+using delosfera_server.Modules.Notifications.Models;
+using delosfera_server.Modules.Notifications.Services;
 using delosfera_server.Modules.Substitutions.DTO;
 using delosfera_server.Modules.Substitutions.Models;
+using ActingFor = delosfera_server.Modules.Users.Services.ActingFor;
 
 namespace delosfera_server.Modules.Substitutions.Services;
 
 public interface ISubstitutionService
 {
-    Task<SubstitutionPage> SearchAsync(string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize, CancellationToken ct = default);
+    /// <summary>
+    /// Реестр заявок. mineOnly — только где пользователь инициатор; participantOnly —
+    /// где он инициатор или согласующий одного из этапов (так реестр видят все, у кого
+    /// нет права на полный реестр).
+    /// </summary>
+    Task<SubstitutionPage> SearchAsync(string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize,
+        bool participantOnly = false, CancellationToken ct = default);
     Task<SubstitutionDetails?> GetAsync(int id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Видна ли заявка пользователю: инициатору, согласующим её маршрута и тем, у кого
+    /// есть право на полный реестр (<paramref name="isPrivileged"/>). Карточка содержит
+    /// паспорт, ИНН и адреса замещающего — открывать её по одному {id} кому угодно нельзя.
+    /// </summary>
+    Task<bool> CanViewAsync(int id, int currentUserId, bool isPrivileged, CancellationToken ct = default);
     Task<SubstitutionDetails> CreateAsync(SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default);
     Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, bool isHrEditor = false, CancellationToken ct = default);
     Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
     Task<SubstitutionDetails> ApproveAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
     Task<SubstitutionDetails> RejectAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
+
+    /// <summary>
+    /// Переназначить этап маршрута текущего круга другому сотруднику: согласующий уволен,
+    /// заблокирован или надолго отсутствует без оформленного замещения. Ведут УЧР и
+    /// администратор (право проверяет контроллер). Обоснование обязательно и пишется в журнал.
+    /// </summary>
+    Task<SubstitutionDetails> ReassignStepAsync(int id, int approvalId, int newUserId, string reason, int actorUserId,
+        CancellationToken ct = default);
+
+    /// <summary>За кого пользователь сейчас действует по замещению (GEN-14) — для карточки.</summary>
+    Task<List<int>> ActingForUserIdsAsync(int userId, CancellationToken ct = default);
     Task<SubstitutionDetails> ExecuteAsync(int id, int actorUserId, CancellationToken ct = default);
     Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
     Task DeleteAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
@@ -43,15 +71,20 @@ public class SubstitutionService : ISubstitutionService
     private readonly INumeratorService _numerator;
     private readonly IBankClock _clock;
     private readonly ISubstitutionPrintService _print;
+    private readonly INotificationService? _notifications;
+    private readonly ILogger<SubstitutionService>? _logger;
 
     public SubstitutionService(DelosferaDbContext db, IAuditService audit, INumeratorService numerator,
-        IBankClock clock, ISubstitutionPrintService print)
+        IBankClock clock, ISubstitutionPrintService print,
+        INotificationService? notifications = null, ILogger<SubstitutionService>? logger = null)
     {
         _db = db;
         _audit = audit;
         _numerator = numerator;
         _clock = clock;
         _print = print;
+        _notifications = notifications;
+        _logger = logger;
     }
 
     public async Task<(byte[] Bytes, string FileName)> PrintAsync(int id, string form, CancellationToken ct = default)
@@ -80,12 +113,22 @@ public class SubstitutionService : ISubstitutionService
             .Include(x => x.Approvals).ThenInclude(a => a.User);
 
     public async Task<SubstitutionPage> SearchAsync(
-        string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize, CancellationToken ct = default)
+        string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize,
+        bool participantOnly = false, CancellationToken ct = default)
     {
         var q = _db.SubstitutionRequests.AsNoTracking().Include(x => x.InitiatorUser).AsQueryable();
 
         if (mineOnly)
             q = q.Where(x => x.InitiatorUserId == currentUserId);
+        else if (participantOnly)
+        {
+            // Согласующий (сам или по замещению) должен находить заявку, которая ждёт или
+            // ждала его решения. Раньше без права на полный реестр показывались только свои
+            // заявки, и директор филиала не видел заявку, пришедшую к нему на согласование.
+            var approvers = await ActingFor.SelfAndAbsentAsync(_db, currentUserId, _clock.Today);
+            q = q.Where(x => x.InitiatorUserId == currentUserId
+                             || x.Approvals.Any(a => approvers.Contains(a.UserId)));
+        }
 
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<SubstitutionStatus>(status, out var st))
             q = q.Where(x => x.Status == st);
@@ -116,10 +159,35 @@ public class SubstitutionService : ISubstitutionService
         };
     }
 
+    public async Task<bool> CanViewAsync(int id, int currentUserId, bool isPrivileged, CancellationToken ct = default)
+    {
+        if (isPrivileged) return true;
+        // Согласующий этапа — сам или по замещению (GEN-14): замещающий согласует за
+        // отсутствующего, значит и карточку должен открыть.
+        var approvers = await ActingFor.SelfAndAbsentAsync(_db, currentUserId, _clock.Today);
+        return await _db.SubstitutionRequests.AsNoTracking().AnyAsync(x => x.Id == id
+            && (x.InitiatorUserId == currentUserId || x.Approvals.Any(a => approvers.Contains(a.UserId))), ct);
+    }
+
     public async Task<SubstitutionDetails?> GetAsync(int id, CancellationToken ct = default)
     {
         var x = await BaseQuery().FirstOrDefaultAsync(r => r.Id == id, ct);
-        return x is null ? null : ToDetails(x);
+        if (x is null) return null;
+
+        var details = ToDetails(x);
+
+        // Кто фактически решал за назначенного (замещающий, GEN-14) — показываем в маршруте.
+        var deciderIds = x.Approvals
+            .Where(a => a.DecidedByUserId is int d && d != a.UserId)
+            .Select(a => a.DecidedByUserId!.Value)
+            .Distinct()
+            .ToList();
+        if (deciderIds.Count > 0)
+            details.DeciderNames = await _db.Users.AsNoTracking()
+                .Where(u => deciderIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.FullName, ct);
+
+        return details;
     }
 
     public async Task<SubstitutionDetails> CreateAsync(SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default)
@@ -164,7 +232,8 @@ public class SubstitutionService : ISubstitutionService
 
         // УЧР правит заявку после согласования Начальником операционного управления —
         // то есть когда этап «Операционное управление» уже пройден (Approved).
-        var opsApproved = entity.Approvals.Any(a =>
+        var currentRound = CurrentRound(entity.Approvals);
+        var opsApproved = entity.Approvals.Any(a => a.Round == currentRound &&
             a.RoleLabel == "Операционное управление" && a.State == SubstitutionApprovalState.Approved);
         var editableByHr = isHrEditor && opsApproved
             && entity.Status is SubstitutionStatus.OnApproval or SubstitutionStatus.OnExecution;
@@ -230,17 +299,24 @@ public class SubstitutionService : ISubstitutionService
         if (string.IsNullOrWhiteSpace(entity.SubstituteName) || entity.StartsOn is null || entity.EndsOn is null)
             throw new InvalidOperationException("Заполните замещающего и период замещения");
 
+        // Маршрут согласования: директор филиала → Операционное управление → УЧР.
+        // Повторная отправка (после отклонения) собирает маршрут заново — новым кругом.
+        // Этапы прошлых кругов остаются в истории вместе с решениями и комментариями: раньше
+        // они удалялись, и из карточки пропадало, кто и почему возвращал заявку.
+        var previous = await _db.SubstitutionApprovals.Where(a => a.RequestId == id).ToListAsync(ct);
+        foreach (var old in previous.Where(a => a.State is SubstitutionApprovalState.Pending or SubstitutionApprovalState.Active))
+            old.State = SubstitutionApprovalState.Skipped;
+        var round = previous.Count == 0 ? 1 : previous.Max(a => a.Round) + 1;
+
+        var steps = await BuildApprovalRouteAsync(entity, round, ct);
+
         // Сквозная нумерация HR-1, HR-2, … без сброса по годам (scope Global).
         // Формат и текущий счётчик правятся в настройках (SubstitutionNumberingController).
+        // Номер выдаётся после сборки маршрута: если отправка остановится (заблокирован
+        // согласующий), номер не пропадёт впустую.
         if (string.IsNullOrWhiteSpace(entity.RegNumber))
             entity.RegNumber = await _numerator.NextAsync(
                 DocumentType.Custom, "Substitution", "Global", "HR-{seq}");
-
-        // Маршрут согласования: директор филиала → Операционное управление → УЧР.
-        // Повторная отправка (после отклонения) пересобирает маршрут заново.
-        _db.SubstitutionApprovals.RemoveRange(
-            await _db.SubstitutionApprovals.Where(a => a.RequestId == id).ToListAsync(ct));
-        var steps = await BuildApprovalRouteAsync(entity, ct);
 
         if (steps.Count > 0)
         {
@@ -258,7 +334,10 @@ public class SubstitutionService : ISubstitutionService
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Substitution", id, "Submitted", actorUserId,
-            new { regNumber = entity.RegNumber, steps = steps.Count });
+            new { regNumber = entity.RegNumber, steps = steps.Count, round });
+
+        if (steps.Count > 0)
+            await NotifyApproverAsync(entity, steps[0], actorUserId, ct);
 
         return (await GetAsync(id, ct))!;
     }
@@ -287,25 +366,65 @@ public class SubstitutionService : ISubstitutionService
     private const int OperationsApproverId = 141;   // Касымов Кубатбек (Операционное управление)
     private const int OperationsFallbackId = 563;   // Ермакова Юлия (замена при отсутствии)
 
-    private async Task<List<SubstitutionApproval>> BuildApprovalRouteAsync(SubstitutionRequest entity, CancellationToken ct)
+    private async Task<List<SubstitutionApproval>> BuildApprovalRouteAsync(SubstitutionRequest entity, int round, CancellationToken ct)
     {
         var steps = new List<SubstitutionApproval>();
         var order = 1;
 
         var directorId = await ResolveBranchDirectorAsync(entity.AbsentUnitId, ct);
         if (directorId is { } dir)
-            steps.Add(new SubstitutionApproval { RequestId = entity.Id, Order = order++, RoleLabel = "Директор филиала", UserId = dir });
+        {
+            await EnsureApproverActiveAsync(dir, "Директор филиала", ct);
+            steps.Add(new SubstitutionApproval { RequestId = entity.Id, Round = round, Order = order++, RoleLabel = "Директор филиала", UserId = dir });
+        }
 
         var opsId = await ResolveOperationsApproverAsync(ct);
         if (opsId is { } ops)
-            steps.Add(new SubstitutionApproval { RequestId = entity.Id, Order = order++, RoleLabel = "Операционное управление", UserId = ops });
+            steps.Add(new SubstitutionApproval { RequestId = entity.Id, Round = round, Order = order++, RoleLabel = "Операционное управление", UserId = ops });
 
         var hrId = await ResolveHrOfficerAsync(entity.AbsentUnitId, ct);
         if (hrId is { } hr)
-            steps.Add(new SubstitutionApproval { RequestId = entity.Id, Order = order++, RoleLabel = "УЧР", UserId = hr });
+        {
+            await EnsureApproverActiveAsync(hr, "УЧР", ct);
+            steps.Add(new SubstitutionApproval { RequestId = entity.Id, Round = round, Order = order++, RoleLabel = "УЧР", UserId = hr });
+        }
 
         return steps;
     }
+
+    /// <summary>
+    /// Этап не назначается заблокированному или отключённому сотруднику: решение по нему не
+    /// принял бы никто, и заявка стояла бы бессрочно. Пропускать этап молча тоже нельзя —
+    /// это обход согласования, — поэтому отправка останавливается с понятной причиной.
+    /// </summary>
+    private async Task EnsureApproverActiveAsync(int userId, string roleLabel, CancellationToken ct)
+    {
+        if (await IsActiveAsync(userId, ct)) return;
+
+        var name = await _db.Users.AsNoTracking().Where(u => u.Id == userId)
+            .Select(u => u.FullName).FirstOrDefaultAsync(ct);
+        throw new InvalidOperationException(
+            $"Согласующий этапа «{roleLabel}» ({name ?? $"id {userId}"}) заблокирован или отключён. " +
+            "Назначьте действующего сотрудника в оргструктуре или в настройках маршрута УЧР и отправьте заявку снова.");
+    }
+
+    /// <summary>Номер действующего круга согласования — последний.</summary>
+    private static int CurrentRound(IEnumerable<SubstitutionApproval> approvals) =>
+        approvals.Select(a => a.Round).DefaultIfEmpty(1).Max();
+
+    /// <summary>Активный этап действующего круга.</summary>
+    private static SubstitutionApproval? ActiveStep(SubstitutionRequest entity)
+    {
+        var round = CurrentRound(entity.Approvals);
+        return entity.Approvals.FirstOrDefault(a => a.Round == round && a.State == SubstitutionApprovalState.Active);
+    }
+
+    /// <summary>Пользователь — это назначенный на этап или его действующий замещающий (GEN-14).</summary>
+    private Task<bool> ActsForAsync(int actorUserId, int principalUserId) =>
+        ActingFor.ActsForAsync(_db, actorUserId, principalUserId, _clock.Today);
+
+    public Task<List<int>> ActingForUserIdsAsync(int userId, CancellationToken ct = default) =>
+        ActingFor.AbsentUserIdsAsync(_db, userId, _clock.Today);
 
     /// <summary>Директор филиала: поднимаемся по дереву от подразделения сотрудника до филиала и берём его начальника.</summary>
     private async Task<int?> ResolveBranchDirectorAsync(int? unitId, CancellationToken ct)
@@ -368,10 +487,12 @@ public class SubstitutionService : ISubstitutionService
         if (entity.Status != SubstitutionStatus.OnApproval)
             throw new InvalidOperationException("Согласовать можно только заявку на согласовании");
 
-        var step = entity.Approvals.FirstOrDefault(a => a.State == SubstitutionApprovalState.Active)
+        var step = ActiveStep(entity)
             ?? throw new InvalidOperationException("Нет активного этапа согласования");
-        if (step.UserId != actorUserId)
-            throw new InvalidOperationException("Согласовать может только назначенный на этап сотрудник");
+        // Согласует назначенный на этап или тот, кто его сейчас замещает (GEN-14): иначе
+        // заявка стояла, пока директор филиала в отпуске.
+        if (!await ActsForAsync(actorUserId, step.UserId))
+            throw new UnauthorizedAccessException("Согласовать может только назначенный на этап сотрудник или его замещающий");
 
         step.State = SubstitutionApprovalState.Approved;
         step.Comment = comment;
@@ -379,7 +500,8 @@ public class SubstitutionService : ISubstitutionService
         step.DecidedByUserId = actorUserId;
 
         var next = entity.Approvals
-            .Where(a => a.State == SubstitutionApprovalState.Pending).OrderBy(a => a.Order).FirstOrDefault();
+            .Where(a => a.Round == step.Round && a.State == SubstitutionApprovalState.Pending)
+            .OrderBy(a => a.Order).FirstOrDefault();
         if (next is not null)
         {
             next.State = SubstitutionApprovalState.Active;
@@ -390,7 +512,21 @@ public class SubstitutionService : ISubstitutionService
 
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Approved", actorUserId, new { step = step.RoleLabel });
+        await _audit.LogAsync("Substitution", id, "Approved", actorUserId, new
+        {
+            step = step.RoleLabel,
+            round = step.Round,
+            onBehalfOf = step.UserId != actorUserId ? step.UserId : (int?)null,
+        });
+
+        if (next is not null)
+            await NotifyApproverAsync(entity, next, actorUserId, ct);
+        else
+            await NotifyInitiatorAsync(entity,
+                "Заявка на замещение согласована",
+                $"Заявка на замещение {Number(entity)} согласована и передана в УЧР на исполнение. Тема: {entity.Subject}",
+                actorUserId, ct);
+
         return (await GetAsync(id, ct))!;
     }
 
@@ -401,19 +537,85 @@ public class SubstitutionService : ISubstitutionService
         if (entity.Status != SubstitutionStatus.OnApproval)
             throw new InvalidOperationException("Отклонить можно только заявку на согласовании");
 
-        var step = entity.Approvals.FirstOrDefault(a => a.State == SubstitutionApprovalState.Active)
+        // Причина отклонения обязательна: по ней инициатор исправляет заявку, и она остаётся
+        // в истории круга. Раньше отклонение проходило и без неё — в том числе по кнопке
+        // «Отмена» в окне ввода причины.
+        if (string.IsNullOrWhiteSpace(comment))
+            throw new InvalidOperationException("Укажите причину отклонения");
+
+        var step = ActiveStep(entity)
             ?? throw new InvalidOperationException("Нет активного этапа согласования");
-        if (step.UserId != actorUserId)
-            throw new InvalidOperationException("Отклонить может только назначенный на этап сотрудник");
+        if (!await ActsForAsync(actorUserId, step.UserId))
+            throw new UnauthorizedAccessException("Отклонить может только назначенный на этап сотрудник или его замещающий");
 
         step.State = SubstitutionApprovalState.Rejected;
-        step.Comment = comment;
+        step.Comment = comment.Trim();
         step.DecidedAt = DateTime.UtcNow;
         step.DecidedByUserId = actorUserId;
+
+        // Дальше по этому кругу очередь не дойдёт: этапы закрываются, но остаются в истории.
+        foreach (var rest in entity.Approvals.Where(a => a.Round == step.Round && a.State == SubstitutionApprovalState.Pending))
+            rest.State = SubstitutionApprovalState.Skipped;
         entity.Status = SubstitutionStatus.Rejected;
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Rejected", actorUserId, new { step = step.RoleLabel });
+        await _audit.LogAsync("Substitution", id, "Rejected", actorUserId, new
+        {
+            step = step.RoleLabel,
+            round = step.Round,
+            comment = step.Comment,
+            onBehalfOf = step.UserId != actorUserId ? step.UserId : (int?)null,
+        });
+
+        await NotifyInitiatorAsync(entity,
+            "Заявка на замещение отклонена",
+            $"Заявка на замещение {Number(entity)} отклонена на этапе «{step.RoleLabel}»: {step.Comment}",
+            actorUserId, ct);
+
+        return (await GetAsync(id, ct))!;
+    }
+
+    public async Task<SubstitutionDetails> ReassignStepAsync(
+        int id, int approvalId, int newUserId, string reason, int actorUserId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Укажите причину переназначения этапа");
+
+        var entity = await _db.SubstitutionRequests.Include(x => x.Approvals).FirstOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
+        if (entity.Status != SubstitutionStatus.OnApproval)
+            throw new InvalidOperationException("Переназначить этап можно только у заявки на согласовании");
+
+        var step = entity.Approvals.FirstOrDefault(a => a.Id == approvalId)
+            ?? throw new KeyNotFoundException("Этап согласования не найден");
+        if (step.Round != CurrentRound(entity.Approvals)
+            || step.State is not (SubstitutionApprovalState.Active or SubstitutionApprovalState.Pending))
+            throw new InvalidOperationException("Переназначить можно только ещё не пройденный этап действующего маршрута");
+        if (step.UserId == newUserId)
+            throw new InvalidOperationException("Этап уже назначен этому сотруднику");
+        if (!await IsActiveAsync(newUserId, ct))
+            throw new InvalidOperationException("Нельзя назначить этап заблокированному, отключённому или несуществующему сотруднику");
+
+        var from = step.UserId;
+        step.UserId = newUserId;
+        // Новый согласующий получает полный срок: отсчёт SLA этапа начинается заново.
+        if (step.State == SubstitutionApprovalState.Active)
+            step.ActivatedAt = DateTime.UtcNow;
+
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Substitution", id, "StepReassigned", actorUserId, new
+        {
+            step = step.RoleLabel,
+            round = step.Round,
+            from,
+            to = newUserId,
+            reason = reason.Trim(),
+        });
+
+        if (step.State == SubstitutionApprovalState.Active)
+            await NotifyApproverAsync(entity, step, actorUserId, ct);
+
         return (await GetAsync(id, ct))!;
     }
 
@@ -487,6 +689,52 @@ public class SubstitutionService : ISubstitutionService
         await _db.SaveChangesAsync(ct);
         return s.ApprovalStepSlaDays;
     }
+
+    // ── Уведомления ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Согласующему — что заявка ждёт его решения. Раньше не уходило ничего: ни задачи,
+    /// ни уведомления, и согласующий узнавал о заявке только из напоминания о просрочке
+    /// норматива (ЗМ-SLA). Сбой рассылки не откатывает действие.
+    /// </summary>
+    private async Task NotifyApproverAsync(SubstitutionRequest entity, SubstitutionApproval step, int actorUserId, CancellationToken ct) =>
+        // И тем, кто сейчас замещает согласующего (GEN-14): иначе о задаче узнаёт только
+        // тот, кто в отпуске.
+        await NotifyAsync(
+            (await ActingFor.SubstituteIdsAsync(_db, step.UserId, _clock.Today)).Prepend(step.UserId).Distinct().ToList(),
+            "Заявка на замещение ждёт вашего согласования",
+            $"Заявка на замещение {Number(entity)} ждёт вашего решения на этапе «{step.RoleLabel}». " +
+            $"Отсутствующий: {entity.AbsentName}, замещающий: {entity.SubstituteName}. Тема: {entity.Subject}",
+            entity.Id, actorUserId, ct);
+
+    private Task NotifyInitiatorAsync(SubstitutionRequest entity, string title, string body, int actorUserId, CancellationToken ct) =>
+        NotifyAsync([entity.InitiatorUserId], title, body, entity.Id, actorUserId, ct);
+
+    private async Task NotifyAsync(List<int> userIds, string title, string body, int requestId, int actorUserId, CancellationToken ct)
+    {
+        if (_notifications is null) return;
+        try
+        {
+            await _notifications.CreateAsync(new CreateNotificationRequest
+            {
+                TitleRu = title,
+                BodyRu = body,
+                Category = NotificationCategory.Other,
+                EntityType = "SubstitutionRequest",
+                EntityId = requestId,
+                Url = $"/substitutions/{requestId}",
+                UserIds = userIds,
+            }, actorUserId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Заявка уже сохранена; неотправленное уведомление этого не отменяет.
+            _logger?.LogWarning(ex, "Не удалось отправить уведомление по заявке на замещение {RequestId}", requestId);
+        }
+    }
+
+    private static string Number(SubstitutionRequest e) =>
+        string.IsNullOrWhiteSpace(e.RegNumber) ? $"#{e.Id}" : e.RegNumber;
 
     // ── вспомогательное ──────────────────────────────────────────────────────
 
@@ -618,9 +866,12 @@ public class SubstitutionService : ISubstitutionService
                 .Select(m => new CommissionMemberDto { UserId = m.UserId, FullName = m.FullName, Position = m.Position })
                 .ToList(),
             Approvals = x.Approvals
-                .OrderBy(a => a.Order)
+                .OrderBy(a => a.Round).ThenBy(a => a.Order)
                 .Select(a => new ApprovalStepDto
                 {
+                    Id = a.Id,
+                    Round = a.Round,
+                    DecidedByUserId = a.DecidedByUserId,
                     Order = a.Order,
                     RoleLabel = a.RoleLabel,
                     UserId = a.UserId,

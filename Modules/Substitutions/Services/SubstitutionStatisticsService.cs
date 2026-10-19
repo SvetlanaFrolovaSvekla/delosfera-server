@@ -159,9 +159,12 @@ public class SubstitutionStatisticsService : ISubstitutionStatisticsService
                 r.CreatedAt,
                 r.Approvals.Where(a => a.State == SubstitutionApprovalState.Active)
                     .Select(a => a.ActivatedAt).FirstOrDefault(),
-                r.Approvals.Where(a => a.ActivatedAt != null)
+                // Время прохождения — по действующему (последнему) кругу: прошлые круги
+                // закончились отклонением и в «прохождение маршрута» не входят.
+                r.Approvals.Where(a => a.ActivatedAt != null && a.Round == r.Approvals.Max(x => x.Round))
                     .OrderBy(a => a.Order).Select(a => a.ActivatedAt).FirstOrDefault(),
-                r.Approvals.Where(a => a.State == SubstitutionApprovalState.Approved && a.DecidedAt != null)
+                r.Approvals.Where(a => a.State == SubstitutionApprovalState.Approved && a.DecidedAt != null
+                                       && a.Round == r.Approvals.Max(x => x.Round))
                     .OrderByDescending(a => a.DecidedAt).Select(a => a.DecidedAt).FirstOrDefault()))
             .ToListAsync(ct);
     }

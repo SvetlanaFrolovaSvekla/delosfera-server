@@ -5,6 +5,7 @@ using delosfera_server.Common.Models;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Modules.Users.Services;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
@@ -994,8 +995,10 @@ public class SzService : ISzService
         if (sz.AddresseeUserId is null)
             throw new InvalidOperationException("У записки не указан адресат");
 
-        if (sz.AddresseeUserId != actorUserId)
-            throw new UnauthorizedAccessException("Решение по записке выносит только её адресат");
+        // Решение выносит адресат либо тот, кто его сейчас замещает (GEN-14): задача
+        // адресата уходит замещающему, и без этого он видел её, но выполнить не мог.
+        if (!await ActsForAsync(actorUserId, sz.AddresseeUserId))
+            throw new UnauthorizedAccessException("Решение по записке выносит только её адресат или его замещающий");
 
         // Записка доходит до адресата двумя путями. Без подписания она попадает
         // к нему прямо с согласования. А когда адресат её же и подписывает,
@@ -1037,7 +1040,8 @@ public class SzService : ISzService
         await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, actorUserId);
         await _db.SaveChangesAsync();
 
-        await _audit.LogAsync("Sz", sz.Id, "AddresseeDecided", actorUserId);
+        await _audit.LogAsync("Sz", sz.Id, "AddresseeDecided", actorUserId,
+            OnBehalfOf(sz.AddresseeUserId, actorUserId));
 
         return (await GetAsync(sz.Id))!;
     }
@@ -1058,9 +1062,9 @@ public class SzService : ISzService
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
-        if (sz.AddresseeUserId != actorUserId)
+        if (!await ActsForAsync(actorUserId, sz.AddresseeUserId))
             throw new UnauthorizedAccessException(
-                "Вопрос выносит тот, кому записка адресована");
+                "Вопрос выносит тот, кому записка адресована, или его замещающий");
 
         // До подписания выносить нечего: вопрос ставится по записке, с которой
         // адресат уже согласился, подписав её.
@@ -1077,7 +1081,12 @@ public class SzService : ISzService
         await _db.SaveChangesAsync();
 
         await _audit.LogAsync("Sz", sz.Id, "SubmittedToBody", actorUserId,
-            new {body = request.Body.ToString(), question = sz.SubmitToBodyQuestion});
+            new
+            {
+                body = request.Body.ToString(),
+                question = sz.SubmitToBodyQuestion,
+                onBehalfOf = sz.AddresseeUserId != actorUserId ? sz.AddresseeUserId : null,
+            });
 
         return (await GetAsync(sz.Id))!;
     }
@@ -1088,8 +1097,8 @@ public class SzService : ISzService
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
-        if (sz.AddresseeUserId != actorUserId)
-            throw new UnauthorizedAccessException("Снять вопрос может тот, кому записка адресована");
+        if (!await ActsForAsync(actorUserId, sz.AddresseeUserId))
+            throw new UnauthorizedAccessException("Снять вопрос может тот, кому записка адресована, или его замещающий");
 
         if (sz.Document!.StatusCode != SzStatus.OnBoardReview)
             throw new InvalidOperationException("Записка не вынесена на коллегиальный орган");
@@ -1109,7 +1118,8 @@ public class SzService : ISzService
         await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.OnExecution, actorUserId);
         await _db.SaveChangesAsync();
 
-        await _audit.LogAsync("Sz", sz.Id, "WithdrawnFromBody", actorUserId, null);
+        await _audit.LogAsync("Sz", sz.Id, "WithdrawnFromBody", actorUserId,
+            OnBehalfOf(sz.AddresseeUserId, actorUserId));
         return (await GetAsync(sz.Id))!;
     }
 
@@ -1270,7 +1280,7 @@ public class SzService : ISzService
         page = page < 1 ? 1 : page;
         pageSize = pageSize is < 1 or > 200 ? 25 : pageSize;
 
-        var query = InboxQuery(currentUserId);
+        var query = await InboxQueryAsync(currentUserId);
 
         var total = await query.CountAsync();
         var items = await query
@@ -1301,7 +1311,8 @@ public class SzService : ISzService
             .AnyAsync(u => u.Id == unitId && u.RequiresPaperSz);
     }
 
-    public Task<int> InboxCountAsync(int currentUserId) => InboxQuery(currentUserId).CountAsync();
+    public async Task<int> InboxCountAsync(int currentUserId) =>
+        await (await InboxQueryAsync(currentUserId)).CountAsync();
 
     public async Task<Dictionary<string, int>> CountByStatusAsync(int currentUserId)
     {
@@ -1346,15 +1357,27 @@ public class SzService : ISzService
     }
 
     /// <summary>«СЗ, согласую я» — общий фильтр для списка и счётчика.</summary>
-    private IQueryable<SzDocument> InboxQuery(int currentUserId)
+    private async Task<IQueryable<SzDocument>> InboxQueryAsync(int currentUserId)
     {
-        // Активные задачи согласования текущего пользователя.
+        // Активные задачи согласования текущего пользователя и тех, кого он замещает
+        // (GEN-14): визу за отсутствующего движок принимает, значит и в списке «согласую
+        // я» такая записка должна быть.
+        var actors = await ActingFor.SelfAndAbsentAsync(_db, currentUserId, Today);
+
         var documentIds = _db.RouteParticipants
-            .Where(p => p.UserId == currentUserId && p.State == ParticipantState.Active)
+            .Where(p => p.UserId != null && actors.Contains(p.UserId.Value) && p.State == ParticipantState.Active)
             .Select(p => p.RouteStep!.RouteInstance!.DocumentId);
 
         return BaseQuery().Where(x => documentIds.Contains(x.DocumentId));
     }
+
+    /// <summary>Пользователь — это <paramref name="principalUserId"/> или его действующий замещающий (GEN-14).</summary>
+    private Task<bool> ActsForAsync(int actorUserId, int? principalUserId) =>
+        ActingFor.ActsForAsync(_db, actorUserId, principalUserId, Today);
+
+    /// <summary>Пометка для журнала: действие выполнено за другого (по замещению). null — сам за себя.</summary>
+    private static object? OnBehalfOf(int? principalUserId, int actorUserId) =>
+        principalUserId is int principal && principal != actorUserId ? new { onBehalfOf = principal } : null;
 
     // --- вспомогательное ---
 

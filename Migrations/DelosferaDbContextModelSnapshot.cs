@@ -13458,6 +13458,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("text")
                         .HasColumnName("role_label");
 
+                    b.Property<int>("Round")
+                        .HasColumnType("integer")
+                        .HasColumnName("round");
+
                     b.Property<int>("State")
                         .HasColumnType("integer")
                         .HasColumnName("state");

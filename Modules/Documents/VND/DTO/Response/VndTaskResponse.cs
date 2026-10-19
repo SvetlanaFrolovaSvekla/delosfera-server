@@ -41,6 +41,12 @@ public class VndTaskResponse
     /// <summary>Инициатор редакции (кто отправил на согласование)</summary>
     public string? InitiatorName { get; set; }
 
+    /// <summary>
+    /// Этап согласования пришёл по замещению (GEN-14): ФИО отсутствующего, за которого
+    /// пользователь выносит решение. Пусто — этап его собственный.
+    /// </summary>
+    public string? OnBehalfOf { get; set; }
+
     /// <summary>Норматив в минутах для текущей фазы согласования (Primary/Repeat/FinalHold)</summary>
     public int? DeadlineMinutes { get; set; }
 

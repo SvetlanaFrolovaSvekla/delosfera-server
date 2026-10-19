@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Sz.Models;
 using delosfera_server.Modules.Users.Models;
+using delosfera_server.Modules.Users.Services;
 
 namespace delosfera_server.Modules.Sz.Services;
 
@@ -39,15 +41,21 @@ public static class SzVisibility
 
         var units = await VisibleUnitIdsAsync(db, currentUserId);
 
+        // Роли в записке (согласующий, адресат, подписант, исполнитель) переходят к
+        // замещающему вместе с задачами (GEN-14). Без этого реестр задач показывал ему
+        // работу за отсутствующего, а карточка записки отвечала «нет доступа».
+        // Авторство и руководство подразделением по замещению не передаются.
+        var actors = await ActingFor.SelfAndAbsentAsync(db, currentUserId, WorkingCalendar.Today);
+
         return query.Where(x =>
             x.Document!.AuthorId == currentUserId
             || (x.AuthorUnitId != null && units.Contains(x.AuthorUnitId.Value))
-            || x.Approvers.Any(a => a.UserId == currentUserId)
-            || db.RouteParticipants.Any(p => p.UserId == currentUserId
+            || x.Approvers.Any(a => actors.Contains(a.UserId))
+            || db.RouteParticipants.Any(p => p.UserId != null && actors.Contains(p.UserId.Value)
                                              && p.RouteStep!.RouteInstance!.DocumentId == x.DocumentId)
-            || x.AddresseeUserId == currentUserId
-            || x.SignerUserId == currentUserId
-            || x.Assignments.Any(a => a.AssigneeUserId == currentUserId));
+            || (x.AddresseeUserId != null && actors.Contains(x.AddresseeUserId.Value))
+            || (x.SignerUserId != null && actors.Contains(x.SignerUserId.Value))
+            || x.Assignments.Any(a => actors.Contains(a.AssigneeUserId)));
     }
 
     /// <summary>
