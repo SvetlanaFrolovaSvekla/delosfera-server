@@ -475,8 +475,23 @@ public class VndApprovalService : IVndApprovalService
         // SaveChanges, что и само решение, — атомарно.
         // ТЕСТОВЫЙ режим (request.WithoutEcp): решение без подписи и без записи в журнал. Допустимость
         // проверяет VndApprovalController по EcpSigning:AllowWithoutEcp.
+        // ТЕСТОВЫЙ режим (request.TestEcp): имитация подписи — запись журнала с тем же хэшем, но
+        // без обращения к ГП (допустимость проверяет VndApprovalController по EcpSigning:AllowVndTestEcp).
         VndResolutionSignature? signature = null;
-        if (!request.WithoutEcp)
+        if (request.TestEcp)
+        {
+            signature = await _resolutionSignatures.BuildTestSignatureAsync(new ResolutionSignatureInput
+            {
+                Process = process,
+                Stage = stage,
+                Decision = decision,
+                UserId = currentUserId,
+                Comment = request.Comment,
+                IpAddress = request.RequestIpAddress,
+                UserAgent = request.RequestUserAgent,
+            });
+        }
+        else if (!request.WithoutEcp)
         {
             signature = await _resolutionSignatures.VerifyForDecisionAsync(new ResolutionSignatureInput
             {

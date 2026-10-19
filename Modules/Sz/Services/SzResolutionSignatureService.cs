@@ -671,7 +671,7 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
     private async Task EnsurePinBindingAsync(int userId, string signerPin, CancellationToken ct)
     {
         var boundToOtherPin =
-            await _db.VndResolutionSignatures.AnyAsync(s => s.UserId == userId && s.PersonIdnp != signerPin, ct)
+            await _db.VndResolutionSignatures.AnyAsync(s => s.Verified && s.UserId == userId && s.PersonIdnp != signerPin, ct)
             // Тестовые имитации (Verified=false) к привязке ПИН отношения не имеют.
             || await _db.SzResolutionSignatures.AnyAsync(s => s.Verified && s.UserId == userId && s.PersonIdnp != signerPin, ct);
         if (boundToOtherPin)
@@ -680,7 +680,7 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
                 "Ваша учётная запись уже привязана к ЭЦП другого лица — подписывать можно только своей ЭЦП");
 
         var usedByOtherUser =
-            await _db.VndResolutionSignatures.AnyAsync(s => s.PersonIdnp == signerPin && s.UserId != userId, ct)
+            await _db.VndResolutionSignatures.AnyAsync(s => s.Verified && s.PersonIdnp == signerPin && s.UserId != userId, ct)
             || await _db.SzResolutionSignatures.AnyAsync(s => s.Verified && s.PersonIdnp == signerPin && s.UserId != userId, ct);
         if (usedByOtherUser)
             throw new ResolutionSignatureException(StatusCodes.Status403Forbidden,

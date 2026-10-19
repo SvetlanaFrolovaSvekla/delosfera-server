@@ -41,6 +41,9 @@ public class VndResolutionSignatureResponse
     public DateTime SignedAt { get; set; }
     public DateTime VerifiedAt { get; set; }
     public bool Verified { get; set; }
+
+    /// <summary>Тестовая имитация ЭЦП (EcpSigning:AllowVndTestEcp), а не настоящая подпись.</summary>
+    public bool IsTest { get; set; }
 }
 
 /// <summary>Результат повторной проверки подписи (POST /api/vnd/{vndId}/signatures/{id}/verify).</summary>

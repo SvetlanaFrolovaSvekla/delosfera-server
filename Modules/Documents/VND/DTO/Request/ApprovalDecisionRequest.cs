@@ -55,6 +55,13 @@ public class ApprovalDecisionRequest
     /// не создаётся.</summary>
     public bool WithoutEcp { get; set; }
 
+    /// <summary>ТЕСТОВЫЙ режим: решение с ИМИТАЦИЕЙ ЭЦП (как кнопки «… (тест ЭЦП)» у служебных записок).
+    /// Разрешено, только если на сервере включено EcpSigning:AllowVndTestEcp (иначе 403, проверяет
+    /// VndApprovalController). Подпись у ГП «Инфоком» не ставится и не проверяется, но в журнал
+    /// VndResolutionSignature пишется запись-имитация (Verified=false, «ТЕСТ») — лист согласования с ЭЦП
+    /// и сверка версий текста работают с ней так же, как с настоящей.</summary>
+    public bool TestEcp { get; set; }
+
     /// <summary>IP клиента — заполняет контроллер из соединения, из формы НЕ биндится.</summary>
     [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever]
     public string? RequestIpAddress { get; set; }

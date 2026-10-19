@@ -318,6 +318,17 @@ internal sealed class FakeResolutionSignatureService
         });
     }
 
+    /// <summary>Тестовая имитация ЭЦП — та же запись, что у VerifyForDecisionAsync, но с признаком имитации.</summary>
+    public async Task<delosfera_server.Modules.Documents.VND.Models.VndResolutionSignature> BuildTestSignatureAsync(
+        delosfera_server.Modules.Documents.VND.Services.ResolutionSignatureInput input, CancellationToken ct = default)
+    {
+        var entry = await VerifyForDecisionAsync(input, ct);
+        entry.PersonIdnp = delosfera_server.Modules.Documents.VND.Services.ResolutionSignatureService.TestPin;
+        entry.Verified = false;
+        entry.VerificationError = delosfera_server.Modules.Documents.VND.Services.ResolutionSignatureService.TestVerificationNote;
+        return entry;
+    }
+
     public Task<List<delosfera_server.Modules.Documents.VND.DTO.Response.VndResolutionSignatureResponse>> ListAsync(
         int vndId, int currentUserId, CancellationToken ct = default) =>
         throw new NotImplementedException();

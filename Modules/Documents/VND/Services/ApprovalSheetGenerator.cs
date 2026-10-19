@@ -19,7 +19,8 @@ public enum ApprovalSheetMode
 }
 
 /// <summary>Данные штампа ЭЦП для колонки "Подпись" (из журнала VndResolutionSignature).
-/// Даты — уже в часовом поясе банка.</summary>
+/// Даты — уже в часовом поясе банка. <paramref name="IsTest"/> — тестовая имитация ЭЦП
+/// (EcpSigning:AllowVndTestEcp): штамп печатается как «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП».</summary>
 public sealed record ApprovalSheetStamp(
     string? SignerName,
     string? OrganizationName,
@@ -27,7 +28,8 @@ public sealed record ApprovalSheetStamp(
     string? IssuerName,
     DateTime SignedAtLocal,
     string DocumentHash,
-    string SignatureSha256);
+    string SignatureSha256,
+    bool IsTest = false);
 
 /// <summary>Строка Листа согласования с фактическим решением согласующего.</summary>
 /// <param name="Decision">"Согласовано", "Согласовано с замечаниями", "Отклонено", "Ожидает решения"…</param>
@@ -70,6 +72,8 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
     private const string StampColor = "1F3A93";
     private const string StampFill = "F2F5FD";
     private const string MutedColor = "7A869A";
+    // Штамп тестовой имитации ЭЦП — тёмно-оранжевый, чтобы его нельзя было спутать с настоящим.
+    private const string TestColor = "B45309";
 
     // Ширины колонок таблицы (№, должность, ФИО, результат, дата, подпись). Обычный режим — как в
     // шаблоне; с ЭЦП колонка "Подпись" шире за счёт должности/ФИО, чтобы штамп помещался.
@@ -105,7 +109,7 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
                 InsertNote(body, titleParagraph, note);
             var table = FillTable(body, rows, mode);
             if (mode == ApprovalSheetMode.Signed && table is not null)
-                InsertSignedFooter(table);
+                InsertSignedFooter(table, rows.Any(r => r.Stamp?.IsTest == true));
 
             doc.MainDocumentPart.Document.Save();
         }
@@ -306,9 +310,18 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
             inner.Append(new Paragraph(props, MakeRun(new Line(text, Bold: bold, Size: size, Color: color, Font: font))));
         }
 
-        Add("ПОДПИСАНО С ПОМОЩЬЮ ЭЦП", bold: true, size: 15, align: JustificationValues.Center);
-        Add("облачная ЭЦП ГП «Инфоком» · подпись проверена", size: 12, color: MutedColor,
-            align: JustificationValues.Center);
+        if (stamp.IsTest)
+        {
+            Add("ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП", bold: true, size: 15, color: TestColor, align: JustificationValues.Center);
+            Add("не является подписью · у ГП «Инфоком» не ставилась и не проверялась", size: 12, color: TestColor,
+                align: JustificationValues.Center);
+        }
+        else
+        {
+            Add("ПОДПИСАНО С ПОМОЩЬЮ ЭЦП", bold: true, size: 15, align: JustificationValues.Center);
+            Add("облачная ЭЦП ГП «Инфоком» · подпись проверена", size: 12, color: MutedColor,
+                align: JustificationValues.Center);
+        }
         if (!string.IsNullOrWhiteSpace(stamp.SignerName)) Add($"Владелец: {stamp.SignerName}", bold: true);
         if (!string.IsNullOrWhiteSpace(stamp.OrganizationName)) Add($"Организация: {stamp.OrganizationName}");
         if (FormatCertDate(stamp.CertValidNotAfter) is { } certUntil) Add($"Сертификат действителен до: {certUntil}");
@@ -335,8 +348,20 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
     }
 
     /// <summary>Пояснение под таблицей в режиме с подписями.</summary>
-    private static void InsertSignedFooter(Table table)
+    private static void InsertSignedFooter(Table table, bool hasTestStamps = false)
     {
+        if (hasTestStamps)
+        {
+            // Предупреждение о тестовых «подписях» — самым последним абзацем (вставляется сразу после
+            // таблицы, обычное пояснение ниже встанет перед ним).
+            table.InsertAfterSelf(new Paragraph(
+                new ParagraphProperties(new SpacingBetweenLines { Before = "120", After = "0" }),
+                MakeRun(new Line(
+                    "ВНИМАНИЕ: решения со штампом «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП» приняты в тестовом режиме системы — " +
+                    "электронной подписью они не подписаны и юридической силы не имеют.",
+                    Bold: true, Size: 16, Color: TestColor))));
+        }
+
         var paragraph = new Paragraph(
             new ParagraphProperties(new SpacingBetweenLines { Before = "240", After = "0" }),
             MakeRun(new Line(

@@ -37,6 +37,19 @@ public class VndRedactionResponse
     /// (частичным или полным) по замечаниям.</summary>
     public int? DisagreementMatrixFileId { get; set; }
 
+    /// <summary>Титульный лист редакции (см. VndRedaction.TitlePageFileId) — null, пока его не
+    /// сформировали или не загрузили.</summary>
+    public int? TitlePageFileId { get; set; }
+
+    /// <summary>Имя файла титульного листа (как в хранилище).</summary>
+    public string? TitlePageFileName { get; set; }
+
+    /// <summary>Титульный лист загружен пользователем вручную (система его не пересобирает сама).</summary>
+    public bool TitlePageIsManual { get; set; }
+
+    /// <summary>Когда титульный лист последний раз формировался/загружался.</summary>
+    public DateTime? TitlePageUpdatedAt { get; set; }
+
     public bool RequiresApproval { get; set; }
     public required string ApprovalStatus { get; set; }
 

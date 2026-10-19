@@ -84,11 +84,11 @@ public class UserEcpCredentialController : ControllerBase
             _currentUser.UserId, request.VndId, request.StageId, request.Comment,
             delosfera_server.Modules.Documents.VND.DTO.Request.ApprovalDecisionTypeExtensions.ToStageDecision(request.Decision), ct)));
 
-    /// <summary>Разрешены ли решения без ЭЦП (тестовый режим, EcpSigning:AllowWithoutEcp) — по нему клиент
-    /// показывает кнопки "... (без ЭЦП, тест)".</summary>
+    /// <summary>Тестовые режимы подписания резолюций ВНД: решения без ЭЦП (EcpSigning:AllowWithoutEcp —
+    /// кнопки "... (без ЭЦП, тест)") и имитация ЭЦП (EcpSigning:AllowVndTestEcp — кнопки "... (тест ЭЦП)").</summary>
     [HttpGet("test-mode")]
     public IActionResult TestMode([FromServices] Microsoft.Extensions.Options.IOptions<EcpSigningOptions> options) =>
-        Ok(new { allowWithoutEcp = options.Value.AllowWithoutEcp });
+        Ok(new { allowWithoutEcp = options.Value.AllowWithoutEcp, allowVndTestEcp = options.Value.AllowVndTestEcp });
 
     private async Task<IActionResult> Run(Func<Task<IActionResult>> action)
     {

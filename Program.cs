@@ -105,6 +105,9 @@ builder.Services.AddScoped<delosfera_server.Modules.Signing.Services.IUserEcpCre
 builder.Services.AddSingleton<IApprovalSheetGenerator, ApprovalSheetGenerator>();
 // Лист согласования по текущему состоянию процесса (обычный и с отметками ЭЦП) - см. VndApprovalSheetController.
 builder.Services.AddScoped<IApprovalSheetService, ApprovalSheetService>();
+// Титульный лист редакции ВНД (шапка с реквизитами текущей/предыдущей редакции) - см. VndTitlePageService.
+builder.Services.AddSingleton<ITitlePageGenerator, TitlePageGenerator>();
+builder.Services.AddScoped<IVndTitlePageService, VndTitlePageService>();
 // Проверка подлинности согласования ВНД по файлу редакции (SHA-256 файла → подписи ЭЦП под этим текстом)
 // - см. VndAuthenticityController.
 builder.Services.AddScoped<IVndAuthenticityService, VndAuthenticityService>();

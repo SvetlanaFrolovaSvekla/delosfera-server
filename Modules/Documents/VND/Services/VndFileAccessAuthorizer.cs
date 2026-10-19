@@ -37,6 +37,7 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
                         || r.TidFileId == fileId
                         || r.ApprovalSheetFileId == fileId
                         || r.DisagreementMatrixFileId == fileId
+                        || r.TitlePageFileId == fileId
                         || r.ApprovalSheets.Any(s => s.FileAttachmentId == fileId)
                         || r.Attachments.Any(a => a.FileAttachmentId == fileId))
             .Select(r => r.VndId);
@@ -86,6 +87,7 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
                         // (для автоматического листа - инициатор согласования).
                         || r.ApprovalSheetFileId == fileId
                         || r.DisagreementMatrixFileId == fileId
+                        || r.TitlePageFileId == fileId
                         || r.ApprovalSheets.Any(s => s.FileAttachmentId == fileId)
                         || r.Attachments.Any(a => a.FileAttachmentId == fileId))
             .AnyAsync(r => r.Vnd!.Status != VndStatus.Draft
@@ -165,6 +167,7 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
             || r.TidFileId == fileId
             || r.ApprovalSheetFileId == fileId
             || r.DisagreementMatrixFileId == fileId
+            || r.TitlePageFileId == fileId
             || r.ApprovalSheets.Any(s => s.FileAttachmentId == fileId)
             || r.Attachments.Any(a => a.FileAttachmentId == fileId), ct);
         if (isRedactionFile) return false;

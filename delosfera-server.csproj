@@ -40,6 +40,8 @@
       <Content Remove="tests/**/*" />
       <EmbeddedResource Remove="tests/**/*" />
       <EmbeddedResource Include="Modules\Documents\VND\Resources\ApprovalSheetTemplate.docx" LogicalName="ApprovalSheetTemplate.docx" />
+      <!-- Шаблон "Титульный лист" редакции ВНД (см. Modules\Documents\VND\Services\TitlePageGenerator.cs) -->
+      <EmbeddedResource Include="Modules\Documents\VND\Resources\TitlePageTemplate.docx" LogicalName="TitlePageTemplate.docx" />
       <None Remove="tests/**/*" />
     </ItemGroup>
 

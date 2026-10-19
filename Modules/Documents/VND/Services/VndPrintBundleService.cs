@@ -73,6 +73,7 @@ public class VndPrintBundleService : IVndPrintBundleService
                 r.TidFileId,
                 r.ApprovalSheetFileId,
                 r.DisagreementMatrixFileId,
+                r.TitlePageFileId,
                 Sheets = r.ApprovalSheets.Select(s => s.FileAttachmentId).ToList(),
                 Attachments = r.Attachments.Select(a => a.FileAttachmentId).ToList(),
             })
@@ -87,6 +88,7 @@ public class VndPrintBundleService : IVndPrintBundleService
             if (r.TidFileId is { } tid) vndFileIds.Add(tid);
             if (r.ApprovalSheetFileId is { } sheet) vndFileIds.Add(sheet);
             if (r.DisagreementMatrixFileId is { } matrix) vndFileIds.Add(matrix);
+            if (r.TitlePageFileId is { } titlePage) vndFileIds.Add(titlePage);
             vndFileIds.UnionWith(r.Sheets);
             vndFileIds.UnionWith(r.Attachments);
         }

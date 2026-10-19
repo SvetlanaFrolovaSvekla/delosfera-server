@@ -16,4 +16,12 @@ public class EcpSigningOptions
     /// штампом «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП». Включается только в appsettings.Development.json или переменной
     /// окружения EcpSigning__AllowSzTestEcp=true; на бою должно быть false.</summary>
     public bool AllowSzTestEcp { get; set; }
+
+    /// <summary>ТЕСТОВЫЙ режим для согласования ВНД — то же, что <see cref="AllowSzTestEcp"/> для СЗ:
+    /// кнопки «… (тест ЭЦП)» имитируют подписание без обращения к ГП «Инфоком». Решение сохраняется с
+    /// «подписью»-имитацией в журнале VndResolutionSignature (Verified=false, «ТЕСТ»), в листе
+    /// согласования с ЭЦП — штамп «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП». Включается только в
+    /// appsettings.Development.json или переменной окружения EcpSigning__AllowVndTestEcp=true; на бою
+    /// должно быть false.</summary>
+    public bool AllowVndTestEcp { get; set; }
 }

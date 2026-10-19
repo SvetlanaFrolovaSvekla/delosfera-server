@@ -76,6 +76,26 @@ public class VndRedaction : IAuditableEntity
     public int? DisagreementMatrixFileId { get; set; }
     public FileAttachment? DisagreementMatrixFile { get; set; }
 
+    /// <summary>Титульный лист редакции — .docx по шаблону TitlePageTemplate.docx с реквизитами
+    /// этой и предыдущей редакции, решениями по ним (блок «Внесены изменения, дополнения») и
+    /// отменой действия (см. VndTitlePageService). Хранится ОТДЕЛЬНО от текста редакции: раньше
+    /// такая шапка была внутри самого документа, и её обновление после консолидации (когда
+    /// появляются дата и № принятия) меняло уже подписанный текст. Специальное вложение — не
+    /// входит в Attachments и в хэш подписи ЭЦП. Null — титульного листа нет (старые ВНД, пока
+    /// его не сформируют или не загрузят вручную).</summary>
+    public int? TitlePageFileId { get; set; }
+    public FileAttachment? TitlePageFile { get; set; }
+
+    /// <summary>Титульный лист загружен пользователем вручную — система его не перезаписывает при
+    /// консолидации/архивации/правке реквизитов, пока его не сформируют заново кнопкой.</summary>
+    public bool TitlePageIsManual { get; set; }
+
+    /// <summary>Когда титульный лист последний раз формировался/загружался.</summary>
+    public DateTime? TitlePageUpdatedAt { get; set; }
+
+    /// <summary>Решения по этой редакции: утверждение и последующие (см. VndRedactionDecision).</summary>
+    public ICollection<VndRedactionDecision> Decisions { get; set; } = new List<VndRedactionDecision>();
+
     /// <summary>Заголовок и вид документа НА МОМЕНТ ЭТОЙ редакции (этап "заголовок/вид тоже по
     /// редакции", см. обсуждение) — переименование/смена вида документа не переписывают задним
     /// числом то, как назывались/классифицировались прошлые редакции.</summary>

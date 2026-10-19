@@ -132,6 +132,14 @@ public class VndApprovalController : ControllerBase
                 code = "ecp_required",
             });
 
+        // Имитация ЭЦП — только в тестовом режиме (EcpSigning:AllowVndTestEcp).
+        if (request.TestEcp && !_ecpSigning.AllowVndTestEcp)
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "Тестовая имитация ЭЦП выключена на сервере (EcpSigning:AllowVndTestEcp)",
+                code = "ecp_required",
+            });
+
         try
         {
             return Ok(await _service.DecideAsync(vndId, stageId, request, _currentUser.UserId));

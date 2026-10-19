@@ -32,6 +32,7 @@ public class VndService : IVndService
     private readonly INotificationService _notifications;
     private readonly ILogger<VndService> _logger;
     private readonly IVndNewRedactionMailingService? _newRedactionMailing;
+    private readonly IVndTitlePageService? _titlePages;
     private readonly delosfera_server.Common.Services.IBankClock _clock;
 
     public VndService(
@@ -41,9 +42,11 @@ public class VndService : IVndService
         IDocxLegacyLinkExtractor legacyLinkExtractor,
         INotificationService notifications, ILogger<VndService> logger,
         delosfera_server.Common.Services.IBankClock clock,
-        IVndNewRedactionMailingService? newRedactionMailing = null)
+        IVndNewRedactionMailingService? newRedactionMailing = null,
+        IVndTitlePageService? titlePages = null)
     {
         _newRedactionMailing = newRedactionMailing;
+        _titlePages = titlePages;
         _db = db;
         _fileService = fileService;
         _currentUser = currentUser;
@@ -887,7 +890,9 @@ public class VndService : IVndService
             .Include(x => x.Rubrics)
             .Include(x => x.Keywords)
             // Все листы согласования редакции (их бывает несколько - см. VndRedactionApprovalSheet).
-            .Include(x => x.ApprovalSheets).ThenInclude(s => s.FileAttachment);
+            .Include(x => x.ApprovalSheets).ThenInclude(s => s.FileAttachment)
+            // Титульный лист - для имени файла в ответе (см. ToRedactionResponse).
+            .Include(x => x.TitlePageFile);
 
     /// <summary>Копирует реквизиты в НОВУЮ редакцию (заголовок/вид, орган/разработчик/куратор,
     /// гриф секретности, период, ответственные исполнители/рубрики/ключевые слова) — либо с
@@ -972,6 +977,11 @@ public class VndService : IVndService
             })
             .ToList(),
         DisagreementMatrixFileId = x.DisagreementMatrixFileId,
+        TitlePageFileId = x.TitlePageFileId,
+        TitlePageFileName = x.TitlePageFile?.OriginalFileName
+                            ?? (x.TitlePageFileId is null ? null : $"{x.Code}_Титульный_лист.docx"),
+        TitlePageIsManual = x.TitlePageIsManual,
+        TitlePageUpdatedAt = x.TitlePageUpdatedAt,
         RequiresApproval = x.RequiresApproval,
         ApprovalStatus = x.ApprovalStatus.ToString(),
         AttachmentFileIds = x.Attachments.Select(a => a.FileAttachmentId).ToList(),
@@ -1566,6 +1576,12 @@ public class VndService : IVndService
         if (!enteringConsolidation && _newRedactionMailing is not null)
             await _newRedactionMailing.NotifyNewRedactionAsync(vndId);
 
+        // Новая действующая редакция без консолидации — сразу получает Титульный лист (при
+        // консолидации он формируется в VndActualizationService.PublishAsync).
+        if (!enteringConsolidation && _titlePages is not null)
+            await _titlePages.RefreshQuietlyAsync([redaction.Id], TitlePageRefreshMode.CreateOrRefreshAuto,
+                currentUserId);
+
         return ToRedactionResponse(redaction, vnd);
     }
 
@@ -1629,6 +1645,7 @@ public class VndService : IVndService
             if (r.DocFileKgId.HasValue) fileIds.Add(r.DocFileKgId.Value);
             if (r.DocFileEnId.HasValue) fileIds.Add(r.DocFileEnId.Value);
             if (r.TidFileId.HasValue) fileIds.Add(r.TidFileId.Value);
+            if (r.TitlePageFileId.HasValue) fileIds.Add(r.TitlePageFileId.Value);
             fileIds.AddRange(r.Attachments.Select(a => a.FileAttachmentId));
         }
 
@@ -1855,6 +1872,12 @@ public class VndService : IVndService
             $"/base-vnd/{id}");
 
         await _db.SaveChangesAsync();
+
+        // Отмена действия попадает в блок «Отменено действие» Титульного листа последней
+        // действующей редакции (если он был сформирован системой).
+        if (vnd.CurrentRedactionId is { } cancelledRedactionId && _titlePages is not null)
+            await _titlePages.RefreshQuietlyAsync([cancelledRedactionId], TitlePageRefreshMode.RefreshAutoOnly,
+                currentUserId);
 
         var canViewExtended = _currentUser.HasPermission(PermissionCode.ViewVndRegistryExtended);
         return await WithFavoriteAsync(ToResponse(vnd, languageCode, today, canViewExtended));
@@ -2129,6 +2152,12 @@ public class VndService : IVndService
 
         List<string> changedFields;
 
+        // Дата/№ принятия и вступление в силу ДО правки — по ним в журнале решений находится
+        // решение, которое нужно исправить для Титульного листа (см. SyncAfterRequisitesEditAsync).
+        var beforeAdoption = targetRedaction is null
+            ? ((DateOnly?)null, (string?)null, (DateOnly?)null)
+            : (targetRedaction.AdoptionDate, targetRedaction.AdoptionCode, targetRedaction.EffectiveDate);
+
         if (targetRedaction is not null)
         {
             // Doc.ResponsibleExecutors/Keywords/Rubrics не загружены в этом запросе (Include не
@@ -2236,7 +2265,26 @@ public class VndService : IVndService
                 $"/base-vnd/{id}");
         }
 
+        if (targetRedaction is not null && _titlePages is not null)
+            await _titlePages.SyncAfterRequisitesEditAsync(targetRedaction.Id, beforeAdoption,
+                (request.AdoptionDate, request.AdoptionCode, request.EffectiveDate));
+
         await _db.SaveChangesAsync();
+
+        // Титульные листы, на которых видны эти реквизиты: самой редакции и всех следующих (у
+        // следующей она — «Предыдущая редакция», а её решения есть в блоке «Внесены изменения»
+        // у всех последующих); при правке данных отмены — последней действующей. Пересобираются
+        // только сформированные системой листы.
+        if (targetRedaction is not null && changedFields.Count > 0 && _titlePages is not null)
+        {
+            var affected = new List<int> { targetRedaction.Id };
+            affected.AddRange(entity.Redactions
+                .Where(r => r.Number > targetRedaction.Number)
+                .Select(r => r.Id));
+            if (cancelFieldsChanged && entity.CurrentRedactionId is { } currentId)
+                affected.Add(currentId);
+            await _titlePages.RefreshQuietlyAsync(affected, TitlePageRefreshMode.RefreshAutoOnly, _currentUser.UserId);
+        }
 
         // Перечитываем документ с нужными Include-ами для ответа (заголовок/тип общие, остальное
         // могло измениться либо на нём самом, либо только на редакции).

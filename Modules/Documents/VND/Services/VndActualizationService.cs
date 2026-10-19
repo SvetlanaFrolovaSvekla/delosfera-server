@@ -27,6 +27,7 @@ public class VndActualizationService : IVndActualizationService
     private readonly IFileStorageService _fileService;
     private readonly delosfera_server.Common.Services.IBankClock _clock;
     private readonly IVndNewRedactionMailingService? _newRedactionMailing;
+    private readonly IVndTitlePageService? _titlePages;
 
     public VndActualizationService(
         DelosferaDbContext db,
@@ -37,10 +38,12 @@ public class VndActualizationService : IVndActualizationService
         IPlanItemSync planItemSync,
         IFileStorageService fileService,
         delosfera_server.Common.Services.IBankClock clock,
-        IVndNewRedactionMailingService? newRedactionMailing = null
+        IVndNewRedactionMailingService? newRedactionMailing = null,
+        IVndTitlePageService? titlePages = null
     )
     {
         _newRedactionMailing = newRedactionMailing;
+        _titlePages = titlePages;
         _db = db;
         _currentUser = currentUser;
         _notifications = notifications;
@@ -347,6 +350,7 @@ public class VndActualizationService : IVndActualizationService
         if (draft.DocFileKgId.HasValue) fileIds.Add(draft.DocFileKgId.Value);
         if (draft.DocFileEnId.HasValue) fileIds.Add(draft.DocFileEnId.Value);
         if (draft.TidFileId.HasValue) fileIds.Add(draft.TidFileId.Value);
+        if (draft.TitlePageFileId.HasValue) fileIds.Add(draft.TitlePageFileId.Value);
         fileIds.AddRange(draft.Attachments.Select(a => a.FileAttachmentId));
 
         var actor = await _db.Users.FindAsync(currentUserId);
@@ -810,6 +814,14 @@ public class VndActualizationService : IVndActualizationService
         // если ShiftNextPeriod == false — DueActualizationDate не трогаем
 
         var latestRedaction = vnd.Redactions.OrderByDescending(r => r.Number).FirstOrDefault();
+
+        // Журнал решений для Титульного листа (см. VndTitlePageService) — ДО того, как дата/№
+        // принятия редакции перезаписываются ниже: при актуализации без изменений иначе потерялся бы
+        // исходный протокол утверждения редакции.
+        if (latestRedaction is not null && _titlePages is not null)
+            await _titlePages.RecordConsolidationAsync(vnd, latestRedaction, request.AdoptionDate,
+                request.AdoptionCode, request.EffectiveDate, currentUserId);
+
         if (latestRedaction is not null)
         {
             vnd.CurrentRedactionId = latestRedaction.Id;
@@ -857,6 +869,13 @@ public class VndActualizationService : IVndActualizationService
         vnd.ActualizationPerformed = false;
 
         await _db.SaveChangesAsync();
+
+        // Титульный лист редакции: у новой редакции формируется сразу (при консолидации как раз
+        // появляются дата и № принятия), у уже действующей (актуализация без изменений) —
+        // пересобирается, если он был сформирован системой. Загруженный вручную не трогаем.
+        if (latestRedaction is not null && _titlePages is not null)
+            await _titlePages.RefreshQuietlyAsync([latestRedaction.Id],
+                TitlePageRefreshMode.CreateOrRefreshAuto, currentUserId);
 
         // --- Позиция плана (если ВНД сопоставлена с ней) закрывается и получает новый срок —
         // см. PlanItemLifecycleService.PlanItemSyncService. Вызов безопасен и для публикации вне

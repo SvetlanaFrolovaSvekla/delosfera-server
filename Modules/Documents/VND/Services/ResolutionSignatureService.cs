@@ -78,6 +78,14 @@ public interface IResolutionSignatureService
     /// журнала — вызывающий код сохраняет её в одном SaveChanges с решением.</summary>
     Task<VndResolutionSignature> VerifyForDecisionAsync(ResolutionSignatureInput input, CancellationToken ct = default);
 
+    /// <summary>ТЕСТ (EcpSigning:AllowVndTestEcp): запись журнала с ИМИТАЦИЕЙ подписи — хэш тот же, что
+    /// подписывался бы по-настоящему (из БД), «подпись» — случайные байты, ГП не вызывается.
+    /// Verified=false и VerificationError=<see cref="ResolutionSignatureService.TestVerificationNote"/> —
+    /// признак имитации: такие записи не участвуют в привязке ПИН к учётке, а в листе согласования
+    /// печатаются штампом «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП». Как и VerifyForDecisionAsync, в контекст не
+    /// добавляет — вызывающий код сохраняет запись одним SaveChanges с решением.</summary>
+    Task<VndResolutionSignature> BuildTestSignatureAsync(ResolutionSignatureInput input, CancellationToken ct = default);
+
     Task<List<VndResolutionSignatureResponse>> ListAsync(int vndId, int currentUserId, CancellationToken ct = default);
 
     Task<ResolutionSignatureVerifyResponse> ReverifyAsync(
@@ -355,6 +363,88 @@ public class ResolutionSignatureService : IResolutionSignatureService
     }
 
     // ----------------------------------------------------------------------------------------
+    // ТЕСТ: имитация ЭЦП (только EcpSigning:AllowVndTestEcp) — по образцу служебных записок
+    // (SzResolutionSignatureService.ResolveWithTestEcpAsync)
+    // ----------------------------------------------------------------------------------------
+
+    public const string TestPin = "00000000000000";
+    public const string TestVerificationNote = "ТЕСТ: имитация ЭЦП, у ГП «Инфоком» подпись не ставилась и не проверялась";
+
+    /// <summary>Запись журнала — тестовая имитация, а не настоящая подпись.</summary>
+    public static bool IsTestSignature(VndResolutionSignature s) =>
+        !s.Verified && s.VerificationError == TestVerificationNote;
+
+    public async Task<VndResolutionSignature> BuildTestSignatureAsync(
+        ResolutionSignatureInput input, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var process = input.Process;
+        var redaction = process.Redaction
+                        ?? throw new InvalidOperationException("Процесс согласования загружен без редакции");
+        var vnd = process.Vnd
+                  ?? throw new InvalidOperationException("Процесс согласования загружен без ВНД");
+
+        var phase = PhaseForStatus(process.Status);
+        var roundNumber = await CurrentRoundNumberAsync(process.Id, phase, ct);
+
+        // Хэш — тот же, что подписывался бы по-настоящему: лист согласования и сверка версий текста
+        // работают с тестовой подписью так же, как с боевой.
+        EnsureSignableDecision(input.Decision);
+        var components = await BuildComponentsAsync(redaction, vnd.Code, input.Comment, input.Decision, ct);
+        var hash = ResolutionSignatureHasher.Compute(components);
+
+        // «Подпись» — случайные байты: уникальна (индекс по SHA-256 подписи) и заведомо не CMS.
+        var fakeSignature = RandomNumberGenerator.GetBytes(64);
+        var now = DateTime.UtcNow;
+
+        var userName = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == input.UserId)
+            .Select(u => u.FullName)
+            .FirstOrDefaultAsync(ct);
+
+        _logger.LogWarning("ВНД {VndId}: решение {Decision} пользователя {UserId} сохраняется с ТЕСТОВОЙ имитацией ЭЦП",
+            vnd.Id, input.Decision, input.UserId);
+
+        return new VndResolutionSignature
+        {
+            VndId = vnd.Id,
+            ApprovalProcessId = process.Id,
+            RedactionId = redaction.Id,
+            StageId = input.Stage.Id,
+            Phase = phase,
+            RoundNumber = roundNumber,
+            Decision = input.Decision,
+            UserId = input.UserId,
+
+            PersonIdnp = TestPin,
+            PersonFio = Truncate(userName, 300),
+            OrganizationName = "ТЕСТ (имитация ЭЦП)",
+
+            CertCommonName = Truncate(userName, 300),
+            CertValidNotAfter = now.AddYears(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            CertIssuerCommonName = "Тестовый УЦ (имитация)",
+
+            HashSchemaVersion = ResolutionSignatureHasher.VersionOf(components),
+            Hash = hash,
+            CommentText = components.Comment,
+            CommentHash = ResolutionSignatureHasher.Sha256Hex(components.Comment),
+            ContentDigest = components.Content,
+            VndCode = Truncate(components.Code, 100)!,
+            SignatureBase64 = Convert.ToBase64String(fakeSignature),
+            SignatureSha256 = ResolutionSignatureHasher.Sha256Hex(fakeSignature),
+
+            SignedAt = now,
+            VerifiedAt = now,
+            // Verified=false — признак тестовой имитации (см. IsTestSignature).
+            Verified = false,
+            VerificationError = TestVerificationNote,
+
+            IpAddress = Truncate(input.IpAddress, 64),
+            UserAgent = Truncate(input.UserAgent, 512),
+        };
+    }
+
+    // ----------------------------------------------------------------------------------------
     // Журнал и повторная проверка
     // ----------------------------------------------------------------------------------------
 
@@ -389,6 +479,7 @@ public class ResolutionSignatureService : IResolutionSignatureService
                 SignedAt = s.SignedAt,
                 VerifiedAt = s.VerifiedAt,
                 Verified = s.Verified,
+                IsTest = !s.Verified && s.VerificationError == TestVerificationNote,
             })
             .ToListAsync(ct);
     }
@@ -453,17 +544,42 @@ public class ResolutionSignatureService : IResolutionSignatureService
         if (!string.Equals(ResolutionSignatureHasher.NormalizeCode(liveCode), entry.VndCode, StringComparison.Ordinal))
             result.ChangedComponents.Add("code");
 
-        // Сама подпись — у провайдера, по сохранённому хэшу (он и подписывался).
-        var check = await CheckSignAsync(entry.SignatureBase64, entry.Hash, ct);
-        result.SignatureVerified = check is null
-            ? null
-            : check.Verified && string.Equals(FormatPin(check.PersonIdnp), entry.PersonIdnp, StringComparison.Ordinal);
-        result.SignerPersonFio = check?.PersonFio ?? entry.PersonFio;
+        // Сама подпись — у провайдера, по сохранённому хэшу (он и подписывался). Тестовую имитацию
+        // провайдеру не отправляем — там нечего проверять.
+        var isTest = IsTestSignature(entry);
+        if (isTest)
+        {
+            result.SignatureVerified = false;
+            result.SignerPersonFio = entry.PersonFio;
+        }
+        else
+        {
+            var check = await CheckSignAsync(entry.SignatureBase64, entry.Hash, ct);
+            result.SignatureVerified = check is null
+                ? null
+                : check.Verified && string.Equals(FormatPin(check.PersonIdnp), entry.PersonIdnp, StringComparison.Ordinal);
+            result.SignerPersonFio = check?.PersonFio ?? entry.PersonFio;
+        }
 
         if (!journalConsistent)
         {
             result.Status = "journal_tampered";
             result.Message = "Запись журнала подписей не согласована сама с собой — данные изменены в обход системы";
+        }
+        else if (isTest)
+        {
+            // Для клиента — как "document_changed"/"provider_unavailable": жёлтая плашка, не красная.
+            result.Status = result.ChangedComponents.Count > 0 ? "document_changed" : "provider_unavailable";
+            result.Message = "Тестовая имитация ЭЦП — у провайдера не проверяется"
+                             + (result.ChangedComponents.Count > 0
+                                 ? "; после «подписания» изменено: " + string.Join(", ", result.ChangedComponents.Select(c => c switch
+                                 {
+                                     "comment" => "текст резолюции",
+                                     "content" => "содержимое редакции (файлы документа)",
+                                     "code" => "код ВНД",
+                                     _ => c,
+                                 }))
+                                 : "; документ и резолюция с момента «подписания» не менялись");
         }
         else if (result.SignatureVerified == false)
         {
@@ -713,15 +829,16 @@ public class ResolutionSignatureService : IResolutionSignatureService
     /// подписывавшая за одного пользователя delosfera, не принимается от другого.</summary>
     private async Task EnsurePinBindingAsync(int userId, string signerPin, CancellationToken ct)
     {
+        // Тестовые имитации (Verified=false) к привязке ПИН отношения не имеют.
         var boundToOtherPin = await _db.VndResolutionSignatures
-            .AnyAsync(s => s.UserId == userId && s.PersonIdnp != signerPin, ct);
+            .AnyAsync(s => s.Verified && s.UserId == userId && s.PersonIdnp != signerPin, ct);
         if (boundToOtherPin)
             throw new ResolutionSignatureException(StatusCodes.Status403Forbidden,
                 ResolutionSignatureErrorCodes.IdentityMismatch,
                 "Ваша учётная запись уже привязана к ЭЦП другого лица — подписывать можно только своей ЭЦП");
 
         var usedByOtherUser = await _db.VndResolutionSignatures
-            .AnyAsync(s => s.PersonIdnp == signerPin && s.UserId != userId, ct);
+            .AnyAsync(s => s.Verified && s.PersonIdnp == signerPin && s.UserId != userId, ct);
         if (usedByOtherUser)
             throw new ResolutionSignatureException(StatusCodes.Status403Forbidden,
                 ResolutionSignatureErrorCodes.IdentityMismatch,

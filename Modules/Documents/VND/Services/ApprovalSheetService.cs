@@ -97,7 +97,8 @@ public static class ApprovalSheetRowBuilder
                         signature.CertIssuerCommonName,
                         TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(signature.SignedAt, DateTimeKind.Utc), zone),
                         signature.Hash,
-                        signature.SignatureSha256);
+                        signature.SignatureSha256,
+                        ResolutionSignatureService.IsTestSignature(signature));
                 }
                 else if (forDecision.Count > 0)
                 {
