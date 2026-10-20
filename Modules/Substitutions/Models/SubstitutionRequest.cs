@@ -47,6 +47,14 @@ public class SubstitutionRequest : IAuditableEntity
     public SubstitutionStatus Status { get; set; } = SubstitutionStatus.Draft;
 
     // ── Блок 1. Общие сведения ──────────────────────────────────────────────
+    /// <summary>
+    /// Автор заявки — кто её завёл в системе. Ставится один раз при создании и больше не
+    /// меняется (в отличие от инициатора, которого можно указать другим). У заявок, созданных
+    /// до появления поля, восстановлен из журнала аудита.
+    /// </summary>
+    public int? AuthorUserId { get; set; }
+    public User? AuthorUser { get; set; }
+
     /// <summary>Инициатор запроса (КСЗ-ЗМ-01).</summary>
     public int InitiatorUserId { get; set; }
     public User? InitiatorUser { get; set; }
@@ -101,6 +109,14 @@ public class SubstitutionRequest : IAuditableEntity
 
     // ── Блок 6. Прочее ──────────────────────────────────────────────────────
     public string? Description { get; set; }                     // КСЗ-ЗМ-29
+
+    /// <summary>
+    /// Какие этапы маршрута не сформировались при последней отправке и почему (не назначен
+    /// начальник филиала, не выбран согласующий Операционного управления или кадровик УЧР).
+    /// Этап в этом случае пропускается, а не останавливает заявку; пометка показывается в
+    /// карточке, и о ней уходит уведомление инициатору и УЧР.
+    /// </summary>
+    public string? RouteNote { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

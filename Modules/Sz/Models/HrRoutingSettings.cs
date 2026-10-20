@@ -23,6 +23,13 @@ public class HrRoutingSettings : IAuditableEntity
     /// <summary>Замена согласующего Операционного управления при его отсутствии.</summary>
     public int? OperationsFallbackUserId { get; set; }
 
+    /// <summary>
+    /// Кто подписывает приказ и договор о материальной ответственности по заявкам на замещение
+    /// сотрудников Головного офиса. У филиала это директор филиала (этап маршрута), а у Головного
+    /// офиса директора филиала нет — без этой настройки подпись «Директор» не формируется.
+    /// </summary>
+    public int? HeadOfficeSignerUserId { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

@@ -89,6 +89,10 @@ public class SubstitutionListItem
     public DateOnly? StartsOn { get; set; }
     public DateOnly? EndsOn { get; set; }
     public string? InitiatorName { get; set; }
+
+    /// <summary>Автор заявки (кто создал) — неизменяемое поле.</summary>
+    public int? AuthorUserId { get; set; }
+    public string? AuthorName { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -142,6 +146,23 @@ public class SubstitutionDetails : SubstitutionListItem
 
     /// <summary>Как фактически решавших зовут: id → ФИО (для «согласовал Б за А»).</summary>
     public Dictionary<int, string> DeciderNames { get; set; } = new();
+
+    /// <summary>Какие этапы не сформировались при отправке и почему — пометка для карточки.</summary>
+    public string? RouteNote { get; set; }
+
+    /// <summary>Права текущего пользователя на эту заявку (заполняет контроллер).</summary>
+    public SubstitutionAccessDto? Access { get; set; }
+}
+
+/// <summary>Что текущему пользователю можно делать с заявкой.</summary>
+public class SubstitutionAccessDto
+{
+    /// <summary>Ведёт заявки как УЧР (кадровик из настроек маршрута или администратор).</summary>
+    public bool CanManage { get; set; }
+    public bool IsInitiator { get; set; }
+    public bool CanWithdraw { get; set; }
+    public bool CanDelete { get; set; }
+    public bool CanExecute { get; set; }
 }
 
 public class SubstitutionPage

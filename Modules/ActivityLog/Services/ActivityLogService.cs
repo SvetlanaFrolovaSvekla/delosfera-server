@@ -112,16 +112,65 @@ public class ActivityLogService : IActivityLogService
         var actors = await _db.Users.AsNoTracking()
             .Where(u => actorIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => u.FullName);
+        var substitutions = await LoadSubstitutionContextAsync(rows, actors);
 
-        return rows.Select(a => AuditToResponse(module, a, actors)).ToList();
+        return rows.Select(a => AuditToResponse(module, a, actors, substitutions)).ToList();
     }
 
-    /// <summary>Строка аудита (СЗ/закупки) в виде записи журнала.</summary>
-    private static ActivityLogEntryResponse AuditToResponse(string module, AuditEntry a, IReadOnlyDictionary<int, string> actors)
+    /// <summary>
+    /// Номера заявок на замещение и ФИО тех, за кого действовали (GEN-14), — для строк
+    /// «… согласовал(а) заявку на замещение HR-5 за Иванова (по замещению)». Недостающие ФИО
+    /// дописываются в <paramref name="names"/>.
+    /// </summary>
+    private async Task<Dictionary<int, string>> LoadSubstitutionContextAsync(
+        IReadOnlyCollection<AuditEntry> rows, Dictionary<int, string> names, CancellationToken ct = default)
+    {
+        var subs = rows.Where(r => r.EntityType == SubstitutionAuditType).ToList();
+        if (subs.Count == 0) return new Dictionary<int, string>();
+
+        var ids = subs.Select(r => r.EntityId).Distinct().ToList();
+        var numbers = await _db.SubstitutionRequests.AsNoTracking()
+            .Where(x => ids.Contains(x.Id) && x.RegNumber != null)
+            .ToDictionaryAsync(x => x.Id, x => x.RegNumber!, ct);
+
+        var people = new HashSet<int>();
+        foreach (var r in subs.Where(r => r.PayloadJson != null))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(r.PayloadJson!);
+                if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                foreach (var p in doc.RootElement.EnumerateObject())
+                    if (p.Name.ToLowerInvariant() is "onbehalfof" or "from" or "to"
+                        && p.Value.ValueKind == System.Text.Json.JsonValueKind.Number && p.Value.TryGetInt32(out var id))
+                        people.Add(id);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Строка останется без уточнений.
+            }
+        }
+        people.ExceptWith(names.Keys);
+        if (people.Count > 0)
+            foreach (var u in await _db.Users.AsNoTracking().Where(u => people.Contains(u.Id))
+                         .Select(u => new { u.Id, u.FullName }).ToListAsync(ct))
+                names[u.Id] = u.FullName;
+        return numbers;
+    }
+
+    private const string SubstitutionAuditType = "SubstitutionRequest";
+
+    /// <summary>Строка аудита (СЗ/закупки/заявки на замещение) в виде записи журнала.</summary>
+    private static ActivityLogEntryResponse AuditToResponse(string module, AuditEntry a, IReadOnlyDictionary<int, string> actors,
+        IReadOnlyDictionary<int, string>? substitutionNumbers = null)
     {
         var (_, urlPrefix) = AuditActivityText.Origin(a.EntityType);
         var (ru, icon) = AuditActivityText.Describe(a.EntityType, a.Action);
         var actor = a.UserId is { } uid && actors.TryGetValue(uid, out var name) ? name : "Система";
+        if (a.EntityType == SubstitutionAuditType)
+            ru = AuditActivityText.DescribeSubstitution(a.Action, ru,
+                substitutionNumbers?.GetValueOrDefault(a.EntityId) ?? $"#{a.EntityId}",
+                a.PayloadJson, id => actors.TryGetValue(id, out var n) ? n : null);
 
         return new ActivityLogEntryResponse
         {
@@ -232,6 +281,7 @@ public class ActivityLogService : IActivityLogService
         var filterInMemory = terms.Count > 0 || icons.Count > 0;
         var result = new List<ActivityLogEntryResponse>();
         var actors = new Dictionary<int, string>();
+        var substitutionNumbers = new Dictionary<int, string>();
         DateTime? lastAt = null;
         long lastId = 0;
         var scanned = 0;
@@ -262,10 +312,12 @@ public class ActivityLogService : IActivityLogService
                     .ToListAsync(ct);
                 foreach (var n in names) actors[n.Id] = n.FullName;
             }
+            foreach (var (k, v) in await LoadSubstitutionContextAsync(rows, actors, ct))
+                substitutionNumbers[k] = v;
 
             foreach (var row in rows)
             {
-                var entry = AuditToResponse(module, row, actors);
+                var entry = AuditToResponse(module, row, actors, substitutionNumbers);
                 if (icons.Count > 0 && !icons.Contains(entry.Icon)) continue;
                 if (terms.Count > 0)
                 {

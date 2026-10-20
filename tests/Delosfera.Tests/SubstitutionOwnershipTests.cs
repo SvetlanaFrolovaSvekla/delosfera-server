@@ -147,6 +147,44 @@ public class SubstitutionOwnershipTests
         Assert.True(await db.SubstitutionRequests.AnyAsync(x => x.Id == id));
     }
 
+    // ── Автор заявки ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Автор_ставится_при_создании_и_не_меняется()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var сервис = Сервис(db);
+        var автор = await ПользовательАsync(db);
+        var другойИнициатор = await ПользовательАsync(db);
+
+        // Заявку завёл один сотрудник, инициатором указан другой.
+        var запрос = Черновик();
+        запрос.InitiatorUserId = другойИнициатор;
+        var создано = await сервис.CreateAsync(запрос, автор);
+        Assert.Equal(автор, создано.AuthorUserId);
+        Assert.Equal(другойИнициатор, создано.InitiatorUserId);
+
+        // Правка инициатором автора не трогает.
+        var обновлено = await сервис.UpdateAsync(создано.Id, Черновик("Уточнённая тема"), другойИнициатор);
+        Assert.Equal(автор, обновлено.AuthorUserId);
+    }
+
+    [Fact]
+    public async Task Реестр_фильтруется_по_автору()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var сервис = Сервис(db);
+        var первый = await ПользовательАsync(db);
+        var второй = await ПользовательАsync(db);
+        var своя = (await сервис.CreateAsync(Черновик("Своя"), первый)).Id;
+        await сервис.CreateAsync(Черновик("Чужая"), второй);
+
+        var страница = await сервис.SearchAsync(null, null, mineOnly: false, первый, 1, 50, authorUserId: первый);
+
+        Assert.Equal([своя], страница.Items.Select(x => x.Id).ToArray());
+        Assert.Equal(первый, страница.Items[0].AuthorUserId);
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private static SubstitutionService Сервис(DelosferaDbContext db) =>

@@ -13524,6 +13524,76 @@ namespace delosfera_server.Migrations
                     b.ToTable("substitution_commission_members", (string)null);
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Substitutions.Models.SubstitutionDocument", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AbsentUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("absent_user_id");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("content");
+
+                    b.Property<string>("ContentSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("content_sha256");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int?>("DirectorUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("director_user_id");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("file_name");
+
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_current");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<int>("RequestId")
+                        .HasColumnType("integer")
+                        .HasColumnName("request_id");
+
+                    b.Property<int?>("SubstituteUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("substitute_user_id");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_substitution_documents");
+
+                    b.HasIndex("RequestId", "Kind", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("ix_substitution_documents_request_id_kind_version");
+
+                    b.ToTable("substitution_documents", (string)null);
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Substitutions.Models.SubstitutionRequest", b =>
                 {
                     b.Property<int>("Id")
@@ -13561,6 +13631,10 @@ namespace delosfera_server.Migrations
                     b.Property<string>("AddressResidence")
                         .HasColumnType("text")
                         .HasColumnName("address_residence");
+
+                    b.Property<int?>("AuthorUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("author_user_id");
 
                     b.Property<string>("CommissionChairName")
                         .HasColumnType("text")
@@ -13630,6 +13704,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("text")
                         .HasColumnName("reg_number");
 
+                    b.Property<string>("RouteNote")
+                        .HasColumnType("text")
+                        .HasColumnName("route_note");
+
                     b.Property<DateOnly?>("StartsOn")
                         .HasColumnType("date")
                         .HasColumnName("starts_on");
@@ -13681,6 +13759,9 @@ namespace delosfera_server.Migrations
                     b.HasIndex("AbsentUserId")
                         .HasDatabaseName("ix_substitution_requests_absent_user_id");
 
+                    b.HasIndex("AuthorUserId")
+                        .HasDatabaseName("ix_substitution_requests_author_user_id");
+
                     b.HasIndex("CommissionChairUserId")
                         .HasDatabaseName("ix_substitution_requests_commission_chair_user_id");
 
@@ -13697,6 +13778,177 @@ namespace delosfera_server.Migrations
                         .HasDatabaseName("ix_substitution_requests_substitute_user_id");
 
                     b.ToTable("substitution_requests", (string)null);
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Substitutions.Models.SubstitutionSignature", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CertCommonName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("cert_common_name");
+
+                    b.Property<string>("CertIssuerCommonName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("cert_issuer_common_name");
+
+                    b.Property<string>("CertIssuerOrganizationName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("cert_issuer_organization_name");
+
+                    b.Property<string>("CertKeyIdentifier")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("cert_key_identifier");
+
+                    b.Property<string>("CertValidNotAfter")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("cert_valid_not_after");
+
+                    b.Property<string>("CertValidNotBefore")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("cert_valid_not_before");
+
+                    b.Property<DateTime?>("CmsSigningTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cms_signing_time");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("document_id");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("hash");
+
+                    b.Property<string>("HashSchemaVersion")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("hash_schema_version");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<int?>("OnBehalfOfUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("on_behalf_of_user_id");
+
+                    b.Property<string>("OrganizationInn")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("organization_inn");
+
+                    b.Property<string>("OrganizationName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("organization_name");
+
+                    b.Property<string>("PersonFio")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("person_fio");
+
+                    b.Property<string>("PersonIdnp")
+                        .IsRequired()
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)")
+                        .HasColumnName("person_idnp");
+
+                    b.Property<int?>("PlacementAnchor")
+                        .HasColumnType("integer")
+                        .HasColumnName("placement_anchor");
+
+                    b.Property<int?>("PlacementIndentMm")
+                        .HasColumnType("integer")
+                        .HasColumnName("placement_indent_mm");
+
+                    b.Property<DateTime?>("ProviderCheckTimestamp")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("provider_check_timestamp");
+
+                    b.Property<DateTime?>("ProviderTimestamp")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("provider_timestamp");
+
+                    b.Property<int>("RequestId")
+                        .HasColumnType("integer")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("role");
+
+                    b.Property<string>("SignatureBase64")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("signature_base64");
+
+                    b.Property<string>("SignatureSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("signature_sha256");
+
+                    b.Property<DateTime>("SignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("signed_at");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("user_agent");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("VerificationError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("verification_error");
+
+                    b.Property<bool>("Verified")
+                        .HasColumnType("boolean")
+                        .HasColumnName("verified");
+
+                    b.Property<DateTime>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("verified_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_substitution_signatures");
+
+                    b.HasIndex("DocumentId")
+                        .HasDatabaseName("ix_substitution_signatures_document_id");
+
+                    b.HasIndex("SignatureSha256")
+                        .IsUnique()
+                        .HasDatabaseName("ix_substitution_signatures_signature_sha256");
+
+                    b.HasIndex("RequestId", "DocumentId")
+                        .HasDatabaseName("ix_substitution_signatures_request_id_document_id");
+
+                    b.HasIndex("UserId", "PersonIdnp")
+                        .HasDatabaseName("ix_substitution_signatures_user_id_person_idnp");
+
+                    b.ToTable("substitution_signatures", (string)null);
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Substitutions.Models.SubstitutionSlaSettings", b =>
@@ -13746,6 +13998,10 @@ namespace delosfera_server.Migrations
                     b.Property<int?>("HeadOfficeHrUserId")
                         .HasColumnType("integer")
                         .HasColumnName("head_office_hr_user_id");
+
+                    b.Property<int?>("HeadOfficeSignerUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("head_office_signer_user_id");
 
                     b.Property<int?>("OperationsApproverUserId")
                         .HasColumnType("integer")
@@ -18410,6 +18666,18 @@ namespace delosfera_server.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Substitutions.Models.SubstitutionDocument", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Substitutions.Models.SubstitutionRequest", "Request")
+                        .WithMany()
+                        .HasForeignKey("RequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_substitution_documents_substitution_requests_request_id");
+
+                    b.Navigation("Request");
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Substitutions.Models.SubstitutionRequest", b =>
                 {
                     b.HasOne("delosfera_server.Modules.Dictionaries.Models.OrganizationUnit", "AbsentUnit")
@@ -18423,6 +18691,12 @@ namespace delosfera_server.Migrations
                         .HasForeignKey("AbsentUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_substitution_requests_users_absent_user_id");
+
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_substitution_requests_users_author_user_id");
 
                     b.HasOne("delosfera_server.Modules.Users.Models.User", "CommissionChairUser")
                         .WithMany()
@@ -18453,6 +18727,8 @@ namespace delosfera_server.Migrations
 
                     b.Navigation("AbsentUser");
 
+                    b.Navigation("AuthorUser");
+
                     b.Navigation("CommissionChairUser");
 
                     b.Navigation("InitiatorUser");
@@ -18460,6 +18736,36 @@ namespace delosfera_server.Migrations
                     b.Navigation("SubstituteUnit");
 
                     b.Navigation("SubstituteUser");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Substitutions.Models.SubstitutionSignature", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Substitutions.Models.SubstitutionDocument", "Document")
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_substitution_signatures_substitution_documents_document_id");
+
+                    b.HasOne("delosfera_server.Modules.Substitutions.Models.SubstitutionRequest", "Request")
+                        .WithMany()
+                        .HasForeignKey("RequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_substitution_signatures_substitution_requests_request_id");
+
+                    b.HasOne("delosfera_server.Modules.Users.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_substitution_signatures_users_user_id");
+
+                    b.Navigation("Document");
+
+                    b.Navigation("Request");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Sz.Models.SzApprover", b =>

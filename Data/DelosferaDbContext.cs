@@ -147,6 +147,12 @@ public class DelosferaDbContext : DbContext
         Set<delosfera_server.Modules.Substitutions.Models.SubstitutionApproval>();
     public DbSet<delosfera_server.Modules.Substitutions.Models.SubstitutionSlaSettings> SubstitutionSlaSettings =>
         Set<delosfera_server.Modules.Substitutions.Models.SubstitutionSlaSettings>();
+    // Зафиксированные приказ и договор заявки на замещение и подписи ЭЦП под ними (этап «На подписании»).
+    // Журнал подписей неизменяем — см. проверку в ApplyAuditInfo ниже.
+    public DbSet<delosfera_server.Modules.Substitutions.Models.SubstitutionDocument> SubstitutionDocuments =>
+        Set<delosfera_server.Modules.Substitutions.Models.SubstitutionDocument>();
+    public DbSet<delosfera_server.Modules.Substitutions.Models.SubstitutionSignature> SubstitutionSignatures =>
+        Set<delosfera_server.Modules.Substitutions.Models.SubstitutionSignature>();
     public DbSet<RouteTemplateStep> RouteTemplateSteps => Set<RouteTemplateStep>();
     public DbSet<RouteTemplateParticipant> RouteTemplateParticipants => Set<RouteTemplateParticipant>();
 
@@ -440,6 +446,12 @@ public class DelosferaDbContext : DbContext
                     "Журнал подписей ЭЦП неизменяем — изменение и удаление записей запрещены");
         }
         foreach (var signature in ChangeTracker.Entries<SzResolutionSignature>())
+        {
+            if (signature.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException(
+                    "Журнал подписей ЭЦП неизменяем — изменение и удаление записей запрещены");
+        }
+        foreach (var signature in ChangeTracker.Entries<delosfera_server.Modules.Substitutions.Models.SubstitutionSignature>())
         {
             if (signature.State is EntityState.Modified or EntityState.Deleted)
                 throw new InvalidOperationException(

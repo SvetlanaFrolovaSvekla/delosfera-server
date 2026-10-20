@@ -20,12 +20,12 @@ public interface ISubstitutionService
     /// где он инициатор или согласующий одного из этапов (так реестр видят все, у кого
     /// нет права на полный реестр).
     /// </summary>
-    /// <para>absentUserId / substituteUserId — отсутствующий и замещающий; periodFrom / periodTo —
+    /// <para>absentUserId / substituteUserId / authorUserId — отсутствующий, замещающий и автор; periodFrom / periodTo —
     /// заявки, период замещения которых пересекается с указанным (границы включительно; любую
     /// можно не задавать).</para>
     Task<SubstitutionPage> SearchAsync(string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize,
         bool participantOnly = false, int? absentUserId = null, int? substituteUserId = null,
-        DateOnly? periodFrom = null, DateOnly? periodTo = null, CancellationToken ct = default);
+        DateOnly? periodFrom = null, DateOnly? periodTo = null, int? authorUserId = null, CancellationToken ct = default);
     Task<SubstitutionDetails?> GetAsync(int id, CancellationToken ct = default);
 
     /// <summary>
@@ -62,6 +62,25 @@ public interface ISubstitutionService
 
     /// <summary>Задать норматив срока согласования (ЗМ-SLA). Ведёт администратор.</summary>
     Task<int> SetSlaDaysAsync(int days, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ведёт ли пользователь заявки на замещение как УЧР: он выбран кадровиком УЧР (по ГО или
+    /// по филиалам) в настройках маршрута, либо сейчас замещает такого кадровика (GEN-14).
+    /// Раньше полный доступ давало право «Видеть все СЗ» — а оно есть у Председателя, Правления,
+    /// делопроизводства и руководителей, и все они видели паспорт, ИНН и адреса замещающих и
+    /// могли «исполнить» чужую заявку.
+    /// </summary>
+    Task<bool> IsHrManagerAsync(int userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Кадровик УЧР именно этой заявки — тот, кто отвечает за её кадровое оформление и отмечает
+    /// «Исполнено (приказ оформлен)»: согласующий этапа «УЧР» действующего круга (кадровик по
+    /// Головному офису, если отсутствующий из ГО, по филиалам — если из филиала; с учётом
+    /// переназначения этапа), а если этапа нет — кадровик по области отсутствующего из настроек
+    /// маршрута. Также тот, кто его сейчас замещает (отпуск, больничный — GEN-14).
+    /// Администратор системы проверяется отдельно (контроллер) — как технический запасной вариант.
+    /// </summary>
+    Task<bool> IsResponsibleHrAsync(int id, int userId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -106,6 +125,17 @@ public class SubstitutionService : ISubstitutionService
             .FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
 
+        // На подписании и после — тот самый зафиксированный файл, который подписывают, а не
+        // заново собранный: иначе «без подписей» могло бы отличаться от подписанного.
+        if (form is "order" or "liability")
+        {
+            var kind = form == "order" ? SubstitutionDocumentKind.Order : SubstitutionDocumentKind.Liability;
+            var frozen = await _db.SubstitutionDocuments.AsNoTracking()
+                .Where(d => d.RequestId == id && d.Kind == kind && d.IsCurrent)
+                .FirstOrDefaultAsync(ct);
+            if (frozen is not null) return (frozen.Content, frozen.FileName);
+        }
+
         var stamp = entity.RegNumber ?? id.ToString();
         return form switch
         {
@@ -119,6 +149,7 @@ public class SubstitutionService : ISubstitutionService
     private IQueryable<SubstitutionRequest> BaseQuery() =>
         _db.SubstitutionRequests.AsNoTracking()
             .Include(x => x.InitiatorUser)
+            .Include(x => x.AuthorUser)
             .Include(x => x.AbsentUnit)
             .Include(x => x.SubstituteUnit)
             .Include(x => x.CommissionMembers.OrderBy(m => m.SortOrder))
@@ -127,9 +158,12 @@ public class SubstitutionService : ISubstitutionService
     public async Task<SubstitutionPage> SearchAsync(
         string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize,
         bool participantOnly = false, int? absentUserId = null, int? substituteUserId = null,
-        DateOnly? periodFrom = null, DateOnly? periodTo = null, CancellationToken ct = default)
+        DateOnly? periodFrom = null, DateOnly? periodTo = null, int? authorUserId = null, CancellationToken ct = default)
     {
-        var q = _db.SubstitutionRequests.AsNoTracking().Include(x => x.InitiatorUser).AsQueryable();
+        var q = _db.SubstitutionRequests.AsNoTracking()
+            .Include(x => x.InitiatorUser)
+            .Include(x => x.AuthorUser)
+            .AsQueryable();
 
         if (mineOnly)
             q = q.Where(x => x.InitiatorUserId == currentUserId);
@@ -138,9 +172,7 @@ public class SubstitutionService : ISubstitutionService
             // Согласующий (сам или по замещению) должен находить заявку, которая ждёт или
             // ждала его решения. Раньше без права на полный реестр показывались только свои
             // заявки, и директор филиала не видел заявку, пришедшую к нему на согласование.
-            var approvers = await ActingFor.SelfAndAbsentAsync(_db, currentUserId, _clock.Today);
-            q = q.Where(x => x.InitiatorUserId == currentUserId
-                             || x.Approvals.Any(a => approvers.Contains(a.UserId)));
+            q = await ParticipantFilterAsync(q, currentUserId, ct);
         }
 
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<SubstitutionStatus>(status, out var st))
@@ -150,6 +182,8 @@ public class SubstitutionService : ISubstitutionService
             q = q.Where(x => x.AbsentUserId == absentId);
         if (substituteUserId is int substituteId)
             q = q.Where(x => x.SubstituteUserId == substituteId);
+        if (authorUserId is int authorId)
+            q = q.Where(x => x.AuthorUserId == authorId);
 
         // Период: заявка попадает, если её период замещения пересекается с заданным.
         // Незаполненная граница заявки считается открытой (замещение «с …» или «по …»).
@@ -191,10 +225,64 @@ public class SubstitutionService : ISubstitutionService
         if (isPrivileged) return true;
         // Согласующий этапа — сам или по замещению (GEN-14): замещающий согласует за
         // отсутствующего, значит и карточку должен открыть.
-        var approvers = await ActingFor.SelfAndAbsentAsync(_db, currentUserId, _clock.Today);
-        return await _db.SubstitutionRequests.AsNoTracking().AnyAsync(x => x.Id == id
-            && (x.InitiatorUserId == currentUserId || x.Approvals.Any(a => approvers.Contains(a.UserId))), ct);
+        var q = await ParticipantFilterAsync(_db.SubstitutionRequests.AsNoTracking(), currentUserId, ct);
+        return await q.AnyAsync(x => x.Id == id, ct);
     }
+
+    /// <summary>
+    /// Заявки, в которых пользователь участвует: инициатор; согласующий любого этапа (сам или
+    /// по замещению); отсутствующий и замещающий — с момента отправки (черновик видит только
+    /// автор); подписант документов на этапе подписания (директор — в т.ч. подписант ГО из
+    /// настроек). Остальным заявка не видна: в ней паспорт, ИНН и адреса замещающего.
+    /// </summary>
+    private async Task<IQueryable<SubstitutionRequest>> ParticipantFilterAsync(
+        IQueryable<SubstitutionRequest> q, int userId, CancellationToken ct)
+    {
+        var approvers = await ActingFor.SelfAndAbsentAsync(_db, userId, _clock.Today);
+        var signerDocs = _db.SubstitutionDocuments.Where(d => d.IsCurrent
+            && d.DirectorUserId != null && approvers.Contains(d.DirectorUserId.Value));
+        return q.Where(x => x.InitiatorUserId == userId
+                            || x.Approvals.Any(a => approvers.Contains(a.UserId))
+                            || (x.Status != SubstitutionStatus.Draft
+                                && (x.AbsentUserId == userId || x.SubstituteUserId == userId))
+                            || signerDocs.Any(d => d.RequestId == x.Id));
+    }
+
+    public async Task<bool> IsHrManagerAsync(int userId, CancellationToken ct = default)
+    {
+        var hr = await _db.HrRoutingSettings.AsNoTracking()
+            .Select(s => new { s.HeadOfficeHrUserId, s.BranchHrUserId })
+            .FirstOrDefaultAsync(ct);
+        if (hr is null) return false;
+        var self = await ActingFor.SelfAndAbsentAsync(_db, userId, _clock.Today);
+        return (hr.HeadOfficeHrUserId is { } ho && self.Contains(ho))
+               || (hr.BranchHrUserId is { } br && self.Contains(br));
+    }
+
+    public async Task<bool> IsResponsibleHrAsync(int id, int userId, CancellationToken ct = default)
+    {
+        var r = await _db.SubstitutionRequests.AsNoTracking()
+            .Include(x => x.Approvals)
+            .FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (r is null) return false;
+
+        var owner = await ResponsibleHrUserIdAsync(r, ct);
+        return owner is { } o && await ActsForAsync(userId, o);
+    }
+
+    /// <summary>Кадровик УЧР заявки: этап «УЧР» действующего круга, иначе — по настройкам маршрута.</summary>
+    private async Task<int?> ResponsibleHrUserIdAsync(SubstitutionRequest r, CancellationToken ct)
+    {
+        var round = CurrentRound(r.Approvals);
+        var step = r.Approvals
+            .Where(a => a.Round == round && a.RoleLabel == HrStepRole)
+            .OrderByDescending(a => a.Order)
+            .FirstOrDefault();
+        return step?.UserId ?? await ResolveHrOfficerAsync(r.AbsentUnitId, ct);
+    }
+
+    /// <summary>Роль этапа УЧР в маршруте (см. BuildApprovalRouteAsync).</summary>
+    private const string HrStepRole = "УЧР";
 
     public async Task<SubstitutionDetails?> GetAsync(int id, CancellationToken ct = default)
     {
@@ -226,6 +314,8 @@ public class SubstitutionService : ISubstitutionService
         {
             Status = SubstitutionStatus.Draft,
             InitiatorUserId = request.InitiatorUserId ?? actorUserId,
+            // Автор — тот, кто создаёт заявку; дальше Apply его не трогает, поле неизменяемое.
+            AuthorUserId = actorUserId,
             Year = _clock.Today.Year,
             CreatedAt = now,
             UpdatedAt = now,
@@ -254,8 +344,10 @@ public class SubstitutionService : ISubstitutionService
         // (паспорт, ИНН, адреса) по {id}. Теперь доступ решает владелец/право.
         var isInitiator = entity.InitiatorUserId == actorUserId;
 
+        // Withdrawn — заявки, отозванные до того, как отзыв стал возвращать в черновик: их тоже
+        // можно поправить и отправить заново, а не оставлять зависшими.
         var editableByInitiator = isInitiator
-            && entity.Status is SubstitutionStatus.Draft or SubstitutionStatus.Rejected;
+            && entity.Status is SubstitutionStatus.Draft or SubstitutionStatus.Rejected or SubstitutionStatus.Withdrawn;
 
         // УЧР правит заявку после согласования Начальником операционного управления —
         // то есть когда этап «Операционное управление» уже пройден (Approved).
@@ -288,6 +380,18 @@ public class SubstitutionService : ISubstitutionService
         await _audit.LogAsync(AuditEntityType, id, editableByHr ? "UpdatedByHr" : "Updated", actorUserId,
             new { byHr = editableByHr, changes });
 
+        // Правка УЧР меняет текст приказа и договора — подписывать надо уже новую версию:
+        // документы фиксируются заново, прежние подписи остаются в журнале под старой версией и
+        // показываются неактуальными (как у СЗ и ВНД). На подписании подписантам сразу уходит
+        // уведомление; на согласовании — новая подпись запрашивается после прохождения маршрута.
+        if (editableByHr && changes.Count > 0)
+        {
+            if (entity.Status == SubstitutionStatus.OnExecution)
+                await StartSigningAsync(entity, actorUserId, refreeze: true, ct, edited: true);
+            else if (entity.Status == SubstitutionStatus.OnApproval && await HasDocumentsAsync(id, ct))
+                await RefreezeQuietlyAsync(entity, actorUserId, "edited", ct);
+        }
+
         return (await GetAsync(id, ct))!;
     }
 
@@ -308,6 +412,22 @@ public class SubstitutionService : ISubstitutionService
         ["endsOn"] = e.EndsOn?.ToString("yyyy-MM-dd"),
         ["handoverOn"] = e.HandoverOn?.ToString("yyyy-MM-dd"),
         ["description"] = e.Description,
+        // Остальное, что попадает в приказ и договор: без этого правка, например, состава
+        // комиссии или адреса не заводила бы новую версию документов на подпись.
+        ["absentUserId"] = e.AbsentUserId,
+        ["absentBranch"] = e.AbsentBranch,
+        ["substituteUserId"] = e.SubstituteUserId,
+        ["substituteBranch"] = e.SubstituteBranch,
+        ["passportIssuedBy"] = e.PassportIssuedBy,
+        ["passportIssuedOn"] = e.PassportIssuedOn?.ToString("yyyy-MM-dd"),
+        ["passportValidUntil"] = e.PassportValidUntil?.ToString("yyyy-MM-dd"),
+        ["addressRegistration"] = e.AddressRegistration,
+        ["addressResidence"] = e.AddressResidence,
+        ["daysCount"] = e.DaysCount,
+        ["commissionChair"] = $"{e.CommissionChairName} | {e.CommissionChairPosition}",
+        ["handoverMoment"] = e.HandoverMoment.ToString(),
+        ["commission"] = string.Join("; ", e.CommissionMembers.OrderBy(m => m.SortOrder)
+            .Select(m => $"{m.FullName} | {m.Position}")),
     };
 
     public async Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default)
@@ -320,7 +440,7 @@ public class SubstitutionService : ISubstitutionService
         if (entity.InitiatorUserId != actorUserId && !isPrivileged)
             throw new UnauthorizedAccessException("Отправить заявку может только инициатор");
 
-        if (entity.Status is not (SubstitutionStatus.Draft or SubstitutionStatus.Rejected))
+        if (entity.Status is not (SubstitutionStatus.Draft or SubstitutionStatus.Rejected or SubstitutionStatus.Withdrawn))
             throw new InvalidOperationException("Отправить можно только черновик или отклонённую заявку");
 
         if (string.IsNullOrWhiteSpace(entity.SubstituteName) || entity.StartsOn is null || entity.EndsOn is null)
@@ -335,7 +455,8 @@ public class SubstitutionService : ISubstitutionService
             old.State = SubstitutionApprovalState.Skipped;
         var round = previous.Count == 0 ? 1 : previous.Max(a => a.Round) + 1;
 
-        var steps = await BuildApprovalRouteAsync(entity, round, ct);
+        var (steps, routeNotes) = await BuildApprovalRouteAsync(entity, round, ct);
+        entity.RouteNote = routeNotes.Count == 0 ? null : string.Join("\n", routeNotes);
 
         // Сквозная нумерация HR-1, HR-2, … без сброса по годам (scope Global).
         // Формат и текущий счётчик правятся в настройках (SubstitutionNumberingController).
@@ -361,10 +482,29 @@ public class SubstitutionService : ISubstitutionService
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync(AuditEntityType, id, "Submitted", actorUserId,
-            new { regNumber = entity.RegNumber, steps = steps.Count, round });
+            new { regNumber = entity.RegNumber, steps = steps.Count, round, skipped = routeNotes });
 
         if (steps.Count > 0)
+        {
+            // Приказ и договор фиксируются уже при отправке: директор филиала (а также согласующие
+            // Опер. управления и УЧР, если они же отсутствующий или замещающий) подписывают их ЭЦП
+            // прямо на своём этапе согласования, не дожидаясь конца маршрута. Повторная отправка
+            // заводит новую версию — подписи прошлой версии становятся неактуальными.
+            await FreezeDocumentsAsync(entity.Id, ct);
             await NotifyApproverAsync(entity, steps[0], actorUserId, ct);
+        }
+        else
+            await StartSigningAsync(entity, actorUserId, refreeze: true, ct);
+
+        // Пропущенные этапы не останавливают заявку, но о них должны знать и инициатор, и УЧР:
+        // иначе выглядело так, будто заявку «никто не согласовывал».
+        if (routeNotes.Count > 0)
+            await NotifyAsync(
+                (await HrOfficerIdsAsync(ct)).Prepend(entity.InitiatorUserId).Distinct().ToList(),
+                "Заявка на замещение отправлена не по полному маршруту",
+                $"Заявка на замещение {Number(entity)}: {string.Join(" ", routeNotes)} " +
+                "Назначьте согласующих в оргструктуре или в настройках маршрута УЧР.",
+                entity.Id, actorUserId, ct);
 
         return (await GetAsync(id, ct))!;
     }
@@ -375,12 +515,17 @@ public class SubstitutionService : ISubstitutionService
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
 
         if (entity.Status != SubstitutionStatus.OnExecution)
-            throw new InvalidOperationException("Исполнить можно только заявку на исполнении");
+            throw new InvalidOperationException("Исполнить можно только заявку на подписании");
+
+        // Кто отметил: кадровик заявки сам, его замещающий (за кадровика) или администратор.
+        var hrOwner = await ResponsibleHrUserIdAsync(
+            await _db.SubstitutionRequests.AsNoTracking().Include(x => x.Approvals).FirstAsync(x => x.Id == id, ct), ct);
 
         entity.Status = SubstitutionStatus.Executed;
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync(AuditEntityType, id, "Executed", actorUserId);
+        var onBehalfOf = hrOwner is { } h && h != actorUserId && await ActsForAsync(actorUserId, h) ? h : (int?)null;
+        await _audit.LogAsync(AuditEntityType, id, "Executed", actorUserId, new { onBehalfOf });
 
         return (await GetAsync(id, ct))!;
     }
@@ -393,21 +538,36 @@ public class SubstitutionService : ISubstitutionService
     private const int OperationsApproverId = 141;   // Касымов Кубатбек (Операционное управление)
     private const int OperationsFallbackId = 563;   // Ермакова Юлия (замена при отсутствии)
 
-    private async Task<List<SubstitutionApproval>> BuildApprovalRouteAsync(SubstitutionRequest entity, int round, CancellationToken ct)
+    /// <summary>
+    /// Маршрут заявки и пометки о пропущенных этапах. Этап, для которого в системе не настроен
+    /// согласующий (у филиала не назначен начальник, в настройках маршрута УЧР не выбран
+    /// согласующий Операционного управления или кадровик), пропускается — как и раньше, — но
+    /// теперь не молча: пометка уходит в карточку и уведомлением инициатору и УЧР. У сотрудника
+    /// Головного офиса этапа директора филиала нет по устройству маршрута — это не пропуск.
+    /// </summary>
+    private async Task<(List<SubstitutionApproval> Steps, List<string> Notes)> BuildApprovalRouteAsync(
+        SubstitutionRequest entity, int round, CancellationToken ct)
     {
         var steps = new List<SubstitutionApproval>();
+        var notes = new List<string>();
         var order = 1;
 
-        var directorId = await ResolveBranchDirectorAsync(entity.AbsentUnitId, ct);
+        var (isBranch, directorId) = await SubstitutionDocuments.BranchOfAsync(_db, entity.AbsentUnitId, ct);
         if (directorId is { } dir)
         {
             await EnsureApproverActiveAsync(dir, "Директор филиала", ct);
             steps.Add(new SubstitutionApproval { RequestId = entity.Id, Round = round, Order = order++, RoleLabel = "Директор филиала", UserId = dir });
         }
+        else if (isBranch)
+        {
+            notes.Add($"Этап «Директор филиала» пропущен: у филиала «{entity.AbsentBranch ?? "—"}» в оргструктуре не назначен начальник.");
+        }
 
         var opsId = await ResolveOperationsApproverAsync(ct);
         if (opsId is { } ops)
             steps.Add(new SubstitutionApproval { RequestId = entity.Id, Round = round, Order = order++, RoleLabel = "Операционное управление", UserId = ops });
+        else
+            notes.Add("Этап «Операционное управление» пропущен: в настройках маршрута УЧР не выбран действующий согласующий.");
 
         var hrId = await ResolveHrOfficerAsync(entity.AbsentUnitId, ct);
         if (hrId is { } hr)
@@ -415,8 +575,12 @@ public class SubstitutionService : ISubstitutionService
             await EnsureApproverActiveAsync(hr, "УЧР", ct);
             steps.Add(new SubstitutionApproval { RequestId = entity.Id, Round = round, Order = order++, RoleLabel = "УЧР", UserId = hr });
         }
+        else
+        {
+            notes.Add($"Этап «УЧР» пропущен: в настройках маршрута УЧР не выбран кадровик по {(isBranch ? "филиальной сети" : "Головному офису")}.");
+        }
 
-        return steps;
+        return (steps, notes);
     }
 
     /// <summary>
@@ -549,10 +713,15 @@ public class SubstitutionService : ISubstitutionService
         if (next is not null)
             await NotifyApproverAsync(entity, next, actorUserId, ct);
         else
+        {
+            // Маршрут пройден — фиксируем приказ и договор и зовём подписантов (этап «На подписании»).
+            // Инициатора извещаем последним: его уведомление — итог согласования.
+            await StartSigningAsync(entity, actorUserId, refreeze: false, ct);
             await NotifyInitiatorAsync(entity,
                 "Заявка на замещение согласована",
-                $"Заявка на замещение {Number(entity)} согласована и передана в УЧР на исполнение. Тема: {entity.Subject}",
+                $"Заявка на замещение {Number(entity)} согласована и передана на подписание документов. Тема: {entity.Subject}",
                 actorUserId, ct);
+        }
 
         return (await GetAsync(id, ct))!;
     }
@@ -640,6 +809,11 @@ public class SubstitutionService : ISubstitutionService
             reason = reason.Trim(),
         });
 
+        // Директор филиала — он же подписант приказа и договора: место подписи в зафиксированных
+        // документах должно перейти к новому директору — заводим новую версию.
+        if (step.RoleLabel == SubstitutionDocuments.DirectorStepRole && await HasDocumentsAsync(id, ct))
+            await RefreezeQuietlyAsync(entity, actorUserId, "directorReassigned", ct);
+
         if (step.State == SubstitutionApprovalState.Active)
             await NotifyApproverAsync(entity, step, actorUserId, ct);
 
@@ -648,20 +822,42 @@ public class SubstitutionService : ISubstitutionService
 
     public async Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default)
     {
-        var entity = await _db.SubstitutionRequests.FirstOrDefaultAsync(x => x.Id == id, ct)
+        var entity = await _db.SubstitutionRequests.Include(x => x.Approvals).FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
 
         // Отозвать заявку из работы вправе только её инициатор (или администратор).
         if (entity.InitiatorUserId != actorUserId && !isPrivileged)
             throw new UnauthorizedAccessException("Отозвать заявку может только инициатор");
 
-        if (entity.Status is SubstitutionStatus.Executed or SubstitutionStatus.Withdrawn)
-            throw new InvalidOperationException("Заявка уже завершена");
+        if (entity.Status is not (SubstitutionStatus.OnApproval or SubstitutionStatus.OnExecution))
+            throw new InvalidOperationException("Отозвать можно только заявку на согласовании или на подписании");
 
-        entity.Status = SubstitutionStatus.Withdrawn;
+        // Отзыв возвращает заявку в черновик: инициатор правит её и отправляет заново (новым
+        // кругом). Раньше заявка переходила в «Отозвано» и там зависала — ни правки, ни повторной
+        // отправки, а пометка «отправлена не по полному маршруту» висела от прошлой отправки.
+        // Непройденные этапы круга закрываются (остаются в истории), пометка о маршруте снимается —
+        // при повторной отправке маршрут и пометка соберутся заново.
+        var round = CurrentRound(entity.Approvals);
+        var active = entity.Approvals.FirstOrDefault(a => a.Round == round && a.State == SubstitutionApprovalState.Active);
+        foreach (var step in entity.Approvals.Where(a => a.Round == round
+                     && a.State is SubstitutionApprovalState.Pending or SubstitutionApprovalState.Active))
+            step.State = SubstitutionApprovalState.Skipped;
+
+        var from = entity.Status;
+        entity.Status = SubstitutionStatus.Draft;
+        entity.RouteNote = null;
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync(AuditEntityType, id, "Withdrawn", actorUserId);
+        await _audit.LogAsync(AuditEntityType, id, "Withdrawn", actorUserId,
+            new { from = from.ToString(), to = SubstitutionStatus.Draft.ToString(), round });
+
+        // Тот, кто ждал решения по этапу, должен знать, что заявки у него больше нет.
+        if (active is not null)
+            await NotifyAsync(
+                (await ActingFor.SubstituteIdsAsync(_db, active.UserId, _clock.Today)).Prepend(active.UserId).Distinct().ToList(),
+                "Заявка на замещение отозвана",
+                $"Заявка на замещение {Number(entity)} отозвана инициатором и возвращена в черновик — решение по этапу «{active.RoleLabel}» больше не требуется.",
+                entity.Id, actorUserId, ct);
 
         return (await GetAsync(id, ct))!;
     }
@@ -681,6 +877,136 @@ public class SubstitutionService : ISubstitutionService
         _db.SubstitutionRequests.Remove(entity);
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync(AuditEntityType, id, "Deleted", actorUserId);
+    }
+
+    // ── Подписание документов (этап «На подписании») ─────────────────────────
+
+    /// <summary>
+    /// Этап «На подписании»: зафиксировать (или взять уже зафиксированные) приказ и договор и
+    /// позвать подписантов. refreeze — собрать новую версию документов; edited — это правка УЧР
+    /// на подписании (в журнал — «DocumentsRefrozen»). Сбой формирования документов не откатывает
+    /// согласование: заявку можно исполнить и с бумажными формами, а УЧР получит запись в журнале.
+    /// </summary>
+    private async Task StartSigningAsync(SubstitutionRequest entity, int actorUserId, bool refreeze, CancellationToken ct,
+        bool edited = false)
+    {
+        // Документы, зафиксированные при отправке, переиспользуются: подписи, поставленные на
+        // этапе согласования (директор филиала и др.), остаются действующими. Новая версия
+        // заводится только если документов ещё нет или их надо собрать заново (refreeze).
+        var docs = refreeze
+            ? []
+            : await _db.SubstitutionDocuments.Where(d => d.RequestId == entity.Id && d.IsCurrent).ToListAsync(ct);
+        if (docs.Count == 0)
+        {
+            var fresh = await FreezeDocumentsAsync(entity.Id, ct);
+            if (fresh is null) return;
+            docs = fresh;
+        }
+
+        await _audit.LogAsync(AuditEntityType, entity.Id, edited ? "DocumentsRefrozen" : "SigningStarted", actorUserId,
+            new { documents = docs.Select(d => new { kind = d.Kind.ToString(), d.Version }).ToList() });
+
+        await NotifyPendingSignersAsync(entity, docs, actorUserId, ct);
+    }
+
+    /// <summary>
+    /// Зафиксировать приказ и договор новой версией. null — не удалось (ошибка в журнале):
+    /// сбой формирования документов не откатывает согласование — заявку можно исполнить и с
+    /// бумажными формами.
+    /// </summary>
+    private async Task<List<SubstitutionDocument>?> FreezeDocumentsAsync(int requestId, CancellationToken ct)
+    {
+        try
+        {
+            var docs = await SubstitutionDocuments.FreezeAsync(_db, _print, requestId, ct);
+            await _db.SaveChangesAsync(ct);
+            return docs;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, "Не удалось зафиксировать документы заявки на замещение {RequestId}", requestId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Заявка ещё на согласовании, а документы изменились (правка УЧР, переназначение директора):
+    /// новая версия заводится сразу, прежние подписи становятся неактуальными. Новую подпись
+    /// запрашиваем, когда маршрут будет пройден (StartSigningAsync), — до того только журнал.
+    /// </summary>
+    private async Task RefreezeQuietlyAsync(SubstitutionRequest entity, int actorUserId, string reason, CancellationToken ct)
+    {
+        var docs = await FreezeDocumentsAsync(entity.Id, ct);
+        if (docs is null) return;
+        await _audit.LogAsync(AuditEntityType, entity.Id, "DocumentsRefrozen", actorUserId, new
+        {
+            reason,
+            documents = docs.Select(d => new { kind = d.Kind.ToString(), d.Version }).ToList(),
+        });
+    }
+
+    private Task<bool> HasDocumentsAsync(int requestId, CancellationToken ct) =>
+        _db.SubstitutionDocuments.AnyAsync(d => d.RequestId == requestId && d.IsCurrent, ct);
+
+    /// <summary>
+    /// Позвать тех, чья подпись под действующими версиями ещё не стоит. Кто подписывал прежнюю
+    /// версию, получает «подпишите заново»: его подпись неактуальна, и пока новой нет, на листе
+    /// подписей ЭЦП место отмечается автосогласованием. Уведомление уходит и замещающим
+    /// подписантов (GEN-14): директор в отпуске — подпишет замещающий.
+    /// </summary>
+    private async Task NotifyPendingSignersAsync(SubstitutionRequest entity, List<SubstitutionDocument> docs,
+        int actorUserId, CancellationToken ct)
+    {
+        var docIds = docs.Select(d => d.Id).ToList();
+        var signatures = await _db.SubstitutionSignatures.AsNoTracking()
+            .Where(s => s.RequestId == entity.Id)
+            .Select(s => new { s.DocumentId, s.Role, Owner = s.OnBehalfOfUserId ?? s.UserId, s.Document!.Kind })
+            .ToListAsync(ct);
+
+        var fresh = new List<int>();
+        var stale = new List<int>();
+        foreach (var d in docs)
+        foreach (var slot in SubstitutionDocuments.Slots(d))
+        {
+            if (slot.UserId is not { } owner) continue;
+            if (signatures.Any(s => s.DocumentId == d.Id && s.Role == slot.Role)) continue;
+            var signedBefore = signatures.Any(s => !docIds.Contains(s.DocumentId)
+                                                   && s.Kind == d.Kind && s.Role == slot.Role && s.Owner == owner);
+            (signedBefore ? stale : fresh).Add(owner);
+        }
+
+        async Task<List<int>> WithSubstitutes(IEnumerable<int> ids)
+        {
+            var list = ids.Distinct().ToList();
+            foreach (var id in list.ToList())
+                list.AddRange(await ActingFor.SubstituteIdsAsync(_db, id, _clock.Today));
+            return list.Distinct().ToList();
+        }
+
+        var staleRecipients = await WithSubstitutes(stale);
+        var freshRecipients = (await WithSubstitutes(fresh)).Except(staleRecipients).ToList();
+        var who = $"Отсутствующий: {entity.AbsentName}, замещающий: {entity.SubstituteName}.";
+
+        await NotifyAsync(freshRecipients,
+            "Документы по заявке на замещение ждут вашей подписи",
+            $"Заявка на замещение {Number(entity)}: приказ о временном возложении обязанностей и договор о материальной " +
+            $"ответственности ждут подписи ЭЦП. {who}",
+            entity.Id, actorUserId, ct);
+        await NotifyAsync(staleRecipients,
+            "Документы по заявке на замещение изменены — подпишите заново",
+            $"Заявка на замещение {Number(entity)}: после вашей подписи приказ и договор были изменены — прежняя " +
+            $"подпись неактуальна, подпишите новую версию ЭЦП. Пока новой подписи нет, на листе подписей ЭЦП " +
+            $"ставится автосогласование. {who}",
+            entity.Id, actorUserId, ct);
+    }
+
+    /// <summary>Кадровики УЧР из настроек маршрута (по ГО и по филиалам).</summary>
+    private async Task<List<int>> HrOfficerIdsAsync(CancellationToken ct)
+    {
+        var s = await _db.HrRoutingSettings.AsNoTracking()
+            .Select(x => new { x.HeadOfficeHrUserId, x.BranchHrUserId }).FirstOrDefaultAsync(ct);
+        return new[] { s?.HeadOfficeHrUserId, s?.BranchHrUserId }
+            .Where(x => x is not null).Select(x => x!.Value).Distinct().ToList();
     }
 
     // ── Норматив срока согласования (ЗМ-SLA) ──────────────────────────────────
@@ -739,7 +1065,8 @@ public class SubstitutionService : ISubstitutionService
 
     private async Task NotifyAsync(List<int> userIds, string title, string body, int requestId, int actorUserId, CancellationToken ct)
     {
-        if (_notifications is null) return;
+        // Некому слать (например, подписанты не определены) — пустое уведомление не создаём.
+        if (_notifications is null || userIds.Count == 0) return;
         try
         {
             await _notifications.CreateAsync(new CreateNotificationRequest
@@ -846,6 +1173,8 @@ public class SubstitutionService : ISubstitutionService
         StartsOn = x.StartsOn,
         EndsOn = x.EndsOn,
         InitiatorName = x.InitiatorUser == null ? null : x.InitiatorUser.FullName,
+        AuthorUserId = x.AuthorUserId,
+        AuthorName = x.AuthorUser == null ? null : x.AuthorUser.FullName,
         CreatedAt = x.CreatedAt,
     };
 
@@ -862,6 +1191,9 @@ public class SubstitutionService : ISubstitutionService
             ReasonTitle = ReasonTitle(x.Reason),
             InitiatorUserId = x.InitiatorUserId,
             InitiatorName = x.InitiatorUser?.FullName,
+            AuthorUserId = x.AuthorUserId,
+            AuthorName = x.AuthorUser?.FullName,
+            CreatedAt = x.CreatedAt,
             AbsentUserId = x.AbsentUserId,
             AbsentName = x.AbsentName,
             AbsentPosition = x.AbsentPosition,
@@ -890,6 +1222,7 @@ public class SubstitutionService : ISubstitutionService
             HandoverMoment = x.HandoverMoment.ToString(),
             HandoverOn = x.HandoverOn,
             Description = x.Description,
+            RouteNote = x.RouteNote,
             CommissionMembers = x.CommissionMembers
                 .OrderBy(m => m.SortOrder)
                 .Select(m => new CommissionMemberDto { UserId = m.UserId, FullName = m.FullName, Position = m.Position })
@@ -921,7 +1254,9 @@ public class SubstitutionService : ISubstitutionService
     {
         SubstitutionStatus.Draft => "Черновик",
         SubstitutionStatus.OnApproval => "На согласовании",
-        SubstitutionStatus.OnExecution => "На исполнении",
+        // Этап после согласования: приказ и договор подписывают директор, отсутствующий и
+        // замещающий; УЧР отмечает «Исполнено» (в том числе без подписей — с бумажными формами).
+        SubstitutionStatus.OnExecution => "На подписании",
         SubstitutionStatus.Executed => "Исполнено",
         SubstitutionStatus.Rejected => "Отклонено",
         SubstitutionStatus.Withdrawn => "Отозвано",

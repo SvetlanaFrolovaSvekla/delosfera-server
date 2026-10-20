@@ -193,6 +193,11 @@ builder.Services.AddScoped<
 builder.Services.AddSingleton<
     delosfera_server.Modules.Substitutions.Services.ISubstitutionPrintService,
     delosfera_server.Modules.Substitutions.Services.SubstitutionPrintService>();
+// Этап «На подписании»: зафиксированные приказ и договор, подписи ЭЦП ГП «Инфоком» директора,
+// отсутствующего и замещающего (журнал неизменяем — см. SubstitutionSignature).
+builder.Services.AddScoped<
+    delosfera_server.Modules.Substitutions.Services.ISubstitutionSigningService,
+    delosfera_server.Modules.Substitutions.Services.SubstitutionSigningService>();
 // ЗМ-SLA: статистика по замещениям и напоминания о зависших заявках на согласовании.
 builder.Services.AddScoped<
     delosfera_server.Modules.Substitutions.Services.ISubstitutionStatisticsService,

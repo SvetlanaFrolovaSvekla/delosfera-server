@@ -46,6 +46,85 @@ public static class AuditActivityText
         : Generic.TryGetValue(action, out var generic) ? generic
         : (action, "info");
 
+    /// <summary>
+    /// Уточнение строки заявки на замещение по данным записи аудита: номер заявки, за кого
+    /// действовал замещающий (GEN-14), этап маршрута, какой документ подписан. Без этого лента
+    /// не различала «согласовал сам» и «согласовал за директора в отпуске».
+    /// </summary>
+    public static string DescribeSubstitution(string action, string baseRu, string number,
+        string? payloadJson, Func<int, string?> nameOf)
+    {
+        int? Int(System.Text.Json.JsonElement root, string prop) =>
+            TryGet(root, prop, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number && v.TryGetInt32(out var i) ? i : null;
+        string? Str(System.Text.Json.JsonElement root, string prop) =>
+            TryGet(root, prop, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+
+        System.Text.Json.JsonElement p = default;
+        var hasPayload = false;
+        if (!string.IsNullOrWhiteSpace(payloadJson))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(payloadJson);
+                p = doc.RootElement.Clone();
+                hasPayload = p.ValueKind == System.Text.Json.JsonValueKind.Object;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Повреждённый payload — строка без уточнений.
+            }
+        }
+
+        var ru = baseRu;
+        if (hasPayload && action is "Signed" or "SignedTest")
+        {
+            var docTitle = Str(p, "document") switch
+            {
+                "Order" => "приказ",
+                "Liability" => "договор о материальной ответственности",
+                _ => "документ",
+            };
+            var role = Str(p, "role") switch
+            {
+                "Director" => "как директор",
+                "Absent" => "как отсутствующий (ознакомлен и согласен)",
+                "Substitute" => "как замещающий",
+                _ => null,
+            };
+            var version = Int(p, "version");
+            ru = (action == "SignedTest" ? "подписал(а) тестовой имитацией ЭЦП " : "подписал(а) ЭЦП ")
+                 + docTitle + (version is > 1 ? $" (версия {version})" : "")
+                 + (role is null ? "" : $" {role}")
+                 + " по заявке на замещение";
+        }
+
+        var text = $"{ru} {number}";
+        if (!hasPayload) return text;
+
+        if (action is "Approved" or "Rejected" or "StepReassigned" && Str(p, "step") is { } step)
+            text += $" — этап «{step}»";
+        if (action == "StepReassigned" && Int(p, "to") is { } to)
+            text += $": {nameOf(Int(p, "from") ?? 0) ?? "—"} → {nameOf(to) ?? "—"}";
+        if (action == "Withdrawn" && Str(p, "from") is "OnExecution")
+            text += " (с этапа подписания)";
+        if (Int(p, "onBehalfOf") is { } ob && nameOf(ob) is { } obName)
+            text += $" за {obName} (по замещению)";
+        return text;
+    }
+
+    private static bool TryGet(System.Text.Json.JsonElement root, string prop, out System.Text.Json.JsonElement value)
+    {
+        // Payload пишется анонимными объектами — регистр имён может отличаться (Version/version).
+        foreach (var x in root.EnumerateObject())
+            if (string.Equals(x.Name, prop, StringComparison.OrdinalIgnoreCase))
+            {
+                value = x.Value;
+                return true;
+            }
+        value = default;
+        return false;
+    }
+
     private static readonly Dictionary<string, (string Ru, string Icon)> Generic = new()
     {
         ["Created"] = ("создал(а)", "doc"),
@@ -171,9 +250,16 @@ public static class AuditActivityText
         ["SubstitutionRequest.Approved"] = ("согласовал(а) заявку на замещение", "check"),
         ["SubstitutionRequest.Rejected"] = ("отклонил(а) заявку на замещение", "x"),
         ["SubstitutionRequest.StepReassigned"] = ("переназначил(а) этап согласования заявки на замещение", "edit"),
-        ["SubstitutionRequest.Executed"] = ("исполнил(а) заявку на замещение", "check"),
-        ["SubstitutionRequest.Withdrawn"] = ("отозвал(а) заявку на замещение", "x"),
+        ["SubstitutionRequest.Executed"] = ("отметил(а) исполненной (приказ оформлен) заявку на замещение", "check"),
+        ["SubstitutionRequest.Withdrawn"] = ("отозвал(а) в черновик заявку на замещение", "x"),
         ["SubstitutionRequest.Deleted"] = ("удалил(а) черновик заявки на замещение", "x"),
+        // Этап «На подписании»: приказ и договор, подписи ЭЦП. Раньше этих действий в словаре не
+        // было, и лента показывала их как есть: «Жаныл Эсенова SignedTest», «… SigningStarted»
+        // с нейтральным значком.
+        ["SubstitutionRequest.SigningStarted"] = ("передал(а) на подписание документы заявки на замещение", "clock"),
+        ["SubstitutionRequest.DocumentsRefrozen"] = ("обновил(а) приказ и договор (нужна новая подпись) по заявке на замещение", "edit"),
+        ["SubstitutionRequest.Signed"] = ("подписал(а) ЭЦП документ по заявке на замещение", "check"),
+        ["SubstitutionRequest.SignedTest"] = ("подписал(а) тестовой имитацией ЭЦП документ по заявке на замещение", "check"),
 
         ["Substitution.Created"] = ("оформил(а) замещение", "doc"),
         ["Substitution.Cancelled"] = ("отменил(а) замещение", "x"),

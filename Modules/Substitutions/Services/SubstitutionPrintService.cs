@@ -165,7 +165,8 @@ public class SubstitutionPrintService : ISubstitutionPrintService
         _ => "Другое",
     };
 
-    private static string Short(string? fullName)
+    /// <summary>«Фамилия И.О.» — как в строках подписей бланка.</summary>
+    internal static string Short(string? fullName)
     {
         if (string.IsNullOrWhiteSpace(fullName)) return "—";
         var parts = fullName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -194,24 +195,48 @@ internal sealed class Docx
 
     public void P(string text, bool bold = false, bool center = false)
     {
+        var pPr = new ParagraphProperties(
+            new SpacingBetweenLines { After = "60", Line = "264", LineRule = LineSpacingRuleValues.Auto });
+        // Текст приказа/договора — по ширине, заголовки — по центру (как в бланках ЛС/МО).
+        pPr.AppendChild(new Justification { Val = center ? JustificationValues.Center : JustificationValues.Both });
+
+        var p = new Paragraph();
+        p.AppendChild(pPr);
+        // «\t» в тексте — настоящая табуляция Word (место подписи), а не символ внутри строки.
+        var parts = text.Split('\t');
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var run = new Run();
+            run.AppendChild(RunProps(bold));
+            if (i > 0) run.AppendChild(new TabChar());
+            run.AppendChild(new Text(parts[i]) { Space = SpaceProcessingModeValues.Preserve });
+            p.AppendChild(run);
+        }
+        _body.AppendChild(p);
+    }
+
+    private static RunProperties RunProps(bool bold)
+    {
         var rPr = new RunProperties(
             new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman", ComplexScript = "Times New Roman" },
             new FontSize { Val = "24" },
             new FontSizeComplexScript { Val = "24" });
         if (bold) rPr.AppendChild(new Bold());
-
-        var run = new Run();
-        run.AppendChild(rPr);
-        run.AppendChild(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
-
-        var pPr = new ParagraphProperties();
-        if (center) pPr.AppendChild(new Justification { Val = JustificationValues.Center });
-
-        var p = new Paragraph();
-        p.AppendChild(pPr);
-        p.AppendChild(run);
-        _body.AppendChild(p);
+        return rPr;
     }
+
+    /// <summary>
+    /// Лист A4 с полями бланка (лево 30 мм, право 15 мм, верх/низ 20 мм). Без этого у документа не
+    /// было размеров страницы: Word подставлял свои, а просмотр в браузере растягивал текст на всю
+    /// ширину окна без полей.
+    /// </summary>
+    public static SectionProperties A4Section() => new(
+        new PageSize { Width = 11906U, Height = 16838U },
+        new PageMargin
+        {
+            Top = 1134, Bottom = 1134, Left = 1701U, Right = 851U,
+            Header = 708U, Footer = 708U, Gutter = 0U,
+        });
 
     public byte[] Build()
     {
@@ -219,6 +244,7 @@ internal sealed class Docx
         using (var doc = WordprocessingDocument.Create(ms, DocumentFormat.OpenXml.WordprocessingDocumentType.Document))
         {
             var main = doc.AddMainDocumentPart();
+            _body.AppendChild(A4Section());
             main.Document = new Document(_body);
             main.Document.Save();
         }

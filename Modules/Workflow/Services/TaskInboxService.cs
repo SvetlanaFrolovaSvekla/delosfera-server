@@ -208,6 +208,28 @@ public class TaskInboxService : ITaskInboxService
             })
             .ToListAsync();
 
+        // Подписание документов заявок на замещение (этап «На подписании»): приказ и договор ждут
+        // ЭЦП директора (сам или по замещению), отсутствующего и замещающего. Задача — на каждое
+        // ещё не подписанное место подписи действующей версии документа.
+        var signingDocs = await _db.SubstitutionDocuments.AsNoTracking()
+            .Where(d => d.IsCurrent && d.Request!.Status == SubstitutionStatus.OnExecution
+                        && ((d.DirectorUserId != null && assignees.Contains(d.DirectorUserId.Value))
+                            || d.AbsentUserId == userId
+                            || d.SubstituteUserId == userId))
+            .Select(d => new
+            {
+                d.Id, d.RequestId, d.Kind, d.DirectorUserId, d.AbsentUserId, d.SubstituteUserId, d.CreatedAt,
+                d.Request!.RegNumber, d.Request.Subject,
+            })
+            .ToListAsync();
+        var signingDocIds = signingDocs.Select(d => d.Id).ToList();
+        var signedSlots = signingDocIds.Count == 0
+            ? []
+            : await _db.SubstitutionSignatures.AsNoTracking()
+                .Where(x => signingDocIds.Contains(x.DocumentId))
+                .Select(x => new { x.DocumentId, x.Role })
+                .ToListAsync();
+
         // Норматив этапа (ЗМ-SLA) — тот же, по которому шлются напоминания.
         var substitutionSlaDays = substitutionRows.Count == 0
             ? 0
@@ -393,7 +415,7 @@ public class TaskInboxService : ITaskInboxService
             DocumentTitle = r.Subject,
             DocumentType = SubstitutionDocumentType,
             DocumentTypeTitle = "Заявка на замещение",
-            TaskType = "Исполнение: приказ о замещении",
+            TaskType = "Исполнение: приказ о замещении (на подписании)",
             StepOrder = null,
             StepKind = null,
             // Норматива на исполнение нет — срок не ставим.
@@ -402,6 +424,39 @@ public class TaskInboxService : ITaskInboxService
             OnBehalfOf = r.HrUserId is { } hr && hr != userId && names.TryGetValue(hr, out var hrName) ? hrName : null,
             // С момента, когда заявка ушла на исполнение, — последнее её изменение.
             CreatedAt = r.UpdatedAt,
+        });
+
+        var substitutionSigningTasks = signingDocs.SelectMany(d =>
+        {
+            var slots = new List<(SubstitutionSignerRole Role, int Owner, string Title)>();
+            if (d.DirectorUserId is { } dir && assignees.Contains(dir))
+                slots.Add((SubstitutionSignerRole.Director, dir, "директор"));
+            if (d.Kind == SubstitutionDocumentKind.Order && d.AbsentUserId == userId)
+                slots.Add((SubstitutionSignerRole.Absent, userId, "ознакомление"));
+            if (d.SubstituteUserId == userId)
+                slots.Add((SubstitutionSignerRole.Substitute, userId,
+                    d.Kind == SubstitutionDocumentKind.Order ? "ознакомление" : "работник"));
+            var kindTitle = d.Kind == SubstitutionDocumentKind.Order ? "приказ" : "договор о матответственности";
+            return slots
+                .Where(slot => !signedSlots.Any(x => x.DocumentId == d.Id && x.Role == slot.Role))
+                .Select(slot => new InboxTaskDto
+                {
+                    TaskId = d.Id,
+                    ParticipantId = null,
+                    DocumentId = 0,
+                    EntityId = d.RequestId,
+                    RegNumber = d.RegNumber,
+                    DocumentTitle = d.Subject,
+                    DocumentType = SubstitutionDocumentType,
+                    DocumentTypeTitle = "Заявка на замещение",
+                    TaskType = $"Подписание ЭЦП: {kindTitle} ({slot.Title})",
+                    StepOrder = null,
+                    StepKind = null,
+                    DueAt = null,
+                    IsOverdue = false,
+                    OnBehalfOf = slot.Owner != userId && names.TryGetValue(slot.Owner, out var on) ? on : null,
+                    CreatedAt = d.CreatedAt,
+                });
         });
 
         var registrationTasks = registrationRows.Select(r => new InboxTaskDto
@@ -490,6 +545,7 @@ public class TaskInboxService : ITaskInboxService
             .Concat(vndTasks)
             .Concat(substitutionTasks)
             .Concat(substitutionExecutionTasks)
+            .Concat(substitutionSigningTasks)
             .Concat(registrationTasks)
             .Concat(resolutionTasks)
             .Concat(ownTasks)

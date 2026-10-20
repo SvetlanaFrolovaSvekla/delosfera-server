@@ -24,4 +24,11 @@ public class EcpSigningOptions
     /// appsettings.Development.json или переменной окружения EcpSigning__AllowVndTestEcp=true; на бою
     /// должно быть false.</summary>
     public bool AllowVndTestEcp { get; set; }
+
+    /// <summary>ТЕСТОВЫЙ режим для подписания приказа и договора МО заявок на замещение — отдельно от
+    /// СЗ и ВНД: кнопки «Тест» ставят «подпись»-имитацию без обращения к ГП «Инфоком» (в журнале
+    /// SubstitutionSignature — Verified=false, «ТЕСТ»; в документе — штамп «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП»).
+    /// Включается только на тестовом стенде — переменной окружения
+    /// EcpSigning__AllowSubstitutionTestEcp=true (или в appsettings.Development.json); на бою false.</summary>
+    public bool AllowSubstitutionTestEcp { get; set; }
 }
