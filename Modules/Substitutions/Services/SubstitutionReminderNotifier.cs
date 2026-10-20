@@ -95,7 +95,9 @@ public class SubstitutionReminderNotifier : ISubstitutionReminderNotifier
                 BodyRu = $"Заявка на замещение {number} на этапе «{r.Active.RoleLabel}» " +
                          $"без решения {elapsed} раб. дн. — превышен норматив {slaDays} дн. " +
                          $"(просрочка {overdueBy} дн.). Тема: {r.Subject}",
-                Category = NotificationCategory.Other,
+                // Заявки на замещение ведутся в разделе СЗ (УЧР) — и уведомления о них идут под
+                // вкладкой «СЗ» с её значком, а не в легаси-«Разное» без вкладки (значок «…»).
+                Category = NotificationCategory.Sz,
                 Severity = NotificationSeverity.Urgent,
                 EntityType = Entity,
                 EntityId = r.Id,

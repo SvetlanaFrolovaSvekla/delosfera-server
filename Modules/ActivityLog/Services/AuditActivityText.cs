@@ -20,7 +20,11 @@ public static class AuditActivityText
         "ProcurementPlan" => ("План закупок", "/prc/plan/"),
         "Supplier" => ("Поставщик", "/prc/suppliers/"),
         "Document" or "DocumentAttachment" => ("Документ", "/documents/"),
-        "AcknowledgementSheet" or "AcknowledgementEntry" => ("Ознакомление", "/acknowledgements/"),
+        // Отдельной карточки листа нет — ведём на общую страницу ознакомления (как taskLink на фронте).
+        // Префикс без «/» на конце — ссылка без id (см. ActivityLogService.AuditToResponse).
+        "AcknowledgementSheet" or "AcknowledgementEntry" => ("Ознакомление", "/hr-ack"),
+        // Заявка на замещение (КСЗ-В9) — карточка /substitutions/{id}.
+        "SubstitutionRequest" => ("Заявка на замещение", "/substitutions/"),
         "Substitution" => ("Замещение", "/management/substitutions"),
         "RouteTemplate" or "RouteTemplateStep" or "RouteParticipant" or "Remark" =>
             ("Маршрут согласования", "/management/route-templates"),
@@ -159,6 +163,18 @@ public static class AuditActivityText
         ["Remark.Resolved"] = ("снял(а) замечание", "check"),
 
         // ── Замещение, подписание, справка, синхронизация ────────────────────
+        // ── Заявка на замещение (КСЗ-В9) ─────────────────────────────────────
+        ["SubstitutionRequest.Created"] = ("создал(а) заявку на замещение", "doc"),
+        ["SubstitutionRequest.Updated"] = ("изменил(а) заявку на замещение", "edit"),
+        ["SubstitutionRequest.UpdatedByHr"] = ("внёс(ла) правки УЧР в заявку на замещение", "edit"),
+        ["SubstitutionRequest.Submitted"] = ("отправил(а) заявку на замещение на согласование", "clock"),
+        ["SubstitutionRequest.Approved"] = ("согласовал(а) заявку на замещение", "check"),
+        ["SubstitutionRequest.Rejected"] = ("отклонил(а) заявку на замещение", "x"),
+        ["SubstitutionRequest.StepReassigned"] = ("переназначил(а) этап согласования заявки на замещение", "edit"),
+        ["SubstitutionRequest.Executed"] = ("исполнил(а) заявку на замещение", "check"),
+        ["SubstitutionRequest.Withdrawn"] = ("отозвал(а) заявку на замещение", "x"),
+        ["SubstitutionRequest.Deleted"] = ("удалил(а) черновик заявки на замещение", "x"),
+
         ["Substitution.Created"] = ("оформил(а) замещение", "doc"),
         ["Substitution.Cancelled"] = ("отменил(а) замещение", "x"),
         ["SimpleSignatureRegulation.Accepted"] = ("принял(а) регламент подписи", "check"),

@@ -49,8 +49,11 @@ public class ActivityLogService : IActivityLogService
     /// ссылка ведёт куда надо (дочерние сущности живут под своими id).</summary>
     private static readonly (string Module, string[] EntityTypes)[] AuditSlices =
     [
-        (ActivityModules.Sz, ["Sz"]),
+        // Заявки на замещение ведутся в разделе СЗ (УЧР) — и в журнале идут под вкладкой «СЗ».
+        // Раньше их в журнале не было вовсе: ни создания, ни согласования.
+        (ActivityModules.Sz, ["Sz", "SubstitutionRequest"]),
         (ActivityModules.Procurement, ["ProcurementRequest"]),
+        (ActivityModules.Acknowledgement, ["AcknowledgementSheet"]),
     ];
 
     // Получение последних записей журнала активности по всем контурам.
@@ -131,7 +134,10 @@ public class ActivityLogService : IActivityLogService
             Icon = WidgetIcons.Contains(icon) ? icon : "info",
             // «Иванов зарегистрировал записку»; у системного события подлежащее — «Система».
             Text = $"{actor} {ru}",
-            Url = $"{urlPrefix}{a.EntityId}",
+            // Префикс с «/» на конце — карточка по id; без него — общая страница раздела
+            // (у листа ознакомления своей карточки нет). Раньше id приклеивался всегда, и
+            // такие ссылки вели в никуда ("/management/substitutions12").
+            Url = urlPrefix.EndsWith('/') ? $"{urlPrefix}{a.EntityId}" : urlPrefix,
             CreatedAt = a.At,
         };
     }

@@ -12,4 +12,8 @@ public static class ActivityModules
     /// <summary>Закупки. Собственного потока журнала не ведут — события берутся из
     /// технического аудита (тип "ProcurementRequest").</summary>
     public const string Procurement = "prc";
+
+    /// <summary>Ознакомление с документами. Как и СЗ, события берутся из технического аудита
+    /// (типы "AcknowledgementSheet"/"AcknowledgementEntry").</summary>
+    public const string Acknowledgement = "ack";
 }

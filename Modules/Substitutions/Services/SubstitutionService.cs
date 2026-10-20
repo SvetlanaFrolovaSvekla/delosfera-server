@@ -20,8 +20,12 @@ public interface ISubstitutionService
     /// где он инициатор или согласующий одного из этапов (так реестр видят все, у кого
     /// нет права на полный реестр).
     /// </summary>
+    /// <para>absentUserId / substituteUserId — отсутствующий и замещающий; periodFrom / periodTo —
+    /// заявки, период замещения которых пересекается с указанным (границы включительно; любую
+    /// можно не задавать).</para>
     Task<SubstitutionPage> SearchAsync(string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize,
-        bool participantOnly = false, CancellationToken ct = default);
+        bool participantOnly = false, int? absentUserId = null, int? substituteUserId = null,
+        DateOnly? periodFrom = null, DateOnly? periodTo = null, CancellationToken ct = default);
     Task<SubstitutionDetails?> GetAsync(int id, CancellationToken ct = default);
 
     /// <summary>
@@ -66,6 +70,14 @@ public interface ISubstitutionService
 /// </summary>
 public class SubstitutionService : ISubstitutionService
 {
+    /// <summary>
+    /// Тип записи в техническом аудите. Раньше заявки писались под «Substitution» — тем же
+    /// типом, что и оформление замещения в настройках (Users.SubstitutionService), с
+    /// пересекающимися id: журнал не мог отличить одно от другого, и заявки не попадали в
+    /// «Последнюю активность». Свой тип — и строки журнала ведут в карточку заявки.
+    /// </summary>
+    public const string AuditEntityType = "SubstitutionRequest";
+
     private readonly DelosferaDbContext _db;
     private readonly IAuditService _audit;
     private readonly INumeratorService _numerator;
@@ -114,7 +126,8 @@ public class SubstitutionService : ISubstitutionService
 
     public async Task<SubstitutionPage> SearchAsync(
         string? query, string? status, bool mineOnly, int currentUserId, int page, int pageSize,
-        bool participantOnly = false, CancellationToken ct = default)
+        bool participantOnly = false, int? absentUserId = null, int? substituteUserId = null,
+        DateOnly? periodFrom = null, DateOnly? periodTo = null, CancellationToken ct = default)
     {
         var q = _db.SubstitutionRequests.AsNoTracking().Include(x => x.InitiatorUser).AsQueryable();
 
@@ -132,6 +145,20 @@ public class SubstitutionService : ISubstitutionService
 
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<SubstitutionStatus>(status, out var st))
             q = q.Where(x => x.Status == st);
+
+        if (absentUserId is int absentId)
+            q = q.Where(x => x.AbsentUserId == absentId);
+        if (substituteUserId is int substituteId)
+            q = q.Where(x => x.SubstituteUserId == substituteId);
+
+        // Период: заявка попадает, если её период замещения пересекается с заданным.
+        // Незаполненная граница заявки считается открытой (замещение «с …» или «по …»).
+        if (periodFrom is DateOnly from)
+            q = q.Where(x => x.EndsOn == null || x.EndsOn >= from);
+        if (periodTo is DateOnly to)
+            q = q.Where(x => x.StartsOn == null || x.StartsOn <= to);
+        if (periodFrom is not null || periodTo is not null)
+            q = q.Where(x => x.StartsOn != null || x.EndsOn != null);
 
         if (!string.IsNullOrWhiteSpace(query))
         {
@@ -207,7 +234,7 @@ public class SubstitutionService : ISubstitutionService
 
         _db.SubstitutionRequests.Add(entity);
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", entity.Id, "Created", actorUserId);
+        await _audit.LogAsync(AuditEntityType, entity.Id, "Created", actorUserId);
 
         return (await GetAsync(entity.Id, ct))!;
     }
@@ -258,7 +285,7 @@ public class SubstitutionService : ISubstitutionService
 
         var changes = before.Where(kv => !Equals(kv.Value, after[kv.Key]))
             .ToDictionary(kv => kv.Key, kv => new { was = kv.Value, now = after[kv.Key] });
-        await _audit.LogAsync("Substitution", id, editableByHr ? "UpdatedByHr" : "Updated", actorUserId,
+        await _audit.LogAsync(AuditEntityType, id, editableByHr ? "UpdatedByHr" : "Updated", actorUserId,
             new { byHr = editableByHr, changes });
 
         return (await GetAsync(id, ct))!;
@@ -333,7 +360,7 @@ public class SubstitutionService : ISubstitutionService
         }
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Submitted", actorUserId,
+        await _audit.LogAsync(AuditEntityType, id, "Submitted", actorUserId,
             new { regNumber = entity.RegNumber, steps = steps.Count, round });
 
         if (steps.Count > 0)
@@ -353,7 +380,7 @@ public class SubstitutionService : ISubstitutionService
         entity.Status = SubstitutionStatus.Executed;
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Executed", actorUserId);
+        await _audit.LogAsync(AuditEntityType, id, "Executed", actorUserId);
 
         return (await GetAsync(id, ct))!;
     }
@@ -512,7 +539,7 @@ public class SubstitutionService : ISubstitutionService
 
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Approved", actorUserId, new
+        await _audit.LogAsync(AuditEntityType, id, "Approved", actorUserId, new
         {
             step = step.RoleLabel,
             round = step.Round,
@@ -559,7 +586,7 @@ public class SubstitutionService : ISubstitutionService
         entity.Status = SubstitutionStatus.Rejected;
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Rejected", actorUserId, new
+        await _audit.LogAsync(AuditEntityType, id, "Rejected", actorUserId, new
         {
             step = step.RoleLabel,
             round = step.Round,
@@ -604,7 +631,7 @@ public class SubstitutionService : ISubstitutionService
 
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "StepReassigned", actorUserId, new
+        await _audit.LogAsync(AuditEntityType, id, "StepReassigned", actorUserId, new
         {
             step = step.RoleLabel,
             round = step.Round,
@@ -634,7 +661,7 @@ public class SubstitutionService : ISubstitutionService
         entity.Status = SubstitutionStatus.Withdrawn;
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Withdrawn", actorUserId);
+        await _audit.LogAsync(AuditEntityType, id, "Withdrawn", actorUserId);
 
         return (await GetAsync(id, ct))!;
     }
@@ -653,7 +680,7 @@ public class SubstitutionService : ISubstitutionService
 
         _db.SubstitutionRequests.Remove(entity);
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Substitution", id, "Deleted", actorUserId);
+        await _audit.LogAsync(AuditEntityType, id, "Deleted", actorUserId);
     }
 
     // ── Норматив срока согласования (ЗМ-SLA) ──────────────────────────────────
@@ -719,7 +746,9 @@ public class SubstitutionService : ISubstitutionService
             {
                 TitleRu = title,
                 BodyRu = body,
-                Category = NotificationCategory.Other,
+                // Заявки на замещение ведутся в разделе СЗ (УЧР) — и уведомления о них идут под
+                // вкладкой «СЗ» с её значком, а не в легаси-«Разное» без вкладки (значок «…»).
+                Category = NotificationCategory.Sz,
                 EntityType = "SubstitutionRequest",
                 EntityId = requestId,
                 Url = $"/substitutions/{requestId}",

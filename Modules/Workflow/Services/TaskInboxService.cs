@@ -177,6 +177,37 @@ public class TaskInboxService : ITaskInboxService
             })
             .ToListAsync();
 
+        // Исполнение заявок на замещение в УЧР (приказ на время замещения). После последнего
+        // этапа маршрута заявка уходит «На исполнение», и задачи у кадровика не оставалось —
+        // заявку можно было найти только в реестре. Исполняет кадровик этапа «УЧР» действующего
+        // круга (сам или его замещающий); если этапа УЧР в маршруте не было — кадровики из
+        // настроек маршрута УЧР (ГО и филиалы).
+        var hrSettings = await _db.HrRoutingSettings.AsNoTracking()
+            .Select(x => new { x.HeadOfficeHrUserId, x.BranchHrUserId })
+            .FirstOrDefaultAsync();
+        var isRoutingHr = hrSettings is not null
+                          && ((hrSettings.HeadOfficeHrUserId is { } hoHr && assignees.Contains(hoHr))
+                              || (hrSettings.BranchHrUserId is { } brHr && assignees.Contains(brHr)));
+        var substitutionExecutionRows = await _db.SubstitutionRequests.AsNoTracking()
+            .Where(r => r.Status == SubstitutionStatus.OnExecution
+                        && (r.Approvals.Any(a => a.RoleLabel == HrStepRole
+                                                 && a.Round == r.Approvals.Max(x => x.Round)
+                                                 && assignees.Contains(a.UserId))
+                            || (isRoutingHr && !r.Approvals.Any(a => a.RoleLabel == HrStepRole
+                                                                     && a.Round == r.Approvals.Max(x => x.Round)))))
+            .Select(r => new
+            {
+                r.Id,
+                r.RegNumber,
+                r.Subject,
+                r.UpdatedAt,
+                HrUserId = r.Approvals
+                    .Where(a => a.RoleLabel == HrStepRole && a.Round == r.Approvals.Max(x => x.Round))
+                    .Select(a => (int?)a.UserId)
+                    .FirstOrDefault(),
+            })
+            .ToListAsync();
+
         // Норматив этапа (ЗМ-SLA) — тот же, по которому шлются напоминания.
         var substitutionSlaDays = substitutionRows.Count == 0
             ? 0
@@ -352,6 +383,27 @@ public class TaskInboxService : ITaskInboxService
             };
         });
 
+        var substitutionExecutionTasks = substitutionExecutionRows.Select(r => new InboxTaskDto
+        {
+            TaskId = r.Id,
+            ParticipantId = null,
+            DocumentId = 0,
+            EntityId = r.Id,
+            RegNumber = r.RegNumber,
+            DocumentTitle = r.Subject,
+            DocumentType = SubstitutionDocumentType,
+            DocumentTypeTitle = "Заявка на замещение",
+            TaskType = "Исполнение: приказ о замещении",
+            StepOrder = null,
+            StepKind = null,
+            // Норматива на исполнение нет — срок не ставим.
+            DueAt = null,
+            IsOverdue = false,
+            OnBehalfOf = r.HrUserId is { } hr && hr != userId && names.TryGetValue(hr, out var hrName) ? hrName : null,
+            // С момента, когда заявка ушла на исполнение, — последнее её изменение.
+            CreatedAt = r.UpdatedAt,
+        });
+
         var registrationTasks = registrationRows.Select(r => new InboxTaskDto
         {
             TaskId = r.SzId,
@@ -437,6 +489,7 @@ public class TaskInboxService : ITaskInboxService
             .Concat(ackTasks)
             .Concat(vndTasks)
             .Concat(substitutionTasks)
+            .Concat(substitutionExecutionTasks)
             .Concat(registrationTasks)
             .Concat(resolutionTasks)
             .Concat(ownTasks)
@@ -463,6 +516,9 @@ public class TaskInboxService : ITaskInboxService
 
     /// <summary>Контур заявок на замещение в реестре задач — по нему клиент строит ссылку.</summary>
     public const string SubstitutionDocumentType = "Substitution";
+
+    /// <summary>Роль этапа кадровика в маршруте заявки на замещение (см. SubstitutionService.BuildApprovalRouteAsync).</summary>
+    private const string HrStepRole = "УЧР";
 
     /// <summary>Норматив этапа заявки на замещение, пока администратор его не задал (как в SubstitutionService).</summary>
     private const int DefaultSubstitutionSlaDays = 3;

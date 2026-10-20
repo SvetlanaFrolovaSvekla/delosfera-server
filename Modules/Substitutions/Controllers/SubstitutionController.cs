@@ -31,17 +31,22 @@ public class SubstitutionController : ControllerBase
         _statistics = statistics;
     }
 
-    /// <summary>Реестр заявок; mineOnly — только свои. УЧР видит все.</summary>
+    /// <summary>
+    /// Реестр заявок; mineOnly — только свои. УЧР видит все. absentUserId / substituteUserId —
+    /// отсутствующий и замещающий; periodFrom / periodTo (yyyy-MM-dd) — пересечение с периодом замещения.
+    /// </summary>
     [HttpGet]
     public async Task<IActionResult> Search(
         [FromQuery] string? query, [FromQuery] string? status, [FromQuery] bool mineOnly = false,
+        [FromQuery] int? absentUserId = null, [FromQuery] int? substituteUserId = null,
+        [FromQuery] DateOnly? periodFrom = null, [FromQuery] DateOnly? periodTo = null,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
     {
         // Кто не ведёт кадровые СЗ, видит свои заявки и те, где он согласующий:
         // иначе директор филиала не находил заявку, пришедшую ему на согласование.
         var participantOnly = !CanSeeAll;
         return Ok(await _service.SearchAsync(query, status, mineOnly, _currentUser.UserId, page, pageSize,
-            participantOnly, ct));
+            participantOnly, absentUserId, substituteUserId, periodFrom, periodTo, ct));
     }
 
     /// <summary>Полный реестр заявок: УЧР (ведение кадровых СЗ) и администратор системы.</summary>
