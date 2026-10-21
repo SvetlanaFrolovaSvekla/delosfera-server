@@ -14,6 +14,8 @@ public class ProcurementListItemDto
     public decimal Amount { get; set; }
     public bool IsAffiliated { get; set; }
     public bool HasBudget { get; set; }
+    /// <summary>Автор заявки — для ссылки на профиль из реестра.</summary>
+    public int? InitiatorUserId { get; set; }
     public string? InitiatorName { get; set; }
     public string? InitiatorUnit { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -34,6 +36,37 @@ public class ProcurementSearchRequest
     public bool? MineOnly { get; set; }
     public decimal? AmountFrom { get; set; }
     public decimal? AmountTo { get; set; }
+
+    // ── Расширенный поиск реестра ──
+
+    /// <summary>Часть регистрационного номера.</summary>
+    public string? RegNumber { get; set; }
+
+    /// <summary>Часть предмета закупки.</summary>
+    public string? Subject { get; set; }
+
+    /// <summary>Инициаторы (авторы заявки), любой из.</summary>
+    public List<int>? InitiatorUserIds { get; set; }
+
+    /// <summary>Кураторы, любой из.</summary>
+    public List<int>? CuratorUserIds { get; set; }
+
+    /// <summary>Способы закупки, любой из.</summary>
+    public List<int>? MethodIds { get; set; }
+
+    /// <summary>Вид предмета закупки.</summary>
+    public ProcurementSubjectKind? SubjectKind { get; set; }
+
+    /// <summary>Дата создания: с — по, банковские сутки (Бишкек), включительно.</summary>
+    public DateOnly? CreatedFrom { get; set; }
+    public DateOnly? CreatedTo { get; set; }
+
+    /// <summary>Только с аффилированным лицом.</summary>
+    public bool? AffiliatedOnly { get; set; }
+
+    /// <summary>Только вне бюджета.</summary>
+    public bool? OffBudgetOnly { get; set; }
+
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
 }
@@ -43,6 +76,9 @@ public class ProcurementCountersDto
 {
     public int All { get; set; }
     public int Drafts { get; set; }
+
+    /// <summary>Вкладка «Инициирую я»: заявки, автор которых — текущий пользователь.</summary>
+    public int Mine { get; set; }
     public int OnApproval { get; set; }
     public int InProcurement { get; set; }
     public int Completed { get; set; }
@@ -190,4 +226,11 @@ public class ProcurementCardDto
     /// консолидации принимает организатор закупок (п. 10.3 Положения).
     /// </summary>
     public List<SimilarRequestDto> SimilarRequests { get; set; } = [];
+}
+
+/// <summary>Способ закупки для выпадающего списка фильтра реестра.</summary>
+public class ProcurementMethodOptionDto
+{
+    public int Id { get; set; }
+    public required string ShortTitle { get; set; }
 }

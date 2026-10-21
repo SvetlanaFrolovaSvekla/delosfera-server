@@ -43,6 +43,17 @@ public class Document : IAuditableEntity
     /// <summary>Текущий статус (строковый код, набор зависит от типа документа).</summary>
     public required string StatusCode { get; set; }
 
+    /// <summary>
+    /// Когда документ перешёл в текущий статус. Проставляет сам контекст при каждом
+    /// сохранении со сменой <see cref="StatusCode"/> (DelosferaDbContext.ApplyAuditInfo),
+    /// так что ни один путь смены статуса его не минует.
+    ///
+    /// Нужен доске записок: «застряла» — это долго на одной стадии, а не давно создана.
+    /// Записка, месяц пролежавшая черновиком и вчера ушедшая на согласование, по дате
+    /// создания выглядела зависшей с первого дня на согласовании.
+    /// </summary>
+    public DateTime StatusChangedAt { get; set; }
+
     public int AuthorId { get; set; }
     public User? Author { get; set; }
 

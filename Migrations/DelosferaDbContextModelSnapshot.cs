@@ -5932,6 +5932,10 @@ namespace delosfera_server.Migrations
                         .HasColumnType("text")
                         .HasColumnName("status_code");
 
+                    b.Property<DateTime>("StatusChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("status_changed_at");
+
                     b.Property<int?>("StorageTermId")
                         .HasColumnType("integer")
                         .HasColumnName("storage_term_id");

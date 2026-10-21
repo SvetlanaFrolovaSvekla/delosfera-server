@@ -464,6 +464,20 @@ public class DelosferaDbContext : DbContext
         {
             if (document.State is EntityState.Added or EntityState.Modified)
                 document.Entity.ConcurrencyToken = Guid.NewGuid();
+
+            // Момент входа в текущий статус — для доски записок («сколько на этой стадии»).
+            // Ставим здесь, а не в каждом месте смены статуса: путь, который забудет его
+            // обновить, тихо испортил бы подсветку зависших.
+            if (document.State == EntityState.Added)
+            {
+                document.Entity.StatusChangedAt = DateTime.UtcNow;
+            }
+            else if (document.State == EntityState.Modified)
+            {
+                var status = document.Property(d => d.StatusCode);
+                if (status.IsModified && !Equals(status.OriginalValue, status.CurrentValue))
+                    document.Entity.StatusChangedAt = DateTime.UtcNow;
+            }
         }
 
         var entries = ChangeTracker.Entries<IAuditableEntity>();

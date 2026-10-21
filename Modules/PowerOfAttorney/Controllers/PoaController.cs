@@ -37,6 +37,17 @@ public class PoaController : ControllerBase
     public async Task<IActionResult> Search([FromBody] PoaFilterRequest filter, CancellationToken ct) =>
         Ok(await _poa.SearchAsync(filter, ct));
 
+    /// <summary>Тот же реестр целиком, книгой Excel. Фильтры — как у поиска.</summary>
+    [HttpPost("export")]
+    [RequirePermission(PermissionCode.ViewPowersOfAttorney)]
+    public async Task<IActionResult> Export([FromBody] PoaFilterRequest filter, CancellationToken ct)
+    {
+        var bytes = await _poa.ExportAsync(filter, ct);
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"Доверенности {_clock.Today:dd.MM.yyyy}.xlsx");
+    }
+
     [HttpGet("{id:int}")]
     [RequirePermission(PermissionCode.ViewPowersOfAttorney)]
     public async Task<IActionResult> Get(int id, CancellationToken ct)

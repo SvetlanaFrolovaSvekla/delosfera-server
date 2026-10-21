@@ -38,10 +38,49 @@ public class PoaFilterRequest
     public int? GrantorUserId { get; set; }
     public int? UnitId { get; set; }
 
-    /// <summary>Действующие на указанный день — «кто был вправе подписать тогда».</summary>
+    /// <summary>Доверители (любой из). Расширенный поиск реестра.</summary>
+    public List<int>? GrantorUserIds { get; set; }
+
+    /// <summary>Представители-сотрудники (любой из).</summary>
+    public List<int>? HolderUserIds { get; set; }
+
+    /// <summary>
+    /// Часть ФИО представителя, как оно записано в доверенности. Единственный способ
+    /// найти доверенность на стороннее лицо: учётной записи у него нет.
+    /// </summary>
+    public string? HolderName { get; set; }
+
+    /// <summary>Сотрудник банка или стороннее лицо.</summary>
+    public PoaHolderKind? HolderKind { get; set; }
+
+    /// <summary>Часть регистрационного номера.</summary>
+    public string? RegNumber { get; set; }
+
+    /// <summary>Фраза из текста полномочий.</summary>
+    public string? Powers { get; set; }
+
+    /// <summary>Только с правом передоверия.</summary>
+    public bool? AllowsDelegation { get; set; }
+
+    /// <summary>Дата выдачи: с — по (любая граница может быть пустой).</summary>
+    public DateOnly? IssuedFrom { get; set; }
+    public DateOnly? IssuedTo { get; set; }
+
+    /// <summary>Дата окончания срока: с — по.</summary>
+    public DateOnly? ValidToFrom { get; set; }
+    public DateOnly? ValidToTo { get; set; }
+
+    /// <summary>
+    /// Действовавшие в указанный день — «кто был вправе подписать тогда». Считается по
+    /// датам, а не по нынешнему состоянию: истёкшая или отозванная позже доверенность
+    /// в тот день действовала.
+    /// </summary>
     public DateOnly? ValidOn { get; set; }
 
-    /// <summary>Поиск по ФИО представителя, номеру и тексту полномочий.</summary>
+    /// <summary>
+    /// Общая строка поиска: слова ищутся порознь (должны найтись все, в любом порядке),
+    /// каждое — в ФИО представителя или доверителя, номере и тексте полномочий.
+    /// </summary>
     public string? Text { get; set; }
 
     public int Page { get; set; } = 1;
@@ -90,6 +129,7 @@ public class PoaDto
     public DateTime? SignedAt { get; set; }
     public DateOnly? RevokedOn { get; set; }
     public string? RevokeReason { get; set; }
+    public int? RevokedByUserId { get; set; }
     public string? RevokedBy { get; set; }
 
     public string? OriginalLocation { get; set; }

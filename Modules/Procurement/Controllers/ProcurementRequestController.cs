@@ -56,6 +56,11 @@ public class ProcurementRequestController : ControllerBase
     public async Task<IActionResult> Counters() =>
         await Run(() => _requests.CountersAsync(_currentUser.UserId));
 
+    /// <summary>Способы закупки для фильтра реестра — без права на справочники.</summary>
+    [HttpGet("requests/methods")]
+    public async Task<IActionResult> Methods() =>
+        await Run(() => _requests.MethodOptionsAsync());
+
     /// <summary>Карточка заявки.</summary>
     [HttpGet("requests/{id:int}")]
     public async Task<IActionResult> Get(int id) => await Run(() => _requests.GetAsync(id));

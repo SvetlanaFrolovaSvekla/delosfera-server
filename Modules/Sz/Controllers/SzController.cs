@@ -463,6 +463,14 @@ public class SzController : ControllerBase
             {
                 MineOnly = true, Statuses = [SzStatus.Draft, SzStatus.Withdrawn],
             }, userId),
+            // «Черновики других пользователей» — подвкладка администратора системы; остальным
+            // счётчик не отдаём (null), как и вкладку.
+            othersDrafts = _currentUser.HasPermission(PermissionCode.ManageSystemSettings)
+                ? await _sz.CountAsync(new SzSearchRequest
+                {
+                    OthersOnly = true, Statuses = [SzStatus.Draft, SzStatus.Withdrawn],
+                }, userId)
+                : (int?)null,
             pendingRegistration = byStatus.TryGetValue(SzStatus.PendingRegistration, out var p) ? p : 0,
             archived = byStatus.TryGetValue(SzStatus.Archived, out var a) ? a : 0,
             byStatus,

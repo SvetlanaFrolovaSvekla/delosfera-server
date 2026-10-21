@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using delosfera_server.Common.Export;
 using delosfera_server.Data;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Documents.Services;
@@ -13,6 +14,9 @@ public interface IPoaService
     Task<PoaDto> UpdateAsync(int id, PoaSaveRequest request, CancellationToken ct = default);
     Task<PoaDto> GetAsync(int id, CancellationToken ct = default);
     Task<PoaListResult> SearchAsync(PoaFilterRequest filter, CancellationToken ct = default);
+
+    /// <summary>Отфильтрованный реестр целиком, книгой Excel.</summary>
+    Task<byte[]> ExportAsync(PoaFilterRequest filter, CancellationToken ct = default);
 
     Task<PoaDto> IssueAsync(int id, int currentUserId, CancellationToken ct = default);
     Task<PoaDto> RevokeAsync(int id, string reason, DateOnly? on, int currentUserId, CancellationToken ct = default);
@@ -312,6 +316,73 @@ public class PoaService : IPoaService
 
     public async Task<PoaListResult> SearchAsync(PoaFilterRequest filter, CancellationToken ct = default)
     {
+        var query = Filtered(filter);
+
+        var total = await query.CountAsync(ct);
+
+        var page = Math.Max(filter.Page, 1);
+        var size = Math.Clamp(filter.PageSize, 1, 200);
+
+        var items = await Project(Ordered(query)
+                .Skip((page - 1) * size)
+                .Take(size))
+            .ToListAsync(ct);
+
+        return new PoaListResult {Total = total, Page = page, PageSize = size, Items = items};
+    }
+
+    /// <summary>Тот же реестр целиком, книгой Excel: выгрузка не знает, что такое «первые двести».</summary>
+    public async Task<byte[]> ExportAsync(PoaFilterRequest filter, CancellationToken ct = default)
+    {
+        var rows = await Project(Ordered(Filtered(filter))).ToListAsync(ct);
+
+        var sheet = new XlsxSheet
+        {
+            Name = "Доверенности",
+            Header =
+            [
+                "Номер", "Выдана", "Доверитель", "Кому", "Должность", "Подразделение",
+                "Полномочия", "Предельная сумма", "Передоверие", "Действует с", "Действует по", "Состояние",
+            ],
+            Widths = [16, 13, 28, 28, 26, 30, 60, 18, 13, 13, 13, 16],
+            Rows = rows
+                .Select(p => new[]
+                {
+                    p.RegNumber ?? "б/н",
+                    p.IssuedOn.ToString("dd.MM.yyyy"),
+                    p.GrantorName ?? "—",
+                    p.HolderName,
+                    p.HolderPosition ?? "—",
+                    p.HolderUnit ?? "—",
+                    p.Powers,
+                    p.AmountLimit is {} limit ? $"{limit:N2} {p.AmountCurrency}".Trim() : "не ограничена",
+                    p.AllowsDelegation ? "разрешено" : "нет",
+                    p.ValidFrom.ToString("dd.MM.yyyy"),
+                    p.ValidTo.ToString("dd.MM.yyyy"),
+                    StatusTitle(p.Status),
+                })
+                .ToList(),
+        };
+
+        return XlsxWorkbook.Build(sheet);
+    }
+
+    private static string StatusTitle(string status) => status switch
+    {
+        nameof(PoaStatus.Draft) => "Проект",
+        nameof(PoaStatus.OnApproval) => "На подписании",
+        nameof(PoaStatus.Active) => "Действует",
+        nameof(PoaStatus.Revoked) => "Отозвана",
+        nameof(PoaStatus.Expired) => "Срок истёк",
+        _ => status,
+    };
+
+    private static IQueryable<Models.PowerOfAttorney> Ordered(IQueryable<Models.PowerOfAttorney> query) =>
+        query.OrderByDescending(p => p.IssuedOn).ThenByDescending(p => p.Id);
+
+    /// <summary>Фильтр реестра — общий для страничного поиска и выгрузки.</summary>
+    private IQueryable<Models.PowerOfAttorney> Filtered(PoaFilterRequest filter)
+    {
         var query = _db.PowersOfAttorney.AsNoTracking().AsQueryable();
 
         if (filter.Statuses is {Count: > 0})
@@ -326,33 +397,84 @@ public class PoaService : IPoaService
         if (filter.UnitId is {} unit)
             query = query.Where(p => p.HolderUnitId == unit);
 
+        if (filter.GrantorUserIds is {Count: > 0})
+            query = query.Where(p => filter.GrantorUserIds.Contains(p.GrantorUserId));
+
+        if (filter.HolderUserIds is {Count: > 0})
+            query = query.Where(p => p.HolderUserId != null && filter.HolderUserIds.Contains(p.HolderUserId.Value));
+
+        if (CleanLike(filter.HolderName) is {Length: > 0} holderName)
+            query = query.Where(p => EF.Functions.ILike(p.HolderName, $"%{holderName}%"));
+
+        if (filter.HolderKind is {} kind)
+            query = query.Where(p => p.HolderKind == kind);
+
+        if (CleanLike(filter.RegNumber) is {Length: > 0} number)
+            query = query.Where(p => p.RegNumber != null && EF.Functions.ILike(p.RegNumber, $"%{number}%"));
+
+        if (CleanLike(filter.Powers) is {Length: > 0} powers)
+            query = query.Where(p => EF.Functions.ILike(p.Powers, $"%{powers}%"));
+
+        if (filter.AllowsDelegation == true)
+            query = query.Where(p => p.AllowsDelegation);
+
+        if (filter.IssuedFrom is {} issuedFrom)
+            query = query.Where(p => p.IssuedOn >= issuedFrom);
+        if (filter.IssuedTo is {} issuedTo)
+            query = query.Where(p => p.IssuedOn <= issuedTo);
+
+        if (filter.ValidToFrom is {} validToFrom)
+            query = query.Where(p => p.ValidTo >= validToFrom);
+        if (filter.ValidToTo is {} validToTo)
+            query = query.Where(p => p.ValidTo <= validToTo);
+
+        // «Кто был вправе подписать в тот день» решают даты, а не нынешнее состояние:
+        // доверенность, истёкшая или отозванная позже, в тот день действовала. Проекты и
+        // неподписанные не действовали никогда.
         if (filter.ValidOn is {} day)
             query = query.Where(p =>
-                p.Status == PoaStatus.Active
+                p.Status != PoaStatus.Draft && p.Status != PoaStatus.OnApproval
                 && p.ValidFrom <= day && p.ValidTo >= day
                 && (p.RevokedOn == null || p.RevokedOn > day));
 
-        if (!string.IsNullOrWhiteSpace(filter.Text))
+        // Слова общей строки ищутся порознь: должны найтись все, в любом порядке.
+        foreach (var term in SearchTerms(filter.Text))
         {
-            var text = filter.Text.Trim();
+            var pattern = $"%{term}%";
             query = query.Where(p =>
-                EF.Functions.ILike(p.HolderName, $"%{text}%")
-                || EF.Functions.ILike(p.Powers, $"%{text}%")
-                || (p.RegNumber != null && EF.Functions.ILike(p.RegNumber, $"%{text}%")));
+                EF.Functions.ILike(p.HolderName, pattern)
+                || EF.Functions.ILike(p.Powers, pattern)
+                || (p.RegNumber != null && EF.Functions.ILike(p.RegNumber, pattern))
+                || (p.GrantorUser != null && EF.Functions.ILike(p.GrantorUser.FullName, pattern)));
         }
 
-        var total = await query.CountAsync(ct);
+        return query;
+    }
 
-        var page = Math.Max(filter.Page, 1);
-        var size = Math.Clamp(filter.PageSize, 1, 200);
+    /// <summary>
+    /// Текст поля без управляющих символов (NUL роняет ILike в Postgres) и с экранированными
+    /// «%», «_» и «\» — чтобы они искались буквально, а не как шаблон.
+    /// </summary>
+    private static string CleanLike(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        return EscapeLike(new string(value.Where(c => !char.IsControl(c)).ToArray()).Trim());
+    }
 
-        var items = await Project(query
-                .OrderByDescending(p => p.IssuedOn).ThenByDescending(p => p.Id)
-                .Skip((page - 1) * size)
-                .Take(size))
-            .ToListAsync(ct);
+    private static string EscapeLike(string value) =>
+        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
-        return new PoaListResult {Total = total, Page = page, PageSize = size, Items = items};
+    /// <summary>Слова общей строки поиска для LIKE, не больше восьми, уже экранированные.</summary>
+    private static List<string> SearchTerms(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return [];
+        var cleaned = new string(value.Select(c => char.IsControl(c) ? ' ' : c).ToArray());
+        return cleaned
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .Select(EscapeLike)
+            .ToList();
     }
 
     /// <summary>
@@ -411,6 +533,7 @@ public class PoaService : IPoaService
             SignedAt = p.SignedAt,
             RevokedOn = p.RevokedOn,
             RevokeReason = p.RevokeReason,
+            RevokedByUserId = p.RevokedByUserId,
             RevokedBy = p.RevokedByUser == null ? null : p.RevokedByUser.FullName,
             OriginalLocation = p.OriginalLocation,
             OriginalHandedAt = p.OriginalHandedAt,

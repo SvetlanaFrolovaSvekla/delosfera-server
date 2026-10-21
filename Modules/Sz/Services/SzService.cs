@@ -264,6 +264,15 @@ public class SzService : ISzService
         else
             query = await ApplyVisibilityAsync(query, currentUserId);
 
+        // «Черновики других пользователей» — подвкладка администратора системы: только он
+        // видит чужие черновики. Остальным — пустая выборка, а не отказ (см. SzSearchRequest.OthersOnly).
+        if (request.OthersOnly)
+        {
+            query = _currentUser.HasPermission(PermissionCode.ManageSystemSettings)
+                ? query.Where(x => x.Document!.AuthorId != currentUserId)
+                : query.Where(x => false);
+        }
+
         // По умолчанию реестр — неархивные записки. «Избранное» — исключение: пользователь
         // сам отметил записку, и она не должна пропадать оттуда после сдачи в архив.
         var statuses = request.Statuses.Count > 0

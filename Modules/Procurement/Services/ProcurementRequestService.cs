@@ -19,6 +19,9 @@ public interface IProcurementRequestService
     /// <summary>Выгрузка реестра закупок в Excel; Ids сужают до отобранных (РС-2).</summary>
     Task<byte[]> ExportAsync(ProcurementSearchRequest request, int currentUserId);
     Task<ProcurementCountersDto> CountersAsync(int currentUserId);
+
+    /// <summary>Способы закупки для фильтра реестра.</summary>
+    Task<List<ProcurementMethodOptionDto>> MethodOptionsAsync();
     Task<ProcurementCardDto> GetAsync(int id);
     Task<ProcurementCardDto> CreateAsync(ProcurementCreateRequest request, int actorUserId);
 
@@ -112,6 +115,7 @@ public class ProcurementRequestService : IProcurementRequestService
                 Amount = r.Amount,
                 IsAffiliated = r.IsAffiliated,
                 HasBudget = r.HasBudget,
+                InitiatorUserId = r.Document.AuthorId,
                 InitiatorName = r.Document.Author!.FullName,
                 InitiatorUnit = r.InitiatorUnit!.TitleRu,
                 CreatedAt = r.CreatedAt,
@@ -138,13 +142,53 @@ public class ProcurementRequestService : IProcurementRequestService
         if (request.Ids.Count > 0)
             q = q.Where(r => request.Ids.Contains(r.Id));
 
-        if (!string.IsNullOrWhiteSpace(request.Query))
+        // Общая строка: слова ищутся порознь (должны найтись все, в любом порядке) — в предмете,
+        // номере, ФИО инициатора и подразделении. Как в реестре служебных записок.
+        foreach (var word in SearchTerms(request.Query))
         {
-            var term = $"%{request.Query.Trim()}%";
+            var term = $"%{word}%";
             q = q.Where(r =>
                 EF.Functions.ILike(r.Subject, term) ||
-                (r.Document!.RegNumber != null && EF.Functions.ILike(r.Document.RegNumber, term)));
+                (r.Document!.RegNumber != null && EF.Functions.ILike(r.Document.RegNumber, term)) ||
+                (r.Document!.Author != null && EF.Functions.ILike(r.Document.Author.FullName, term)) ||
+                (r.InitiatorUnit != null && EF.Functions.ILike(r.InitiatorUnit.TitleRu, term)));
         }
+
+        if (CleanLike(request.RegNumber) is {Length: > 0} number)
+            q = q.Where(r => r.Document!.RegNumber != null && EF.Functions.ILike(r.Document.RegNumber, $"%{number}%"));
+
+        if (CleanLike(request.Subject) is {Length: > 0} subject)
+            q = q.Where(r => EF.Functions.ILike(r.Subject, $"%{subject}%"));
+
+        if (request.InitiatorUserIds is {Count: > 0})
+            q = q.Where(r => request.InitiatorUserIds.Contains(r.Document!.AuthorId));
+
+        if (request.CuratorUserIds is {Count: > 0})
+            q = q.Where(r => r.CuratorUserId != null && request.CuratorUserIds.Contains(r.CuratorUserId.Value));
+
+        if (request.MethodIds is {Count: > 0})
+            q = q.Where(r => request.MethodIds.Contains(r.MethodId));
+
+        if (request.SubjectKind is { } kind)
+            q = q.Where(r => r.SubjectKind == kind);
+
+        // Даты создания — банковские сутки (Бишкек), а хранится момент в UTC.
+        if (request.CreatedFrom is { } createdFrom)
+        {
+            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(createdFrom.ToDateTime(TimeOnly.MinValue), _clock.Zone);
+            q = q.Where(r => r.CreatedAt >= fromUtc);
+        }
+        if (request.CreatedTo is { } createdTo)
+        {
+            var toUtc = TimeZoneInfo.ConvertTimeToUtc(createdTo.AddDays(1).ToDateTime(TimeOnly.MinValue), _clock.Zone);
+            q = q.Where(r => r.CreatedAt < toUtc);
+        }
+
+        if (request.AffiliatedOnly == true)
+            q = q.Where(r => r.IsAffiliated);
+
+        if (request.OffBudgetOnly == true)
+            q = q.Where(r => !r.HasBudget);
 
         if (request.Statuses is {Count: > 0})
             q = q.Where(r => request.Statuses.Contains(r.Document!.StatusCode));
@@ -202,6 +246,39 @@ public class ProcurementRequestService : IProcurementRequestService
         return Common.Export.XlsxWorkbook.Build(sheet);
     }
 
+    public async Task<List<ProcurementMethodOptionDto>> MethodOptionsAsync() =>
+        await _db.ProcurementMethods
+            .AsNoTracking()
+            .OrderBy(m => m.Id)
+            .Select(m => new ProcurementMethodOptionDto {Id = m.Id, ShortTitle = m.ShortTitleRu})
+            .ToListAsync();
+
+    /// <summary>
+    /// Текст поля без управляющих символов (NUL роняет ILike в Postgres) и с экранированными
+    /// «%», «_» и обратной косой — чтобы они искались буквально, а не как шаблон.
+    /// </summary>
+    private static string CleanLike(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        return EscapeLike(new string(value.Where(c => !char.IsControl(c)).ToArray()).Trim());
+    }
+
+    private static string EscapeLike(string value) =>
+        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+
+    /// <summary>Слова общей строки поиска для LIKE, не больше восьми, уже экранированные.</summary>
+    private static List<string> SearchTerms(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return [];
+        var cleaned = new string(value.Select(c => char.IsControl(c) ? ' ' : c).ToArray());
+        return cleaned
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .Select(EscapeLike)
+            .ToList();
+    }
+
     private static string ProcStatusTitle(string code) => code switch
     {
         Models.ProcurementStatus.Draft => "Черновик",
@@ -230,6 +307,8 @@ public class ProcurementRequestService : IProcurementRequestService
             Drafts = await BaseQuery()
                 .CountAsync(r => r.Document!.StatusCode == ProcurementStatus.Draft
                                  && r.Document.AuthorId == currentUserId),
+            Mine = await RestrictVisibility(BaseQuery(), currentUserId)
+                .CountAsync(r => r.Document!.AuthorId == currentUserId),
             OnApproval = Count(ProcurementStatus.OnApproval),
             InProcurement = Count(ProcurementStatus.InProcurement),
             Completed = Count(ProcurementStatus.Completed),

@@ -11,7 +11,7 @@ namespace delosfera_server.Modules.Sz.Services;
 public interface ISzTrackerService
 {
     /// <summary>Доска записок по стадиям (РС-4) — только записки, видимые пользователю.</summary>
-    Task<List<SzTrackerColumnDto>> GetBoardAsync(int currentUserId);
+    Task<SzTrackerBoardDto> GetBoardAsync(int currentUserId);
 }
 
 /// <summary>
@@ -20,11 +20,22 @@ public interface ISzTrackerService
 /// отклонённые не показываются — доска про работу.
 ///
 /// Видимость — та же, что у реестра (<see cref="SzVisibility"/>): каждый видит на доске
-/// свои записки и те, к которым причастен; право «видеть все записки» открывает всю доску,
-/// чужие черновики — только администратору системы.
+/// свои записки и те, к которым причастен; право «видеть все записки» открывает всю доску.
+/// Черновики на доске — только свои, у всех, включая администратора: чужой черновик ещё
+/// не в работе, затора в нём нет, а колонка из черновиков всего банка — шум. Разобрать
+/// чужие черновики администратор может в реестре (вкладка «Черновики»).
 /// </summary>
 public class SzTrackerService : ISzTrackerService
 {
+    /// <summary>Записка в ходу дольше недели на одной стадии — повод разобраться.</summary>
+    public const int StaleAfterDays = 7;
+
+    /// <summary>
+    /// На исполнении без срока — дольше месяца. Исполнение длиннее согласования, а
+    /// записку со сроком оценивает сам срок: она либо просрочена, либо нет.
+    /// </summary>
+    public const int StaleExecutionAfterDays = 30;
+
     private readonly DelosferaDbContext _db;
     private readonly IBankClock _clock;
     private readonly ICurrentUserService _currentUser;
@@ -36,28 +47,37 @@ public class SzTrackerService : ISzTrackerService
         _currentUser = currentUser;
     }
 
-    private static readonly (string Code, string Title)[] Stages =
+    /// <summary>
+    /// Колонки доски. У колонки может быть несколько статусов: прежний «Зарегистрирована»
+    /// означал «номер присвоен, идёт согласование» — такие записки лежат в «На согласовании»,
+    /// а не пропадают с доски.
+    /// </summary>
+    private static readonly (string Code, string Title, string[] Statuses)[] Stages =
     [
-        (SzStatus.Draft, "Черновик"),
-        (SzStatus.PendingRegistration, "Ждёт регистрации"),
-        (SzStatus.OnApproval, "На согласовании"),
-        (SzStatus.OnSigning, "На подписании"),
-        (SzStatus.OnRevision, "На доработке"),
-        (SzStatus.OnAddresseeDecision, "Решение адресата"),
-        (SzStatus.OnExecution, "На исполнении"),
+        (SzStatus.Draft, "Черновик", new[] {SzStatus.Draft}),
+        (SzStatus.PendingRegistration, "Ждёт регистрации", new[] {SzStatus.PendingRegistration}),
+        (SzStatus.OnApproval, "На согласовании", new[] {SzStatus.OnApproval, SzStatus.Registered}),
+        (SzStatus.OnSigning, "На подписании", new[] {SzStatus.OnSigning}),
+        (SzStatus.OnRevision, "На доработке", new[] {SzStatus.OnRevision}),
+        (SzStatus.OnAddresseeDecision, "Решение адресата", new[] {SzStatus.OnAddresseeDecision}),
+        (SzStatus.OnBoardReview, "На коллегиальном органе", new[] {SzStatus.OnBoardReview}),
+        (SzStatus.OnExecution, "На исполнении", new[] {SzStatus.OnExecution}),
     ];
 
-    public async Task<List<SzTrackerColumnDto>> GetBoardAsync(int currentUserId)
+    public async Task<SzTrackerBoardDto> GetBoardAsync(int currentUserId)
     {
-        var codes = Stages.Select(s => s.Code).ToArray();
+        var codes = Stages.SelectMany(s => s.Statuses).ToArray();
+        var canSeeOthersDrafts = _currentUser.HasPermission(PermissionCode.ManageSystemSettings);
 
         var visible = await SzVisibility.ApplyAsync(
             _db.SzDocuments.AsNoTracking(), _db, currentUserId,
             canSeeAll: _currentUser.HasPermission(PermissionCode.ViewAllSz),
-            canSeeOthersDrafts: _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
+            canSeeOthersDrafts: canSeeOthersDrafts);
 
         var rows = await visible
             .Where(s => codes.Contains(s.Document!.StatusCode))
+            // На доске — только свои черновики, какими бы правами ни обладал пользователь.
+            .Where(s => s.Document!.StatusCode != SzStatus.Draft || s.Document.AuthorId == currentUserId)
             .Select(s => new
             {
                 s.Id,
@@ -65,9 +85,12 @@ public class SzTrackerService : ISzTrackerService
                 Status = s.Document.StatusCode,
                 s.Document.Title,
                 s.Document.CreatedAt,
+                s.Document.StatusChangedAt,
                 s.Document.AuthorId,
+                s.AuthorUnitId,
                 s.KindId,
                 s.AddresseeUserId,
+                s.DueDate,
             })
             .ToListAsync();
 
@@ -80,11 +103,23 @@ public class SzTrackerService : ISzTrackerService
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => u.FullName);
 
+        // «Моё подразделение»: своё подразделение и те, которыми руковожу (с вложенными) —
+        // руководитель управления отвечает и за его отделы.
+        var ownUnitId = await _db.Users
+            .Where(u => u.Id == currentUserId)
+            .Select(u => u.OrgUnitId)
+            .FirstOrDefaultAsync();
+        var myUnits = (await SzVisibility.VisibleUnitIdsAsync(_db, currentUserId)).ToHashSet();
+        if (ownUnitId is int own) myUnits.Add(own);
+
         var today = _clock.Today;
 
         var enriched = rows.Select(r =>
         {
-            var age = Math.Max(0, today.DayNumber - DateOnly.FromDateTime(r.CreatedAt).DayNumber);
+            var age = DaysSince(r.CreatedAt, today);
+            var stageDays = DaysSince(r.StatusChangedAt, today);
+            var daysLeft = r.DueDate is DateOnly due ? due.DayNumber - today.DayNumber : (int?)null;
+
             return new
             {
                 r.Status,
@@ -93,22 +128,31 @@ public class SzTrackerService : ISzTrackerService
                     Id = r.Id,
                     RegNumber = r.RegNumber,
                     Title = r.Title,
+                    KindId = r.KindId,
                     Kind = kinds.GetValueOrDefault(r.KindId, "—"),
                     AuthorName = users.GetValueOrDefault(r.AuthorId),
                     AddresseeName = r.AddresseeUserId is { } a ? users.GetValueOrDefault(a) : null,
                     AgeDays = age,
-                    // Черновик может лежать сколько угодно; записка в ходу дольше двух
-                    // недель — повод разобраться.
-                    IsStale = r.Status != SzStatus.Draft && age > 14,
+                    StageSince = r.StatusChangedAt,
+                    StageDays = stageDays,
+                    IsStale = IsStale(r.Status, stageDays, r.DueDate),
+                    DueDate = r.DueDate,
+                    DaysLeft = daysLeft,
+                    IsOverdue = daysLeft < 0,
+                    IsMine = r.AuthorId == currentUserId,
+                    IsMyUnit = r.AuthorUnitId is int unit && myUnits.Contains(unit),
                 },
             };
         }).ToList();
 
-        return Stages.Select(s =>
+        var columns = Stages.Select(s =>
         {
-            var col = enriched.Where(i => i.Status == s.Code)
+            // Сначала то, что требует внимания: просроченные, затем дольше всех стоящие на стадии.
+            var col = enriched.Where(i => s.Statuses.Contains(i.Status))
                 .Select(i => i.Dto)
-                .OrderByDescending(i => i.AgeDays)
+                .OrderByDescending(i => i.IsOverdue)
+                .ThenByDescending(i => i.StageDays)
+                .ThenByDescending(i => i.Id)
                 .ToList();
             return new SzTrackerColumnDto
             {
@@ -118,5 +162,32 @@ public class SzTrackerService : ISzTrackerService
                 Items = col,
             };
         }).ToList();
+
+        return new SzTrackerBoardDto
+        {
+            Columns = columns,
+            StaleAfterDays = StaleAfterDays,
+            StaleExecutionAfterDays = StaleExecutionAfterDays,
+            HasUnit = myUnits.Count > 0,
+            CanSeeOthersDrafts = canSeeOthersDrafts,
+        };
+    }
+
+    /// <summary>
+    /// Зависла ли записка. Черновик не зависает: автор доделает его, когда сочтёт нужным.
+    /// На исполнении со сроком решает срок (просрочена или нет), без срока — свой порог.
+    /// </summary>
+    public static bool IsStale(string status, int stageDays, DateOnly? dueDate) => status switch
+    {
+        SzStatus.Draft => false,
+        SzStatus.OnExecution => dueDate is null && stageDays > StaleExecutionAfterDays,
+        _ => stageDays > StaleAfterDays,
+    };
+
+    /// <summary>Полных календарных дней от момента (UTC) до сегодня — по дате банка, не по UTC.</summary>
+    private int DaysSince(DateTime utc, DateOnly today)
+    {
+        var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _clock.Zone);
+        return Math.Max(0, today.DayNumber - DateOnly.FromDateTime(local).DayNumber);
     }
 }
