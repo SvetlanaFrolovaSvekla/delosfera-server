@@ -93,6 +93,12 @@ builder.Services.AddScoped<IVndApprovalService, VndApprovalService>();
 // ЭЦП ГП «Инфоком» на резолюции "Согласовать": хэш резолюции, проверка подписи (2.6) и
 // неизменяемый журнал подписей (см. VndResolutionSignature / ResolutionSignatureService).
 builder.Services.AddScoped<IResolutionSignatureService, ResolutionSignatureService>();
+// Локальная подпись (печать) системы «Делосфера» для сотрудников без ЭЦП КР (право
+// SignWithoutNationalEcp): HMAC-SHA256 ключом SystemSeal:HmacKey — см. SystemSealService.
+builder.Services.Configure<delosfera_server.Modules.Signing.Services.SystemSealOptions>(
+    builder.Configuration.GetSection(delosfera_server.Modules.Signing.Services.SystemSealOptions.Section));
+builder.Services.AddSingleton<delosfera_server.Modules.Signing.Services.ISystemSealService,
+    delosfera_server.Modules.Signing.Services.SystemSealService>();
 // Сохранённая ЭЦП-идентификация ("личный кабинет → Электронная подпись"): ПИН и код из СМС хранятся
 // зашифрованно (AES-256-GCM, ключ EcpCredentials:EncryptionKey), сервер сам обменивает код на минутный
 // токен ГП перед каждым подписанием — см. UserEcpCredentialService.

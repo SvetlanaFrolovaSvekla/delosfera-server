@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using delosfera_server.Modules.Signing.Models;
 using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Documents.VND.Models;
@@ -49,6 +50,13 @@ public class VndResolutionSignature
     public int RoundNumber { get; set; }
 
     public ApprovalStageDecision Decision { get; set; }
+
+    // --- Чем подписано
+    /// <summary>ЭЦП ГП «Инфоком» (Түндүк) или локальная подпись системы «Делосфера» (право
+    /// SignWithoutNationalEcp — сотрудники без ЭЦП КР). Для DelosferaSystem: PersonIdnp пуст (ПИН
+    /// нет), SignatureBase64 — HMAC-SHA256 печать системы (см. ResolutionSignatureService
+    /// .SystemSealPayload), CertKeyIdentifier — идентификатор ключа печати; ГП не вызывается.</summary>
+    public ResolutionSignatureMethod Method { get; set; } = ResolutionSignatureMethod.InfocomEcp;
 
     // --- Кто подписал
     /// <summary>Пользователь delosfera, который отправил резолюцию.</summary>
@@ -132,6 +140,7 @@ public class VndResolutionSignatureConfiguration : IEntityTypeConfiguration<VndR
         b.HasKey(x => x.Id).HasName("pk_vnd_resolution_signature");
 
         b.Property(x => x.PersonIdnp).HasMaxLength(14);
+        b.Property(x => x.Method).HasDefaultValue(ResolutionSignatureMethod.InfocomEcp);
         b.Property(x => x.PersonFio).HasMaxLength(300);
         b.Property(x => x.OrganizationInn).HasMaxLength(20);
         b.Property(x => x.OrganizationName).HasMaxLength(500);

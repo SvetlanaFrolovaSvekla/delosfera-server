@@ -164,6 +164,9 @@ public class VndAuthenticitySignature
 
     public bool Verified { get; set; }
 
+    /// <summary>Локальная подпись системы «Делосфера» (сотрудник без ЭЦП КР), а не ЭЦП ГП «Инфоком».</summary>
+    public bool IsSystem { get; set; }
+
     public required string HashSchemaVersion { get; set; }
 
     /// <summary>Подписанный хэш резолюции (решение + комментарий + отпечаток текста + код ВНД).</summary>

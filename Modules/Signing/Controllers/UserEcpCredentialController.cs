@@ -86,9 +86,18 @@ public class UserEcpCredentialController : ControllerBase
 
     /// <summary>Тестовые режимы подписания резолюций ВНД: решения без ЭЦП (EcpSigning:AllowWithoutEcp —
     /// кнопки "... (без ЭЦП, тест)") и имитация ЭЦП (EcpSigning:AllowVndTestEcp — кнопки "... (тест ЭЦП)").</summary>
+    /// <summary>Режимы подписания сервера: тестовые (без ЭЦП / имитация ЭЦП) и готовность локальной
+    /// подписи системы «Делосфера» (systemSealConfigured — задан ключ SystemSeal:HmacKey; сами кнопки
+    /// системной подписи клиент показывает только обладателю права SignWithoutNationalEcp).</summary>
     [HttpGet("test-mode")]
-    public IActionResult TestMode([FromServices] Microsoft.Extensions.Options.IOptions<EcpSigningOptions> options) =>
-        Ok(new { allowWithoutEcp = options.Value.AllowWithoutEcp, allowVndTestEcp = options.Value.AllowVndTestEcp });
+    public IActionResult TestMode([FromServices] Microsoft.Extensions.Options.IOptions<EcpSigningOptions> options,
+        [FromServices] ISystemSealService systemSeal) =>
+        Ok(new
+        {
+            allowWithoutEcp = options.Value.AllowWithoutEcp,
+            allowVndTestEcp = options.Value.AllowVndTestEcp,
+            systemSealConfigured = systemSeal.IsConfigured,
+        });
 
     private async Task<IActionResult> Run(Func<Task<IActionResult>> action)
     {

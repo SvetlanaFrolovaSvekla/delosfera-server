@@ -69,6 +69,7 @@ public class VndApprovalService : IVndApprovalService
     private readonly IFixedApprovalUnitResolver _fixedUnits;
     private readonly IVndWorkCalendarCache _workCalendar;
     private readonly IResolutionSignatureService _resolutionSignatures;
+    private readonly delosfera_server.Modules.Documents.Services.IAuditService? _audit;
 
     public VndApprovalService(
         DelosferaDbContext db,
@@ -80,7 +81,9 @@ public class VndApprovalService : IVndApprovalService
         IApprovalSheetGenerator approvalSheetGenerator,
         IFixedApprovalUnitResolver fixedUnits,
         IVndWorkCalendarCache workCalendar,
-        IResolutionSignatureService resolutionSignatures)
+        IResolutionSignatureService resolutionSignatures,
+        // Необязателен только для тестов, которые собирают сервис вручную; в DI всегда есть.
+        delosfera_server.Modules.Documents.Services.IAuditService? audit = null)
     {
         _db = db;
         _fileService = fileService;
@@ -92,6 +95,7 @@ public class VndApprovalService : IVndApprovalService
         _fixedUnits = fixedUnits;
         _workCalendar = workCalendar;
         _resolutionSignatures = resolutionSignatures;
+        _audit = audit;
     }
 
     /// <summary>Пересчитать сохранённые сроки фаз после того, как у процесса сменилась
@@ -490,8 +494,25 @@ public class VndApprovalService : IVndApprovalService
         // проверяет VndApprovalController по EcpSigning:AllowWithoutEcp.
         // ТЕСТОВЫЙ режим (request.TestEcp): имитация подписи — запись журнала с тем же хэшем, но
         // без обращения к ГП (допустимость проверяет VndApprovalController по EcpSigning:AllowVndTestEcp).
+        // Право SignWithoutNationalEcp (request.SystemSign): сотрудник без ЭЦП КР — вместо подписи ГП
+        // «Инфоком» backend ставит локальную печать системы «Делосфера» над тем же хэшем резолюции
+        // (ResolutionSignatureService.BuildSystemSignatureAsync; право проверяют контроллер и сам сервис).
         VndResolutionSignature? signature = null;
-        if (request.TestEcp)
+        if (request.SystemSign)
+        {
+            signature = await _resolutionSignatures.BuildSystemSignatureAsync(new ResolutionSignatureInput
+            {
+                Process = process,
+                Stage = stage,
+                Decision = decision,
+                UserId = currentUserId,
+                Comment = request.Comment,
+                Hash = request.EcpHash,
+                IpAddress = request.RequestIpAddress,
+                UserAgent = request.RequestUserAgent,
+            });
+        }
+        else if (request.TestEcp)
         {
             signature = await _resolutionSignatures.BuildTestSignatureAsync(new ResolutionSignatureInput
             {
@@ -682,19 +703,47 @@ public class VndApprovalService : IVndApprovalService
         // замечания. Сам текст замечания по-прежнему доступен на карточке ВНД (в ходе
         // согласования) и в уведомлении, которое приходит инициатору (см.
         // VndApprovalNotificationMessages).
+        // Подпись локальной печатью системы (сотрудник без ЭЦП КР) — в журнале действий это видно прямо
+        // в строке: подписано не через Түндүк / ГП «Инфоком».
+        var systemSigned = signature is not null && ResolutionSignatureService.IsSystemSignature(signature);
+        var (signRu, signEn, signKg) = systemSigned
+            ? (" — подписано локальной подписью системы «Делосфера» (без ЭЦП КР, не через Түндүк)",
+               " — signed with the Delosfera local system signature (no Kyrgyz e-signature, not via Tunduk)",
+               " — «Делосфера» системасынын жергиликтүү колу менен кол коюлду (КР ЭККсыз, Түндүк аркылуу эмес)")
+            : ("", "", "");
+
         _activityLog.Log(
             ActivityModules.Vnd, logKind, vndId, process.Vnd!.Code, currentUserId,
             decision == ApprovalStageDecision.Rejected
                 ? new ActivityText(
-                    $"{approverName} отклонил(а) редакцию {redactionCode} ВНД «{vndTitle}»",
-                    $"{approverName} rejected revision {redactionCode} of VND \"{vndTitle}\"",
-                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын четке какты")
+                    $"{approverName} отклонил(а) редакцию {redactionCode} ВНД «{vndTitle}»{signRu}",
+                    $"{approverName} rejected revision {redactionCode} of VND \"{vndTitle}\"{signEn}",
+                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын четке какты{signKg}")
                 : new ActivityText(
-                    $"{approverName} согласовал(а) редакцию {redactionCode} ВНД «{vndTitle}»",
-                    $"{approverName} approved revision {redactionCode} of VND \"{vndTitle}\"",
-                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын макулдады"),
+                    $"{approverName} согласовал(а) редакцию {redactionCode} ВНД «{vndTitle}»{signRu}",
+                    $"{approverName} approved revision {redactionCode} of VND \"{vndTitle}\"{signEn}",
+                    $"{approverName} «{vndTitle}» ВНДисинин {redactionCode} редакциясын макулдады{signKg}"),
             $"/base-vnd/{vndId}");
         await _db.SaveChangesAsync();
+
+        // Технический аудит с хэш-цепочкой (AUD-1): неизменяемая отметка, что резолюция подписана
+        // локальной подписью системы, а не ЭЦП ГП «Инфоком» (Түндүк).
+        if (systemSigned && _audit is not null)
+        {
+            await _audit.LogAsync("VndResolutionSignature", signature!.Id, "SystemSealed", currentUserId, new
+            {
+                vndId,
+                stageId = stage.Id,
+                approverUserId = stage.ApproverUserId,
+                decision = decision.ToString(),
+                phase = signature.Phase.ToString(),
+                round = signature.RoundNumber,
+                method = "DelosferaSystem",
+                viaTunduk = false,
+                hash = signature.Hash,
+                sealKeyId = signature.CertKeyIdentifier,
+            });
+        }
 
         var decisionNotice = decision switch
         {

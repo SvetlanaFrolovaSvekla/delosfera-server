@@ -214,6 +214,83 @@ public class DocumentAttachmentTests
         Assert.Single(await ownerService.ListAsync(documentId));
     }
 
+    // ── вложения служебной записки: статус и право EditAnySz ─────────────────
+
+    [Theory]
+    [InlineData("OnApproval")]
+    [InlineData("OnSigning")]
+    [InlineData("OnExecution")]
+    public async Task SzAttachments_AreLockedOutsideAuthorStatuses_EvenForAuthorAndAdmin(string status)
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (documentId, authorId) = await SeedDocumentWithAuthorAsync(db);
+
+        var (authorService, _, _) = NewServiceWithStorage(db, new FakeCurrentUser(authorId));
+        var added = await authorService.AddAsync(documentId, FakeFile("исходный", "a.txt"), userId: authorId);
+        await SetStatusAsync(db, documentId, status);
+
+        // Вложения входят в отпечаток, под которым согласующие ставят ЭЦП: на маршруте
+        // их не меняет ни автор, ни администратор — записку для этого отзывают.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => authorService.AddAsync(documentId, FakeFile("новый", "b.txt"), userId: authorId));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => authorService.ReplaceAsync(added.Id, FakeFile("подмена", "a.txt"), userId: authorId));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => authorService.DeleteAsync(added.Id, userId: authorId));
+
+        var (adminService, _, _) = NewServiceWithStorage(db,
+            new FakeCurrentUser(authorId + 1000, PermissionCode.ManageSystemSettings));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => adminService.AddAsync(documentId, FakeFile("новый", "b.txt"), userId: authorId + 1000));
+
+        Assert.Single(await authorService.ListAsync(documentId));
+    }
+
+    [Theory]
+    [InlineData("Withdrawn")]
+    [InlineData("OnRevision")]
+    public async Task SzAttachments_ClerkWithEditAnySz_ChangesOthersMemoAtAuthorStatuses(string status)
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (documentId, authorId) = await SeedDocumentWithAuthorAsync(db);
+
+        var (authorService, _, _) = NewServiceWithStorage(db, new FakeCurrentUser(authorId));
+        var added = await authorService.AddAsync(documentId, FakeFile("исходный", "a.txt"), userId: authorId);
+        await SetStatusAsync(db, documentId, status);
+
+        var clerkId = authorId + 1000;
+        var (clerkService, _, _) = NewServiceWithStorage(db,
+            new FakeCurrentUser(clerkId, PermissionCode.ViewAllSz, PermissionCode.EditAnySz));
+
+        await clerkService.AddAsync(documentId, FakeFile("забытое вложение", "b.txt"), userId: clerkId);
+        await clerkService.ReplaceAsync(added.Id, FakeFile("исправленный", "a.txt"), userId: clerkId);
+
+        var list = await clerkService.ListAsync(documentId);
+        Assert.Equal(2, list.Count);
+    }
+
+    [Fact]
+    public async Task SzAttachments_ViewAllSzAlone_DoesNotAllowChangingOthersFiles()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (documentId, authorId) = await SeedDocumentWithAuthorAsync(db);
+        await SetStatusAsync(db, documentId, "Withdrawn");
+
+        var viewerId = authorId + 1000;
+        var (viewerService, _, _) = NewServiceWithStorage(db,
+            new FakeCurrentUser(viewerId, PermissionCode.ViewAllSz));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => viewerService.AddAsync(documentId, FakeFile("чужой файл", "b.txt"), userId: viewerId));
+    }
+
+    private static async Task SetStatusAsync(DelosferaDbContext db, int documentId, string status)
+    {
+        var document = await db.Documents.SingleAsync(d => d.Id == documentId);
+        document.StatusCode = status;
+        await db.SaveChangesAsync();
+    }
+
     // ── стенд ────────────────────────────────────────────────────────────────
 
     private (IDocumentAttachmentService Service, ISignatureService Signatures) NewService(DelosferaDbContext db)

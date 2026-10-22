@@ -1591,13 +1591,27 @@ public class VndService : IVndService
         var vnd = await _db.VndDocuments.FindAsync(vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
 
+        // То же правило, что и в GetByIdAsync: чужой черновик видят только его создатель и
+        // обладатели ViewOtherUsersDrafts. Раньше карточка такого ВНД не открывалась, а список его
+        // редакций (с id файлов) отдавался любому с правом ViewVnd.
+        if (vnd.Status == VndStatus.Draft
+            && vnd.CreatedByUserId != _currentUser.UserId
+            && !_currentUser.HasPermission(PermissionCode.ViewOtherUsersDrafts))
+            throw new UnauthorizedAccessException("Черновик ВНД доступен только его автору");
+
         var redactions = await IncludeRequisites(_db.VndRedactions
                 .Where(x => x.VndId == vndId)
                 .Include(x => x.Attachments).ThenInclude(a => a.FileAttachment))
             .OrderBy(x => x.Number)
             .ToListAsync();
 
-        return redactions.Select(r => ToRedactionResponse(r, vnd)).ToList();
+        var latestNumber = redactions.Count == 0 ? 0 : redactions.Max(r => r.Number);
+        return redactions.Select(r =>
+        {
+            var response = ToRedactionResponse(r, vnd);
+            response.CanManageTitlePage = VndTitlePageService.CanManage(_currentUser, vnd, r, latestNumber);
+            return response;
+        }).ToList();
     }
 
     /// <summary>

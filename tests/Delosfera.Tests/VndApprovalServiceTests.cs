@@ -215,7 +215,74 @@ public class VndApprovalServiceTests
             new FakeActivityLog(), new ApprovalSheetGenerator(),
             new FixedApprovalUnitResolver(db), new FixedWorkCalendar(),
             new ResolutionSignatureService(db, new NoopFileStorage(), new ThrowingInfocomEcpClient(),
-                new FakeCurrentUser(Approver1), NullLogger<ResolutionSignatureService>.Instance));
+                new FakeCurrentUser(Approver1), SystemSealServiceTests.NewSeal(configured: false),
+                NullLogger<ResolutionSignatureService>.Instance));
+
+    /// <summary>Как NewServiceWithRealSignatureCheck, но с правами текущего пользователя и ключом печати.</summary>
+    private static VndApprovalService NewServiceWithSystemSeal(DelosferaDbContext db, bool sealConfigured,
+        params delosfera_server.Modules.Users.Models.PermissionCode[] permissions) =>
+        new(db, new NoopFileStorage(), new NoopNotificationService(),
+            new FakeCurrentUser(Approver1, permissions), NullLogger<VndApprovalService>.Instance,
+            new FakeActivityLog(), new ApprovalSheetGenerator(),
+            new FixedApprovalUnitResolver(db), new FixedWorkCalendar(),
+            new ResolutionSignatureService(db, new NoopFileStorage(), new ThrowingInfocomEcpClient(),
+                new FakeCurrentUser(Approver1, permissions), SystemSealServiceTests.NewSeal(sealConfigured),
+                NullLogger<ResolutionSignatureService>.Instance));
+
+    // --- Локальная подпись системы «Делосфера» (право SignWithoutNationalEcp) ------------------
+
+    [Fact]
+    public async Task Decide_SystemSign_WithoutPermission_IsRejected_AndNothingSaved()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var seeded = SeedTwoStageProcess(db);
+        var stageId = seeded.Stages.First(s => s.ApproverUserId == Approver1).Id;
+        var svc = NewServiceWithSystemSeal(db, sealConfigured: true);
+
+        var ex = await Assert.ThrowsAsync<ResolutionSignatureException>(() => svc.DecideAsync(seeded.VndId, stageId,
+            new ApprovalDecisionRequest { Decision = ApprovalDecisionType.Approve, SystemSign = true }, Approver1));
+        Assert.Equal(ResolutionSignatureErrorCodes.SystemSignNotAllowed, ex.Code);
+        Assert.Equal(403, ex.StatusCode);
+
+        db.ChangeTracker.Clear();
+        Assert.Equal(ApprovalStageDecision.Pending, (await db.VndApprovalStages.SingleAsync(s => s.Id == stageId)).PrimaryDecision);
+        Assert.False(await db.VndResolutionSignatures.AnyAsync(s => s.StageId == stageId));
+    }
+
+    [Fact]
+    public async Task Decide_SystemSign_WhenSealKeyMissing_FailsClosed()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var seeded = SeedTwoStageProcess(db);
+        var stageId = seeded.Stages.First(s => s.ApproverUserId == Approver1).Id;
+        var svc = NewServiceWithSystemSeal(db, sealConfigured: false,
+            delosfera_server.Modules.Users.Models.PermissionCode.SignWithoutNationalEcp);
+
+        var ex = await Assert.ThrowsAsync<ResolutionSignatureException>(() => svc.DecideAsync(seeded.VndId, stageId,
+            new ApprovalDecisionRequest { Decision = ApprovalDecisionType.Approve, SystemSign = true }, Approver1));
+        Assert.Equal(ResolutionSignatureErrorCodes.SystemSealUnavailable, ex.Code);
+        Assert.False(await db.VndResolutionSignatures.AnyAsync(s => s.StageId == stageId));
+    }
+
+    [Fact]
+    public async Task Decide_SystemSign_SavesJournalEntryMarkedAsSystem()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var seeded = SeedTwoStageProcess(db);
+        var stageId = seeded.Stages.First(s => s.ApproverUserId == Approver1).Id;
+        var svc = NewService(db);
+
+        await svc.DecideAsync(seeded.VndId, stageId,
+            new ApprovalDecisionRequest { Decision = ApprovalDecisionType.Approve, SystemSign = true }, Approver1);
+
+        db.ChangeTracker.Clear();
+        var entry = await db.VndResolutionSignatures.AsNoTracking().SingleAsync(s => s.StageId == stageId);
+        Assert.Equal(delosfera_server.Modules.Signing.Models.ResolutionSignatureMethod.DelosferaSystem, entry.Method);
+        Assert.True(ResolutionSignatureService.IsSystemSignature(entry));
+        Assert.False(ResolutionSignatureService.IsTestSignature(entry));
+        Assert.Equal(ApprovalStageDecision.Approved,
+            (await db.VndApprovalStages.SingleAsync(s => s.Id == stageId)).PrimaryDecision);
+    }
 
     [Fact]
     public async Task Decide_Approve_SavesSignatureJournalEntryWithDecision()

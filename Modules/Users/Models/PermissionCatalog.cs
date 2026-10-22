@@ -253,6 +253,25 @@ public static class PermissionCatalog
             TitleKg = "ВНДнин купуялуулук жөндөөлөрү: документке кирүүнү тандалган топторго жана колдонуучуларга чектөө"
         },
 
+        [PermissionCode.EditAnySz] = new PermissionDescription
+        {
+            TitleRu = "Править чужие служебные записки (черновик, доработка, отозванная): поля и вложения",
+            TitleEn = "Edit other users' internal memos (draft, revision, withdrawn): fields and attachments",
+            TitleKg = "Башкалардын кызматтык каттарын оңдоо (долбоор, иштеп чыгуу, кайтарылып алынган): талаалар жана тиркемелер"
+        },
+        [PermissionCode.WithdrawAnySz] = new PermissionDescription
+        {
+            TitleRu = "Отзывать любую служебную записку с согласования, доработки, регистрации или подписания (с обоснованием)",
+            TitleEn = "Withdraw any internal memo from approval, revision, registration or signing (with a reason)",
+            TitleKg = "Каалаган кызматтык катты макулдашуудан, иштеп чыгуудан, каттоодон же кол коюудан кайтарып алуу (негиздеме менен)"
+        },
+        [PermissionCode.SignWithoutNationalEcp] = new PermissionDescription
+        {
+            TitleRu = "Подписывать резолюции без ЭЦП КР — системной подписью «Делосфера» (для сотрудников без гражданства КР)",
+            TitleEn = "Sign resolutions without a Kyrgyz e-signature — with the Delosfera system signature (for non-citizen employees)",
+            TitleKg = "Резолюцияларга КР ЭЦПсыз — «Делосфера» системасынын колу менен кол коюу (КР жарандыгы жок кызматкерлер үчүн)"
+        },
+
         // Системные настройки
         [PermissionCode.ManageSystemSettings] = new PermissionDescription
         {

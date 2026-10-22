@@ -209,6 +209,7 @@ public static class VndAuthenticityMatcher
         SignedAt = s.SignedAt,
         CmsSigningTime = s.CmsSigningTime,
         Verified = s.Verified,
+        IsSystem = ResolutionSignatureService.IsSystemSignature(s),
         HashSchemaVersion = s.HashSchemaVersion,
         Hash = s.Hash,
         ContentDigest = s.ContentDigest,

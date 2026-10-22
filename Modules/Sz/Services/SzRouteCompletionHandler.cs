@@ -338,6 +338,75 @@ public class SzRouteCompletionHandler : IRouteCompletionHandler
     }
 
     /// <summary>
+    /// Автору: его записку отозвал не он сам (право WithdrawAnySz — администратор,
+    /// делопроизводство). Иначе записка молча исчезает с согласования, и автор
+    /// узнаёт об этом от согласующих.
+    /// </summary>
+    public Task NotifyAuthorWithdrawnByOtherAsync(SzDocument sz, int actorUserId, string reason) =>
+        NotifyAuthorAboutOtherAsync(sz, actorUserId,
+            titleRu: "Ваша служебная записка отозвана",
+            titleKg: "Сиздин кызматтык катыңыз кайтарылып алынды",
+            titleEn: "Your memo has been withdrawn",
+            bodyRu: (title, who) => $"«{title}» отозвана с согласования. Отозвал: {who}. Причина: {reason}",
+            bodyKg: (title, who) => $"«{title}» макулдашуудан кайтарылып алынды. Кайтарып алган: {who}. Себеби: {reason}",
+            bodyEn: (title, who) => $"“{title}” has been withdrawn from approval by {who}. Reason: {reason}",
+            severity: NotificationSeverity.Warning);
+
+    /// <summary>
+    /// Автору: его записку отправил не он сам (право EditAnySz) — после правки чужой
+    /// рукой. Уходит она в том виде, в каком её оставил отправивший, и автор должен
+    /// знать, что под его именем согласуют не совсем то, что он писал.
+    /// </summary>
+    public Task NotifyAuthorSubmittedByOtherAsync(SzDocument sz, int actorUserId, bool toRegistration) =>
+        NotifyAuthorAboutOtherAsync(sz, actorUserId,
+            titleRu: "Вашу служебную записку отправил другой сотрудник",
+            titleKg: "Сиздин кызматтык катыңызды башка кызматкер жөнөттү",
+            titleEn: "Your memo was submitted by another employee",
+            bodyRu: (title, who) => toRegistration
+                ? $"«{title}» отправлена на регистрацию. Отправил: {who}. Проверьте содержание и вложения — их могли изменить."
+                : $"«{title}» снова отправлена на согласование. Отправил: {who}. Проверьте содержание и вложения — их могли изменить.",
+            bodyKg: (title, who) => toRegistration
+                ? $"«{title}» каттоого жөнөтүлдү. Жөнөткөн: {who}. Мазмунун жана тиркемелерин текшериңиз."
+                : $"«{title}» кайрадан макулдашууга жөнөтүлдү. Жөнөткөн: {who}. Мазмунун жана тиркемелерин текшериңиз.",
+            bodyEn: (title, who) => toRegistration
+                ? $"“{title}” has been sent for registration by {who}. Check its content and attachments — they may have been changed."
+                : $"“{title}” has been resubmitted for approval by {who}. Check its content and attachments — they may have been changed.",
+            severity: NotificationSeverity.Info);
+
+    private async Task NotifyAuthorAboutOtherAsync(
+        SzDocument sz, int actorUserId,
+        string titleRu, string titleKg, string titleEn,
+        Func<string, string, string> bodyRu, Func<string, string, string> bodyKg, Func<string, string, string> bodyEn,
+        NotificationSeverity severity)
+    {
+        var doc = await _db.Documents.AsNoTracking()
+            .Where(d => d.Id == sz.DocumentId)
+            .Select(d => new {d.Title, d.AuthorId})
+            .FirstAsync();
+        if (doc.AuthorId == actorUserId) return;
+
+        var who = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == actorUserId).Select(u => u.FullName).FirstOrDefaultAsync()
+            ?? $"#{actorUserId}";
+
+        await _notifications.CreateAsync(new CreateNotificationRequest
+        {
+            TitleRu = titleRu,
+            TitleKg = titleKg,
+            TitleEn = titleEn,
+            BodyRu = bodyRu(doc.Title, who),
+            BodyKg = bodyKg(doc.Title, who),
+            BodyEn = bodyEn(doc.Title, who),
+            Category = NotificationCategory.Sz,
+            Severity = severity,
+            EntityType = "Sz",
+            EntityId = sz.Id,
+            Url = $"/sz/{sz.Id}",
+            UserIds = [doc.AuthorId],
+        }, actorUserId);
+    }
+
+    /// <summary>
     /// Снимает задачу на доработку, когда записка ушла с доработки: повторно отправлена
     /// на согласование, отозвана или забракована. Без этого доработка висела бы в
     /// задачах автора и после того, как он её уже сдал.

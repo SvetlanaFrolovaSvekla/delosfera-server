@@ -50,6 +50,11 @@ public class VndRedactionResponse
     /// <summary>Когда титульный лист последний раз формировался/загружался.</summary>
     public DateTime? TitlePageUpdatedAt { get; set; }
 
+    /// <summary>Может ли текущий пользователь сформировать/загрузить/убрать титульный лист этой
+    /// редакции (см. VndTitlePageService.CanManage) — фронт показывает кнопки по этому флагу, а не
+    /// повторяет правило у себя. Заполняется только в списке редакций (GetRedactionsAsync).</summary>
+    public bool CanManageTitlePage { get; set; }
+
     public bool RequiresApproval { get; set; }
     public required string ApprovalStatus { get; set; }
 

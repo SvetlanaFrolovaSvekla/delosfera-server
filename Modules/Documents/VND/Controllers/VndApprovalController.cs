@@ -48,7 +48,7 @@ public class VndApprovalController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Текущий процесс согласования для последней редакции ВНД</summary>
@@ -94,7 +94,7 @@ public class VndApprovalController : ControllerBase
         catch (ResolutionSignatureException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message, code = ex.Code }); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Решение согласующего по своему этапу. multipart/form-data — согласующий
@@ -140,6 +140,18 @@ public class VndApprovalController : ControllerBase
                 code = "ecp_required",
             });
 
+        // Локальная подпись системы «Делосфера» вместо ЭЦП КР — только обладателю права
+        // SignWithoutNationalEcp (сотрудники без гражданства КР). Повторно проверяет и
+        // ResolutionSignatureService.BuildSystemSignatureAsync.
+        if (request.SystemSign && !_currentUser.HasPermission(PermissionCode.SignWithoutNationalEcp))
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "У вас нет права подписывать резолюции без ЭЦП КР — подпишите резолюцию ЭЦП",
+                code = ResolutionSignatureErrorCodes.SystemSignNotAllowed,
+            });
+        if (request.SystemSign && (request.WithoutEcp || request.TestEcp))
+            return BadRequest(new { message = "Системная подпись не совмещается с тестовыми режимами подписи" });
+
         try
         {
             return Ok(await _service.DecideAsync(vndId, stageId, request, _currentUser.UserId));
@@ -147,7 +159,7 @@ public class VndApprovalController : ControllerBase
         catch (ResolutionSignatureException ex) { return StatusCode(ex.StatusCode, new { message = ex.Message, code = ex.Code }); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Инициатор отзывает согласование — редакция и документ возвращаются в черновик</summary>
@@ -162,7 +174,7 @@ public class VndApprovalController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Инициатор отправляет исправленную редакцию на повторное согласование</summary>
@@ -187,7 +199,7 @@ public class VndApprovalController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
     
     /// <summary>Добавить строку в матрицу разногласий (только инициатор, только на доработке)</summary>
@@ -202,7 +214,7 @@ public class VndApprovalController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Изменить строку матрицы разногласий (только инициатор, только на доработке)</summary>
@@ -217,7 +229,7 @@ public class VndApprovalController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Удалить строку из матрицы разногласий</summary>
@@ -231,7 +243,7 @@ public class VndApprovalController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Главный редактор добавляет согласующего в уже запущенный процесс согласования</summary>
@@ -248,7 +260,7 @@ public class VndApprovalController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Главный редактор убирает согласующего из уже запущенного процесса согласования —
@@ -268,7 +280,7 @@ public class VndApprovalController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Главный редактор заменяет согласующего на обязательном этапе маршрута — сам
@@ -286,6 +298,6 @@ public class VndApprovalController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 }

@@ -125,6 +125,124 @@ public class SzAuthorizationTests
             Service(db, стенд.Stranger).SubmitAsync(стенд.SzId, стенд.Stranger));
     }
 
+    // ── POST /api/sz/{id}/withdraw — отзыв ─────────────────────────────────────
+
+    [Fact]
+    public async Task Чужой_не_может_отозвать_записку()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+        await SetStatusAsync(db, стенд.SzId, SzStatus.OnApproval);
+
+        // ViewAllSz и EditAnySz отзыва не дают: прерывать чужой маршрут — отдельное право.
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            Service(db, стенд.Stranger, PermissionCode.ViewAllSz, PermissionCode.EditAnySz)
+                .WithdrawAsync(стенд.SzId, "Не приложено вложение", стенд.Stranger));
+    }
+
+    [Fact]
+    public async Task Держатель_WithdrawAnySz_отзывает_чужую_и_отправляет_снова()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+        await SetStatusAsync(db, стенд.SzId, SzStatus.OnApproval);
+
+        var clerk = Service(db, стенд.Stranger,
+            PermissionCode.ViewAllSz, PermissionCode.EditAnySz, PermissionCode.WithdrawAnySz);
+
+        var withdrawn = await clerk.WithdrawAsync(стенд.SzId, "Не приложено вложение", стенд.Stranger);
+        Assert.Equal(SzStatus.Withdrawn, withdrawn.StatusCode);
+
+        var edited = await clerk.UpdateDraftAsync(стенд.SzId, SaveRequest(стенд, "Поправлено"), стенд.Stranger);
+        Assert.Equal("Поправлено", edited.Title);
+
+        // Номера в стенде нет — отправленная уходит на регистрацию, как у автора.
+        var submitted = await clerk.SubmitAsync(стенд.SzId, стенд.Stranger);
+        Assert.Equal(SzStatus.PendingRegistration, submitted.StatusCode);
+    }
+
+    [Fact]
+    public async Task Не_автор_правит_содержание_но_не_согласующих_и_подписанта()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+        var approver = await AddUserAsync(db, "Согласующий автора");
+
+        // Автор задал маршрут: один согласующий, подписант — он сам.
+        var byAuthor = SaveRequest(стенд, "Тема автора");
+        byAuthor.ApproverUserIds = [approver.Id];
+        byAuthor.SignerUserId = стенд.Author;
+        await Service(db, стенд.Author).UpdateDraftAsync(стенд.SzId, byAuthor, стенд.Author);
+        await SetStatusAsync(db, стенд.SzId, SzStatus.Withdrawn);
+
+        // Делопроизводитель пытается поставить согласующим и подписантом себя.
+        var byClerk = SaveRequest(стенд, "Поправлено делопроизводством");
+        byClerk.ApproverUserIds = [стенд.Stranger];
+        byClerk.SignerUserId = стенд.Stranger;
+        byClerk.ApprovalIsParallel = true;
+        var details = await Service(db, стенд.Stranger, PermissionCode.ViewAllSz, PermissionCode.EditAnySz)
+            .UpdateDraftAsync(стенд.SzId, byClerk, стенд.Stranger);
+
+        Assert.Equal("Поправлено делопроизводством", details.Title);
+
+        db.ChangeTracker.Clear();
+        var approvers = await db.SzApprovers.Where(a => a.SzDocumentId == стенд.SzId)
+            .Select(a => a.UserId).ToListAsync();
+        Assert.Equal(new[] { approver.Id }, approvers);
+        var sz = await db.SzDocuments.AsNoTracking().SingleAsync(x => x.Id == стенд.SzId);
+        Assert.Equal(стенд.Author, sz.SignerUserId);
+        Assert.False(sz.ApprovalIsParallel);
+
+        // И отдельной ручкой согласующих не переписать.
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            Service(db, стенд.Stranger, PermissionCode.ViewAllSz, PermissionCode.EditAnySz)
+                .SetApproversAsync(стенд.SzId, [стенд.Stranger], parallel: false, стенд.Stranger));
+    }
+
+    [Fact]
+    public async Task Администратор_меняет_маршрут_чужой_записки_отзывает_и_отправляет()
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var стенд = await SeedAsync(db);
+        var fired = await AddUserAsync(db, "Уволившийся согласующий");
+        var replacement = await AddUserAsync(db, "Новый согласующий");
+        var admin = await AddUserAsync(db, "Администратор");
+
+        var byAuthor = SaveRequest(стенд, "Тема");
+        byAuthor.ApproverUserIds = [fired.Id];
+        await Service(db, стенд.Author).UpdateDraftAsync(стенд.SzId, byAuthor, стенд.Author);
+        await SetStatusAsync(db, стенд.SzId, SzStatus.OnApproval);
+
+        // Только ManageSystemSettings — без WithdrawAnySz/EditAnySz: админу хватает своего права.
+        var adminService = Service(db, admin.Id, PermissionCode.ManageSystemSettings);
+
+        var withdrawn = await adminService.WithdrawAsync(стенд.SzId, "Согласующий уволился", admin.Id);
+        Assert.Equal(SzStatus.Withdrawn, withdrawn.StatusCode);
+
+        var fix = SaveRequest(стенд, "Тема");
+        fix.ApproverUserIds = [replacement.Id];
+        fix.SignerUserId = стенд.Stranger;
+        await adminService.UpdateDraftAsync(стенд.SzId, fix, admin.Id);
+
+        db.ChangeTracker.Clear();
+        var approvers = await db.SzApprovers.Where(a => a.SzDocumentId == стенд.SzId)
+            .Select(a => a.UserId).ToListAsync();
+        Assert.Equal(new[] { replacement.Id }, approvers);
+        Assert.Equal(стенд.Stranger,
+            (await db.SzDocuments.AsNoTracking().SingleAsync(x => x.Id == стенд.SzId)).SignerUserId);
+
+        var submitted = await adminService.SubmitAsync(стенд.SzId, admin.Id);
+        Assert.Equal(SzStatus.PendingRegistration, submitted.StatusCode);
+    }
+
+    private static async Task SetStatusAsync(DelosferaDbContext db, int szId, string status)
+    {
+        var sz = await db.SzDocuments.Include(x => x.Document).SingleAsync(x => x.Id == szId);
+        sz.Document!.StatusCode = status;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+    }
+
     // ── PUT /api/sz/{id}/approvers — маршрут согласующих ───────────────────────
 
     [Fact]

@@ -151,6 +151,7 @@ public class SzService : ISzService
     {
         if (sz.Document!.AuthorId == actorUserId) return;
         if (_currentUser.HasPermission(PermissionCode.ViewAllSz)) return;
+        if (_currentUser.HasPermission(PermissionCode.EditAnySz)) return;
         if (_currentUser.HasPermission(PermissionCode.ManageSystemSettings)) return;
         throw new UnauthorizedAccessException(message);
     }
@@ -658,6 +659,16 @@ public class SzService : ISzService
         EnsureAuthorOrPrivileged(sz, actorUserId,
             "Нет прав на изменение этой служебной записки");
 
+        // Кто правит чужую записку (делопроизводство), правит её содержание, но не
+        // круг тех, кто её согласует и подписывает: иначе можно убрать неудобных
+        // согласующих и оставить себя. Маршрут задаёт автор — и администратор системы,
+        // когда маршрут надо чинить (уволился согласующий, собрали не тех): присланные
+        // остальными согласующие, режим и подписант не применяются.
+        var byAuthor = sz.Document!.AuthorId == actorUserId;
+        var canChangeRoute = byAuthor || _currentUser.HasPermission(PermissionCode.ManageSystemSettings);
+        var keptParallel = sz.ApprovalIsParallel;
+        var keptSigner = sz.SignerUserId;
+
         ValidateSaveRequest(request);
 
         // Правка полей разрешена, пока записка не ушла дальше автора. Отозванная —
@@ -681,8 +692,27 @@ public class SzService : ISzService
         }
         sz.KindId = request.KindId;
         ApplyFields(sz, request);
+        if (!canChangeRoute)
+        {
+            sz.ApprovalIsParallel = keptParallel;
+            sz.SignerUserId = keptSigner;
+        }
         await ApplyRubricsAsync(sz, request.RubricIds);
-        await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
+        if (canChangeRoute)
+        {
+            await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
+
+            // Маршрут чужой записки поправил администратор — это должно остаться
+            // в журнале отдельной строкой, а не потеряться в общем «Изменена».
+            if (!byAuthor)
+                await _audit.LogAsync("Sz", sz.Id, "RouteChangedByAdmin", actorUserId, new
+                {
+                    approvers = request.ApproverUserIds.Distinct().ToList(),
+                    parallel = sz.ApprovalIsParallel,
+                    signer = sz.SignerUserId,
+                    onBehalfOfAuthor = sz.Document.AuthorId,
+                });
+        }
 
         // Предлагаемых исполнителей форма карточки не показывает и не присылает.
         // Пустой список здесь стирал их при каждом сохранении черновика — теперь
@@ -805,6 +835,21 @@ public class SzService : ISzService
 
             await _audit.LogAsync("Sz", sz.Id, "ResubmittedForApproval", actorUserId,
                 new { round = sz.ApprovalRounds });
+        }
+
+        // Отправил не автор (EditAnySz) — автору знать, что записку под его именем
+        // отправили, возможно, уже не в том виде, в каком он её оставил.
+        if (sz.Document!.AuthorId != actorUserId)
+        {
+            try
+            {
+                await _addresseeTasks.NotifyAuthorSubmittedByOtherAsync(
+                    sz, actorUserId, toRegistration: sz.Document.RegNumber is null);
+            }
+            catch (Exception)
+            {
+                // Записка отправлена — неотправленное уведомление этого не отменяет.
+            }
         }
 
         return (await GetAsync(sz.Id))!;
@@ -960,8 +1005,11 @@ public class SzService : ISzService
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
-        EnsureAuthorOrPrivileged(sz, actorUserId,
-            "Нет прав на изменение согласующих этой служебной записки");
+        // Состав согласующих — автор и администратор системы: ни ViewAllSz, ни EditAnySz
+        // чужой маршрут не переписывают (см. UpdateDraftAsync).
+        if (sz.Document!.AuthorId != actorUserId
+            && !_currentUser.HasPermission(PermissionCode.ManageSystemSettings))
+            throw new UnauthorizedAccessException("Состав согласующих меняет только автор записки или администратор");
 
         if (sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision or SzStatus.Withdrawn))
             throw new InvalidOperationException(
@@ -1196,8 +1244,13 @@ public class SzService : ISzService
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
         // Отзыв — право инициатора: согласующий прерывать чужой процесс не может.
-        if (sz.Document!.AuthorId != actorUserId)
-            throw new InvalidOperationException("Отозвать записку может только её автор");
+        // Чужую записку отзывает только обладатель WithdrawAnySz (администратор,
+        // делопроизводство) — когда её надо поправить, а автора нет на месте.
+        var byAuthor = sz.Document!.AuthorId == actorUserId;
+        if (!byAuthor
+            && !_currentUser.HasPermission(PermissionCode.WithdrawAnySz)
+            && !_currentUser.HasPermission(PermissionCode.ManageSystemSettings))
+            throw new UnauthorizedAccessException("Отозвать записку может только её автор");
 
         // Отзыв возможен на согласовании и доработке, но не когда записка уже исполняется.
         if (sz.Document.StatusCode is not (SzStatus.OnApproval or SzStatus.OnRevision
@@ -1233,7 +1286,24 @@ public class SzService : ISzService
         await _documents.ChangeStatusAsync(sz.DocumentId, SzStatus.Withdrawn, actorUserId);
         await _db.SaveChangesAsync();
 
-        await _audit.LogAsync("Sz", sz.Id, "Withdrawn", actorUserId, new { reason = sz.WithdrawReason });
+        await _audit.LogAsync("Sz", sz.Id, "Withdrawn", actorUserId, new
+        {
+            reason = sz.WithdrawReason,
+            onBehalfOfAuthor = byAuthor ? (int?)null : sz.Document.AuthorId,
+        });
+
+        if (!byAuthor)
+        {
+            // Уже после фиксации: недоступная почта не должна откатывать отзыв.
+            try
+            {
+                await _addresseeTasks.NotifyAuthorWithdrawnByOtherAsync(sz, actorUserId, reason.Trim());
+            }
+            catch (Exception)
+            {
+                // Записка отозвана — неотправленное уведомление этого не отменяет.
+            }
+        }
 
         return (await GetAsync(sz.Id))!;
     }

@@ -8767,6 +8767,12 @@ namespace delosfera_server.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("ip_address");
 
+                    b.Property<int>("Method")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("method");
+
                     b.Property<string>("OrganizationInn")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")

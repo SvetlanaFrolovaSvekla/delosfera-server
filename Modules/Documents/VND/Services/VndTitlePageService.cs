@@ -291,26 +291,43 @@ public class VndTitlePageService : IVndTitlePageService
         await LogAsync(vnd, redaction, userId, "убрал(а)", "removed", "алып салды");
     }
 
-    /// <summary>Сформировать/загрузить/убрать титульный лист вручную может главный редактор, тот, у
-    /// кого есть право править реквизиты или редактировать редакции напрямую.</summary>
+    /// <summary>Кто может вручную сформировать/загрузить/убрать титульный лист редакции:
+    /// • главный редактор ВНД (право прямого редактирования редакций или правки маршрута любого
+    ///   согласования) — у любого ВНД и любой редакции;
+    /// • сотрудник с правом «Редактирование реквизитов ВНД» — лист собирается из реквизитов;
+    /// • ответственный за ТЕКУЩИЙ цикл актуализации — только пока ВНД на актуализации/консолидации
+    ///   и только у последней редакции (той, что он сейчас готовит). Прежние редакции и чужие ВНД
+    ///   ему недоступны.
+    /// Широкие права «Создание/Актуализация любых ВНД» сюда намеренно не входят: они есть и у
+    /// рядовых редакторов ВНД, и давали бы доступ к титульным листам чужих документов.
+    /// Единое правило для сервера и для флага CanManageTitlePage в ответе.</summary>
+    public static bool CanManage(ICurrentUserService user, VndDocument vnd, VndRedaction redaction,
+        int latestRedactionNumber)
+    {
+        if (user.HasPermission(PermissionCode.EditLastRevisionDirectly)
+            || user.HasPermission(PermissionCode.EditAnyVndApprovalRoute)
+            || user.HasPermission(PermissionCode.EditVndRequisites))
+            return true;
+
+        return vnd.ActualizationResponsibleUserId == user.UserId
+               && vnd.Status is VndStatus.OnActualization or VndStatus.Consolidation
+               && redaction.Number == latestRedactionNumber;
+    }
+
     private async Task<(VndDocument Vnd, VndRedaction Redaction)> LoadForEditAsync(int vndId, int redactionId)
     {
-        var canManage =
-            _currentUser.HasPermission(PermissionCode.EditLastRevisionDirectly)
-            || _currentUser.HasPermission(PermissionCode.EditVndRequisites)
-            || _currentUser.HasPermission(PermissionCode.CreateVndWithApproval)
-            || _currentUser.HasPermission(PermissionCode.CreateVndWithoutApproval)
-            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithApproval)
-            || _currentUser.HasPermission(PermissionCode.ActualizeAnyVndWithoutApproval);
-        if (!canManage)
-            throw new UnauthorizedAccessException(
-                "Титульный лист может формировать или загружать главный редактор ВНД либо сотрудник с правом " +
-                "«Редактирование реквизитов ВНД»");
-
         var vnd = await _db.VndDocuments.FirstOrDefaultAsync(x => x.Id == vndId)
                   ?? throw new KeyNotFoundException($"ВНД с id={vndId} не найден");
         var redaction = await _db.VndRedactions.FirstOrDefaultAsync(r => r.Id == redactionId && r.VndId == vndId)
                         ?? throw new KeyNotFoundException($"Редакция с id={redactionId} не найдена");
+
+        var latestNumber = await _db.VndRedactions.Where(r => r.VndId == vndId).MaxAsync(r => r.Number);
+        if (!CanManage(_currentUser, vnd, redaction, latestNumber))
+            throw new UnauthorizedAccessException(
+                "Титульный лист может формировать или загружать главный редактор ВНД, сотрудник с правом " +
+                "«Редактирование реквизитов ВНД» или ответственный за текущую актуализацию этого ВНД " +
+                "(только для готовящейся редакции)");
+
         return (vnd, redaction);
     }
 

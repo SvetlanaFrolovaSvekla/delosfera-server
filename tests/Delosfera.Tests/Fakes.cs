@@ -329,6 +329,17 @@ internal sealed class FakeResolutionSignatureService
         return entry;
     }
 
+    /// <summary>Локальная подпись системы «Делосфера» — та же запись, но Method = DelosferaSystem и без ПИН.</summary>
+    public async Task<delosfera_server.Modules.Documents.VND.Models.VndResolutionSignature> BuildSystemSignatureAsync(
+        delosfera_server.Modules.Documents.VND.Services.ResolutionSignatureInput input, CancellationToken ct = default)
+    {
+        var entry = await VerifyForDecisionAsync(input, ct);
+        entry.Method = delosfera_server.Modules.Signing.Models.ResolutionSignatureMethod.DelosferaSystem;
+        entry.PersonIdnp = "";
+        entry.CertIssuerCommonName = delosfera_server.Modules.Documents.VND.Services.ResolutionSignatureService.SystemSealIssuer;
+        return entry;
+    }
+
     public Task<List<delosfera_server.Modules.Documents.VND.DTO.Response.VndResolutionSignatureResponse>> ListAsync(
         int vndId, int currentUserId, CancellationToken ct = default) =>
         throw new NotImplementedException();

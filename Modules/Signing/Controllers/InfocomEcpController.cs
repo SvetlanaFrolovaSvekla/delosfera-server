@@ -89,7 +89,12 @@ public class InfocomEcpController : ControllerBase
             _logger.LogWarning(
                 "ЭЦП {Operation}: user={User} pin={Pin} → отказ провайдера HTTP {Status}, errorCode={ErrorCode}, message={Message} ({Ms} мс)",
                 operation, user, maskedPin, ex.StatusCode, ex.Error.ErrorCode, ex.Error.ErrorMessage, sw.ElapsedMilliseconds);
-            return StatusCode(ex.StatusCode == 0 ? 502 : ex.StatusCode, ex.Error);
+            var status = ex.StatusCode == 0 ? 502 : ex.StatusCode;
+            // Провайдер/ecp-service иногда отвечает ошибкой без текста (пустое тело, HTML от прокси) -
+            // тогда у пользователя оставалось только "Request failed with status code 500".
+            if (string.IsNullOrWhiteSpace(ex.Error.ErrorMessage) || ex.Error.ErrorMessage.TrimStart().StartsWith('<'))
+                ex.Error.ErrorMessage = FriendlyMessage(status);
+            return StatusCode(status, ex.Error);
         }
         catch (HttpRequestException ex)
         {
@@ -98,16 +103,27 @@ public class InfocomEcpController : ControllerBase
             return StatusCode(502, new InfocomErrorBody
             {
                 ErrorCode = 502,
-                ErrorMessage = "Нет связи с delosfera-ecp-service — проверьте, что сервис запущен (InfocomEcpService:BaseUrl в appsettings.json)",
+                // Подробности (адрес сервиса, причина) — в логе выше; пользователю — понятный текст.
+                ErrorMessage = FriendlyMessage(502),
             });
         }
         catch (TaskCanceledException ex)
         {
             _logger.LogWarning(ex, "ЭЦП {Operation}: user={User} pin={Pin} → таймаут delosfera-ecp-service ({Ms} мс)",
                 operation, user, maskedPin, sw.ElapsedMilliseconds);
-            return StatusCode(504, new InfocomErrorBody { ErrorCode = 504, ErrorMessage = "Таймаут delosfera-ecp-service" });
+            return StatusCode(504, new InfocomErrorBody { ErrorCode = 504, ErrorMessage = FriendlyMessage(504) });
         }
     }
+
+    /// <summary>Текст для пользователя, когда у ошибки нет своего осмысленного сообщения.</summary>
+    private static string FriendlyMessage(int status) => status switch
+    {
+        504 or 408 => "Сервис ЭЦП не ответил вовремя. Попробуйте ещё раз.",
+        502 or 503 => "Сервис ЭЦП сейчас недоступен. Подождите минуту и попробуйте снова.",
+        429 => "Слишком много попыток подряд. Подождите минуту и попробуйте снова.",
+        _ => "Сервис ЭЦП ответил ошибкой. Попробуйте ещё раз через минуту; если ошибка повторяется — " +
+             "обратитесь к администратору.",
+    };
 
     /// <summary>Оставляет только последние 4 цифры ПИН — достаточно, чтобы найти запись, но не раскрывает номер.</summary>
     private static string MaskPin(string? pin) =>

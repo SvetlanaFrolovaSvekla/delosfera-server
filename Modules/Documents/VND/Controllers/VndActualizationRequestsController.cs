@@ -32,7 +32,7 @@ public class VndActualizationRequestsController : ControllerBase
         {
             return Ok(await _service.GetPendingRequestsAsync(_currentUser.UserId));
         }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Одобрить или отклонить заявку</summary>
@@ -47,7 +47,7 @@ public class VndActualizationRequestsController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     /// <summary>Отозвать свою заявку — доступно только заявителю, и только пока заявка ещё не
@@ -62,6 +62,6 @@ public class VndActualizationRequestsController : ControllerBase
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
-        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 }

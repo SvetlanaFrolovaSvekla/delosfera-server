@@ -53,6 +53,10 @@ public static class RolePermissionDefaults
             PermissionCode.ViewPowersOfAttorney,
             PermissionCode.ViewAllSz,
             PermissionCode.RegisterSz,
+            // Отозванную записку (забыли вложение, не тот файл) доводят сами:
+            // правят поля и файлы и отправляют снова, не возвращая автору.
+            PermissionCode.EditAnySz,
+            PermissionCode.WithdrawAnySz,
         ]),
 
         // Правление видит реестр записок целиком: до них доходит то, что не решилось
@@ -139,6 +143,10 @@ public static class RolePermissionDefaults
             PermissionCode.ViewAllSz,
             PermissionCode.RegisterSz,
             PermissionCode.SubmitSzToBody,
+            // Застрявшую записку (забыли вложение, автора нет) администратор
+            // отзывает, правит и отправляет снова сам, без перевода статуса вручную.
+            PermissionCode.EditAnySz,
+            PermissionCode.WithdrawAnySz,
             PermissionCode.ViewAllProcurements,
             PermissionCode.ConductProcurement,
             PermissionCode.RecordCommissionDecisions,

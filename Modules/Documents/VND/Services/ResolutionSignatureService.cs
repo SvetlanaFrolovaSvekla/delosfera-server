@@ -10,6 +10,7 @@ using delosfera_server.Data;
 using delosfera_server.Modules.Documents.VND.DTO.Response;
 using delosfera_server.Modules.Documents.VND.Models;
 using delosfera_server.Modules.Files.Services;
+using delosfera_server.Modules.Signing.Models;
 using delosfera_server.Modules.Signing.Models.InfocomEcp;
 using delosfera_server.Modules.Signing.Services;
 using delosfera_server.Modules.Users.Models;
@@ -31,6 +32,12 @@ public static class ResolutionSignatureErrorCodes
     public const string IdentityMismatch = "identity_mismatch";
     public const string ProviderUnavailable = "provider_unavailable";
     public const string StorageIntegrity = "storage_integrity";
+
+    /// <summary>Системная подпись «Делосфера» недоступна: ключ печати не настроен на сервере.</summary>
+    public const string SystemSealUnavailable = "system_seal_unavailable";
+
+    /// <summary>У пользователя нет права подписывать без ЭЦП КР (SignWithoutNationalEcp).</summary>
+    public const string SystemSignNotAllowed = "system_sign_not_allowed";
 }
 
 /// <summary>Отказ в приёме подписи/хэша — контроллер отдаёт StatusCode + { message, code }.</summary>
@@ -87,6 +94,14 @@ public interface IResolutionSignatureService
     /// печатаются штампом «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП». Как и VerifyForDecisionAsync, в контекст не
     /// добавляет — вызывающий код сохраняет запись одним SaveChanges с решением.</summary>
     Task<VndResolutionSignature> BuildTestSignatureAsync(ResolutionSignatureInput input, CancellationToken ct = default);
+
+    /// <summary>Локальная подпись системы «Делосфера» (право SignWithoutNationalEcp) — для
+    /// сотрудников без ЭЦП КР. Хэш резолюции тот же, что подписывался бы ЭЦП (из БД); вместо CMS-подписи
+    /// провайдера — HMAC-печать сервера над хэшем и реквизитами резолюции (<see
+    /// cref="ResolutionSignatureService.SystemSealPayload"/>), ГП «Инфоком» не вызывается. Если клиент
+    /// прислал хэш (Hash), он сверяется с пересчитанным — подписывается ровно то, что видел пользователь.
+    /// Как и VerifyForDecisionAsync, в контекст не добавляет.</summary>
+    Task<VndResolutionSignature> BuildSystemSignatureAsync(ResolutionSignatureInput input, CancellationToken ct = default);
 
     Task<List<VndResolutionSignatureResponse>> ListAsync(int vndId, int currentUserId, CancellationToken ct = default);
 
@@ -161,6 +176,7 @@ public class ResolutionSignatureService : IResolutionSignatureService
     private readonly IFileStorageService _files;
     private readonly IInfocomEcpClient _infocom;
     private readonly ICurrentUserService _currentUser;
+    private readonly ISystemSealService _systemSeal;
     private readonly ILogger<ResolutionSignatureService> _logger;
 
     public ResolutionSignatureService(
@@ -168,12 +184,14 @@ public class ResolutionSignatureService : IResolutionSignatureService
         IFileStorageService files,
         IInfocomEcpClient infocom,
         ICurrentUserService currentUser,
+        ISystemSealService systemSeal,
         ILogger<ResolutionSignatureService> logger)
     {
         _db = db;
         _files = files;
         _infocom = infocom;
         _currentUser = currentUser;
+        _systemSeal = systemSeal;
         _logger = logger;
     }
 
@@ -449,6 +467,133 @@ public class ResolutionSignatureService : IResolutionSignatureService
     }
 
     // ----------------------------------------------------------------------------------------
+    // Локальная подпись системы «Делосфера» (право SignWithoutNationalEcp)
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>Издатель «сертификата» в записях системной подписи — так он печатается в штампе.</summary>
+    public const string SystemSealIssuer = "Система «Делосфера»";
+
+    /// <summary>Версия канонической строки печати (<see cref="SystemSealPayload"/>).</summary>
+    public const string SystemSealSchema = "delosfera-system-seal-v1";
+
+    /// <summary>Запись журнала — локальная подпись системы «Делосфера», а не ЭЦП ГП «Инфоком».</summary>
+    public static bool IsSystemSignature(VndResolutionSignature s) =>
+        s.Method == ResolutionSignatureMethod.DelosferaSystem;
+
+    /// <summary>Каноническая строка, над которой ставится HMAC-печать системы: хэш резолюции (решение +
+    /// комментарий + текст редакции + код ВНД) и всё, что определяет, КТО, ГДЕ и КОГДА её вынес. Правка
+    /// любого из этих полей в БД в обход приложения ломает печать (см. ReverifyAsync).</summary>
+    public static string SystemSealPayload(VndResolutionSignature s) => string.Join('\n',
+        SystemSealSchema,
+        "hash=" + s.Hash.ToUpperInvariant(),
+        "user=" + s.UserId.ToString(CultureInfo.InvariantCulture),
+        "vnd=" + s.VndId.ToString(CultureInfo.InvariantCulture),
+        "process=" + s.ApprovalProcessId.ToString(CultureInfo.InvariantCulture),
+        "redaction=" + s.RedactionId.ToString(CultureInfo.InvariantCulture),
+        "stage=" + s.StageId.ToString(CultureInfo.InvariantCulture),
+        "phase=" + ((int)s.Phase).ToString(CultureInfo.InvariantCulture),
+        "round=" + s.RoundNumber.ToString(CultureInfo.InvariantCulture),
+        "decision=" + ((int)s.Decision).ToString(CultureInfo.InvariantCulture),
+        "signedAt=" + new DateTimeOffset(DateTime.SpecifyKind(s.SignedAt, DateTimeKind.Utc))
+            .ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));
+
+    public async Task<VndResolutionSignature> BuildSystemSignatureAsync(
+        ResolutionSignatureInput input, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var process = input.Process;
+        var redaction = process.Redaction
+                        ?? throw new InvalidOperationException("Процесс согласования загружен без редакции");
+        var vnd = process.Vnd
+                  ?? throw new InvalidOperationException("Процесс согласования загружен без ВНД");
+
+        // Право проверяет и контроллер; здесь — второй рубеж: печать ставится только за себя и
+        // только обладателю права.
+        if (input.UserId != _currentUser.UserId || !_currentUser.HasPermission(PermissionCode.SignWithoutNationalEcp))
+            throw new ResolutionSignatureException(StatusCodes.Status403Forbidden,
+                ResolutionSignatureErrorCodes.SystemSignNotAllowed,
+                "У вас нет права подписывать резолюции без ЭЦП КР — подпишите резолюцию ЭЦП");
+
+        if (!_systemSeal.IsConfigured)
+            throw new ResolutionSignatureException(StatusCodes.Status503ServiceUnavailable,
+                ResolutionSignatureErrorCodes.SystemSealUnavailable,
+                "Системная подпись «Делосфера» не настроена на сервере — обратитесь к администратору");
+
+        var phase = PhaseForStatus(process.Status);
+        var roundNumber = await CurrentRoundNumberAsync(process.Id, phase, ct);
+
+        EnsureSignableDecision(input.Decision);
+        var components = await BuildComponentsAsync(redaction, vnd.Code, input.Comment, input.Decision, ct);
+        var hash = ResolutionSignatureHasher.Compute(components);
+
+        // Клиент показывал хэш в модалке подтверждения — подписываем только то, что пользователь видел.
+        if (!string.IsNullOrWhiteSpace(input.Hash) && !ResolutionSignatureHasher.HashesEqual(hash, input.Hash))
+            throw new ResolutionSignatureException(StatusCodes.Status409Conflict,
+                ResolutionSignatureErrorCodes.DocumentChanged,
+                "Документ или комментарий изменились после подтверждения — подтвердите резолюцию заново");
+
+        var user = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == input.UserId)
+            .Select(u => new { u.FullName })
+            .FirstOrDefaultAsync(ct);
+
+        // Миллисекунды: время входит в печать и должно пережить round-trip через timestamptz.
+        var now = DateTime.UtcNow;
+        now = new DateTime(now.Ticks - now.Ticks % TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
+
+        var entry = new VndResolutionSignature
+        {
+            Method = ResolutionSignatureMethod.DelosferaSystem,
+
+            VndId = vnd.Id,
+            ApprovalProcessId = process.Id,
+            RedactionId = redaction.Id,
+            StageId = input.Stage.Id,
+            Phase = phase,
+            RoundNumber = roundNumber,
+            Decision = input.Decision,
+            UserId = input.UserId,
+
+            // ПИН у сотрудника без ЭЦП КР нет.
+            PersonIdnp = "",
+            PersonFio = Truncate(user?.FullName, 300),
+
+            CertKeyIdentifier = _systemSeal.KeyId,
+            CertCommonName = Truncate(user?.FullName, 300),
+            CertIssuerCommonName = SystemSealIssuer,
+
+            HashSchemaVersion = ResolutionSignatureHasher.VersionOf(components),
+            Hash = hash,
+            CommentText = components.Comment,
+            CommentHash = ResolutionSignatureHasher.Sha256Hex(components.Comment),
+            ContentDigest = components.Content,
+            VndCode = Truncate(components.Code, 100)!,
+            SignatureBase64 = "",
+            SignatureSha256 = "",
+
+            SignedAt = now,
+            VerifiedAt = now,
+            Verified = true,
+            VerificationError = null,
+
+            IpAddress = Truncate(input.IpAddress, 64),
+            UserAgent = Truncate(input.UserAgent, 512),
+        };
+
+        var seal = _systemSeal.Seal(SystemSealPayload(entry));
+        entry.SignatureBase64 = seal;
+        // Уникальный индекс по SHA-256 подписи: печать включает время до миллисекунды и этап, поэтому
+        // совпадение означает повторную отправку той же резолюции.
+        entry.SignatureSha256 = ResolutionSignatureHasher.Sha256Hex(Convert.FromBase64String(seal));
+
+        _logger.LogInformation(
+            "ВНД {VndId}: решение {Decision} пользователя {UserId} подписано локальной подписью системы «Делосфера» (без ЭЦП КР)",
+            vnd.Id, input.Decision, input.UserId);
+
+        return entry;
+    }
+
+    // ----------------------------------------------------------------------------------------
     // Журнал и повторная проверка
     // ----------------------------------------------------------------------------------------
 
@@ -484,6 +629,7 @@ public class ResolutionSignatureService : IResolutionSignatureService
                 VerifiedAt = s.VerifiedAt,
                 Verified = s.Verified,
                 IsTest = !s.Verified && s.VerificationError == TestVerificationNote,
+                IsSystem = s.Method == ResolutionSignatureMethod.DelosferaSystem,
             })
             .ToListAsync(ct);
     }
@@ -549,11 +695,18 @@ public class ResolutionSignatureService : IResolutionSignatureService
             result.ChangedComponents.Add("code");
 
         // Сама подпись — у провайдера, по сохранённому хэшу (он и подписывался). Тестовую имитацию
-        // провайдеру не отправляем — там нечего проверять.
+        // провайдеру не отправляем — там нечего проверять. Системную печать «Делосфера» проверяет сам
+        // сервер своим ключом (провайдер о ней не знает).
         var isTest = IsTestSignature(entry);
+        var isSystem = IsSystemSignature(entry);
         if (isTest)
         {
             result.SignatureVerified = false;
+            result.SignerPersonFio = entry.PersonFio;
+        }
+        else if (isSystem)
+        {
+            result.SignatureVerified = _systemSeal.Verify(SystemSealPayload(entry), entry.SignatureBase64);
             result.SignerPersonFio = entry.PersonFio;
         }
         else
@@ -584,6 +737,36 @@ public class ResolutionSignatureService : IResolutionSignatureService
                                      _ => c,
                                  }))
                                  : "; документ и резолюция с момента «подписания» не менялись");
+        }
+        else if (isSystem)
+        {
+            const string prefix = "Подпись системы «Делосфера» (без ЭЦП КР)";
+            if (result.SignatureVerified == false)
+            {
+                result.Status = "signature_invalid";
+                result.Message = prefix + ": печать системы не сходится с записью журнала — запись изменена в обход системы";
+            }
+            else if (result.ChangedComponents.Count > 0)
+            {
+                result.Status = "document_changed";
+                result.Message = prefix + " валидна, но документ изменён после подписания: " + string.Join(", ",
+                    result.ChangedComponents.Select(c => c switch
+                    {
+                        "comment" => "текст резолюции",
+                        "content" => "содержимое редакции (файлы документа)",
+                        "code" => "код ВНД",
+                        _ => c,
+                    }));
+            }
+            else if (result.SignatureVerified is null)
+            {
+                result.Status = "provider_unavailable";
+                result.Message = prefix + ": ключ печати не настроен на сервере — подпись не перепроверена; документ не менялся";
+            }
+            else
+            {
+                result.Message = prefix + " валидна, документ и резолюция не менялись после подписания";
+            }
         }
         else if (result.SignatureVerified == false)
         {
@@ -633,6 +816,12 @@ public class ResolutionSignatureService : IResolutionSignatureService
 
         if (entry.HashSchemaVersion is not (ResolutionSignatureHasher.SchemaVersion or ResolutionSignatureHasher.SchemaVersionV2))
             throw new InvalidOperationException($"Неизвестная версия схемы хэша \"{entry.HashSchemaVersion}\"");
+
+        // Системная печать — не CMS: внешними средствами проверки ЭЦП её не проверить.
+        if (IsSystemSignature(entry))
+            throw new InvalidOperationException(
+                "Резолюция подписана локальной подписью системы «Делосфера» (без ЭЦП КР) — файлов CMS-подписи для " +
+                "внешней проверки нет. Проверить печать можно кнопкой «Проверить» в журнале подписей.");
 
         // Подписанные данные восстанавливаются из компонентов журнала — тем же способом, что при
         // повторной проверке (ReverifyAsync). Если они не дают сохранённый хэш, запись правили в обход
@@ -834,15 +1023,18 @@ public class ResolutionSignatureService : IResolutionSignatureService
     private async Task EnsurePinBindingAsync(int userId, string signerPin, CancellationToken ct)
     {
         // Тестовые имитации (Verified=false) к привязке ПИН отношения не имеют.
+        // Системные подписи «Делосфера» (ПИН пуст) к привязке тоже не относятся.
         var boundToOtherPin = await _db.VndResolutionSignatures
-            .AnyAsync(s => s.Verified && s.UserId == userId && s.PersonIdnp != signerPin, ct);
+            .AnyAsync(s => s.Verified && s.Method == ResolutionSignatureMethod.InfocomEcp
+                           && s.UserId == userId && s.PersonIdnp != signerPin, ct);
         if (boundToOtherPin)
             throw new ResolutionSignatureException(StatusCodes.Status403Forbidden,
                 ResolutionSignatureErrorCodes.IdentityMismatch,
                 "Ваша учётная запись уже привязана к ЭЦП другого лица — подписывать можно только своей ЭЦП");
 
         var usedByOtherUser = await _db.VndResolutionSignatures
-            .AnyAsync(s => s.Verified && s.PersonIdnp == signerPin && s.UserId != userId, ct);
+            .AnyAsync(s => s.Verified && s.Method == ResolutionSignatureMethod.InfocomEcp
+                           && s.PersonIdnp == signerPin && s.UserId != userId, ct);
         if (usedByOtherUser)
             throw new ResolutionSignatureException(StatusCodes.Status403Forbidden,
                 ResolutionSignatureErrorCodes.IdentityMismatch,

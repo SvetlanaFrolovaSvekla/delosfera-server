@@ -5,6 +5,7 @@ using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.Models;
 using delosfera_server.Modules.Files.Services;
 using delosfera_server.Modules.Signing.Services;
+using delosfera_server.Modules.Sz.Models;
 using delosfera_server.Modules.Users.Models;
 
 namespace delosfera_server.Modules.Documents.Services;
@@ -83,21 +84,37 @@ public class DocumentAttachmentService : IDocumentAttachmentService
     /// Вложения карточки правит (добавляет, заменяет, удаляет) её автор. Замена и
     /// удаление аннулируют подписи под документом (SIG-01), а добавление меняет
     /// состав карточки — чужой рукой этого делать нельзя. Вмешаться в чужой документ
-    /// может только администратор системы (<see cref="PermissionCode.ManageSystemSettings"/>).
+    /// может только администратор системы (<see cref="PermissionCode.ManageSystemSettings"/>),
+    /// а в чужую служебную записку — ещё и обладатель <see cref="PermissionCode.EditAnySz"/>
+    /// (Сектор делопроизводства).
+    ///
+    /// У служебной записки вложения входят в отпечаток содержимого, под которым согласующие
+    /// ставят ЭЦП (SzResolutionSignatureHasher.BuildContentDigest). Поэтому менять их можно
+    /// только пока записка у автора — черновик, доработка, отозванная, — и не может никто,
+    /// включая администратора: иначе подписи прошедших согласующих оказались бы поставлены
+    /// под другой состав записки. Чтобы поправить файл на согласовании, записку отзывают.
     /// </summary>
-    private void EnsureAuthorOrPrivileged(int documentAuthorId, int userId, string message)
+    private async Task EnsureCanChangeAttachmentsAsync(int documentId, int userId, string message)
     {
-        if (documentAuthorId == userId) return;
-        if (_currentUser.HasPermission(PermissionCode.ManageSystemSettings)) return;
-        throw new UnauthorizedAccessException(message);
-    }
-
-    private async Task<int> DocumentAuthorIdAsync(int documentId) =>
-        await _db.Documents
+        var document = await _db.Documents.AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Select(d => (int?)d.AuthorId)
+            .Select(d => new {d.AuthorId, d.StatusCode, d.Type})
             .FirstOrDefaultAsync()
-        ?? throw new KeyNotFoundException("Документ не найден");
+            ?? throw new KeyNotFoundException("Документ не найден");
+
+        var isSz = document.Type == DocumentType.Sz;
+
+        var allowed = document.AuthorId == userId
+                      || _currentUser.HasPermission(PermissionCode.ManageSystemSettings)
+                      || (isSz && _currentUser.HasPermission(PermissionCode.EditAnySz));
+        if (!allowed)
+            throw new UnauthorizedAccessException(message);
+
+        if (isSz && document.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision or SzStatus.Withdrawn))
+            throw new InvalidOperationException(
+                "Вложения служебной записки меняются только в черновике, на доработке или после отзыва: " +
+                "на согласовании и дальше они входят в то, под чем согласующие поставили подпись");
+    }
 
     public async Task<List<AttachmentDto>> ListAsync(int documentId)
     {
@@ -137,7 +154,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
         var document = await _db.Documents.FirstOrDefaultAsync(d => d.Id == documentId)
             ?? throw new KeyNotFoundException("Документ не найден");
 
-        EnsureAuthorOrPrivileged(document.AuthorId, userId,
+        await EnsureCanChangeAttachmentsAsync(document.Id, userId,
             "Прикреплять файлы к документу может только его автор");
 
         // У служебной записки число вложений ограничено. Предел проверяем здесь, а не только
@@ -190,7 +207,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
 
-        EnsureAuthorOrPrivileged(await DocumentAuthorIdAsync(attachment.DocumentId), userId,
+        await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
             "Заменить файл вложения может только автор документа");
 
         RequireFile(file);
@@ -233,7 +250,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
 
-        EnsureAuthorOrPrivileged(await DocumentAuthorIdAsync(attachment.DocumentId), userId,
+        await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
             "Удалить вложение может только автор документа");
 
         // Подписи не удаляем вместе с вложением, а аннулируем: факт подписания —

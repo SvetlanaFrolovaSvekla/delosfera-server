@@ -44,6 +44,10 @@ public class VndResolutionSignatureResponse
 
     /// <summary>Тестовая имитация ЭЦП (EcpSigning:AllowVndTestEcp), а не настоящая подпись.</summary>
     public bool IsTest { get; set; }
+
+    /// <summary>Локальная подпись системы «Делосфера» (право SignWithoutNationalEcp — сотрудник без
+    /// ЭЦП КР), а не ЭЦП ГП «Инфоком» / Түндүк.</summary>
+    public bool IsSystem { get; set; }
 }
 
 /// <summary>Результат повторной проверки подписи (POST /api/vnd/{vndId}/signatures/{id}/verify).</summary>

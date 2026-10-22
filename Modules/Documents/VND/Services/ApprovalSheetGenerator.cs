@@ -20,7 +20,10 @@ public enum ApprovalSheetMode
 
 /// <summary>Данные штампа ЭЦП для колонки "Подпись" (из журнала VndResolutionSignature).
 /// Даты — уже в часовом поясе банка. <paramref name="IsTest"/> — тестовая имитация ЭЦП
-/// (EcpSigning:AllowVndTestEcp): штамп печатается как «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП».</summary>
+/// (EcpSigning:AllowVndTestEcp): штамп печатается как «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП».
+/// <paramref name="IsSystem"/> — локальная подпись системы «Делосфера» (сотрудник без ЭЦП КР, право
+/// SignWithoutNationalEcp): отдельный штамп «ПОДПИСАНО СИСТЕМОЙ «ДЕЛОСФЕРА»» с пометкой, что это не ЭЦП
+/// КР; <paramref name="SealKeyId"/> — идентификатор ключа печати.</summary>
 public sealed record ApprovalSheetStamp(
     string? SignerName,
     string? OrganizationName,
@@ -29,7 +32,9 @@ public sealed record ApprovalSheetStamp(
     DateTime SignedAtLocal,
     string DocumentHash,
     string SignatureSha256,
-    bool IsTest = false);
+    bool IsTest = false,
+    bool IsSystem = false,
+    string? SealKeyId = null);
 
 /// <summary>Строка Листа согласования с фактическим решением согласующего.</summary>
 /// <param name="Decision">"Согласовано", "Согласовано с замечаниями", "Отклонено", "Ожидает решения"…</param>
@@ -74,6 +79,10 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
     private const string MutedColor = "7A869A";
     // Штамп тестовой имитации ЭЦП — тёмно-оранжевый, чтобы его нельзя было спутать с настоящим.
     private const string TestColor = "B45309";
+    // Штамп локальной подписи системы «Делосфера» (без ЭЦП КР) — тёмно-бирюзовый: не синий, как у ЭЦП
+    // ГП «Инфоком», и не оранжевый, как у тестовой имитации.
+    private const string SystemColor = "0F5E5A";
+    private const string SystemFill = "EEF8F6";
 
     // Ширины колонок таблицы (№, должность, ФИО, результат, дата, подпись). Обычный режим — как в
     // шаблоне; с ЭЦП колонка "Подпись" шире за счёт должности/ФИО, чтобы штамп помещался.
@@ -109,7 +118,8 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
                 InsertNote(body, titleParagraph, note);
             var table = FillTable(body, rows, mode);
             if (mode == ApprovalSheetMode.Signed && table is not null)
-                InsertSignedFooter(table, rows.Any(r => r.Stamp?.IsTest == true));
+                InsertSignedFooter(table, rows.Any(r => r.Stamp?.IsTest == true),
+                    rows.Any(r => r.Stamp?.IsSystem == true));
 
             doc.MainDocumentPart.Document.Save();
         }
@@ -284,53 +294,73 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
         foreach (var element in cell.Elements().Where(e => e is not TableCellProperties).ToList())
             element.Remove();
 
+        var frame = stamp.IsSystem ? SystemColor : StampColor;
+        var fill = stamp.IsSystem ? SystemFill : StampFill;
+
         var borders = new TableBorders(
-            new TopBorder { Val = BorderValues.Double, Size = 6, Color = StampColor, Space = 0 },
-            new LeftBorder { Val = BorderValues.Double, Size = 6, Color = StampColor, Space = 0 },
-            new BottomBorder { Val = BorderValues.Double, Size = 6, Color = StampColor, Space = 0 },
-            new RightBorder { Val = BorderValues.Double, Size = 6, Color = StampColor, Space = 0 },
+            new TopBorder { Val = BorderValues.Double, Size = 6, Color = frame, Space = 0 },
+            new LeftBorder { Val = BorderValues.Double, Size = 6, Color = frame, Space = 0 },
+            new BottomBorder { Val = BorderValues.Double, Size = 6, Color = frame, Space = 0 },
+            new RightBorder { Val = BorderValues.Double, Size = 6, Color = frame, Space = 0 },
             new InsideHorizontalBorder { Val = BorderValues.None },
             new InsideVerticalBorder { Val = BorderValues.None });
 
         var inner = new TableCell(new TableCellProperties(
             new TableCellWidth { Width = "5000", Type = TableWidthUnitValues.Pct },
-            new Shading { Val = ShadingPatternValues.Clear, Color = "auto", Fill = StampFill },
+            new Shading { Val = ShadingPatternValues.Clear, Color = "auto", Fill = fill },
             new TableCellMargin(
                 new TopMargin { Width = "60", Type = TableWidthUnitValues.Dxa },
                 new LeftMargin { Width = "90", Type = TableWidthUnitValues.Dxa },
                 new BottomMargin { Width = "60", Type = TableWidthUnitValues.Dxa },
                 new RightMargin { Width = "90", Type = TableWidthUnitValues.Dxa })));
 
-        void Add(string text, bool bold = false, int size = 13, string color = StampColor, string? font = null,
+        void Add(string text, bool bold = false, int size = 13, string? color = null, string? font = null,
             JustificationValues? align = null)
         {
             var props = new ParagraphProperties(
                 new SpacingBetweenLines { Before = "0", After = "0", Line = "228", LineRule = LineSpacingRuleValues.Auto });
             if (align is { } a) props.Append(new Justification { Val = a });
-            inner.Append(new Paragraph(props, MakeRun(new Line(text, Bold: bold, Size: size, Color: color, Font: font))));
+            inner.Append(new Paragraph(props, MakeRun(new Line(text, Bold: bold, Size: size, Color: color ?? frame, Font: font))));
         }
 
-        if (stamp.IsTest)
+        if (stamp.IsSystem)
         {
-            Add("ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП", bold: true, size: 15, color: TestColor, align: JustificationValues.Center);
-            Add("не является подписью · у ГП «Инфоком» не ставилась и не проверялась", size: 12, color: TestColor,
+            // Локальная подпись системы: ЭЦП КР нет — штамп не должен выглядеть как подпись ГП «Инфоком».
+            Add("ПОДПИСАНО СИСТЕМОЙ «ДЕЛОСФЕРА»", bold: true, size: 15, align: JustificationValues.Center);
+            Add("локальная подпись системы · без ЭЦП КР", size: 12, color: MutedColor,
                 align: JustificationValues.Center);
+            if (!string.IsNullOrWhiteSpace(stamp.SignerName)) Add($"Подписант: {stamp.SignerName}", bold: true);
+            Add($"Подписано: {stamp.SignedAtLocal.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)}");
+            Add("Хэш документа (SHA-256):", size: 12, color: MutedColor);
+            foreach (var chunk in Chunk(stamp.DocumentHash, 32))
+                Add(chunk, size: 12, font: "Consolas");
+            // Идентификатор ключа печати (stamp.SealKeyId) на штамп не выводится — он есть в журнале подписей.
+            Add($"Печать системы: {Shorten(stamp.SignatureSha256)}", size: 12, color: MutedColor, font: "Consolas");
         }
         else
         {
-            Add("ПОДПИСАНО С ПОМОЩЬЮ ЭЦП", bold: true, size: 15, align: JustificationValues.Center);
-            Add("облачная ЭЦП ГП «Инфоком» · подпись проверена", size: 12, color: MutedColor,
-                align: JustificationValues.Center);
+            if (stamp.IsTest)
+            {
+                Add("ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП", bold: true, size: 15, color: TestColor, align: JustificationValues.Center);
+                Add("не является подписью · у ГП «Инфоком» не ставилась и не проверялась", size: 12, color: TestColor,
+                    align: JustificationValues.Center);
+            }
+            else
+            {
+                Add("ПОДПИСАНО С ПОМОЩЬЮ ЭЦП", bold: true, size: 15, align: JustificationValues.Center);
+                Add("облачная ЭЦП ГП «Инфоком» · подпись проверена", size: 12, color: MutedColor,
+                    align: JustificationValues.Center);
+            }
+            if (!string.IsNullOrWhiteSpace(stamp.SignerName)) Add($"Владелец: {stamp.SignerName}", bold: true);
+            if (!string.IsNullOrWhiteSpace(stamp.OrganizationName)) Add($"Организация: {stamp.OrganizationName}");
+            if (FormatCertDate(stamp.CertValidNotAfter) is { } certUntil) Add($"Сертификат действителен до: {certUntil}");
+            if (!string.IsNullOrWhiteSpace(stamp.IssuerName)) Add($"Издатель: {stamp.IssuerName}");
+            Add($"Подписано: {stamp.SignedAtLocal.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)}");
+            Add("Хэш документа (SHA-256):", size: 12, color: MutedColor);
+            foreach (var chunk in Chunk(stamp.DocumentHash, 32))
+                Add(chunk, size: 12, font: "Consolas");
+            Add($"Отпечаток подписи: {Shorten(stamp.SignatureSha256)}", size: 12, color: MutedColor, font: "Consolas");
         }
-        if (!string.IsNullOrWhiteSpace(stamp.SignerName)) Add($"Владелец: {stamp.SignerName}", bold: true);
-        if (!string.IsNullOrWhiteSpace(stamp.OrganizationName)) Add($"Организация: {stamp.OrganizationName}");
-        if (FormatCertDate(stamp.CertValidNotAfter) is { } certUntil) Add($"Сертификат действителен до: {certUntil}");
-        if (!string.IsNullOrWhiteSpace(stamp.IssuerName)) Add($"Издатель: {stamp.IssuerName}");
-        Add($"Подписано: {stamp.SignedAtLocal.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)}");
-        Add("Хэш документа (SHA-256):", size: 12, color: MutedColor);
-        foreach (var chunk in Chunk(stamp.DocumentHash, 32))
-            Add(chunk, size: 12, font: "Consolas");
-        Add($"Отпечаток подписи: {Shorten(stamp.SignatureSha256)}", size: 12, color: MutedColor, font: "Consolas");
 
         var stampTable = new Table(
             new TableProperties(
@@ -348,8 +378,23 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
     }
 
     /// <summary>Пояснение под таблицей в режиме с подписями.</summary>
-    private static void InsertSignedFooter(Table table, bool hasTestStamps = false)
+    private static void InsertSignedFooter(Table table, bool hasTestStamps = false, bool hasSystemStamps = false)
     {
+        if (hasSystemStamps)
+        {
+            // Абзацы вставляются сразу после таблицы, поэтому итоговый порядок обратный вставке:
+            // общее пояснение → (если есть) предупреждение о тестовых → про системную подпись.
+            table.InsertAfterSelf(new Paragraph(
+                new ParagraphProperties(new SpacingBetweenLines { Before = "120", After = "0" }),
+                MakeRun(new Line(
+                    "Решения со штампом «ПОДПИСАНО СИСТЕМОЙ «ДЕЛОСФЕРА»» вынесены сотрудниками, у которых нет ЭЦП " +
+                    "Кыргызской Республики (по праву «Подпись без ЭЦП КР»). Они подписаны не через Түндүк / ГП «Инфоком», " +
+                    "а локальной подписью (печатью) системы «Делосфера»: система удостоверяет, что резолюцию с указанным " +
+                    "хэшем вынес этот авторизованный пользователь в указанное время. Проверить печать можно там же — " +
+                    "«Журнал подписей ЭЦП» → «Проверить».",
+                    Size: 16, Color: SystemColor, Italic: true))));
+        }
+
         if (hasTestStamps)
         {
             // Предупреждение о тестовых «подписях» — самым последним абзацем (вставляется сразу после

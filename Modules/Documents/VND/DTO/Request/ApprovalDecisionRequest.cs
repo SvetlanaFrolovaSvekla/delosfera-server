@@ -62,6 +62,14 @@ public class ApprovalDecisionRequest
     /// и сверка версий текста работают с ней так же, как с настоящей.</summary>
     public bool TestEcp { get; set; }
 
+    /// <summary>Решение с ЛОКАЛЬНОЙ ПОДПИСЬЮ СИСТЕМЫ «Делосфера» — для сотрудников без ЭЦП КР
+    /// (не граждане КР). Разрешено только обладателю права SignWithoutNationalEcp (иначе 403,
+    /// проверяют VndApprovalController и ResolutionSignatureService). ПИН/код/подпись ГП «Инфоком» не
+    /// нужны: backend сам считает хэш резолюции и ставит HMAC-печать системы; в журнал
+    /// VndResolutionSignature пишется запись с Method = DelosferaSystem. EcpHash (если прислан) —
+    /// хэш, показанный пользователю в модалке подтверждения: сверяется с пересчитанным.</summary>
+    public bool SystemSign { get; set; }
+
     /// <summary>IP клиента — заполняет контроллер из соединения, из формы НЕ биндится.</summary>
     [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever]
     public string? RequestIpAddress { get; set; }
