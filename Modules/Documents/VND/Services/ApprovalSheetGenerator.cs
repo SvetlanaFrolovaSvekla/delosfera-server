@@ -391,7 +391,7 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
                     "Кыргызской Республики (по праву «Подпись без ЭЦП КР»). Они подписаны " +
                     "локальной подписью системы «Делосфера». Проверить подпись можно на вкладке " +
                     "«Журнал подписей ЭЦП».",
-                    Size: 16, Color: SystemColor, Italic: true))));
+                    Size: 16, Color: MutedColor, Italic: true))));
         }
 
         if (hasTestStamps)
@@ -411,7 +411,7 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
             MakeRun(new Line(
                 "Подписи ЭЦП поставлены согласующими через облачную ЭЦП ГП «Инфоком» и проверены системой «Делосфера» " +
                 "у провайдера при сохранении резолюций. Хэш документа — SHA-256 подписанного содержимого: решения, " +
-                "текста резолюции, файлов редакции и кода ВНД. Повторно проверить подпись можно на вкладке " +
+                "текста резолюции, файлов редакции и кода ВНД. Проверить подпись можно на вкладке " +
                 "«Журнал подписей ЭЦП».",
                 Size: 16, Color: MutedColor, Italic: true)));
         table.InsertAfterSelf(paragraph);
