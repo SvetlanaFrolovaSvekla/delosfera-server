@@ -403,7 +403,7 @@ public class ApprovalSheetGenerator : IApprovalSheetGenerator
                 MakeRun(new Line(
                     "ВНИМАНИЕ: решения со штампом «ТЕСТОВАЯ ИМИТАЦИЯ ЭЦП» приняты в тестовом режиме системы — " +
                     "электронной подписью они не подписаны и юридической силы не имеют.",
-                    Bold: true, Size: 16, Color: TestColor))));
+                    Italic: true, Size: 16, Color: MutedColor))));
         }
 
         var paragraph = new Paragraph(
