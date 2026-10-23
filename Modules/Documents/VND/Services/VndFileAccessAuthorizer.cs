@@ -50,7 +50,21 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
                         || s.DisagreementMatrixFileId == fileId)
             .Select(s => s.VndRedaction!.VndId);
 
-        var ownerIds = await redactionVndIds.Union(snapshotVndIds).ToListAsync(ct);
+        // Вложения к комментарию инициатора о внесённых исправлениях и к резолюциям согласующих -
+        // тоже файлы конкретного ВНД, секретность распространяется и на них.
+        var repeatCommentVndIds = _db.Set<VndRepeatCommentAttachment>()
+            .Where(a => a.FileAttachmentId == fileId)
+            .Select(a => a.VndApprovalProcess!.VndId);
+
+        var stageAttachmentVndIds = _db.Set<VndApprovalStageAttachment>()
+            .Where(a => a.FileAttachmentId == fileId)
+            .Select(a => a.VndApprovalStage!.ApprovalProcess!.VndId);
+
+        var ownerIds = await redactionVndIds
+            .Union(snapshotVndIds)
+            .Union(repeatCommentVndIds)
+            .Union(stageAttachmentVndIds)
+            .ToListAsync(ct);
         if (ownerIds.Count == 0) return false;
 
         return (await VndSecrecy.GetDeniedIdsAsync(_db, _currentUser, ownerIds, ct)).Count > 0;
@@ -100,12 +114,30 @@ public class VndFileAccessAuthorizer : IFileAccessAuthorizer
         // им нужно видеть, что именно приложили друг другу. Как только редакция становится
         // согласованной, вложения физически удаляются (см. VndApprovalService.CleanupStageAttachmentsAsync),
         // так что этот доступ актуален лишь на время самого согласования.
+        // Вложения хранятся бессрочно как часть истории согласования (см. VndApprovalStageAttachment),
+        // поэтому они видны и всем, кому виден сам ВНД - историю согласования открывают не только
+        // участники маршрута.
         var canAccessApprovalAttachment = await _db.Set<VndApprovalStageAttachment>()
             .Where(a => a.FileAttachmentId == fileId)
             .AnyAsync(a => a.VndApprovalStage!.ApprovalProcess!.InitiatorUserId == userId
                            || a.VndApprovalStage.ApprovalProcess.Stages.Any(s => s.ApproverUserId == userId)
+                           || a.VndApprovalStage.ApprovalProcess.Vnd!.Status != VndStatus.Draft
+                           || a.VndApprovalStage.ApprovalProcess.Vnd.CreatedByUserId == userId
                            || canViewOtherDrafts, ct);
         if (canAccessApprovalAttachment) return true;
+
+        // Вложения к комментарию инициатора о внесённых исправлениях (VndRepeatCommentAttachment,
+        // окно "См. комментарий полностью" в ходе согласования). Раньше сюда не входили вовсе -
+        // файл мог открыть только тот, кто его загрузил (инициатор), у согласующих был 403.
+        // Доступ - инициатору, всем согласующим процесса и всем, кому виден сам ВНД.
+        var canAccessRepeatCommentAttachment = await _db.Set<VndRepeatCommentAttachment>()
+            .Where(a => a.FileAttachmentId == fileId)
+            .AnyAsync(a => a.VndApprovalProcess!.InitiatorUserId == userId
+                           || a.VndApprovalProcess.Stages.Any(s => s.ApproverUserId == userId)
+                           || a.VndApprovalProcess.Vnd!.Status != VndStatus.Draft
+                           || a.VndApprovalProcess.Vnd.CreatedByUserId == userId
+                           || canViewOtherDrafts, ct);
+        if (canAccessRepeatCommentAttachment) return true;
 
         // Снимки файлов редакции по кругам согласования (VndRedactionRevisionSnapshot) -
         // в отличие от вложений к резолюциям выше, остаются доступны БЕССРОЧНО, в т.ч. после

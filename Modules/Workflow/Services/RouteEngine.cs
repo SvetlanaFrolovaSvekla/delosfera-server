@@ -694,6 +694,162 @@ public class RouteEngine : IRouteEngine
         await _notifier.RouteFinishedAsync(inst.Id, RouteInstanceStatus.Interrupted, null);
     }
 
+    public async Task<RouteInstance> RestartAsync(int routeInstanceId, int actorUserId)
+    {
+        var old = await InstanceQuery().FirstOrDefaultAsync(i => i.Id == routeInstanceId)
+            ?? throw new KeyNotFoundException($"Маршрут id={routeInstanceId} не найден");
+
+        if (old.Status is not (RouteInstanceStatus.Running or RouteInstanceStatus.OnRevision))
+            throw new InvalidOperationException("Перезапустить можно только идущий маршрут");
+
+        // Копируем этапы и действующих участников. Снятые с маршрута (Cancelled) в новый круг
+        // не переходят; исключение — кворумные этапы, где Cancelled означает «не понадобился».
+        var steps = new List<RouteStep>();
+        var order = 0;
+        foreach (var s in old.Steps.OrderBy(s => s.Order))
+        {
+            var participants = s.Participants
+                .Where(p => p.State != ParticipantState.Cancelled || s.Quorum is > 0)
+                .OrderBy(p => p.Id)
+                .Select(p => new RouteParticipant
+                {
+                    UserId = p.UserId, UnitId = p.UnitId, RoleRef = p.RoleRef,
+                    Required = p.Required, State = ParticipantState.Pending,
+                })
+                .ToList();
+            if (participants.Count == 0) continue;
+
+            steps.Add(new RouteStep
+            {
+                Order = ++order,
+                Mode = s.Mode,
+                Kind = s.Kind,
+                IsFinalMethodology = s.IsFinalMethodology,
+                TimeNormHours = s.TimeNormHours,
+                Quorum = s.Quorum,
+                RequiredSignatureLevel = s.RequiredSignatureLevel,
+                Participants = participants,
+            });
+        }
+
+        if (steps.Count == 0)
+            throw new InvalidOperationException("В маршруте не осталось участников — перезапускать нечего");
+
+        await InterruptAsync(old.Id, actorUserId);
+
+        var fresh = new RouteInstance
+        {
+            DocumentId = old.DocumentId,
+            TemplateId = old.TemplateId,
+            Status = RouteInstanceStatus.Draft,
+            Steps = steps,
+        };
+        _db.RouteInstances.Add(fresh);
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(Entity, fresh.Id, "Restarted", actorUserId, new { from = old.Id });
+
+        await StartAsync(fresh.Id, actorUserId);
+        return fresh;
+    }
+
+    public async Task<RouteParticipant> AddApproverStepAsync(
+        int routeInstanceId, int userId, int? beforeStepOrder, int actorUserId)
+    {
+        var inst = await InstanceQuery().FirstOrDefaultAsync(i => i.Id == routeInstanceId)
+            ?? throw new KeyNotFoundException($"Маршрут id={routeInstanceId} не найден");
+
+        if (inst.Status != RouteInstanceStatus.Running)
+            throw new InvalidOperationException("Добавить участника можно только в идущий маршрут");
+
+        if (inst.Steps.SelectMany(s => s.Participants)
+            .Any(p => p.UserId == userId && p.State is ParticipantState.Pending or ParticipantState.Active))
+            throw new InvalidOperationException("Этот сотрудник уже есть в маршруте и ещё не вынес решения");
+
+        var current = inst.CurrentStepOrder;
+        var maxOrder = inst.Steps.Count == 0 ? 0 : inst.Steps.Max(s => s.Order);
+        int position;
+        if (beforeStepOrder is { } before)
+        {
+            if (before <= current)
+                throw new InvalidOperationException("Нового участника можно поставить только после текущего этапа");
+            position = Math.Min(before, maxOrder + 1);
+        }
+        else
+        {
+            // Подписание и финальный контроль — в конце маршрута: новый согласующий встаёт перед ними.
+            var tail = inst.Steps
+                .Where(s => s.Order > current && (s.Kind == StepKind.Signing || s.IsFinalMethodology))
+                .OrderBy(s => s.Order)
+                .FirstOrDefault();
+            position = tail?.Order ?? maxOrder + 1;
+        }
+
+        foreach (var s in inst.Steps.Where(s => s.Order >= position))
+            s.Order++;
+
+        var currentStep = inst.Steps.FirstOrDefault(s => s.Order == current);
+        var participant = new RouteParticipant { UserId = userId, Required = true, State = ParticipantState.Pending };
+        _db.RouteSteps.Add(new RouteStep
+        {
+            RouteInstanceId = inst.Id,
+            Order = position,
+            Mode = StepMode.Sequential,
+            Kind = StepKind.Approval,
+            TimeNormHours = currentStep?.TimeNormHours,
+            Participants = [participant],
+        });
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(Entity, inst.Id, "ParticipantAdded", actorUserId,
+            new { userId, step = position, participantId = participant.Id });
+        return participant;
+    }
+
+    public async Task RemoveParticipantAsync(int participantId, int actorUserId)
+    {
+        var instanceId = await _db.RouteSteps
+            .Where(s => s.Participants.Any(p => p.Id == participantId))
+            .Select(s => (int?)s.RouteInstanceId)
+            .FirstOrDefaultAsync()
+            ?? throw new KeyNotFoundException("Участник маршрута не найден");
+
+        var inst = await InstanceQuery().FirstAsync(i => i.Id == instanceId);
+        if (inst.Status != RouteInstanceStatus.Running)
+            throw new InvalidOperationException("Убрать участника можно только из идущего маршрута");
+
+        var step = inst.Steps.First(s => s.Participants.Any(p => p.Id == participantId));
+        var participant = step.Participants.First(p => p.Id == participantId);
+
+        if (participant.Resolution != null || participant.State == ParticipantState.Done)
+            throw new InvalidOperationException("Участник уже вынес решение — убрать его из маршрута нельзя");
+        if (participant.State == ParticipantState.Cancelled)
+            throw new InvalidOperationException("Участник уже снят с маршрута");
+
+        var wasActive = participant.State == ParticipantState.Active;
+        if (wasActive)
+        {
+            // Задача уже выдана — снимаем её; запись участника остаётся в истории как снятая.
+            participant.State = ParticipantState.Cancelled;
+            CloseTask(participant.Id, WorkflowTaskState.Cancelled);
+        }
+        else
+        {
+            // До участника очередь не дошла: задачи нет, следов не остаётся.
+            step.Participants.Remove(participant);
+            _db.Remove(participant);
+            if (step.Participants.Count == 0 && step.Order > inst.CurrentStepOrder)
+                _db.RouteSteps.Remove(step);
+        }
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(Entity, inst.Id, "ParticipantRemoved", actorUserId,
+            new { participantId, participant.UserId, step = step.Order, wasActive });
+
+        // Снятый активный участник — как вынесенное решение: следующий по очереди или следующий этап.
+        if (wasActive)
+            await AdvanceIfStepComplete(inst.Id, step.Id, actorUserId);
+    }
+
     /// <summary>
     /// Заблокирован ли процесс строгим режимом: маршрут на доработке либо на этапе
     /// есть неснятые замечания.

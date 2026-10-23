@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using delosfera_server.Data;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.Models;
@@ -63,6 +64,8 @@ public class DocumentAttachmentService : IDocumentAttachmentService
     private readonly IAuditService _audit;
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<DocumentAttachmentService> _logger;
+    // ISzService резолвим по месту: прямая зависимость замкнула бы кольцо сервисов.
+    private readonly IServiceProvider? _serviceProvider;
 
     public DocumentAttachmentService(
         DelosferaDbContext db,
@@ -70,8 +73,10 @@ public class DocumentAttachmentService : IDocumentAttachmentService
         ISignatureService signatures,
         IAuditService audit,
         ICurrentUserService currentUser,
-        ILogger<DocumentAttachmentService> logger)
+        ILogger<DocumentAttachmentService> logger,
+        IServiceProvider? serviceProvider = null)
     {
+        _serviceProvider = serviceProvider;
         _db = db;
         _files = files;
         _signatures = signatures;
@@ -94,7 +99,9 @@ public class DocumentAttachmentService : IDocumentAttachmentService
     /// включая администратора: иначе подписи прошедших согласующих оказались бы поставлены
     /// под другой состав записки. Чтобы поправить файл на согласовании, записку отзывают.
     /// </summary>
-    private async Task EnsureCanChangeAttachmentsAsync(int documentId, int userId, string message)
+    /// <returns>true — корректировка записки на согласовании (CorrectSzOnApproval): после
+    /// изменения вложений согласование, возможно, придётся начать заново.</returns>
+    private async Task<bool> EnsureCanChangeAttachmentsAsync(int documentId, int userId, string message)
     {
         var document = await _db.Documents.AsNoTracking()
             .Where(d => d.Id == documentId)
@@ -103,6 +110,12 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             ?? throw new KeyNotFoundException("Документ не найден");
 
         var isSz = document.Type == DocumentType.Sz;
+
+        // Корректировка на согласовании: вложение меняется, а собранные визы
+        // пересобираются (RestartApprovalAfterContentChange), а не остаются под чужим составом.
+        if (isSz && document.StatusCode == SzStatus.OnApproval
+                 && _currentUser.HasPermission(PermissionCode.CorrectSzOnApproval))
+            return true;
 
         var allowed = document.AuthorId == userId
                       || _currentUser.HasPermission(PermissionCode.ManageSystemSettings)
@@ -114,7 +127,14 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             throw new InvalidOperationException(
                 "Вложения служебной записки меняются только в черновике, на доработке или после отзыва: " +
                 "на согласовании и дальше они входят в то, под чем согласующие поставили подпись");
+        return false;
     }
+
+    private Task RestartSzApprovalAsync(int documentId, int userId) =>
+        _serviceProvider is null
+            ? Task.CompletedTask
+            : _serviceProvider.GetRequiredService<delosfera_server.Modules.Sz.Services.ISzService>()
+                .RestartApprovalAfterContentChangeAsync(documentId, userId);
 
     public async Task<List<AttachmentDto>> ListAsync(int documentId)
     {
@@ -154,7 +174,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
         var document = await _db.Documents.FirstOrDefaultAsync(d => d.Id == documentId)
             ?? throw new KeyNotFoundException("Документ не найден");
 
-        await EnsureCanChangeAttachmentsAsync(document.Id, userId,
+        var correction = await EnsureCanChangeAttachmentsAsync(document.Id, userId,
             "Прикреплять файлы к документу может только его автор");
 
         // У служебной записки число вложений ограничено. Предел проверяем здесь, а не только
@@ -197,6 +217,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         await _audit.LogAsync("DocumentAttachment", attachment.Id, "Added", userId,
             new {documentId, file.FileName, hash});
+        if (correction) await RestartSzApprovalAsync(documentId, userId);
 
         return (await ListAsync(documentId)).First(a => a.Id == attachment.Id);
     }
@@ -207,7 +228,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
 
-        await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
+        var correction = await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
             "Заменить файл вложения может только автор документа");
 
         RequireFile(file);
@@ -240,6 +261,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         await _audit.LogAsync("DocumentAttachment", attachmentId, "Replaced", userId,
             new {previousFileRef, hash});
+        if (correction) await RestartSzApprovalAsync(attachment.DocumentId, userId);
 
         return (await ListAsync(attachment.DocumentId)).First(a => a.Id == attachmentId);
     }
@@ -250,7 +272,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
 
-        await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
+        var correction = await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
             "Удалить вложение может только автор документа");
 
         // Подписи не удаляем вместе с вложением, а аннулируем: факт подписания —
@@ -262,6 +284,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         await _audit.LogAsync("DocumentAttachment", attachmentId, "Deleted", userId,
             new {attachment.DocumentId, attachment.FileName});
+        if (correction) await RestartSzApprovalAsync(attachment.DocumentId, userId);
     }
 
     public async Task<(Stream Stream, string ContentType, string FileName)> DownloadAsync(int attachmentId)

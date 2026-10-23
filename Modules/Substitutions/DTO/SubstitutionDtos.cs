@@ -163,6 +163,9 @@ public class SubstitutionAccessDto
     public bool CanWithdraw { get; set; }
     public bool CanDelete { get; set; }
     public bool CanExecute { get; set; }
+
+    /// <summary>Корректировать заявку на согласовании/подписании (право CorrectSubstitution или УЧР).</summary>
+    public bool CanCorrect { get; set; }
 }
 
 public class SubstitutionPage

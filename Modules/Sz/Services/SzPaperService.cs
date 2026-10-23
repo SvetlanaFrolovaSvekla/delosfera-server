@@ -248,16 +248,19 @@ public class SzPaperService : ISzPaperService
     // --- вспомогательное ---
 
     /// <summary>
-    /// Лист согласования собирается по всем маршрутам документа, а не только по текущему:
-    /// на бумаге должна остаться история виз, включая прошлые круги согласования.
+    /// Лист согласования — только актуальный круг: последний маршрут согласования и маршрут
+    /// подписания, запущенный после него. Визы прошлых кругов (отклонённые, возвращённые на
+    /// доработку) уже недействительны и в лист не попадают — их история остаётся в карточке.
     /// </summary>
     private async Task<List<SzPrintApprovalResponse>> BuildApprovalSheetAsync(int documentId, string? currentContentDigest)
     {
+        var actualRouteIds = await SzEcpSheetData.ActualRouteIdsAsync(_db, documentId);
+        if (actualRouteIds.Count == 0) return [];
+
         var steps = await _db.RouteSteps.AsNoTracking()
             .Include(s => s.RouteInstance)
             .Include(s => s.Participants).ThenInclude(p => p.Resolution)
-            .Where(s => s.RouteInstance!.DocumentId == documentId
-                        && s.RouteInstance.Status != RouteInstanceStatus.Interrupted)
+            .Where(s => actualRouteIds.Contains(s.RouteInstanceId))
             .OrderBy(s => s.RouteInstanceId).ThenBy(s => s.Order)
             .ToListAsync();
 

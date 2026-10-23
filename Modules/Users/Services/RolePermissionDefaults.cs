@@ -57,6 +57,11 @@ public static class RolePermissionDefaults
             // правят поля и файлы и отправляют снова, не возвращая автору.
             PermissionCode.EditAnySz,
             PermissionCode.WithdrawAnySz,
+            // Поправить записку на согласовании без отзыва и поменять участников маршрута.
+            PermissionCode.CorrectSzOnApproval,
+            // Заявки на замещение — так же: поправить без отзыва, отозвать за инициатора.
+            PermissionCode.CorrectSubstitution,
+            PermissionCode.WithdrawAnySubstitution,
         ]),
 
         // Правление видит реестр записок целиком: до них доходит то, что не решилось
@@ -147,6 +152,9 @@ public static class RolePermissionDefaults
             // отзывает, правит и отправляет снова сам, без перевода статуса вручную.
             PermissionCode.EditAnySz,
             PermissionCode.WithdrawAnySz,
+            PermissionCode.CorrectSzOnApproval,
+            PermissionCode.CorrectSubstitution,
+            PermissionCode.WithdrawAnySubstitution,
             PermissionCode.ViewAllProcurements,
             PermissionCode.ConductProcurement,
             PermissionCode.RecordCommissionDecisions,

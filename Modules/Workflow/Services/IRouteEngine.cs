@@ -44,4 +44,23 @@ public interface IRouteEngine
     /// участников и их задачи, экземпляр пометить прерванным. История резолюций сохраняется.
     /// </summary>
     Task InterruptAsync(int routeInstanceId, int actorUserId);
+
+    /// <summary>
+    /// Новый круг того же маршрута: текущий экземпляр прерывается (резолюции остаются в истории),
+    /// создаётся копия его этапов и действующих участников и запускается с первого этапа.
+    /// </summary>
+    Task<RouteInstance> RestartAsync(int routeInstanceId, int actorUserId);
+
+    /// <summary>
+    /// Добавить согласующего в идущий маршрут — отдельным последовательным этапом. Место — перед
+    /// этапом <paramref name="beforeStepOrder"/> (только после текущего), по умолчанию — перед
+    /// этапами подписания / финального контроля, а если их нет — в конец.
+    /// </summary>
+    Task<RouteParticipant> AddApproverStepAsync(int routeInstanceId, int userId, int? beforeStepOrder, int actorUserId);
+
+    /// <summary>
+    /// Убрать из идущего маршрута участника, который ещё не вынес решения. Если он был активен,
+    /// его задача снимается и маршрут идёт дальше, как после его решения.
+    /// </summary>
+    Task RemoveParticipantAsync(int participantId, int actorUserId);
 }

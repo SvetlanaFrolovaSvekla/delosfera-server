@@ -265,6 +265,24 @@ public static class PermissionCatalog
             TitleEn = "Withdraw any internal memo from approval, revision, registration or signing (with a reason)",
             TitleKg = "Каалаган кызматтык катты макулдашуудан, иштеп чыгуудан, каттоодон же кол коюудан кайтарып алуу (негиздеме менен)"
         },
+        [PermissionCode.CorrectSzOnApproval] = new PermissionDescription
+        {
+            TitleRu = "Корректировать служебную записку на согласовании: поля, вложения и участники маршрута (изменение содержимого перезапускает согласование)",
+            TitleEn = "Correct an internal memo during approval: fields, attachments and route participants (content changes restart the approval)",
+            TitleKg = "Кызматтык катты макулдашуу учурунда оңдоо: талаалар, тиркемелер жана маршруттун катышуучулары (мазмунун өзгөртүү макулдашууну кайра баштайт)"
+        },
+        [PermissionCode.CorrectSubstitution] = new PermissionDescription
+        {
+            TitleRu = "Корректировать заявку на замещение на согласовании и подписании (правка на согласовании перезапускает маршрут)",
+            TitleEn = "Correct a substitution request during approval and signing (edits during approval restart the route)",
+            TitleKg = "Алмаштыруу өтүнмөсүн макулдашууда жана кол коюуда оңдоо (макулдашуудагы оңдоо маршрутту кайра баштайт)"
+        },
+        [PermissionCode.WithdrawAnySubstitution] = new PermissionDescription
+        {
+            TitleRu = "Отзывать любую заявку на замещение с согласования или подписания",
+            TitleEn = "Withdraw any substitution request from approval or signing",
+            TitleKg = "Каалаган алмаштыруу өтүнмөсүн макулдашуудан же кол коюудан кайтарып алуу"
+        },
         [PermissionCode.SignWithoutNationalEcp] = new PermissionDescription
         {
             TitleRu = "Подписывать резолюции без ЭЦП КР — системной подписью «Делосфера» (для сотрудников без гражданства КР)",

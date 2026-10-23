@@ -371,16 +371,20 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
                 s.PersonFio, s.OrganizationName, s.CertCommonName, s.CertIssuerCommonName, s.CertValidNotAfter,
                 s.HashSchemaVersion, s.Hash, s.SignatureSha256, s.ContentDigest,
                 s.SignedAt, s.VerifiedAt, s.Verified, s.VerificationError,
+                s.CommentText,
             })
             .ToListAsync(ct);
 
-        var currentRouteId = sz.Document?.CurrentRouteInstanceId;
+        // Актуальный круг — последний маршрут согласования и запущенный за ним маршрут подписания.
+        // Текущий маршрут записки на подписании — это маршрут подписи, поэтому сравнение только
+        // с CurrentRouteInstanceId уводило визы согласования в «прошлые круги».
+        var actualRouteIds = await SzEcpSheetData.ActualRouteIdsAsync(_db, sz.DocumentId, ct);
         return rows.Select(r => new SzResolutionSignatureResponse
         {
             Id = r.Id,
             RouteParticipantId = r.RouteParticipantId,
             RouteInstanceId = r.RouteInstanceId,
-            IsCurrentRoute = currentRouteId == r.RouteInstanceId,
+            IsCurrentRoute = actualRouteIds.Contains(r.RouteInstanceId),
             StepOrder = r.StepOrder,
             Decision = r.Decision,
             UserId = r.UserId,
@@ -398,6 +402,7 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
             VerifiedAt = r.VerifiedAt,
             Verified = r.Verified,
             IsTest = !r.Verified && r.VerificationError == TestVerificationNote,
+            Comment = string.IsNullOrWhiteSpace(r.CommentText) ? null : r.CommentText,
         }).ToList();
     }
 
@@ -809,6 +814,40 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
 /// </summary>
 public static class SzEcpSheetData
 {
+    /// <summary>
+    /// Маршруты актуального круга согласования записки: последний не прерванный маршрут, а если это
+    /// маршрут подписания (одни этапы подписи) — ещё и маршрут согласования, после которого он
+    /// запущен. Визы прошлых кругов (отклонённые, возвращённые на доработку) сюда не входят.
+    /// </summary>
+    public static async Task<HashSet<int>> ActualRouteIdsAsync(
+        DelosferaDbContext db, int documentId, CancellationToken ct = default)
+    {
+        var steps = await db.RouteSteps.AsNoTracking()
+            .Where(s => s.RouteInstance!.DocumentId == documentId
+                        && s.RouteInstance.Status != RouteInstanceStatus.Interrupted)
+            .Select(s => new { s.RouteInstanceId, s.Kind })
+            .ToListAsync(ct);
+
+        var routes = steps
+            .GroupBy(s => s.RouteInstanceId)
+            .OrderByDescending(g => g.Key)
+            .Select(g => (Id: g.Key, OnlySigning: g.All(s => s.Kind == StepKind.Signing)))
+            .ToList();
+
+        var result = new HashSet<int>();
+        if (routes.Count == 0) return result;
+
+        var latest = routes[0];
+        result.Add(latest.Id);
+        if (latest.OnlySigning)
+        {
+            var approval = routes.Skip(1).FirstOrDefault(r => !r.OnlySigning);
+            if (approval.Id != 0) result.Add(approval.Id);
+        }
+
+        return result;
+    }
+
     /// <summary>Отпечаток содержимого записки на текущий момент (см. SzResolutionSignatureHasher.BuildContentDigest).</summary>
     public static async Task<string> ContentDigestAsync(DelosferaDbContext db, SzDocument sz, CancellationToken ct = default)
     {

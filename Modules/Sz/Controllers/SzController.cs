@@ -235,6 +235,37 @@ public class SzController : ControllerBase
         public bool Parallel { get; set; }
     }
 
+    public class RouteParticipantRequest
+    {
+        public int UserId { get; set; }
+        /// <summary>Поставить перед этим этапом; не задан — перед подписанием, иначе в конец.</summary>
+        public int? BeforeStepOrder { get; set; }
+    }
+
+    /// <summary>Добавить согласующего в идущий маршрут (право CorrectSzOnApproval).</summary>
+    [HttpPost("{id:int}/route/participants")]
+    public async Task<IActionResult> AddRouteParticipant(int id, [FromBody] RouteParticipantRequest req)
+    {
+        try
+        {
+            return Ok(await _sz.AddRouteParticipantAsync(id, req.UserId, req.BeforeStepOrder, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    /// <summary>Убрать из маршрута участника, ещё не вынесшего решение (право CorrectSzOnApproval).</summary>
+    [HttpDelete("{id:int}/route/participants/{participantId:int}")]
+    public async Task<IActionResult> RemoveRouteParticipant(int id, int participantId)
+    {
+        try
+        {
+            return Ok(await _sz.RemoveRouteParticipantAsync(id, participantId, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
     /// <summary>Состав и порядок согласующих (до отправки записки).</summary>
     [HttpPut("{id:int}/approvers")]
     public async Task<IActionResult> SetApprovers(int id, [FromBody] ApproversRequest req)

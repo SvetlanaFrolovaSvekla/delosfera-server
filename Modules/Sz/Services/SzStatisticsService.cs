@@ -1,5 +1,5 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
-using delosfera_server.Common.Export;
 using delosfera_server.Common.Services;
 using delosfera_server.Data;
 using delosfera_server.Modules.Sz.DTO;
@@ -32,11 +32,11 @@ public class SzStatisticsService : ISzStatisticsService
         _clock = clock;
     }
 
-    public async Task<SzStatisticsDto> GetAsync(SzStatisticsFilter filter)
-    {
-        var today = _clock.Today;
-        var rows = await LoadAsync(filter);
+    public async Task<SzStatisticsDto> GetAsync(SzStatisticsFilter filter) =>
+        Summarize(filter, await LoadAsync(filter), _clock.Today);
 
+    private static SzStatisticsDto Summarize(SzStatisticsFilter filter, List<SzRow> rows, DateOnly today)
+    {
         var dto = new SzStatisticsDto
         {
             From = filter.From,
@@ -66,75 +66,245 @@ public class SzStatisticsService : ISzStatisticsService
 
     public async Task<byte[]> ExportAsync(SzStatisticsFilter filter)
     {
-        var summary = await GetAsync(filter);
         var today = _clock.Today;
         var rows = await LoadAsync(filter);
+        var summary = Summarize(filter, rows, today);
 
-        var byUnit = new XlsxSheet
+        // Подписи фильтров для шапки отчёта: без них распечатка «ни о чём» - непонятно,
+        // за какой период и по какому подразделению/виду эти цифры.
+        var unitName = filter.OrgUnitId is { } unitId
+            ? await _db.OrganizationUnits.AsNoTracking().Where(u => u.Id == unitId).Select(u => u.TitleRu).FirstOrDefaultAsync()
+            : null;
+        var kindName = filter.KindId is { } kindId
+            ? await _db.SzKinds.AsNoTracking().Where(k => k.Id == kindId).Select(k => k.TitleRu).FirstOrDefaultAsync()
+            : null;
+
+        var period = PeriodText(filter.From, filter.To);
+        var generated = _clock.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
+
+        void Caption(SzStatisticsWorkbook.Sheet sheet, string title, int lastCol)
         {
-            Name = "По подразделениям",
-            Header = ["Подразделение", "Всего", "В работе", "Просрочено", "Исполнено", "Прочее"],
-            Widths = [46, 10, 12, 14, 12, 12],
-            Rows = summary.ByUnit
-                .OrderByDescending(x => x.Value.Total)
-                .Select(x => Line(x.Key, x.Value))
-                .ToList(),
-        };
+            sheet.Add(SzStatisticsWorkbook.Cell.Text(title, SzStatisticsWorkbook.STitle));
+            sheet.RowHeights[1] = 24;
+            sheet.Merges.Add($"A1:{SzStatisticsWorkbook.Col(lastCol)}1");
+            sheet.Add(SzStatisticsWorkbook.Cell.Text(
+                $"Период: {period}   ·   Подразделение: {unitName ?? "все"}   ·   Вид: {kindName ?? "все"}   ·   Сформировано: {generated}",
+                SzStatisticsWorkbook.SSubtitle));
+            sheet.Merges.Add($"A2:{SzStatisticsWorkbook.Col(lastCol)}2");
+            sheet.AddBlank();
+        }
 
-        var byKind = new XlsxSheet
+        // ── Сводка ──
+        var overview = new SzStatisticsWorkbook.Sheet { Name = "Сводка", Widths = [48, 16, 14] };
+        overview.Add(SzStatisticsWorkbook.Cell.Text("Аналитика служебных записок", SzStatisticsWorkbook.STitle));
+        overview.RowHeights[1] = 24;
+        overview.Merges.Add("A1:C1");
+        foreach (var (label, value) in new[]
+                 {
+                     ("Период", period), ("Подразделение", unitName ?? "все"),
+                     ("Вид записки", kindName ?? "все"), ("Сформировано", generated),
+                 })
         {
-            Name = "По видам",
-            Header = ["Вид записки", "Всего", "В работе", "Просрочено", "Исполнено", "Прочее"],
-            Widths = [46, 10, 12, 14, 12, 12],
-            Rows = summary.ByKind
-                .OrderByDescending(x => x.Value.Total)
-                .Select(x => Line(x.Key, x.Value))
-                .ToList(),
-        };
+            overview.Add(
+                SzStatisticsWorkbook.Cell.Text($"{label}: {value}", SzStatisticsWorkbook.SSubtitle));
+            overview.Merges.Add($"A{overview.Rows.Count}:C{overview.Rows.Count}");
+        }
+        overview.AddBlank();
+        overview.Add(
+            SzStatisticsWorkbook.Cell.Text("Показатель", SzStatisticsWorkbook.SHeader),
+            SzStatisticsWorkbook.Cell.Text("Записок", SzStatisticsWorkbook.SHeader),
+            SzStatisticsWorkbook.Cell.Text("Доля", SzStatisticsWorkbook.SHeader));
+        overview.RowHeights[overview.Rows.Count] = 22;
 
-        var byMonth = new XlsxSheet
+        double Share(int part, int whole) => whole == 0 ? 0 : (double)part / whole;
+
+        void Kpi(string label, int value, bool alarm = false) => overview.Add(
+            SzStatisticsWorkbook.Cell.Text(label, SzStatisticsWorkbook.SKpiLabel),
+            SzStatisticsWorkbook.Cell.Num(value, alarm && value > 0 ? SzStatisticsWorkbook.SIntOverdue : SzStatisticsWorkbook.SInt),
+            SzStatisticsWorkbook.Cell.Num(Share(value, summary.Total), SzStatisticsWorkbook.SPercent));
+
+        Kpi("Всего записок", summary.Total);
+        Kpi("В работе", summary.InWork);
+        Kpi("Просрочено", summary.Overdue, alarm: true);
+        Kpi("Исполнено", summary.Executed);
+        Kpi("Прочее (черновики, отозванные, забракованные)", summary.Other);
+        overview.AddBlank();
+        overview.Add(
+            SzStatisticsWorkbook.Cell.Text("Подразделений с записками", SzStatisticsWorkbook.SKpiLabel),
+            SzStatisticsWorkbook.Cell.Num(summary.ByUnit.Count));
+        overview.Add(
+            SzStatisticsWorkbook.Cell.Text("Подразделений с просрочкой", SzStatisticsWorkbook.SKpiLabel),
+            SzStatisticsWorkbook.Cell.Num(summary.ByUnit.Count(x => x.Value.Overdue > 0),
+                summary.ByUnit.Any(x => x.Value.Overdue > 0) ? SzStatisticsWorkbook.SIntOverdue : SzStatisticsWorkbook.SInt));
+        overview.Add(
+            SzStatisticsWorkbook.Cell.Text("Поручений всего", SzStatisticsWorkbook.SKpiLabel),
+            SzStatisticsWorkbook.Cell.Num(rows.Sum(r => r.AssignmentCount)));
+        var overdueAssignments = rows.Sum(r => r.OverdueAssignments);
+        overview.Add(
+            SzStatisticsWorkbook.Cell.Text("Просроченных поручений", SzStatisticsWorkbook.SKpiLabel),
+            SzStatisticsWorkbook.Cell.Num(overdueAssignments,
+                overdueAssignments > 0 ? SzStatisticsWorkbook.SIntOverdue : SzStatisticsWorkbook.SInt));
+        overview.AddBlank();
+        overview.Add(SzStatisticsWorkbook.Cell.Text(
+            "«Просрочено» - записка со сроком в прошлом или с незакрытым поручением,", SzStatisticsWorkbook.SSubtitle));
+        overview.Add(SzStatisticsWorkbook.Cell.Text(
+            "срок которого истёк. «Прочее» в работу не считается.", SzStatisticsWorkbook.SSubtitle));
+
+        // ── Разрезы ──
+        SzStatisticsWorkbook.Sheet Breakdown(string name, string title, string firstColumn, double firstWidth,
+            IEnumerable<KeyValuePair<string, SzStatisticsCell>> cells, Func<string, string> label)
         {
-            Name = "По месяцам",
-            Header = ["Месяц", "Всего", "В работе", "Просрочено", "Исполнено", "Прочее"],
-            Widths = [14, 10, 12, 14, 12, 12],
-            Rows = summary.ByMonth
-                .OrderBy(x => Month(x.Key))
-                .Select(x => Line(x.Key, x.Value))
-                .ToList(),
-        };
+            var sheet = new SzStatisticsWorkbook.Sheet
+            {
+                Name = name,
+                Widths = [firstWidth, 11, 12, 13, 12, 11, 15, 15],
+                FreezeRows = 4,
+            };
+            Caption(sheet, title, 7);
+            sheet.Add(
+                SzStatisticsWorkbook.Cell.Text(firstColumn, SzStatisticsWorkbook.SHeader),
+                SzStatisticsWorkbook.Cell.Text("Всего", SzStatisticsWorkbook.SHeader),
+                SzStatisticsWorkbook.Cell.Text("В работе", SzStatisticsWorkbook.SHeader),
+                SzStatisticsWorkbook.Cell.Text("Просрочено", SzStatisticsWorkbook.SHeader),
+                SzStatisticsWorkbook.Cell.Text("Исполнено", SzStatisticsWorkbook.SHeader),
+                SzStatisticsWorkbook.Cell.Text("Прочее", SzStatisticsWorkbook.SHeader),
+                SzStatisticsWorkbook.Cell.Text("Доля просрочки", SzStatisticsWorkbook.SHeader),
+                SzStatisticsWorkbook.Cell.Text("Доля от всех записок", SzStatisticsWorkbook.SHeader));
+            sheet.RowHeights[4] = 30;
 
-        // Лист с самими записками: сводка отвечает «сколько», а разбираться в
-        // просрочке приходится по конкретным номерам.
-        var details = new XlsxSheet
+            var list = cells.ToList();
+            foreach (var (key, cell) in list)
+            {
+                sheet.Add(
+                    SzStatisticsWorkbook.Cell.Text(label(key), SzStatisticsWorkbook.STextWrap),
+                    SzStatisticsWorkbook.Cell.Num(cell.Total),
+                    SzStatisticsWorkbook.Cell.Num(cell.InWork),
+                    SzStatisticsWorkbook.Cell.Num(cell.Overdue,
+                        cell.Overdue > 0 ? SzStatisticsWorkbook.SIntOverdue : SzStatisticsWorkbook.SIntMuted),
+                    SzStatisticsWorkbook.Cell.Num(cell.Executed),
+                    SzStatisticsWorkbook.Cell.Num(cell.Other, SzStatisticsWorkbook.SIntMuted),
+                    SzStatisticsWorkbook.Cell.Num(Share(cell.Overdue, cell.Total), SzStatisticsWorkbook.SPercent),
+                    SzStatisticsWorkbook.Cell.Num(Share(cell.Total, summary.Total), SzStatisticsWorkbook.SPercent));
+            }
+
+            if (list.Count == 0)
+            {
+                sheet.Add(SzStatisticsWorkbook.Cell.Text("Нет записок за выбранный период", SzStatisticsWorkbook.SSubtitle));
+                return sheet;
+            }
+
+            sheet.AutoFilter = $"A4:H{sheet.Rows.Count}";
+            sheet.Add(
+                SzStatisticsWorkbook.Cell.Text("Итого", SzStatisticsWorkbook.STotalLabel),
+                SzStatisticsWorkbook.Cell.Num(summary.Total, SzStatisticsWorkbook.STotalInt),
+                SzStatisticsWorkbook.Cell.Num(summary.InWork, SzStatisticsWorkbook.STotalInt),
+                SzStatisticsWorkbook.Cell.Num(summary.Overdue, SzStatisticsWorkbook.STotalInt),
+                SzStatisticsWorkbook.Cell.Num(summary.Executed, SzStatisticsWorkbook.STotalInt),
+                SzStatisticsWorkbook.Cell.Num(summary.Other, SzStatisticsWorkbook.STotalInt),
+                SzStatisticsWorkbook.Cell.Num(Share(summary.Overdue, summary.Total), SzStatisticsWorkbook.STotalPercent),
+                SzStatisticsWorkbook.Cell.Num(summary.Total == 0 ? 0 : 1, SzStatisticsWorkbook.STotalPercent));
+            return sheet;
+        }
+
+        var byUnit = Breakdown("По подразделениям", "Служебные записки по подразделениям", "Подразделение", 52,
+            summary.ByUnit.OrderByDescending(x => x.Value.Total).ThenBy(x => x.Key), k => k);
+        var byKind = Breakdown("По видам", "Служебные записки по видам", "Вид записки", 40,
+            summary.ByKind.OrderByDescending(x => x.Value.Total).ThenBy(x => x.Key), k => k);
+        var byMonth = Breakdown("По месяцам", "Служебные записки по месяцам", "Месяц", 20,
+            summary.ByMonth.OrderBy(x => Month(x.Key)), MonthTitle);
+
+        // ── Перечень записок ──
+        // Сводка отвечает «сколько», а разбираться в просрочке приходится по конкретным номерам.
+        var details = new SzStatisticsWorkbook.Sheet
         {
             Name = "Записки",
-            Header =
-            [
-                "Номер", "Дата", "Тема", "Вид", "Подразделение", "Автор",
-                "Статус", "Срок", "Состояние", "Поручений", "Просрочено поручений",
-            ],
-            Widths = [18, 13, 50, 24, 40, 26, 22, 13, 18, 12, 20],
-            Rows = rows
-                .OrderByDescending(r => r.CreatedAt)
-                .Select(r => new[]
-                {
-                    r.RegNumber ?? "—",
-                    r.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy"),
-                    r.Title,
-                    r.KindTitle ?? "—",
-                    r.UnitTitle ?? "—",
-                    r.AuthorName ?? "—",
-                    SzStatusTitles.Title(r.StatusCode),
-                    r.DueDate?.ToString("dd.MM.yyyy") ?? "—",
-                    ProgressTitle(Classify(r, today)),
-                    r.AssignmentCount.ToString(),
-                    r.OverdueAssignments.ToString(),
-                })
-                .ToList(),
+            Widths = [6, 16, 12, 13, 48, 24, 36, 26, 26, 34, 22, 13, 14, 11, 11, 13, 13],
+            FreezeRows = 4,
         };
+        Caption(details, "Перечень служебных записок", 16);
+        details.Add(
+            new[]
+            {
+                "№", "Рег. номер", "Создана", "Дата регистрации", "Тема", "Вид", "Подразделение", "Автор",
+                "Адресат", "Исполнители", "Статус", "Срок исполнения", "Состояние", "Дней просрочки",
+                "Поручений", "Просрочено поручений", "Исполнена",
+            }.Select(h => SzStatisticsWorkbook.Cell.Text(h, SzStatisticsWorkbook.SHeader)).ToArray());
+        details.RowHeights[4] = 30;
 
-        return XlsxWorkbook.Build(byUnit, byKind, byMonth, details);
+        var number = 0;
+        foreach (var r in rows.OrderByDescending(r => r.CreatedAt))
+        {
+            var state = Classify(r, today);
+            var daysOverdue = state == SzProgress.Overdue && r.DueDate is { } due && due < today
+                ? today.DayNumber - due.DayNumber
+                : 0;
+
+            details.Add(
+                SzStatisticsWorkbook.Cell.Num(++number, SzStatisticsWorkbook.SCenter),
+                SzStatisticsWorkbook.Cell.Text(r.RegNumber ?? "—"),
+                SzStatisticsWorkbook.Cell.Date(ToLocalDate(r.CreatedAt)),
+                SzStatisticsWorkbook.Cell.Date(r.RegisteredOn),
+                SzStatisticsWorkbook.Cell.Text(r.Title, SzStatisticsWorkbook.STextWrap),
+                SzStatisticsWorkbook.Cell.Text(r.KindTitle ?? "—", SzStatisticsWorkbook.STextWrap),
+                SzStatisticsWorkbook.Cell.Text(r.UnitTitle ?? "—", SzStatisticsWorkbook.STextWrap),
+                SzStatisticsWorkbook.Cell.Text(r.AuthorName ?? "—", SzStatisticsWorkbook.STextWrap),
+                SzStatisticsWorkbook.Cell.Text(r.AddresseeName ?? "—", SzStatisticsWorkbook.STextWrap),
+                SzStatisticsWorkbook.Cell.Text(
+                    r.Assignees.Count == 0 ? "—" : string.Join(", ", r.Assignees.Distinct()),
+                    SzStatisticsWorkbook.STextWrap),
+                SzStatisticsWorkbook.Cell.Text(SzStatusTitles.Title(r.StatusCode), SzStatisticsWorkbook.STextWrap),
+                SzStatisticsWorkbook.Cell.Date(r.DueDate),
+                SzStatisticsWorkbook.Cell.Text(ProgressTitle(state), state switch
+                {
+                    SzProgress.Overdue => SzStatisticsWorkbook.SStateOverdue,
+                    SzProgress.Executed => SzStatisticsWorkbook.SStateExecuted,
+                    SzProgress.InWork => SzStatisticsWorkbook.SStateInWork,
+                    _ => SzStatisticsWorkbook.SStateOther,
+                }),
+                daysOverdue > 0
+                    ? SzStatisticsWorkbook.Cell.Num(daysOverdue, SzStatisticsWorkbook.SIntOverdue)
+                    : SzStatisticsWorkbook.Cell.Text("—", SzStatisticsWorkbook.SCenter),
+                SzStatisticsWorkbook.Cell.Num(r.AssignmentCount),
+                SzStatisticsWorkbook.Cell.Num(r.OverdueAssignments,
+                    r.OverdueAssignments > 0 ? SzStatisticsWorkbook.SIntOverdue : SzStatisticsWorkbook.SIntMuted),
+                SzStatisticsWorkbook.Cell.Date(r.ExecutedAt is { } ex ? ToLocalDate(ex) : null));
+        }
+
+        if (number == 0)
+            details.Add(SzStatisticsWorkbook.Cell.Text("Нет записок за выбранный период", SzStatisticsWorkbook.SSubtitle));
+        else
+            details.AutoFilter = $"A4:Q{details.Rows.Count}";
+
+        return SzStatisticsWorkbook.Build(overview, byUnit, byKind, byMonth, details);
     }
+
+    /// <summary>Имя файла выгрузки: «Аналитика СЗ 01.09.2026–30.09.2026.xlsx».</summary>
+    public static string ExportFileName(DateOnly? from, DateOnly? to) =>
+        $"Аналитика служебных записок {PeriodText(from, to).Replace(" – ", "–")}.xlsx";
+
+    private static string PeriodText(DateOnly? from, DateOnly? to) => (from, to) switch
+    {
+        (null, null) => "за всё время",
+        ({ } f, null) => $"с {f:dd.MM.yyyy}",
+        (null, { } t) => $"по {t:dd.MM.yyyy}",
+        ({ } f, { } t) => $"{f:dd.MM.yyyy} – {t:dd.MM.yyyy}",
+    };
+
+    private static readonly string[] MonthNames =
+    [
+        "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+        "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+    ];
+
+    /// <summary>«09.2026» → «Сентябрь 2026».</summary>
+    private static string MonthTitle(string key)
+    {
+        var date = Month(key);
+        return date == DateOnly.MinValue ? key : $"{MonthNames[date.Month - 1]} {date.Year}";
+    }
+
+    private DateOnly ToLocalDate(DateTime utc) => DateOnly.FromDateTime(
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _clock.Zone));
 
     // ── внутреннее ───────────────────────────────────────────────────────────
 
@@ -172,6 +342,10 @@ public class SzStatisticsService : ISzStatisticsService
                 KindTitle = s.Kind!.TitleRu,
                 UnitTitle = s.AuthorUnit!.TitleRu,
                 DueDate = s.DueDate,
+                RegisteredOn = s.RegisteredOn,
+                ExecutedAt = s.ExecutedAt,
+                AddresseeName = s.AddresseeUser != null ? s.AddresseeUser.FullName : null,
+                Assignees = s.Assignments.Select(a => a.AssigneeUser!.FullName).ToList(),
                 AssignmentCount = s.Assignments.Count,
                 OverdueAssignments = s.Assignments.Count(a =>
                     a.State == SzAssignmentState.Open && a.DueDate != null && a.DueDate < today),
@@ -226,16 +400,6 @@ public class SzStatisticsService : ISzStatisticsService
         }
     }
 
-    private static string[] Line(string key, SzStatisticsCell cell) =>
-    [
-        key,
-        cell.Total.ToString(),
-        cell.InWork.ToString(),
-        cell.Overdue.ToString(),
-        cell.Executed.ToString(),
-        cell.Other.ToString(),
-    ];
-
     /// <summary>Ключ «MM.yyyy» для сортировки по времени, а не по строке.</summary>
     private static DateOnly Month(string key) =>
         DateOnly.TryParseExact("01." + key, "dd.MM.yyyy", out var date) ? date : DateOnly.MinValue;
@@ -252,6 +416,10 @@ public class SzStatisticsService : ISzStatisticsService
         public string? KindTitle { get; init; }
         public string? UnitTitle { get; init; }
         public DateOnly? DueDate { get; init; }
+        public DateOnly? RegisteredOn { get; init; }
+        public DateTime? ExecutedAt { get; init; }
+        public string? AddresseeName { get; init; }
+        public List<string> Assignees { get; init; } = [];
         public int AssignmentCount { get; init; }
         public int OverdueAssignments { get; init; }
     }

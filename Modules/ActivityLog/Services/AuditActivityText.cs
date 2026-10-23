@@ -39,12 +39,14 @@ public static class AuditActivityText
     /// <summary>
     /// Глагольное описание действия и значок. Ключ — «Тип.Действие», потому что
     /// одно и то же слово («Создан», «Обновлён») значит разное в разных контурах;
-    /// на неизвестную пару отвечаем действием как есть, а не пустотой.
+    /// на неизвестную пару отвечаем нейтральным «выполнил(а) действие», а не служебным
+    /// кодом вроде «RouteChangedByAdmin» — код пользователю ничего не говорит. Новое
+    /// действие в аудите = новая строка в Map ниже.
     /// </summary>
     public static (string Ru, string Icon) Describe(string entityType, string action) =>
         Map.TryGetValue($"{entityType}.{action}", out var exact) ? exact
         : Generic.TryGetValue(action, out var generic) ? generic
-        : (action, "info");
+        : ("выполнил(а) действие", "info");
 
     /// <summary>
     /// Уточнение строки заявки на замещение по данным записи аудита: номер заявки, за кого
@@ -164,6 +166,11 @@ public static class AuditActivityText
         ["Sz.RestoredFromArchive"] = ("вернул(а) записку из архива", "doc"),
         ["Sz.OriginalHandedOver"] = ("выдал(а) оригинал на руки", "doc"),
         ["Sz.OriginalReturned"] = ("принял(а) оригинал обратно", "doc"),
+        ["Sz.RouteChangedByAdmin"] = ("изменил(а) маршрут согласования записки как администратор", "edit"),
+        ["Sz.RouteParticipantAdded"] = ("добавил(а) согласующего в маршрут записки", "edit"),
+        ["Sz.RouteParticipantRemoved"] = ("исключил(а) согласующего из маршрута записки", "edit"),
+        ["Sz.CorrectedOnApproval"] = ("внёс(ла) правки в записку на согласовании", "edit"),
+        ["Sz.ApprovalRestartedAfterCorrection"] = ("перезапустил(а) согласование после правки записки", "clock"),
         ["SzAssignment.Reported"] = ("отчитался(ась) по поручению", "check"),
         ["SzAssignment.Accepted"] = ("принял(а) исполнение поручения", "check"),
         ["SzAssignment.Returned"] = ("вернул(а) поручение на доработку", "x"),
@@ -182,6 +189,8 @@ public static class AuditActivityText
         ["ProcurementRequest.ProposalRemoved"] = ("убрал(а) предложение", "x"),
         ["ProcurementRequest.ProposalSourcesChanged"] = ("изменил(а) источники предложений", "edit"),
         ["ProcurementRequest.ProposalVerdict"] = ("вынес(ла) вердикт по предложению", "check"),
+        ["ProcurementRequest.SpecificationSet"] = ("приложил(а) техническую спецификацию к заявке", "doc"),
+        ["ProcurementRequest.CompletedWithoutContract"] = ("завершил(а) закупку без договора", "check"),
         ["Tender.Created"] = ("создал(а) конкурс", "doc"),
         ["Tender.Published"] = ("опубликовал(а) конкурс", "clock"),
         ["Tender.PublicationConfirmed"] = ("подтвердил(а) публикацию", "check"),

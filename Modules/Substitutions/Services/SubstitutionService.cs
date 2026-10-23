@@ -35,7 +35,7 @@ public interface ISubstitutionService
     /// </summary>
     Task<bool> CanViewAsync(int id, int currentUserId, bool isPrivileged, CancellationToken ct = default);
     Task<SubstitutionDetails> CreateAsync(SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default);
-    Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, bool isHrEditor = false, CancellationToken ct = default);
+    Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, bool isHrEditor = false, CancellationToken ct = default, bool canCorrect = false);
     Task<SubstitutionDetails> SubmitAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
     Task<SubstitutionDetails> ApproveAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
     Task<SubstitutionDetails> RejectAsync(int id, int actorUserId, string? comment, CancellationToken ct = default);
@@ -329,7 +329,7 @@ public class SubstitutionService : ISubstitutionService
         return (await GetAsync(entity.Id, ct))!;
     }
 
-    public async Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, bool isHrEditor = false, CancellationToken ct = default)
+    public async Task<SubstitutionDetails> UpdateAsync(int id, SubstitutionSaveRequest request, int actorUserId, bool isHrEditor = false, CancellationToken ct = default, bool canCorrect = false)
     {
         Validate(request);
 
@@ -354,14 +354,16 @@ public class SubstitutionService : ISubstitutionService
         var currentRound = CurrentRound(entity.Approvals);
         var opsApproved = entity.Approvals.Any(a => a.Round == currentRound &&
             a.RoleLabel == "Операционное управление" && a.State == SubstitutionApprovalState.Approved);
-        var editableByHr = isHrEditor && opsApproved
+        // Корректировка (право CorrectSubstitution или УЧР): на любом этапе согласования и на
+        // подписании, без ожидания Операционного управления.
+        var editableByHr = (isHrEditor && opsApproved || canCorrect)
             && entity.Status is SubstitutionStatus.OnApproval or SubstitutionStatus.OnExecution;
 
         if (!editableByInitiator && !editableByHr)
         {
             // Посторонний (не инициатор и без права УЧР) — это отказ в доступе (403),
             // а не ошибка статуса. Инициатору/УЧР с неподходящим статусом — 400/409.
-            if (!isInitiator && !isHrEditor)
+            if (!isInitiator && !isHrEditor && !canCorrect)
                 throw new UnauthorizedAccessException(
                     "Редактировать заявку на замещение может только инициатор или УЧР");
             throw new InvalidOperationException(
@@ -388,11 +390,63 @@ public class SubstitutionService : ISubstitutionService
         {
             if (entity.Status == SubstitutionStatus.OnExecution)
                 await StartSigningAsync(entity, actorUserId, refreeze: true, ct, edited: true);
+            else if (entity.Status == SubstitutionStatus.OnApproval
+                     && entity.Approvals.Any(a => a.Round == currentRound && a.State == SubstitutionApprovalState.Approved))
+                // Согласующие одобряли прежнюю версию — их согласования недействительны:
+                // новый круг с первого этапа (маршрут собирается заново по исправленным данным).
+                await RestartRoundAfterEditAsync(entity, actorUserId, ct);
             else if (entity.Status == SubstitutionStatus.OnApproval && await HasDocumentsAsync(id, ct))
                 await RefreezeQuietlyAsync(entity, actorUserId, "edited", ct);
         }
 
         return (await GetAsync(id, ct))!;
+    }
+
+    /// <summary>
+    /// Новый круг согласования после корректировки: непройденные этапы текущего круга закрываются,
+    /// маршрут собирается заново (как при отправке), документы перевыпускаются новой версией —
+    /// прежние подписи остаются в журнале неактуальными.
+    /// </summary>
+    private async Task RestartRoundAfterEditAsync(SubstitutionRequest entity, int actorUserId, CancellationToken ct)
+    {
+        var previous = await _db.SubstitutionApprovals.Where(a => a.RequestId == entity.Id).ToListAsync(ct);
+        foreach (var old in previous.Where(a => a.State is SubstitutionApprovalState.Pending or SubstitutionApprovalState.Active))
+            old.State = SubstitutionApprovalState.Skipped;
+        var approvedBefore = previous
+            .Where(a => a.Round == CurrentRound(previous) && a.State == SubstitutionApprovalState.Approved)
+            .Select(a => a.DecidedByUserId ?? a.UserId).Distinct().ToList();
+        var round = previous.Count == 0 ? 1 : previous.Max(a => a.Round) + 1;
+
+        var (steps, routeNotes) = await BuildApprovalRouteAsync(entity, round, ct);
+        entity.RouteNote = routeNotes.Count == 0 ? null : string.Join("\n", routeNotes);
+
+        if (steps.Count > 0)
+        {
+            steps[0].State = SubstitutionApprovalState.Active;
+            steps[0].ActivatedAt = DateTime.UtcNow;
+            foreach (var s in steps) _db.SubstitutionApprovals.Add(s);
+        }
+        else
+        {
+            entity.Status = SubstitutionStatus.OnExecution;
+        }
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync(AuditEntityType, entity.Id, "RouteRestartedAfterEdit", actorUserId,
+            new { round, steps = steps.Count, skipped = routeNotes });
+
+        if (steps.Count > 0)
+        {
+            await FreezeDocumentsAsync(entity.Id, ct);
+            await NotifyApproverAsync(entity, steps[0], actorUserId, ct);
+            await NotifyAsync(approvedBefore,
+                "Заявка на замещение изменена — согласование заново",
+                $"Заявка на замещение {Number(entity)} изменена после вашего согласования. Согласование начато заново " +
+                "с первого этапа — задача придёт, когда очередь дойдёт до вас.",
+                entity.Id, actorUserId, ct);
+        }
+        else
+            await StartSigningAsync(entity, actorUserId, refreeze: true, ct, edited: true);
     }
 
     /// <summary>Снимок редактируемых полей заявки — для журнала изменений.</summary>

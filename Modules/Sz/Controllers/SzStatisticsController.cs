@@ -34,7 +34,7 @@ public class SzStatisticsController : ControllerBase
             From = from, To = to, OrgUnitId = orgUnitId, KindId = kindId,
         }));
 
-    /// <summary>Та же сводка книгой Excel: четыре листа, включая перечень записок.</summary>
+    /// <summary>Та же сводка оформленной книгой Excel: сводка, три разреза и перечень записок.</summary>
     [HttpGet("export")]
     public async Task<IActionResult> Export(
         [FromQuery] DateOnly? from,
@@ -47,12 +47,10 @@ public class SzStatisticsController : ControllerBase
             From = from, To = to, OrgUnitId = orgUnitId, KindId = kindId,
         });
 
-        var period = from is null && to is null
-            ? "за всё время"
-            : $"{from?.ToString("dd.MM.yyyy") ?? "начало"}-{to?.ToString("dd.MM.yyyy") ?? "сегодня"}";
-
+        // Имя кириллицей: ASP.NET кладёт его в filename*=UTF-8'' (RFC 5987), а в обычный
+        // filename= - ASCII-заглушку из подчёркиваний; клиент берёт именно filename*.
         return File(bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"Статистика СЗ {period}.xlsx");
+            SzStatisticsService.ExportFileName(from, to));
     }
 }

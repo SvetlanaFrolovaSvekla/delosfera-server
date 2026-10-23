@@ -39,4 +39,7 @@ public class SzResolutionSignatureResponse
 
     /// <summary>Тестовая имитация ЭЦП (EcpSigning:AllowSzTestEcp) — не подпись.</summary>
     public bool IsTest { get; set; }
+
+    /// <summary>Комментарий к резолюции — тот самый текст, что вошёл в подписанный хэш.</summary>
+    public string? Comment { get; set; }
 }

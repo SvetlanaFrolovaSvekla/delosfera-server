@@ -73,6 +73,14 @@ public class SubstitutionController : ControllerBase
 
     private bool IsAdmin => _currentUser.HasPermission(PermissionCode.ManageSystemSettings);
 
+    /// <summary>Корректировать заявку на согласовании/подписании: право или УЧР (CanManage).</summary>
+    private async Task<bool> CanCorrectAsync(CancellationToken ct) =>
+        _currentUser.HasPermission(PermissionCode.CorrectSubstitution) || await CanManageAsync(ct);
+
+    /// <summary>Отозвать чужую заявку: администратор или право WithdrawAnySubstitution.</summary>
+    private bool CanWithdrawAny =>
+        IsAdmin || _currentUser.HasPermission(PermissionCode.WithdrawAnySubstitution);
+
     /// <summary>
     /// Карточка с правами текущего пользователя: что ему показывать (кнопки «Отозвать»,
     /// «Удалить», «Исполнено», правка УЧР) решает сервер, а не догадка клиента по ролям.
@@ -88,7 +96,8 @@ public class SubstitutionController : ControllerBase
         {
             CanManage = manage,
             IsInitiator = isInitiator,
-            CanWithdraw = (isInitiator || IsAdmin) && d.Status is "OnApproval" or "OnExecution",
+            CanWithdraw = (isInitiator || CanWithdrawAny) && d.Status is "OnApproval" or "OnExecution",
+            CanCorrect = d.Status is "OnApproval" or "OnExecution" && await CanCorrectAsync(ct),
             CanDelete = (isInitiator || IsAdmin) && d.Status == "Draft",
             CanExecute = d.Status == "OnExecution" && await CanExecuteAsync(d.Id, ct),
         };
@@ -136,7 +145,7 @@ public class SubstitutionController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] SubstitutionSaveRequest request, CancellationToken ct)
     {
-        try { return await CardAsync(await _service.UpdateAsync(id, request, _currentUser.UserId, await CanManageAsync(ct), ct), ct); }
+        try { return await CardAsync(await _service.UpdateAsync(id, request, _currentUser.UserId, await CanManageAsync(ct), ct, await CanCorrectAsync(ct)), ct); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
@@ -207,7 +216,7 @@ public class SubstitutionController : ControllerBase
     [HttpPost("{id:int}/withdraw")]
     public async Task<IActionResult> Withdraw(int id, CancellationToken ct)
     {
-        try { return await CardAsync(await _service.WithdrawAsync(id, _currentUser.UserId, IsAdmin, ct), ct); }
+        try { return await CardAsync(await _service.WithdrawAsync(id, _currentUser.UserId, CanWithdrawAny, ct), ct); }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
