@@ -764,7 +764,7 @@ public class SzService : ISzService
             || sz.Document.CurrentRouteInstanceId is not int routeId)
             return false;
 
-        // Виз ещё нет — пересобирать нечего: первый согласующий и так увидит новую версию.
+        // Подписей ещё нет — пересобирать нечего: первый согласующий и так увидит новую версию.
         var anyResolved = await _db.RouteSteps
             .Where(s => s.RouteInstanceId == routeId)
             .SelectMany(s => s.Participants)
