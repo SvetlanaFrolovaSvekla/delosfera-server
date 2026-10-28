@@ -214,11 +214,12 @@ public class TaskInboxService : ITaskInboxService
         var signingDocs = await _db.SubstitutionDocuments.AsNoTracking()
             .Where(d => d.IsCurrent && d.Request!.Status == SubstitutionStatus.OnExecution
                         && ((d.DirectorUserId != null && assignees.Contains(d.DirectorUserId.Value))
+                            || d.ExtraBankSignerUserIds.Any(u => assignees.Contains(u))
                             || d.AbsentUserId == userId
                             || d.SubstituteUserId == userId))
             .Select(d => new
             {
-                d.Id, d.RequestId, d.Kind, d.DirectorUserId, d.AbsentUserId, d.SubstituteUserId, d.CreatedAt,
+                d.Id, d.RequestId, d.Kind, d.DirectorUserId, d.AbsentUserId, d.SubstituteUserId, d.ExtraBankSignerUserIds, d.CreatedAt,
                 d.Request!.RegNumber, d.Request.Subject,
             })
             .ToListAsync();
@@ -227,7 +228,7 @@ public class TaskInboxService : ITaskInboxService
             ? []
             : await _db.SubstitutionSignatures.AsNoTracking()
                 .Where(x => signingDocIds.Contains(x.DocumentId))
-                .Select(x => new { x.DocumentId, x.Role })
+                .Select(x => new { x.DocumentId, x.Role, Owner = x.OnBehalfOfUserId ?? x.UserId })
                 .ToListAsync();
 
         // Норматив этапа (ЗМ-SLA) — тот же, по которому шлются напоминания.
@@ -429,8 +430,12 @@ public class TaskInboxService : ITaskInboxService
         var substitutionSigningTasks = signingDocs.SelectMany(d =>
         {
             var slots = new List<(SubstitutionSignerRole Role, int Owner, string Title)>();
-            if (d.DirectorUserId is { } dir && assignees.Contains(dir))
-                slots.Add((SubstitutionSignerRole.Director, dir, "директор"));
+            // ЭЦП от Банка — только под договором; приказ Председатель Правления подписывает от руки.
+            if (d.Kind == SubstitutionDocumentKind.Liability && d.DirectorUserId is { } dir && assignees.Contains(dir))
+                slots.Add((SubstitutionSignerRole.Director, dir, "подписант от Банка"));
+            // Дополнительные подписанты договора от Банка (добавлены делопроизводителем в заявке).
+            foreach (var extra in d.ExtraBankSignerUserIds.Where(u => u != d.DirectorUserId && assignees.Contains(u)).Distinct())
+                slots.Add((SubstitutionSignerRole.BankSigner, extra, "подписант от Банка"));
             if (d.Kind == SubstitutionDocumentKind.Order && d.AbsentUserId == userId)
                 slots.Add((SubstitutionSignerRole.Absent, userId, "ознакомление"));
             if (d.SubstituteUserId == userId)
@@ -438,7 +443,8 @@ public class TaskInboxService : ITaskInboxService
                     d.Kind == SubstitutionDocumentKind.Order ? "ознакомление" : "работник"));
             var kindTitle = d.Kind == SubstitutionDocumentKind.Order ? "приказ" : "договор о матответственности";
             return slots
-                .Where(slot => !signedSlots.Any(x => x.DocumentId == d.Id && x.Role == slot.Role))
+                .Where(slot => !signedSlots.Any(x => x.DocumentId == d.Id && x.Role == slot.Role
+                                                     && (slot.Role != SubstitutionSignerRole.BankSigner || x.Owner == slot.Owner)))
                 .Select(slot => new InboxTaskDto
                 {
                     TaskId = d.Id,

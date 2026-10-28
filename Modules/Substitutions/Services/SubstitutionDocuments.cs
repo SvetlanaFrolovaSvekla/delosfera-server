@@ -29,7 +29,10 @@ public sealed record SubstitutionStamp(
     // Место подписи в ЭЦП-версии: после абзаца Anchor текста (без рукописного блока подписей), с
     // отступом IndentMm от левого поля. null — в конце текста (подписи до появления выбора места).
     int? Anchor = null,
-    int? IndentMm = null);
+    int? IndentMm = null,
+    // Чьё место подписи (сам подписант или тот, за кого подписано) — различает дополнительных
+    // подписантов от Банка (роль BankSigner одна, мест несколько).
+    int? Owner = null);
 
 /// <summary>
 /// Зафиксированные документы заявки на замещение (приказ и договор о матответственности) и
@@ -54,7 +57,8 @@ public static class SubstitutionDocuments
 
     public static string RoleTitle(SubstitutionDocumentKind kind, SubstitutionSignerRole role) => (kind, role) switch
     {
-        (SubstitutionDocumentKind.Liability, SubstitutionSignerRole.Director) => "Директор (от Банка)",
+        (SubstitutionDocumentKind.Liability, SubstitutionSignerRole.Director) => "Основной подписант (от Банка)",
+        (_, SubstitutionSignerRole.BankSigner) => "Дополнительный подписант (от Банка)",
         (SubstitutionDocumentKind.Liability, SubstitutionSignerRole.Substitute) => "Работник (замещающий)",
         (_, SubstitutionSignerRole.Director) => "Директор",
         (_, SubstitutionSignerRole.Absent) => "Отсутствующий — ознакомлен и согласен",
@@ -62,22 +66,36 @@ public static class SubstitutionDocuments
         _ => role.ToString(),
     };
 
-    /// <summary>Кто подписывает документ: приказ — директор, отсутствующий и замещающий;
-    /// договор — директор (от Банка) и замещающий (Работник).</summary>
+    /// <summary>Кто подписывает документ ЭЦП: приказ — отсутствующий и замещающий;
+    /// договор — основной подписант от Банка (место «Director», Председатель Правления из настроек
+    /// маршрута УЧР), дополнительные подписанты от Банка (BankSigner, по месту на каждого) и
+    /// замещающий (Работник). См. <see cref="BankSignersAsync"/>.</summary>
     public static List<SubstitutionSignerSlot> Slots(SubstitutionDocument d) => d.Kind switch
     {
+        // Приказ подписывают ЭЦП только отсутствующий и замещающий («Ознакомлены и согласны»);
+        // Председатель Правления и визирующие расписываются на бумаге.
         SubstitutionDocumentKind.Order =>
         [
-            new(SubstitutionSignerRole.Director, d.DirectorUserId),
             new(SubstitutionSignerRole.Absent, d.AbsentUserId),
             new(SubstitutionSignerRole.Substitute, d.SubstituteUserId),
         ],
         _ =>
         [
             new(SubstitutionSignerRole.Director, d.DirectorUserId),
+            .. d.ExtraBankSignerUserIds.Where(u => u != d.DirectorUserId).Distinct()
+                .Select(u => new SubstitutionSignerSlot(SubstitutionSignerRole.BankSigner, u)),
             new(SubstitutionSignerRole.Substitute, d.SubstituteUserId),
         ],
     };
+
+    /// <summary>
+    /// Подпись (её роль и владелец места — сам подписант или тот, за кого подписано) стоит на этом
+    /// месте. У дополнительных подписантов от Банка роль одна, а мест несколько — сверяется ещё и
+    /// сотрудник; у остальных мест достаточно роли (как было: подпись прежнего директора остаётся
+    /// на месте директора).
+    /// </summary>
+    public static bool Owns(SubstitutionSignerSlot slot, SubstitutionSignerRole role, int? owner) =>
+        slot.Role == role && (role != SubstitutionSignerRole.BankSigner || slot.UserId == owner);
 
     /// <summary>
     /// Зафиксировать документы для подписания: сформировать приказ и договор по текущим данным
@@ -90,10 +108,15 @@ public static class SubstitutionDocuments
         var r = await db.SubstitutionRequests.AsNoTracking()
                     .Include(x => x.CommissionMembers)
                     .Include(x => x.Approvals)
+                    .Include(x => x.AbsentUnit)
+                    .Include(x => x.SubstituteUnit)
                     .FirstOrDefaultAsync(x => x.Id == requestId, ct)
                 ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
 
-        var director = await ResolveDirectorAsync(db, r, ct);
+        // Договор МО от имени Банка подписывает не директор филиала, а Председатель Правления из
+        // настроек маршрута УЧР и дополнительные подписанты, добавленные в заявке.
+        var bank = await BankSignersAsync(db, r, ct);
+        var orderSigners = await OrderSignersAsync(db, r, bank, ct);
 
         var existing = await db.SubstitutionDocuments.Where(x => x.RequestId == requestId).ToListAsync(ct);
         foreach (var old in existing.Where(x => x.IsCurrent)) old.IsCurrent = false;
@@ -103,7 +126,9 @@ public static class SubstitutionDocuments
         var created = new List<SubstitutionDocument>();
         foreach (var kind in Kinds)
         {
-            var bytes = kind == SubstitutionDocumentKind.Order ? print.Order(r) : print.Liability(r);
+            var bytes = kind == SubstitutionDocumentKind.Order
+                ? print.Order(r, orderSigners.Chairman, orderSigners.Visas)
+                : print.Liability(r, bank.Signers);
             var doc = new SubstitutionDocument
             {
                 RequestId = requestId,
@@ -116,7 +141,9 @@ public static class SubstitutionDocuments
                 Content = bytes,
                 ContentSha256 = ResolutionSignatureHasher.Sha256Hex(bytes),
                 CreatedAt = now,
-                DirectorUserId = director,
+                // У приказа подписанта от Банка в ЭЦП нет (Председатель Правления — от руки).
+                DirectorUserId = kind == SubstitutionDocumentKind.Order ? null : bank.MainUserId,
+                ExtraBankSignerUserIds = kind == SubstitutionDocumentKind.Order ? Array.Empty<int>() : bank.ExtraUserIds,
                 AbsentUserId = kind == SubstitutionDocumentKind.Order ? r.AbsentUserId : null,
                 SubstituteUserId = r.SubstituteUserId,
             };
@@ -144,6 +171,61 @@ public static class SubstitutionDocuments
         return await db.HrRoutingSettings.AsNoTracking()
             .Select(s => s.HeadOfficeSignerUserId)
             .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>
+    /// Кто подписывает договор о материальной ответственности от имени Банка (и для филиалов тоже):
+    /// основной — Председатель Правления из настроек маршрута УЧР («Подписант приказов о замещении
+    /// по Головному офису», HrRoutingSettings.HeadOfficeSignerUserId); пока настройка не заполнена —
+    /// директор (как у приказа), чтобы договор не остался без подписанта. Плюс дополнительные
+    /// подписанты, которых делопроизводитель добавил в заявке (по порядку, без повторов основного).
+    /// </summary>
+    public static async Task<(int? MainUserId, int[] ExtraUserIds, List<SubstitutionBankSigner> Signers)> BankSignersAsync(
+        DelosferaDbContext db, SubstitutionRequest r, CancellationToken ct)
+    {
+        var main = await db.HrRoutingSettings.AsNoTracking()
+                       .Select(s => s.HeadOfficeSignerUserId)
+                       .FirstOrDefaultAsync(ct)
+                   ?? await ResolveDirectorAsync(db, r, ct);
+        var extras = r.ExtraBankSignerUserIds.Where(u => u != main).Distinct().ToArray();
+
+        var ids = extras.Prepend(main ?? 0).Where(u => u > 0).ToList();
+        var people = await db.Users.AsNoTracking()
+            .Where(u => ids.Contains(u.Id))
+            .Select(u => new { u.Id, u.FullName, Position = u.Position != null ? u.Position.TitleRu : null })
+            .ToListAsync(ct);
+        var signers = ids
+            .Select(id => people.FirstOrDefault(p => p.Id == id))
+            .Where(p => p is not null)
+            .Select(p => new SubstitutionBankSigner(p!.FullName, p.Position, p.Id))
+            .ToList();
+        return (main, extras, signers);
+    }
+
+    /// <summary>
+    /// Подписи приказа от руки: «Председатель Правления» — основной подписант из настроек маршрута
+    /// УЧР; «Завизировали» — согласующие маршрута действующего круга, кроме директора филиала
+    /// (Операционное управление, УЧР), по порядку этапов.
+    /// </summary>
+    public static async Task<(string? Chairman, List<string> Visas)> OrderSignersAsync(DelosferaDbContext db,
+        SubstitutionRequest r, (int? MainUserId, int[] ExtraUserIds, List<SubstitutionBankSigner> Signers)? bank,
+        CancellationToken ct)
+    {
+        var b = bank ?? await BankSignersAsync(db, r, ct);
+        var chairman = b.Signers.FirstOrDefault(s => s.UserId == b.MainUserId)?.FullName;
+
+        var round = r.Approvals.Select(a => a.Round).DefaultIfEmpty(1).Max();
+        var visaIds = r.Approvals
+            .Where(a => a.Round == round && a.RoleLabel != DirectorStepRole)
+            .OrderBy(a => a.Order)
+            .Select(a => a.UserId)
+            .Distinct()
+            .ToList();
+        var names = visaIds.Count == 0
+            ? new Dictionary<int, string>()
+            : await db.Users.AsNoTracking().Where(u => visaIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.FullName, ct);
+        var visas = visaIds.Where(names.ContainsKey).Select(id => names[id]).ToList();
+        return (chairman, visas);
     }
 
     /// <summary>Филиал подразделения: поднимаемся по дереву до подразделения с «Филиал» в названии.</summary>
@@ -211,8 +293,24 @@ public static class SubstitutionDocuments
         Body body, SubstitutionDocumentKind kind)
     {
         var all = body.ChildElements.Where(e => e is W.Paragraph or Table).ToList();
-        var marker = kind == SubstitutionDocumentKind.Order ? "Директор" : "Банк:";
-        var cut = all.FindLastIndex(e => e is W.Paragraph p && TextOf(p).TrimStart().StartsWith(marker, StringComparison.Ordinal));
+        int cut;
+        if (kind == SubstitutionDocumentKind.Order)
+        {
+            // Приказ по образцу Ф-82-01/ЛС: ЭЦП ставят только «Ознакомлены и согласны» — их блок и
+            // заменяется штампами (Председатель Правления и визы остаются строками для подписи от
+            // руки). Приказы, зафиксированные раньше, — с последней строки «Директор».
+            cut = all.FindLastIndex(e => e is W.Paragraph p && TextOf(p).TrimStart().StartsWith("Ознакомлены и согласны", StringComparison.Ordinal));
+            if (cut < 0)
+                cut = all.FindLastIndex(e => e is W.Paragraph p && TextOf(p).TrimStart().StartsWith("Директор", StringComparison.Ordinal));
+        }
+        else
+        {
+            // Договор по образцу Ф-94-01/МО: подписи — строка-таблица «Подпись: ____ ФИО | Подпись ____»
+            // после реквизитов сторон. Договоры, зафиксированные раньше, — с последней строки «Банк:».
+            cut = all.FindLastIndex(e => TextOf(e).TrimStart().StartsWith("Подпись:", StringComparison.Ordinal));
+            if (cut < 0)
+                cut = all.FindLastIndex(e => e is W.Paragraph p && TextOf(p).TrimStart().StartsWith("Банк:", StringComparison.Ordinal));
+        }
         if (cut < 0) return (all, []);
         return (all.Take(cut).ToList(), all.Skip(cut).ToList());
     }
@@ -240,7 +338,7 @@ public static class SubstitutionDocuments
     /// по ним клиент понимает, после какого абзаца ставится подпись.
     /// </summary>
     public static byte[] WithStamps(SubstitutionDocument doc, IReadOnlyList<SubstitutionStamp> stamps, TimeZoneInfo zone,
-        IReadOnlyDictionary<SubstitutionSignerRole, string?>? slotNames = null, bool layout = false)
+        IReadOnlyDictionary<SubstitutionSignerSlot, string?>? slotNames = null, bool layout = false)
     {
         using var ms = new MemoryStream();
         ms.Write(doc.Content);
@@ -265,20 +363,23 @@ public static class SubstitutionDocuments
                 content.Add(empty);
             }
 
-            PlaceSignatureBlocks(doc, content, stamps, zone, slotNames ?? new Dictionary<SubstitutionSignerRole, string?>(),
+            PlaceSignatureBlocks(doc, content, stamps, zone, slotNames ?? new Dictionary<SubstitutionSignerSlot, string?>(),
                 ContentWidthTwips(sect), layout);
 
             if (layout)
                 AddAnchorBookmarks(content);
             else
-                AppendSignatureSheet(body, sect, doc, stamps, zone);
+                AppendSignatureSheet(body, sect, doc, stamps, zone, slotNames);
 
             word.MainDocumentPart.Document.Save();
         }
         return ms.ToArray();
     }
 
-    private sealed record PlacedBlock(SubstitutionSignerRole Role, SubstitutionStamp? Stamp, int Anchor, int IndentMm);
+    private sealed record PlacedBlock(SubstitutionSignerSlot Slot, SubstitutionStamp? Stamp, int Anchor, int IndentMm)
+    {
+        public SubstitutionSignerRole Role => Slot.Role;
+    }
 
     /// <summary>
     /// Блоки подписей по местам: подписанные — после выбранного абзаца (несколько на одном месте —
@@ -288,22 +389,22 @@ public static class SubstitutionDocuments
     /// </summary>
     private static void PlaceSignatureBlocks(SubstitutionDocument doc, List<OpenXmlElement> content,
         IReadOnlyList<SubstitutionStamp> stamps, TimeZoneInfo zone,
-        IReadOnlyDictionary<SubstitutionSignerRole, string?> slotNames, int contentTwips, bool layout)
+        IReadOnlyDictionary<SubstitutionSignerSlot, string?> slotNames, int contentTwips, bool layout)
     {
         var slots = Slots(doc);
         var signed = new List<PlacedBlock>();
         var pending = new List<PlacedBlock>();
         foreach (var slot in slots)
         {
-            var s = stamps.FirstOrDefault(x => x.Role == slot.Role);
+            var s = stamps.FirstOrDefault(x => Owns(slot, x.Role, x.Owner));
             if (s is not null)
             {
                 var (anchor, indent) = NormalizePlacement(s.Anchor, s.IndentMm, content.Count);
-                signed.Add(new PlacedBlock(slot.Role, s, anchor, indent));
+                signed.Add(new PlacedBlock(slot, s, anchor, indent));
             }
             else if (!layout)
             {
-                pending.Add(new PlacedBlock(slot.Role, null, content.Count - 1, 0));
+                pending.Add(new PlacedBlock(slot, null, content.Count - 1, 0));
             }
         }
 
@@ -323,7 +424,7 @@ public static class SubstitutionDocuments
             if (ack) headerDone = true;
 
             var after = tail.TryGetValue(b.Anchor, out var t) ? t : content[b.Anchor];
-            foreach (var el in BuildBlock(doc.Kind, b, slotNames.GetValueOrDefault(b.Role), withHeader, zone, contentTwips))
+            foreach (var el in BuildBlock(doc.Kind, b, slotNames.GetValueOrDefault(b.Slot), withHeader, zone, contentTwips))
             {
                 after.InsertAfterSelf(el);
                 after = el;
@@ -380,7 +481,7 @@ public static class SubstitutionDocuments
     /// Блок одной подписи: (заголовок) + строка «подпись — штамп ЭЦП (— дата)» вместо рукописной
     /// черты. Приказ: «Директор [штамп]»; отсутствующий/замещающий — («Ознакомлены и согласны:»)
     /// «Фамилия И.О. [штамп] «20» октября 2026 г.». Договор: «Банк: ОАО «Керемет Банк»» /
-    /// «Работник: ФИО», затем «Директор / Подпись [штамп] «дата»». Без подписи — то же серым,
+    /// «Работник: ФИО», затем «Подпись [штамп] «дата»». Без подписи — то же серым,
     /// на месте штампа — пунктирная рамка «Место для подписи ЭЦП».
     /// </summary>
     private static IEnumerable<OpenXmlElement> BuildBlock(SubstitutionDocumentKind kind, PlacedBlock b, string? fullName,
@@ -403,8 +504,8 @@ public static class SubstitutionDocuments
         }
         else
         {
-            header = b.Role == SubstitutionSignerRole.Director
-                ? "Банк: ОАО «Керемет Банк»"
+            header = b.Role is SubstitutionSignerRole.Director or SubstitutionSignerRole.BankSigner
+                ? $"Банк: ОАО «Керемет Банк»{(string.IsNullOrWhiteSpace(fullName) ? "" : ", " + SubstitutionPrintService.Short(fullName))}"
                 : $"Работник: {(string.IsNullOrWhiteSpace(fullName) ? "—" : fullName.Trim())}";
         }
         yield return header is null
@@ -428,7 +529,7 @@ public static class SubstitutionDocuments
         else
         {
             yield return SignRow(left,
-                (LabelLiabilityMm, SignLine(b.Role == SubstitutionSignerRole.Director ? "Директор" : "Подпись", 0, bold: false, color, 0, false)),
+                (LabelLiabilityMm, SignLine("Подпись", 0, bold: false, color, 0, false)),
                 (StampWidthMm, stamp),
                 (DateColumnMm, SignLine(date, 0, bold: false, color, 0, false, indentLeft: 120)));
         }
@@ -573,7 +674,8 @@ public static class SubstitutionDocuments
 
     /// <summary>Лист подписей ЭЦП в конце документа — с новой страницы, как лист согласования у ВНД.</summary>
     private static void AppendSignatureSheet(Body body, SectionProperties sect, SubstitutionDocument doc,
-        IReadOnlyList<SubstitutionStamp> stamps, TimeZoneInfo zone)
+        IReadOnlyList<SubstitutionStamp> stamps, TimeZoneInfo zone,
+        IReadOnlyDictionary<SubstitutionSignerSlot, string?>? slotNames = null)
     {
         void Add(OpenXmlElement e) => body.InsertBefore(e, sect);
 
@@ -613,7 +715,9 @@ public static class SubstitutionDocuments
         {
             n++;
             var title = RoleTitle(doc.Kind, slot.Role);
-            var s = stamps.FirstOrDefault(x => x.Role == slot.Role);
+            var s = stamps.FirstOrDefault(x => Owns(slot, x.Role, x.Owner));
+            if (slot.Role == SubstitutionSignerRole.BankSigner && s is null && slotNames?.GetValueOrDefault(slot) is { } bankName)
+                title += $": {bankName}";
             var who = s is null ? null : s.OnBehalfOfName is null ? s.SignerName : $"{s.SignerName} (за {s.OnBehalfOfName})";
 
             var signer = new List<Paragraph> { Paragraph(title, bold: true, size: 20) };

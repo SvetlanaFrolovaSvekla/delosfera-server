@@ -118,6 +118,12 @@ public sealed class SubstitutionSignTarget
     public int DocumentId { get; set; }
     public SubstitutionSignerRole Role { get; set; }
 
+    /// <summary>
+    /// Чьё место подписывается — нужно для дополнительных подписантов от Банка (BankSigner: мест
+    /// несколько). Не задано — место текущего пользователя.
+    /// </summary>
+    public int? SignerUserId { get; set; }
+
     /// <summary>Место подписи (для тестовой подписи); в хэш не входит.</summary>
     public SubstitutionSignPlacement? Placement { get; set; }
 }
@@ -126,6 +132,9 @@ public sealed class SubstitutionEcpSignRequest
 {
     public int DocumentId { get; set; }
     public SubstitutionSignerRole Role { get; set; }
+
+    /// <summary>Чьё место подписывается (для BankSigner); см. <see cref="SubstitutionSignTarget.SignerUserId"/>.</summary>
+    public int? SignerUserId { get; set; }
 
     /// <summary>CMS-подпись хэша из 2.5, base64.</summary>
     public string? SignatureBase64 { get; set; }
@@ -241,7 +250,7 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
             .Select(d => new
             {
                 d.Id, d.Kind, d.Version, d.IsCurrent, d.FileName, d.ContentSha256, d.CreatedAt,
-                d.DirectorUserId, d.AbsentUserId, d.SubstituteUserId,
+                d.DirectorUserId, d.AbsentUserId, d.SubstituteUserId, d.ExtraBankSignerUserIds,
             })
             .ToListAsync(ct);
         var docIds = docs.Select(d => d.Id).ToList();
@@ -251,6 +260,7 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
 
         var userIds = docs.SelectMany(d => new[] { d.DirectorUserId, d.AbsentUserId, d.SubstituteUserId })
             .Where(x => x is not null).Select(x => x!.Value)
+            .Concat(docs.SelectMany(d => d.ExtraBankSignerUserIds))
             .Concat(signatures.Select(s => s.UserId))
             .Concat(signatures.Where(s => s.OnBehalfOfUserId != null).Select(s => s.OnBehalfOfUserId!.Value))
             .Distinct().ToList();
@@ -279,6 +289,7 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
             {
                 Kind = d.Kind, DirectorUserId = d.DirectorUserId, AbsentUserId = d.AbsentUserId,
                 SubstituteUserId = d.SubstituteUserId, FileName = d.FileName, Content = [], ContentSha256 = d.ContentSha256,
+                ExtraBankSignerUserIds = d.ExtraBankSignerUserIds,
             };
             var dto = new SubstitutionSigningDocumentDto
             {
@@ -293,7 +304,8 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
             };
             foreach (var slot in SubstitutionDocuments.Slots(entity))
             {
-                var sig = signatures.FirstOrDefault(s => s.DocumentId == d.Id && s.Role == slot.Role);
+                var sig = signatures.FirstOrDefault(s => s.DocumentId == d.Id
+                                                         && SubstitutionDocuments.Owns(slot, s.Role, s.OnBehalfOfUserId ?? s.UserId));
                 // Неактуальная подпись: тот же подписант ставил её под прежней версией этого документа.
                 var stale = sig is null && d.IsCurrent && slot.UserId is { } staleOwner
                     ? StaleSignatureOf(signatures, docVersion, d.Kind, d.Version, slot.Role, staleOwner)
@@ -306,7 +318,7 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
                     UserId = slot.UserId,
                     UserName = slot.UserId is { } u && names.TryGetValue(u, out var n) ? n : null,
                     CanSign = open && stageAllows && d.IsCurrent && sig is null && slot.UserId is { } owner
-                              && (owner == userId || (slot.Role == SubstitutionSignerRole.Director && actingFor.Contains(owner))),
+                              && (owner == userId || (MayActFor(slot.Role) && actingFor.Contains(owner))),
                     Signature = sig is null ? null : ToDto(sig, names, d.Version),
                     StaleSignature = stale is null ? null : ToDto(stale, names, docVersion[stale.DocumentId].Version),
                     AutoApproved = stale is not null,
@@ -376,13 +388,13 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
 
     public async Task<string> GetHashAsync(int requestId, SubstitutionSignTarget target, int userId, CancellationToken ct = default)
     {
-        var (doc, _) = await LoadForSigningAsync(requestId, target, userId, ct);
-        return ComputeHash(requestId, doc, target.Role);
+        var (doc, owner) = await LoadForSigningAsync(requestId, target, userId, ct);
+        return ComputeHash(requestId, doc, target.Role, owner);
     }
 
     /// <summary>SHA-256 канонической строки (hex upper-case): заявка, документ, вид, версия, роль и
     /// SHA-256 самого файла. Поменяй любой байт файла или подпиши не своё место — хэш другой.</summary>
-    public static string ComputeHash(int requestId, SubstitutionDocument doc, SubstitutionSignerRole role)
+    public static string ComputeHash(int requestId, SubstitutionDocument doc, SubstitutionSignerRole role, int? owner = null)
     {
         var sb = new StringBuilder(HashSchemaVersion);
         sb.Append('\n').Append("request:").Append(requestId.ToString(CultureInfo.InvariantCulture));
@@ -390,6 +402,10 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
         sb.Append('\n').Append("kind:").Append(doc.Kind.ToString());
         sb.Append('\n').Append("version:").Append(doc.Version.ToString(CultureInfo.InvariantCulture));
         sb.Append('\n').Append("role:").Append(role.ToString());
+        // У дополнительных подписантов от Банка мест несколько — в хэш входит и чьё место (у прежних
+        // ролей строка не меняется, хэши ранее поставленных подписей остаются прежними).
+        if (role == SubstitutionSignerRole.BankSigner && owner is { } o)
+            sb.Append(':').Append(o.ToString(CultureInfo.InvariantCulture));
         sb.Append('\n').Append("content:").Append(doc.ContentSha256);
         return ResolutionSignatureHasher.Sha256Hex(sb.ToString());
     }
@@ -400,7 +416,7 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var target = new SubstitutionSignTarget { DocumentId = request.DocumentId, Role = request.Role };
+        var target = new SubstitutionSignTarget { DocumentId = request.DocumentId, Role = request.Role, SignerUserId = request.SignerUserId };
         var (doc, owner) = await LoadForSigningAsync(requestId, target, userId, ct);
 
         // 1. Наличие и формат.
@@ -431,7 +447,7 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
                 ResolutionSignatureErrorCodes.SignatureInvalid, "Недопустимый размер подписи ЭЦП");
 
         // 2. Хэш — только из БД.
-        var expectedHash = ComputeHash(requestId, doc, request.Role);
+        var expectedHash = ComputeHash(requestId, doc, request.Role, owner);
         if (!ResolutionSignatureHasher.HashesEqual(expectedHash, request.Hash))
             throw new ResolutionSignatureException(StatusCodes.Status409Conflict,
                 ResolutionSignatureErrorCodes.DocumentChanged,
@@ -527,7 +543,7 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
         CancellationToken ct = default)
     {
         var (doc, owner) = await LoadForSigningAsync(requestId, target, userId, ct);
-        var hash = ComputeHash(requestId, doc, target.Role);
+        var hash = ComputeHash(requestId, doc, target.Role, owner);
         var fake = RandomNumberGenerator.GetBytes(64);
         var now = DateTime.UtcNow;
         var name = await _db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => u.FullName).FirstOrDefaultAsync(ct);
@@ -614,7 +630,8 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
         var autoApproved = new List<SubstitutionSignature>();
         foreach (var slot in SubstitutionDocuments.Slots(doc))
         {
-            if (slot.UserId is not { } owner || sigs.Any(s => s.Role == slot.Role)) continue;
+            if (slot.UserId is not { } owner
+                || sigs.Any(s => SubstitutionDocuments.Owns(slot, s.Role, s.OnBehalfOfUserId ?? s.UserId))) continue;
             if (StaleSignatureOf(all, docVersion, doc.Kind, doc.Version, slot.Role, owner) is { } stale)
                 autoApproved.Add(stale);
         }
@@ -639,7 +656,8 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
             AutoApproved: auto,
             SignedVersion: docVersion[s.DocumentId].Version,
             Anchor: s.PlacementAnchor,
-            IndentMm: s.PlacementIndentMm);
+            IndentMm: s.PlacementIndentMm,
+            Owner: s.OnBehalfOfUserId ?? s.UserId);
 
         var stamps = sigs.Select(s => Stamp(s, false)).Concat(autoApproved.Select(s => Stamp(s, true))).ToList();
 
@@ -649,18 +667,23 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
             .Select(x => new { x.AbsentName, x.SubstituteName }).FirstOrDefaultAsync(ct);
         string? NameOf(int? userId, string? fallback) =>
             userId is { } u && names.TryGetValue(u, out var n) ? n : fallback;
-        var slotNames = new Dictionary<SubstitutionSignerRole, string?>
+        var slotNames = SubstitutionDocuments.Slots(doc).Distinct().ToDictionary(slot => slot, slot => slot.Role switch
         {
-            [SubstitutionSignerRole.Director] = NameOf(doc.DirectorUserId, null),
-            [SubstitutionSignerRole.Absent] = NameOf(doc.AbsentUserId, request?.AbsentName),
-            [SubstitutionSignerRole.Substitute] = NameOf(doc.SubstituteUserId, request?.SubstituteName),
-        };
+            SubstitutionSignerRole.Absent => NameOf(slot.UserId, request?.AbsentName),
+            SubstitutionSignerRole.Substitute => NameOf(slot.UserId, request?.SubstituteName),
+            _ => NameOf(slot.UserId, null),
+        });
 
         var name = Path.GetFileNameWithoutExtension(doc.FileName) + (layout ? " (макет).docx" : " (с подписями ЭЦП).docx");
         return (SubstitutionDocuments.WithStamps(doc, stamps, _clock.Zone, slotNames, layout), name);
     }
 
     // ── Внутреннее ──────────────────────────────────────────────────────────────
+
+    /// <summary>За кого можно подписать по замещению (GEN-14): за подписантов от Банка — директора
+    /// / основного подписанта и дополнительных; ознакомление отсутствующего и замещающего — только лично.</summary>
+    private static bool MayActFor(SubstitutionSignerRole role) =>
+        role is SubstitutionSignerRole.Director or SubstitutionSignerRole.BankSigner;
 
     /// <summary>Место подписи в пределах документа; не выбрано или вне документа — в конце текста (null).</summary>
     private static (int? Anchor, int? IndentMm) Placement(SubstitutionDocument doc, SubstitutionSignPlacement? placement)
@@ -696,7 +719,11 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
                 ResolutionSignatureErrorCodes.DocumentChanged,
                 "Документ изменён УЧР — подпишите новую версию");
 
-        var slot = SubstitutionDocuments.Slots(doc).FirstOrDefault(s => s.Role == target.Role)
+        // Дополнительных подписантов от Банка несколько — место выбирается по сотруднику.
+        var slot = (target.Role == SubstitutionSignerRole.BankSigner
+                       ? SubstitutionDocuments.Slots(doc).FirstOrDefault(s => s.Role == target.Role
+                                                                              && s.UserId == (target.SignerUserId ?? userId))
+                       : SubstitutionDocuments.Slots(doc).FirstOrDefault(s => s.Role == target.Role))
                    ?? throw new InvalidOperationException("Этот документ в таком качестве не подписывается");
         if (slot.UserId is not { } owner)
             throw new InvalidOperationException("Для этого места подписи не назначен сотрудник");
@@ -711,15 +738,16 @@ public sealed class SubstitutionSigningService : ISubstitutionSigningService
 
         if (owner != userId)
         {
-            var mayActFor = target.Role == SubstitutionSignerRole.Director
+            var mayActFor = MayActFor(target.Role)
                             && await ActingFor.ActsForAsync(_db, userId, owner, _clock.Today);
             if (!mayActFor)
-                throw new UnauthorizedAccessException(target.Role == SubstitutionSignerRole.Director
-                    ? "Подписать за директора может только сам директор или его замещающий"
+                throw new UnauthorizedAccessException(MayActFor(target.Role)
+                    ? "Подписать за этого подписанта может только он сам или его замещающий"
                     : "Ознакомиться и подписать может только сам сотрудник");
         }
 
-        if (await _db.SubstitutionSignatures.AnyAsync(s => s.DocumentId == doc.Id && s.Role == target.Role, ct))
+        if (await _db.SubstitutionSignatures.AnyAsync(s => s.DocumentId == doc.Id && s.Role == target.Role
+                && (target.Role != SubstitutionSignerRole.BankSigner || (s.OnBehalfOfUserId ?? s.UserId) == owner), ct))
             throw new InvalidOperationException("Документ в этом качестве уже подписан");
 
         return (doc, owner);

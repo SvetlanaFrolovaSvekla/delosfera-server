@@ -216,8 +216,8 @@ public class SubstitutionOwnershipTests
     /// <summary>Печать в этих проверках не задействована — важен контроль доступа.</summary>
     private sealed class NoopPrint : ISubstitutionPrintService
     {
-        public byte[] Order(SubstitutionRequest r) => [];
-        public byte[] Liability(SubstitutionRequest r) => [];
+        public byte[] Order(SubstitutionRequest r, string? chairmanName = null, IReadOnlyList<string>? visas = null) => [];
+        public byte[] Liability(SubstitutionRequest r, IReadOnlyList<SubstitutionBankSigner>? bankSigners = null, bool blank = false) => [];
         public byte[] Card(SubstitutionRequest r) => [];
     }
 }

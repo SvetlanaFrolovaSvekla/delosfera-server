@@ -42,6 +42,8 @@
       <EmbeddedResource Include="Modules\Documents\VND\Resources\ApprovalSheetTemplate.docx" LogicalName="ApprovalSheetTemplate.docx" />
       <!-- Шаблон "Титульный лист" редакции ВНД (см. Modules\Documents\VND\Services\TitlePageGenerator.cs) -->
       <EmbeddedResource Include="Modules\Documents\VND\Resources\TitlePageTemplate.docx" LogicalName="TitlePageTemplate.docx" />
+      <!-- Логотип Банка в приказе о замещении (см. Modules\Substitutions\Services\SubstitutionPrintService.cs) -->
+      <EmbeddedResource Include="Modules\Substitutions\Resources\BankLogo.png" LogicalName="SubstitutionBankLogo.png" />
       <None Remove="tests/**/*" />
     </ItemGroup>
 

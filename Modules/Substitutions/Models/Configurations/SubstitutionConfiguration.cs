@@ -26,6 +26,7 @@ public class SubstitutionRequestConfiguration : IEntityTypeConfiguration<Substit
             .HasForeignKey(m => m.RequestId).OnDelete(DeleteBehavior.Cascade);
 
         b.HasIndex(x => x.Status);
+        b.Property(x => x.ExtraBankSignerUserIds).HasColumnType("integer[]");
     }
 }
 
@@ -48,6 +49,7 @@ public class SubstitutionDocumentConfiguration : IEntityTypeConfiguration<Substi
         b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(32);
         b.Property(x => x.FileName).HasMaxLength(300);
         b.Property(x => x.ContentSha256).HasMaxLength(64);
+        b.Property(x => x.ExtraBankSignerUserIds).HasColumnType("integer[]");
         b.HasIndex(x => new { x.RequestId, x.Kind, x.Version }).IsUnique();
     }
 }

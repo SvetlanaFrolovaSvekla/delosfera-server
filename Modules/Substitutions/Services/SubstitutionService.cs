@@ -54,8 +54,17 @@ public interface ISubstitutionService
     Task<SubstitutionDetails> WithdrawAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
     Task DeleteAsync(int id, int actorUserId, bool isPrivileged = false, CancellationToken ct = default);
 
-    /// <summary>Печатная форма: form = "order" (приказ) или "liability" (договор МО).</summary>
+    /// <summary>Печатная форма: form = "order" (приказ), "liability" (договор МО),
+    /// "liabilityBlank" (договор МО с пустыми полями: номер, «в лице …», ФИО подписантов от Банка)
+    /// или "card" (листок заявки).</summary>
     Task<(byte[] Bytes, string FileName)> PrintAsync(int id, string form, CancellationToken ct = default);
+
+    /// <summary>
+    /// Дополнительные подписанты договора МО от имени Банка (кроме основного — Председателя
+    /// Правления из настроек). Ведут делопроизводители и УЧР (право проверяет контроллер).
+    /// Если документы уже зафиксированы — договор перевыпускается новой версией.
+    /// </summary>
+    Task<SubstitutionDetails> SetBankSignersAsync(int id, IReadOnlyList<int> userIds, int actorUserId, CancellationToken ct = default);
 
     /// <summary>Норматив срока согласования (ЗМ-SLA), рабочих дней на этап.</summary>
     Task<int> GetSlaDaysAsync(CancellationToken ct = default);
@@ -120,8 +129,8 @@ public class SubstitutionService : ISubstitutionService
 
     public async Task<(byte[] Bytes, string FileName)> PrintAsync(int id, string form, CancellationToken ct = default)
     {
-        var entity = await _db.SubstitutionRequests
-            .Include(x => x.CommissionMembers)
+        // Листку заявки («card») нужны и автор/инициатор, подразделения и согласующие маршрута.
+        var entity = await BaseQuery()
             .FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
 
@@ -139,11 +148,20 @@ public class SubstitutionService : ISubstitutionService
         var stamp = entity.RegNumber ?? id.ToString();
         return form switch
         {
-            "order" => (_print.Order(entity), $"Приказ о возложении обязанностей {stamp}.docx"),
-            "liability" => (_print.Liability(entity), $"Договор о матответственности {stamp}.docx"),
+            "order" => await OrderPrintAsync(entity, stamp, ct),
+            "liability" => (_print.Liability(entity, (await SubstitutionDocuments.BankSignersAsync(_db, entity, ct)).Signers),
+                $"Договор о матответственности {stamp}.docx"),
+            "liabilityBlank" => (_print.Liability(entity, null, blank: true),
+                $"Договор о матответственности (пустой бланк) {stamp}.docx"),
             "card" => (_print.Card(entity), $"Заявка на замещение {stamp}.docx"),
             _ => throw new InvalidOperationException("Неизвестная форма печати"),
         };
+    }
+
+    private async Task<(byte[] Bytes, string FileName)> OrderPrintAsync(SubstitutionRequest entity, string stamp, CancellationToken ct)
+    {
+        var (chairman, visas) = await SubstitutionDocuments.OrderSignersAsync(_db, entity, null, ct);
+        return (_print.Order(entity, chairman, visas), $"Приказ о возложении обязанностей {stamp}.docx");
     }
 
     private IQueryable<SubstitutionRequest> BaseQuery() =>
@@ -240,7 +258,8 @@ public class SubstitutionService : ISubstitutionService
     {
         var approvers = await ActingFor.SelfAndAbsentAsync(_db, userId, _clock.Today);
         var signerDocs = _db.SubstitutionDocuments.Where(d => d.IsCurrent
-            && d.DirectorUserId != null && approvers.Contains(d.DirectorUserId.Value));
+            && ((d.DirectorUserId != null && approvers.Contains(d.DirectorUserId.Value))
+                || d.ExtraBankSignerUserIds.Any(u => approvers.Contains(u))));
         return q.Where(x => x.InitiatorUserId == userId
                             || x.Approvals.Any(a => approvers.Contains(a.UserId))
                             || (x.Status != SubstitutionStatus.Draft
@@ -302,7 +321,53 @@ public class SubstitutionService : ISubstitutionService
                 .Where(u => deciderIds.Contains(u.Id))
                 .ToDictionaryAsync(u => u.Id, u => u.FullName, ct);
 
+        // Подписанты договора МО от имени Банка: основной (из настроек) и добавленные в заявке.
+        var bank = await SubstitutionDocuments.BankSignersAsync(_db, x, ct);
+        details.BankSigners = bank.Signers.Select(s => new BankSignerDto
+        {
+            UserId = s.UserId,
+            FullName = s.FullName,
+            Position = s.Position,
+            IsMain = s.UserId == bank.MainUserId,
+        }).ToList();
+
         return details;
+    }
+
+    public async Task<SubstitutionDetails> SetBankSignersAsync(int id, IReadOnlyList<int> userIds, int actorUserId,
+        CancellationToken ct = default)
+    {
+        var entity = await _db.SubstitutionRequests
+            .Include(x => x.Approvals)
+            .FirstOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw new KeyNotFoundException("Заявка на замещение не найдена");
+        if (entity.Status == SubstitutionStatus.Executed)
+            throw new InvalidOperationException("Заявка уже исполнена — подписантов договора менять нельзя");
+
+        var ids = userIds.Where(u => u > 0).Distinct().ToArray();
+        var known = await _db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).Select(u => u.Id).ToListAsync(ct);
+        if (known.Count != ids.Length)
+            throw new InvalidOperationException("Подписант не найден среди сотрудников");
+
+        var before = entity.ExtraBankSignerUserIds;
+        if (before.SequenceEqual(ids)) return (await GetAsync(id, ct))!;
+
+        entity.ExtraBankSignerUserIds = ids;
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync(AuditEntityType, id, "BankSignersChanged", actorUserId, new { was = before, now = ids });
+
+        // Подписанты — часть текста договора: если документы уже зафиксированы, договор
+        // перевыпускается (прежние подписи остаются в журнале неактуальными, как при правке УЧР).
+        if (await HasDocumentsAsync(id, ct))
+        {
+            if (entity.Status == SubstitutionStatus.OnExecution)
+                await StartSigningAsync(entity, actorUserId, refreeze: true, ct, edited: true);
+            else
+                await RefreezeQuietlyAsync(entity, actorUserId, "bankSigners", ct);
+        }
+
+        return (await GetAsync(id, ct))!;
     }
 
     public async Task<SubstitutionDetails> CreateAsync(SubstitutionSaveRequest request, int actorUserId, CancellationToken ct = default)
@@ -1023,7 +1088,7 @@ public class SubstitutionService : ISubstitutionService
         foreach (var slot in SubstitutionDocuments.Slots(d))
         {
             if (slot.UserId is not { } owner) continue;
-            if (signatures.Any(s => s.DocumentId == d.Id && s.Role == slot.Role)) continue;
+            if (signatures.Any(s => s.DocumentId == d.Id && SubstitutionDocuments.Owns(slot, s.Role, s.Owner))) continue;
             var signedBefore = signatures.Any(s => !docIds.Contains(s.DocumentId)
                                                    && s.Kind == d.Kind && s.Role == slot.Role && s.Owner == owner);
             (signedBefore ? stale : fresh).Add(owner);
@@ -1277,6 +1342,7 @@ public class SubstitutionService : ISubstitutionService
             HandoverOn = x.HandoverOn,
             Description = x.Description,
             RouteNote = x.RouteNote,
+            ExtraBankSignerUserIds = x.ExtraBankSignerUserIds.ToList(),
             CommissionMembers = x.CommissionMembers
                 .OrderBy(m => m.SortOrder)
                 .Select(m => new CommissionMemberDto { UserId = m.UserId, FullName = m.FullName, Position = m.Position })

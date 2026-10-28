@@ -100,6 +100,7 @@ public class SubstitutionController : ControllerBase
             CanCorrect = d.Status is "OnApproval" or "OnExecution" && await CanCorrectAsync(ct),
             CanDelete = (isInitiator || IsAdmin) && d.Status == "Draft",
             CanExecute = d.Status == "OnExecution" && await CanExecuteAsync(d.Id, ct),
+            CanEditBankSigners = d.Status != "Executed" && await CanCorrectAsync(ct),
         };
         return Ok(d);
     }
@@ -227,6 +228,21 @@ public class SubstitutionController : ControllerBase
     /// подписи — автосогласованием); signed=false — «Для подписи от руки»: тот же зафиксированный
     /// файл без листа. Пока документы не зафиксированы (черновик) — форма по текущим данным.
     /// </summary>
+    /// <summary>
+    /// Дополнительные подписанты договора МО от имени Банка (кроме основного — Председателя
+    /// Правления из настроек маршрута УЧР). Ведут делопроизводство (CorrectSubstitution) и УЧР.
+    /// </summary>
+    [HttpPut("{id:int}/bank-signers")]
+    public async Task<IActionResult> SetBankSigners(int id, [FromBody] SubstitutionBankSignersRequest request, CancellationToken ct)
+    {
+        if (await DenyIfHiddenAsync(id, ct) is { } denied) return denied;
+        if (!await CanCorrectAsync(ct))
+            return StatusCode(403, new { message = "Подписантов договора от Банка добавляют делопроизводство и УЧР" });
+        try { return await CardAsync(await _service.SetBankSignersAsync(id, request.UserIds, _currentUser.UserId, ct), ct); }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     [HttpGet("{id:int}/print/{form}")]
     public async Task<IActionResult> Print(int id, string form, [FromQuery] bool signed = false, CancellationToken ct = default)
     {

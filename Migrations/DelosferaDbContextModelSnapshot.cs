@@ -13566,6 +13566,11 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("director_user_id");
 
+                    b.PrimitiveCollection<int[]>("ExtraBankSignerUserIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]")
+                        .HasColumnName("extra_bank_signer_user_ids");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -13673,6 +13678,11 @@ namespace delosfera_server.Migrations
                     b.Property<DateOnly?>("EndsOn")
                         .HasColumnType("date")
                         .HasColumnName("ends_on");
+
+                    b.PrimitiveCollection<int[]>("ExtraBankSignerUserIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]")
+                        .HasColumnName("extra_bank_signer_user_ids");
 
                     b.Property<int>("HandoverMoment")
                         .HasColumnType("integer")

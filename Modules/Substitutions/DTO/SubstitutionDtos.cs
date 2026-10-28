@@ -152,6 +152,30 @@ public class SubstitutionDetails : SubstitutionListItem
 
     /// <summary>Права текущего пользователя на эту заявку (заполняет контроллер).</summary>
     public SubstitutionAccessDto? Access { get; set; }
+
+    /// <summary>Дополнительные подписанты договора МО от имени Банка (добавлены в заявке).</summary>
+    public List<int> ExtraBankSignerUserIds { get; set; } = [];
+
+    /// <summary>Кто подписывает договор МО от имени Банка: основной (Председатель Правления из
+    /// настроек маршрута УЧР) и дополнительные — по порядку.</summary>
+    public List<BankSignerDto> BankSigners { get; set; } = [];
+}
+
+/// <summary>Подписант договора МО от имени Банка.</summary>
+public class BankSignerDto
+{
+    public int UserId { get; set; }
+    public string FullName { get; set; } = "";
+    public string? Position { get; set; }
+
+    /// <summary>Основной подписант из настроек маршрута УЧР (Председатель Правления).</summary>
+    public bool IsMain { get; set; }
+}
+
+/// <summary>Дополнительные подписанты договора МО от имени Банка — список целиком.</summary>
+public class SubstitutionBankSignersRequest
+{
+    public List<int> UserIds { get; set; } = [];
 }
 
 /// <summary>Что текущему пользователю можно делать с заявкой.</summary>
@@ -166,6 +190,10 @@ public class SubstitutionAccessDto
 
     /// <summary>Корректировать заявку на согласовании/подписании (право CorrectSubstitution или УЧР).</summary>
     public bool CanCorrect { get; set; }
+
+    /// <summary>Добавлять/убирать дополнительных подписантов договора МО от Банка: делопроизводство
+    /// (право CorrectSubstitution) и УЧР — пока заявка не исполнена.</summary>
+    public bool CanEditBankSigners { get; set; }
 }
 
 public class SubstitutionPage
