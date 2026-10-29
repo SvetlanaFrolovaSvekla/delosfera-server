@@ -127,6 +127,30 @@ public class VndService : IVndService
                 (x.TitleEn != null && EF.Functions.ILike(x.TitleEn, $"%{request.Name}%")) ||
                 (x.TitleKg != null && EF.Functions.ILike(x.TitleKg, $"%{request.Name}%")));
 
+        // "Текст редакции" (расширенный поиск): документ попадает в выдачу, если совпадение есть
+        // в тексте ЛЮБОЙ его редакции (на любом языке). Текст извлекается из Word-файлов заранее
+        // (VndRedactionSearchText, см. VndLegacyLinkIndexer) - скачивать и разбирать файлы на
+        // каждый запрос реестра было бы слишком дорого. Пробелы в запросе схлопываются так же,
+        // как в извлечённом тексте (DocxPlainTextExtractor.Normalize).
+        var revisionText = string.IsNullOrWhiteSpace(request.RevisionText)
+            ? null
+            : DocxPlainTextExtractor.Normalize(request.RevisionText);
+        if (!string.IsNullOrEmpty(revisionText))
+        {
+            // Сначала отдельным запросом — id ВНД, в тексте редакций которых есть фраза. Он идёт от
+            // триграммного индекса (ix_vnd_redaction_search_text_text_trgm) и выполняется ОДИН раз.
+            // Раньше это было условием EXISTS прямо в запросе реестра, а реестр грузится через
+            // AsSplitQuery (основной запрос + по запросу на каждую коллекцию Include) — и полный
+            // поиск по текстам всех редакций повторялся в каждом из этих запросов.
+            var pattern = $"%{EscapeLikePattern(revisionText)}%";
+            var matchedVndIds = await _db.VndRedactionSearchTexts.AsNoTracking()
+                .Where(t => EF.Functions.ILike(t.Text, pattern))
+                .Select(t => t.Redaction!.VndId)
+                .Distinct()
+                .ToListAsync();
+            query = query.Where(x => matchedVndIds.Contains(x.Id));
+        }
+
         if (request.Statuses.Count > 0)
         {
             var statuses = request.Statuses.Select(MapStatus).ToList();
@@ -259,6 +283,11 @@ public class VndService : IVndService
             ? new HashSet<int>()
             : await VndSecrecy.GetDeniedIdsAsync(_db, _currentUser, entities.Where(e => e.IsSecret).Select(e => e.Id));
 
+        // Поиск по тексту не должен подтверждать, что слово есть в секретном документе, к
+        // которому у сотрудника нет допуска: такие документы из выдачи по тексту убираем.
+        if (!string.IsNullOrEmpty(revisionText) && deniedSecretIds.Count > 0)
+            entities = entities.Where(e => !deniedSecretIds.Contains(e.Id)).ToList();
+
         return entities
             .Select(x =>
             {
@@ -269,6 +298,11 @@ public class VndService : IVndService
             })
             .ToList();
     }
+
+    /// <summary>Экранировать спецсимволы LIKE (\, %, _), чтобы "50%" или "п_1" в строке
+    /// поиска искались буквально, а не как шаблон.</summary>
+    private static string EscapeLikePattern(string value) =>
+        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     /// <summary>Проставить VndResponse.IsFavorite для текущего пользователя.</summary>
     private async Task<VndResponse> WithFavoriteAsync(VndResponse response)

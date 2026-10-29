@@ -291,5 +291,9 @@ public class WorkflowAuthorizationTests
         public Task<RouteInstance> InstantiateForApproversAsync(int documentId, IReadOnlyList<int> approverUserIds, bool parallel, int? timeNormHours = null, int? signerUserId = null) => throw new NotSupportedException();
         public Task ApplyOverdueAsync(DateTime now) => throw new NotSupportedException();
         public Task InterruptAsync(int routeInstanceId, int actorUserId) => throw new NotSupportedException();
+        public Task<RouteInstance> RestartAsync(int routeInstanceId, int actorUserId) => throw new NotSupportedException();
+        public Task<RouteParticipant> AddApproverStepAsync(int routeInstanceId, int userId, int? beforeStepOrder, int actorUserId) => throw new NotSupportedException();
+        public Task RemoveParticipantAsync(int participantId, int actorUserId) => throw new NotSupportedException();
+        public Task<RouteParticipant> ReplaceParticipantAsync(int participantId, int newUserId, int actorUserId) => throw new NotSupportedException();
     }
 }

@@ -60,6 +60,9 @@ public class DelosferaDbContext : DbContext
     public DbSet<AttachmentVersion> AttachmentVersions => Set<AttachmentVersion>();
 
     public DbSet<VndRedaction> VndRedactions { get; set; }
+
+    /// <summary>Текст редакций для расширенного поиска реестра ВНД (см. VndRedactionSearchText).</summary>
+    public DbSet<VndRedactionSearchText> VndRedactionSearchTexts => Set<VndRedactionSearchText>();
     
     public DbSet<VndRedactionAttachment> VndRedactionAttachments { get; set; }
     

@@ -37,7 +37,12 @@ public static class SzVisibility
             query = query.Where(x => x.Document!.StatusCode != SzStatus.Draft
                                      || x.Document!.AuthorId == currentUserId);
 
-        if (canSeeAll) return query;
+        // Администратор системы (canSeeOthersDrafts) видит весь реестр, а не только свои круги:
+        // он разбирает застрявшие записки и чужие черновики (подвкладка «Черновики других
+        // пользователей»). Раньше одно право ManageSystemSettings снимало только запрет на
+        // чужие черновики, а круги доступа оставались — и подвкладка была пустой, если у
+        // администратора не было ещё и ViewAllSz.
+        if (canSeeAll || canSeeOthersDrafts) return query;
 
         var units = await VisibleUnitIdsAsync(db, currentUserId);
 

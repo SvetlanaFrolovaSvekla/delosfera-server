@@ -63,4 +63,11 @@ public interface IRouteEngine
     /// его задача снимается и маршрут идёт дальше, как после его решения.
     /// </summary>
     Task RemoveParticipantAsync(int participantId, int actorUserId);
+
+    /// <summary>
+    /// Заменить участника идущего маршрута, ещё не вынесшего решения, другим сотрудником на том
+    /// же этапе (смена согласующего или подписанта). Маршрут при этом не перезапускается и не
+    /// продвигается: если задача уже была выдана, она снимается у прежнего и выдаётся новому.
+    /// </summary>
+    Task<RouteParticipant> ReplaceParticipantAsync(int participantId, int newUserId, int actorUserId);
 }

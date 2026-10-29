@@ -43,6 +43,13 @@ public class SzResolutionSignature
 
     public ResolutionType Decision { get; set; }
 
+    /// <summary>Способ подписи: ЭЦП ГП «Инфоком» (по умолчанию) или локальная подпись системы
+    /// «Делосфера» для сотрудников без ЭЦП КР (право SignWithoutNationalEcp) — как у ВНД
+    /// (VndResolutionSignature.Method). Для DelosferaSystem: PersonIdnp пуст, SignatureBase64 —
+    /// HMAC-печать сервера над SzResolutionSignatureService.SystemSealPayload, CertKeyIdentifier —
+    /// идентификатор ключа печати; ГП не вызывается.</summary>
+    public ResolutionSignatureMethod Method { get; set; } = ResolutionSignatureMethod.InfocomEcp;
+
     // --- Кто подписал
     /// <summary>Пользователь delosfera, который вынес резолюцию.</summary>
     public int UserId { get; set; }
@@ -107,6 +114,7 @@ public class SzResolutionSignatureConfiguration : IEntityTypeConfiguration<SzRes
 
         // Как Resolution.Type в маршруте — строкой, чтобы журнал читался без справочника.
         b.Property(x => x.Decision).HasConversion<string>().HasMaxLength(32);
+        b.Property(x => x.Method).HasDefaultValue(ResolutionSignatureMethod.InfocomEcp);
         b.Property(x => x.PersonIdnp).HasMaxLength(14);
         b.Property(x => x.PersonFio).HasMaxLength(300);
         b.Property(x => x.OrganizationInn).HasMaxLength(20);

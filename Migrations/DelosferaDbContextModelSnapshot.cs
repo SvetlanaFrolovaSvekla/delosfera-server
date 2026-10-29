@@ -8648,6 +8648,33 @@ namespace delosfera_server.Migrations
                     b.ToTable("vnd_redaction_revision_snapshot", (string)null);
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionSearchText", b =>
+                {
+                    b.Property<int>("RedactionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("redaction_id");
+
+                    b.Property<DateTime>("IndexedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("indexed_at");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("text");
+
+                    b.HasKey("RedactionId")
+                        .HasName("pk_vnd_redaction_search_text");
+
+                    b.HasIndex("Text")
+                        .HasDatabaseName("ix_vnd_redaction_search_text_text_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Text"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Text"), new[] { "gin_trgm_ops" });
+
+                    b.ToTable("vnd_redaction_search_text", (string)null);
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRepeatCommentAttachment", b =>
                 {
                     b.Property<int>("Id")
@@ -14031,6 +14058,11 @@ namespace delosfera_server.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("operations_fallback_user_id");
 
+                    b.PrimitiveCollection<int[]>("OrderVisaUserIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]")
+                        .HasColumnName("order_visa_user_ids");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -14856,6 +14888,12 @@ namespace delosfera_server.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("ip_address");
+
+                    b.Property<int>("Method")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("method");
 
                     b.Property<string>("OrganizationInn")
                         .HasMaxLength(20)
@@ -17573,6 +17611,18 @@ namespace delosfera_server.Migrations
                     b.Navigation("TidFile");
 
                     b.Navigation("VndRedaction");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRedactionSearchText", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Documents.VND.Models.VndRedaction", "Redaction")
+                        .WithOne()
+                        .HasForeignKey("delosfera_server.Modules.Documents.VND.Models.VndRedactionSearchText", "RedactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_vnd_redaction_search_text_vnd_redaction_redaction_id");
+
+                    b.Navigation("Redaction");
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Documents.VND.Models.VndRepeatCommentAttachment", b =>

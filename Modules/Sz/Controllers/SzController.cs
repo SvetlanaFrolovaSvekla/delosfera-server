@@ -146,6 +146,7 @@ public class SzController : ControllerBase
             return Ok(await _sz.UpdateDraftAsync(id, request, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
@@ -242,7 +243,12 @@ public class SzController : ControllerBase
         public int? BeforeStepOrder { get; set; }
     }
 
-    /// <summary>Добавить согласующего в идущий маршрут (право CorrectSzOnApproval).</summary>
+    public class ReplaceParticipantRequest
+    {
+        public int UserId { get; set; }
+    }
+
+    /// <summary>Добавить согласующего в идущий маршрут (автор или право CorrectSzOnApproval).</summary>
     [HttpPost("{id:int}/route/participants")]
     public async Task<IActionResult> AddRouteParticipant(int id, [FromBody] RouteParticipantRequest req)
     {
@@ -251,10 +257,11 @@ public class SzController : ControllerBase
             return Ok(await _sz.AddRouteParticipantAsync(id, req.UserId, req.BeforeStepOrder, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
-    /// <summary>Убрать из маршрута участника, ещё не вынесшего решение (право CorrectSzOnApproval).</summary>
+    /// <summary>Убрать из маршрута участника, ещё не вынесшего решение (автор или право CorrectSzOnApproval).</summary>
     [HttpDelete("{id:int}/route/participants/{participantId:int}")]
     public async Task<IActionResult> RemoveRouteParticipant(int id, int participantId)
     {
@@ -263,6 +270,23 @@ public class SzController : ControllerBase
             return Ok(await _sz.RemoveRouteParticipantAsync(id, participantId, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+    }
+
+    /// <summary>
+    /// Заменить участника маршрута, ещё не вынесшего решение (согласующего или подписанта),
+    /// другим сотрудником — без отзыва и нового круга (автор или право CorrectSzOnApproval).
+    /// </summary>
+    [HttpPut("{id:int}/route/participants/{participantId:int}")]
+    public async Task<IActionResult> ReplaceRouteParticipant(int id, int participantId, [FromBody] ReplaceParticipantRequest req)
+    {
+        try
+        {
+            return Ok(await _sz.ReplaceRouteParticipantAsync(id, participantId, req.UserId, _currentUser.UserId));
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
@@ -417,6 +441,7 @@ public class SzController : ControllerBase
             OperationsApproverUserId = s?.OperationsApproverUserId,
             OperationsFallbackUserId = s?.OperationsFallbackUserId,
             HeadOfficeSignerUserId = s?.HeadOfficeSignerUserId,
+            OrderVisaUserIds = s?.OrderVisaUserIds.ToList() ?? [],
         });
     }
 
@@ -437,6 +462,9 @@ public class SzController : ControllerBase
         s.OperationsApproverUserId = req.OperationsApproverUserId;
         s.OperationsFallbackUserId = req.OperationsFallbackUserId;
         s.HeadOfficeSignerUserId = req.HeadOfficeSignerUserId;
+        // Старый клиент поле не присылает — список визирующих тогда не трогаем.
+        if (req.OrderVisaUserIds is { } visas)
+            s.OrderVisaUserIds = visas.Where(id => id > 0).Distinct().ToArray();
         s.UpdatedAt = now;
         await _db.SaveChangesAsync();
         return Ok(new HrRoutingSettingsDto
@@ -446,6 +474,7 @@ public class SzController : ControllerBase
             OperationsApproverUserId = s.OperationsApproverUserId,
             OperationsFallbackUserId = s.OperationsFallbackUserId,
             HeadOfficeSignerUserId = s.HeadOfficeSignerUserId,
+            OrderVisaUserIds = s.OrderVisaUserIds.ToList(),
         });
     }
 

@@ -850,6 +850,74 @@ public class RouteEngine : IRouteEngine
             await AdvanceIfStepComplete(inst.Id, step.Id, actorUserId);
     }
 
+    public async Task<RouteParticipant> ReplaceParticipantAsync(int participantId, int newUserId, int actorUserId)
+    {
+        var instanceId = await _db.RouteSteps
+            .Where(s => s.Participants.Any(p => p.Id == participantId))
+            .Select(s => (int?)s.RouteInstanceId)
+            .FirstOrDefaultAsync()
+            ?? throw new KeyNotFoundException("Участник маршрута не найден");
+
+        var inst = await InstanceQuery().FirstAsync(i => i.Id == instanceId);
+        if (inst.Status != RouteInstanceStatus.Running)
+            throw new InvalidOperationException("Заменить участника можно только в идущем маршруте");
+
+        var step = inst.Steps.First(s => s.Participants.Any(p => p.Id == participantId));
+        var participant = step.Participants.First(p => p.Id == participantId);
+
+        if (participant.Resolution != null || participant.State == ParticipantState.Done)
+            throw new InvalidOperationException("Участник уже вынес решение — заменить его нельзя");
+        if (participant.State == ParticipantState.Cancelled)
+            throw new InvalidOperationException("Участник уже снят с маршрута");
+        if (participant.UserId == newUserId)
+            return participant;
+
+        if (inst.Steps.SelectMany(s => s.Participants)
+            .Any(p => p.Id != participantId && p.UserId == newUserId
+                      && p.State is ParticipantState.Pending or ParticipantState.Active))
+            throw new InvalidOperationException("Этот сотрудник уже есть в маршруте и ещё не вынес решения");
+
+        var previousUserId = participant.UserId;
+        var activated = new List<int>();
+        RouteParticipant result;
+
+        if (participant.State == ParticipantState.Active)
+        {
+            // Задача уже у прежнего: снимаем её, а прежнего оставляем в истории снятым. Новый
+            // участник встаёт на тот же этап и сразу получает задачу с тем же сроком —
+            // маршрут не продвигается и не начинается заново.
+            participant.State = ParticipantState.Cancelled;
+            CloseTask(participant.Id, WorkflowTaskState.Cancelled);
+
+            result = new RouteParticipant
+            {
+                UserId = newUserId,
+                Required = participant.Required,
+                State = ParticipantState.Pending,
+            };
+            step.Participants.Add(result);
+            await _db.SaveChangesAsync();
+
+            activated.AddRange(ActivateParticipant(result, participant.DueAt));
+        }
+        else
+        {
+            // До участника очередь не дошла — задачи нет, просто меняем исполнителя этапа.
+            participant.UserId = newUserId;
+            participant.UnitId = null;
+            participant.RoleRef = null;
+            result = participant;
+        }
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(Entity, inst.Id, "ParticipantReplaced", actorUserId,
+            new { participantId, fromUserId = previousUserId, toUserId = newUserId, newParticipantId = result.Id, step = step.Order });
+
+        if (activated.Count > 0)
+            await _notifier.TaskAssignedAsync(activated);
+        return result;
+    }
+
     /// <summary>
     /// Заблокирован ли процесс строгим режимом: маршрут на доработке либо на этапе
     /// есть неснятые замечания.

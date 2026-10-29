@@ -13,8 +13,10 @@ public class HrRoutingSettingsDto
     public int? BranchHrUserId { get; set; }
     public int? OperationsApproverUserId { get; set; }
     public int? OperationsFallbackUserId { get; set; }
-    /// <summary>Подписант приказа и договора по заявкам на замещение сотрудников Головного офиса.</summary>
+    /// <summary>Основной подписант по заявкам на замещение (Председатель Правления): приказ и договор МО.</summary>
     public int? HeadOfficeSignerUserId { get; set; }
+    /// <summary>Визирующие приказов о замещении («Завизировали:»), по порядку. null при сохранении — не менять.</summary>
+    public List<int>? OrderVisaUserIds { get; set; }
 }
 
 /// <summary>Запрос кадровика УЧР: бюджет и позиция плана по СЗ на обучение (КСЗ-08).</summary>

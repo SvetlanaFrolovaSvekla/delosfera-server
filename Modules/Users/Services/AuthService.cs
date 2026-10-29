@@ -116,11 +116,7 @@ public class AuthService : IAuthService
                 $"Подтверждение временно заблокировано после неудачных попыток. Повторите через {minutes} мин.");
         }
 
-        // Как при входе: у доменной учётной записи пароль проверяет каталог, у локальной — хеш.
-        var passwordOk = user.Source == UserSource.Ldap
-            ? !string.IsNullOrWhiteSpace(user.LdapLogin)
-              && await _ldapAuthenticator.VerifyPasswordAsync(user.LdapLogin, password)
-            : _passwordHasher.Verify(user.PasswordHash, password);
+        var passwordOk = await IsAccountPasswordAsync(user, password);
 
         if (!passwordOk)
         {
@@ -141,6 +137,84 @@ public class AuthService : IAuthService
             user.FailedLoginAttempts = 0;
             await _db.SaveChangesAsync();
         }
+    }
+
+    /// <summary>
+    /// Пароль от учётной записи — тот, с которым сотрудник входит в систему.
+    ///
+    /// Входов два: по почте (LoginAsync) и доменный по логину (LoginWithDirectoryAsync), и
+    /// раньше подтверждение сверяло пароль не тем путём, каким сотрудник реально входит.
+    /// Доменный вход ищет учётку в каталоге через ILdapDirectory (с запасными настройками из
+    /// конфигурации) и сопоставляет её с пользователем по почте — поэтому человек, вошедший
+    /// доменным паролем, получал «Неверный пароль», если его карточка числилась локальной,
+    /// у неё не был заполнен LDAP-логин или каталог был настроен только в конфигурации.
+    /// Теперь принимается любой пароль, которым этот же сотрудник может войти.
+    /// </summary>
+    private async Task<bool> IsAccountPasswordAsync(User user, string password)
+    {
+        // 1. Локальный пароль (хеш в базе) — у локальных учёток это основной способ входа.
+        if (user.Source != UserSource.Ldap && !string.IsNullOrEmpty(user.PasswordHash))
+        {
+            try
+            {
+                if (_passwordHasher.Verify(user.PasswordHash, password)) return true;
+            }
+            catch (Exception)
+            {
+                // Хеш в неожиданном формате (например, заглушка у учётки, перенесённой из домена) —
+                // просто не совпало, идём проверять доменный пароль.
+            }
+        }
+
+        // 2. Доменный пароль — тем же путём, что и доменный вход. Каждая неудачная привязка к
+        // каталогу засчитывается доменом как неудачная попытка входа, поэтому пробуем ровно
+        // один логин: LDAP-логин карточки, а если его нет — почту (её имя до @ и есть логин
+        // в домене; совпадение почты в каталоге проверяется ниже).
+        var hasLdapLogin = !string.IsNullOrWhiteSpace(user.LdapLogin);
+        var directoryChecked = false;
+        var directoryFailed = false;
+        try
+        {
+            if (await _directory.IsEnabledAsync())
+            {
+                var entry = await _directory.AuthenticateAsync(hasLdapLogin ? user.LdapLogin! : user.Email, password);
+                directoryChecked = true;
+
+                if (entry is not null)
+                {
+                    // По LDAP-логину находится именно эта учётка; по почте — только если каталог
+                    // вернул ту же почту (иначе это чужая учётная запись с похожим логином).
+                    var sameEmail = !string.IsNullOrWhiteSpace(entry.Email)
+                                    && string.Equals(entry.Email, user.Email, StringComparison.OrdinalIgnoreCase);
+                    if (hasLdapLogin || sameEmail) return true;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            directoryFailed = true; // каталог недоступен — попробуем запасной путь ниже
+        }
+
+        // 3. Запасной путь для доменных учёток — как обычный вход по почте (LoginAsync). Только
+        // если каталог выше не проверял пароль: второй раз тот же неверный пароль в домен не шлём.
+        if (!directoryChecked && user.Source == UserSource.Ldap && hasLdapLogin)
+        {
+            try
+            {
+                if (await _ldapAuthenticator.VerifyPasswordAsync(user.LdapLogin!, password)) return true;
+                directoryFailed = false;
+            }
+            catch (Exception)
+            {
+                directoryFailed = true;
+            }
+        }
+
+        if (directoryFailed && (user.Source == UserSource.Ldap || hasLdapLogin))
+            throw new InvalidOperationException(
+                "Не удалось проверить пароль: служба каталогов (домен) недоступна. Повторите попытку позже.");
+
+        return false;
     }
 
     public async Task<AuthResult> LoginWithDirectoryAsync(DomainLoginRequest request, string languageCode)

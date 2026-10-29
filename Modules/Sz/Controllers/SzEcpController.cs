@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using delosfera_server.Common.Services.Authorization;
 using delosfera_server.Modules.Documents.VND.Services;
 using delosfera_server.Modules.Signing.Services;
+using delosfera_server.Modules.Users.Models;
 using delosfera_server.Modules.Sz.Services;
 using delosfera_server.Modules.Workflow.Models;
 
@@ -79,6 +80,28 @@ public class SzEcpController : ControllerBase
                 Request.Headers.UserAgent.ToString(), ct);
             return Ok(await _sz.GetAsync(id));
         });
+
+    /// <summary>Резолюция локальной подписью системы «Делосфера» — для сотрудников без ЭЦП КР (право
+    /// SignWithoutNationalEcp), как у ВНД: без ПИН/кода/подписи провайдера, после подтверждения в окне
+    /// backend сам ставит печать над тем же хэшем резолюции. Возвращает обновлённую карточку записки.</summary>
+    [HttpPost("resolve-system")]
+    public Task<IActionResult> ResolveSystem(int id, [FromBody] SzSystemSignRequest request, CancellationToken ct)
+    {
+        if (!_currentUser.HasPermission(PermissionCode.SignWithoutNationalEcp))
+            return Task.FromResult<IActionResult>(new ObjectResult(new
+            {
+                message = "У вас нет права подписывать резолюции без ЭЦП КР — подпишите резолюцию ЭЦП",
+                code = ResolutionSignatureErrorCodes.SystemSignNotAllowed,
+            }) { StatusCode = StatusCodes.Status403Forbidden });
+
+        return Run(async () =>
+        {
+            await _signatures.ResolveWithSystemSealAsync(id, request, _currentUser.UserId,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                Request.Headers.UserAgent.ToString(), ct);
+            return Ok(await _sz.GetAsync(id));
+        });
+    }
 
     /// <summary>Журнал подписей ЭЦП по записке: кто, когда, ФИО из сертификата, под какой версией текста.</summary>
     [HttpGet("signatures")]

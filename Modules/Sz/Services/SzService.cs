@@ -53,11 +53,18 @@ public interface ISzService
     /// </summary>
     Task<bool> RestartApprovalAfterContentChangeAsync(int documentId, int actorUserId);
 
-    /// <summary>Добавить согласующего в идущий маршрут (право CorrectSzOnApproval).</summary>
+    /// <summary>Добавить согласующего в идущий маршрут (автор или право CorrectSzOnApproval).</summary>
     Task<SzDetails> AddRouteParticipantAsync(int id, int userId, int? beforeStepOrder, int actorUserId);
 
-    /// <summary>Убрать из маршрута участника, ещё не вынесшего решение (право CorrectSzOnApproval).</summary>
+    /// <summary>Убрать из маршрута участника, ещё не вынесшего решение (автор или право CorrectSzOnApproval).</summary>
     Task<SzDetails> RemoveRouteParticipantAsync(int id, int participantId, int actorUserId);
+
+    /// <summary>
+    /// Заменить участника маршрута, ещё не вынесшего решение, другим сотрудником — согласующего
+    /// на согласовании или подписанта на подписании (автор или право CorrectSzOnApproval).
+    /// Записка не отзывается и на новый круг не уходит.
+    /// </summary>
+    Task<SzDetails> ReplaceRouteParticipantAsync(int id, int participantId, int userId, int actorUserId);
 
     /// <summary>
     /// Проставить признак «в бюджете/вне» и позицию плана закупок по СЗ на обучение (КСЗ-08).
@@ -630,6 +637,8 @@ public class SzService : ISzService
     public async Task<SzDetails> CreateDraftAsync(SzSaveRequest request, int authorId)
     {
         ValidateSaveRequest(request);
+        // До создания карточки документа: отказ не должен оставлять её без записки.
+        await ValidateApproversAsync(authorId, request.ApproverUserIds, existing: []);
 
         var kind = await _db.SzKinds.FirstOrDefaultAsync(k => k.Id == request.KindId)
             ?? throw new KeyNotFoundException("Вид служебной записки не найден");
@@ -669,8 +678,10 @@ public class SzService : ISzService
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
-        // Корректировку на согласовании разрешает отдельное право — проверяется ниже.
-        if (sz.Document!.StatusCode != SzStatus.OnApproval)
+        // Записка на маршруте (согласование, подписание) — корректировка: её правит автор или
+        // обладатель CorrectSzOnApproval, проверяется ниже.
+        var onRoute = sz.Document!.StatusCode is SzStatus.OnApproval or SzStatus.OnSigning;
+        if (!onRoute)
             EnsureAuthorOrPrivileged(sz, actorUserId,
                 "Нет прав на изменение этой служебной записки");
 
@@ -681,15 +692,21 @@ public class SzService : ISzService
         // остальными согласующие, режим и подписант не применяются.
         var byAuthor = sz.Document!.AuthorId == actorUserId;
 
-        // Корректировка на согласовании (CorrectSzOnApproval): поля и вложения правятся без
-        // отзыва, состав маршрута — отдельными действиями (Add/RemoveRouteParticipantAsync).
-        var correction = sz.Document.StatusCode == SzStatus.OnApproval;
-        if (correction && !_currentUser.HasPermission(PermissionCode.CorrectSzOnApproval))
+        // Корректировка на маршруте: автор или обладатель CorrectSzOnApproval правят поля без
+        // отзыва; подписанта — здесь же (см. ChangeSignerOnRouteAsync), согласующих — отдельными
+        // действиями (Add/Remove/ReplaceRouteParticipantAsync). На новый круг записка уходит,
+        // только если изменился текст или реквизиты — то, под чем ставятся подписи.
+        var correction = onRoute;
+        if (correction && !byAuthor && !_currentUser.HasPermission(PermissionCode.CorrectSzOnApproval))
             throw new UnauthorizedAccessException("Нет права корректировать записку на согласовании");
+        var requestedSigner = request.SignerUserId;
 
         var canChangeRoute = !correction
                              && (byAuthor || _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
         var digestBefore = correction ? await SzEcpSheetData.ContentDigestAsync(_db, sz) : null;
+        // Сотрудники записки в отпечаток ЭЦП не входят, но это тоже содержание:
+        // о ком кадровая записка и с какими значениями. Сравниваем их отдельно.
+        var employeesBefore = correction ? await EmployeesFingerprintAsync(sz.Id) : null;
         var keptParallel = sz.ApprovalIsParallel;
         var keptSigner = sz.SignerUserId;
 
@@ -724,6 +741,10 @@ public class SzService : ISzService
         await ApplyRubricsAsync(sz, request.RubricIds);
         if (canChangeRoute)
         {
+            var currentApprovers = await _db.SzApprovers
+                .Where(a => a.SzDocumentId == sz.Id).Select(a => a.UserId).ToListAsync();
+            await ValidateApproversAsync(sz.Document.AuthorId, request.ApproverUserIds, currentApprovers);
+
             await ReplaceApproversAsync(sz.Id, request.ApproverUserIds);
 
             // Маршрут чужой записки поправил администратор — это должно остаться
@@ -749,9 +770,27 @@ public class SzService : ISzService
         await _db.SaveChangesAsync();
         await _audit.LogAsync("Sz", sz.Id, correction ? "CorrectedOnApproval" : "Updated", actorUserId);
 
-        // Изменилось то, под чем ставятся подписи, — собранные визы недействительны.
-        if (correction && digestBefore != await SzEcpSheetData.ContentDigestAsync(_db, sz))
-            await RestartApprovalAfterContentChangeAsync(sz.DocumentId, actorUserId);
+        // Изменилось то, под чем ставятся подписи (текст и реквизиты), — собранные визы
+        // недействительны. Вложения и состав маршрута в подписываемое содержимое не входят.
+        var contentChanged = correction
+                             && (digestBefore != await SzEcpSheetData.ContentDigestAsync(_db, sz)
+                                 || employeesBefore != await EmployeesFingerprintAsync(sz.Id));
+        var restarted = contentChanged
+                        && await RestartApprovalAfterContentChangeAsync(sz.DocumentId, actorUserId);
+
+        // Смена подписанта на маршруте — без отзыва и нового круга.
+        if (correction && !restarted && requestedSigner != keptSigner)
+            await ChangeSignerOnRouteAsync(sz.Id, requestedSigner, actorUserId);
+        else if (correction && restarted && requestedSigner != keptSigner)
+        {
+            // Круг начат заново — подписанта достаточно записать в карточку: маршрут подписи
+            // соберётся из неё после согласования.
+            var fresh = await _db.SzDocuments.FirstAsync(x => x.Id == sz.Id);
+            fresh.SignerUserId = requestedSigner;
+            await _db.SaveChangesAsync();
+            await _audit.LogAsync("Sz", sz.Id, "SignerChangedOnRoute", actorUserId,
+                new { from = keptSigner, to = requestedSigner });
+        }
 
         return (await GetAsync(sz.Id))!;
     }
@@ -760,9 +799,21 @@ public class SzService : ISzService
     {
         var sz = await _db.SzDocuments.Include(x => x.Document)
             .FirstOrDefaultAsync(x => x.DocumentId == documentId);
-        if (sz is null || sz.Document!.StatusCode != SzStatus.OnApproval
+        if (sz is null || sz.Document!.StatusCode is not (SzStatus.OnApproval or SzStatus.OnSigning)
             || sz.Document.CurrentRouteInstanceId is not int routeId)
             return false;
+
+        // На подписании согласование уже пройдено целиком: изменился текст — визы
+        // согласующих поставлены под другую версию. Маршрут подписи прерываем и запускаем
+        // согласование заново; подписант получит записку после него, как обычно.
+        if (sz.Document.StatusCode == SzStatus.OnSigning)
+        {
+            await _routeEngine.InterruptAsync(routeId, actorUserId);
+            await StartApprovalRouteAsync(sz, actorUserId);
+            await _audit.LogAsync("Sz", sz.Id, "ApprovalRestartedAfterCorrection", actorUserId,
+                new { fromRoute = routeId, toRoute = sz.Document.CurrentRouteInstanceId, round = sz.ApprovalRounds, fromSigning = true });
+            return true;
+        }
 
         // Подписей ещё нет — пересобирать нечего: первый согласующий и так увидит новую версию.
         var anyResolved = await _db.RouteSteps
@@ -781,26 +832,106 @@ public class SzService : ISzService
         return true;
     }
 
-    /// <summary>Записка на согласовании, корректирует обладатель CorrectSzOnApproval.</summary>
-    private async Task<SzDocument> LoadForRouteCorrectionAsync(int id)
+    /// <summary>Записка на маршруте; корректирует её автор или обладатель CorrectSzOnApproval.
+    /// allowSigning — действие допустимо и на подписании (замена подписанта).</summary>
+    private async Task<SzDocument> LoadForRouteCorrectionAsync(int id, int actorUserId, bool allowSigning = false)
     {
-        if (!_currentUser.HasPermission(PermissionCode.CorrectSzOnApproval))
-            throw new UnauthorizedAccessException("Нет права менять участников маршрута на согласовании");
-
         var sz = await _db.SzDocuments.Include(x => x.Document)
             .FirstOrDefaultAsync(x => x.Id == id)
             ?? throw new KeyNotFoundException("Служебная записка не найдена");
 
-        if (sz.Document!.StatusCode != SzStatus.OnApproval || sz.Document.CurrentRouteInstanceId is null)
-            throw new InvalidOperationException("Участников маршрута можно менять только на согласовании");
+        if (sz.Document!.AuthorId != actorUserId && !_currentUser.HasPermission(PermissionCode.CorrectSzOnApproval))
+            throw new UnauthorizedAccessException("Менять участников маршрута может автор записки или сотрудник с правом корректировки");
+
+        var statusOk = sz.Document.StatusCode == SzStatus.OnApproval
+                       || (allowSigning && sz.Document.StatusCode == SzStatus.OnSigning);
+        if (!statusOk || sz.Document.CurrentRouteInstanceId is null)
+            throw new InvalidOperationException(allowSigning
+                ? "Участников маршрута можно менять только на согласовании или подписании"
+                : "Согласующих можно добавлять и убирать только на согласовании");
         return sz;
+    }
+
+    public async Task<SzDetails> ReplaceRouteParticipantAsync(int id, int participantId, int userId, int actorUserId)
+    {
+        var sz = await LoadForRouteCorrectionAsync(id, actorUserId, allowSigning: true);
+        var routeId = sz.Document!.CurrentRouteInstanceId!.Value;
+        if (!await _db.Users.AnyAsync(u => u.Id == userId && u.IsActive))
+            throw new ArgumentException("Пользователь не найден или неактивен");
+
+        var current = await _db.RouteSteps
+            .Where(s => s.RouteInstanceId == routeId)
+            .SelectMany(s => s.Participants.Select(p => new { p.Id, p.UserId, s.Kind }))
+            .FirstOrDefaultAsync(p => p.Id == participantId)
+            ?? throw new KeyNotFoundException("Участник не относится к текущему маршруту записки");
+
+        // Визировать собственную записку автор не может — ни при подборе, ни заменой.
+        if (current.Kind != StepKind.Signing && userId == sz.Document.AuthorId)
+            throw new ArgumentException("Автор не может быть согласующим своей записки");
+
+        await _routeEngine.ReplaceParticipantAsync(participantId, userId, actorUserId);
+
+        var signerReplaced = current.Kind == StepKind.Signing && sz.Document.StatusCode == SzStatus.OnSigning;
+        if (signerReplaced)
+        {
+            // На подписании подписант записки — тот, кто стоит на этапе подписи.
+            sz.SignerUserId = userId;
+        }
+        else if (current.UserId is int oldUserId)
+        {
+            // Список согласующих автора ведём вместе с маршрутом — на тот же порядковый номер,
+            // чтобы после доработки новый круг собрался уже с заменой.
+            var approver = await _db.SzApprovers.FirstOrDefaultAsync(a => a.SzDocumentId == id && a.UserId == oldUserId);
+            if (approver != null && !await _db.SzApprovers.AnyAsync(a => a.SzDocumentId == id && a.UserId == userId))
+                approver.UserId = userId;
+        }
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", sz.Id, signerReplaced ? "SignerChangedOnRoute" : "RouteParticipantReplaced",
+            actorUserId, new { participantId, from = current.UserId, to = userId });
+        return (await GetAsync(sz.Id))!;
+    }
+
+    /// <summary>
+    /// Сменить подписанта записки на маршруте. На согласовании подписант — поле карточки (маршрут
+    /// подписи соберётся из него после согласования); на подписании — участник этапа подписи,
+    /// его меняем в маршруте. Ни отзыва, ни нового круга.
+    /// </summary>
+    private async Task ChangeSignerOnRouteAsync(int id, int? signerUserId, int actorUserId)
+    {
+        var sz = await LoadForRouteCorrectionAsync(id, actorUserId, allowSigning: true);
+        var previous = sz.SignerUserId;
+
+        if (sz.Document!.StatusCode == SzStatus.OnSigning)
+        {
+            // Без отдельного подписанта подписывает адресат — значит, «очистить» поле на
+            // подписании означает передать подпись адресату.
+            var target = signerUserId ?? sz.AddresseeUserId
+                ?? throw new InvalidOperationException("Укажите подписанта: у записки нет адресата, который подписал бы её вместо него");
+
+            var routeId = sz.Document.CurrentRouteInstanceId!.Value;
+            var signing = await _db.RouteSteps
+                .Where(s => s.RouteInstanceId == routeId && s.Kind == StepKind.Signing)
+                .SelectMany(s => s.Participants)
+                .Where(p => p.Resolution == null && (p.State == ParticipantState.Active || p.State == ParticipantState.Pending))
+                .Select(p => new { p.Id, p.UserId })
+                .FirstOrDefaultAsync()
+                ?? throw new InvalidOperationException("Подписант уже вынес решение — сменить его нельзя");
+
+            if (signing.UserId != target)
+                await _routeEngine.ReplaceParticipantAsync(signing.Id, target, actorUserId);
+        }
+
+        sz.SignerUserId = signerUserId;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync("Sz", sz.Id, "SignerChangedOnRoute", actorUserId,
+            new { from = previous, to = signerUserId });
     }
 
     public async Task<SzDetails> AddRouteParticipantAsync(int id, int userId, int? beforeStepOrder, int actorUserId)
     {
-        var sz = await LoadForRouteCorrectionAsync(id);
-        if (!await _db.Users.AnyAsync(u => u.Id == userId))
-            throw new KeyNotFoundException("Пользователь не найден");
+        var sz = await LoadForRouteCorrectionAsync(id, actorUserId);
+        await ValidateApproversAsync(sz.Document!.AuthorId, [userId], existing: []);
 
         await _routeEngine.AddApproverStepAsync(sz.Document!.CurrentRouteInstanceId!.Value, userId, beforeStepOrder, actorUserId);
 
@@ -817,7 +948,7 @@ public class SzService : ISzService
 
     public async Task<SzDetails> RemoveRouteParticipantAsync(int id, int participantId, int actorUserId)
     {
-        var sz = await LoadForRouteCorrectionAsync(id);
+        var sz = await LoadForRouteCorrectionAsync(id, actorUserId);
         var routeId = sz.Document!.CurrentRouteInstanceId!.Value;
 
         var userId = await _db.RouteSteps
@@ -978,7 +1109,7 @@ public class SzService : ISzService
     /// (запускает делопроизводство) и повторной отправки уже зарегистрированной
     /// записки с доработки.
     /// </summary>
-    private async Task StartApprovalRouteAsync(SzDocument sz, int actorUserId)
+    private async Task StartApprovalRouteAsync(SzDocument sz, int actorUserId, int? templateId = null)
     {
         var approvers = await _db.SzApprovers
             .Where(a => a.SzDocumentId == sz.Id)
@@ -986,10 +1117,24 @@ public class SzService : ISzService
             .Select(a => a.UserId)
             .ToListAsync();
 
-        var instance = approvers.Count > 0
-            ? await _routeEngine.InstantiateForApproversAsync(
-                sz.DocumentId, approvers, sz.ApprovalIsParallel, signerUserId: null)
-            : await InstantiateFromKindAsync(sz);
+        // Шаблон, явно выбранный при регистрации, главнее и списка автора, и шаблона
+        // вида: раньше параметр принимался API, но молча игнорировался.
+        RouteInstance instance;
+        if (templateId is int explicitTemplate)
+        {
+            if (!await _db.RouteTemplates.AsNoTracking()
+                    .AnyAsync(t => t.Id == explicitTemplate && t.DocumentType == DocumentType.Sz))
+                throw new KeyNotFoundException("Шаблон маршрута не найден или не относится к служебным запискам");
+
+            instance = await _routeEngine.InstantiateFromTemplateAsync(sz.DocumentId, explicitTemplate);
+        }
+        else
+        {
+            instance = approvers.Count > 0
+                ? await _routeEngine.InstantiateForApproversAsync(
+                    sz.DocumentId, approvers, sz.ApprovalIsParallel, signerUserId: null)
+                : await InstantiateFromKindAsync(sz);
+        }
 
         await _routeEngine.StartAsync(instance.Id, actorUserId);
         sz.Document!.CurrentRouteInstanceId = instance.Id;
@@ -1008,6 +1153,7 @@ public class SzService : ISzService
             parallel = sz.ApprovalIsParallel,
             round = sz.ApprovalRounds,
             routeInstanceId = instance.Id,
+            templateId,
         });
     }
 
@@ -1135,6 +1281,8 @@ public class SzService : ISzService
         var distinct = userIds.Distinct().ToList();
 
         var existing = await _db.SzApprovers.Where(a => a.SzDocumentId == id).ToListAsync();
+        await ValidateApproversAsync(sz.Document.AuthorId, distinct, existing.Select(a => a.UserId).ToList());
+
         _db.SzApprovers.RemoveRange(existing);
 
         for (var i = 0; i < distinct.Count; i++)
@@ -1333,7 +1481,7 @@ public class SzService : ISzService
         // После регистрации записка уходит на согласование: номер получает то, что
         // ещё будут согласовывать и подписывать. По завершении маршрута согласования
         // обработчик сам отправит записку на подпись адресату (руководству).
-        await StartApprovalRouteAsync(sz, actorUserId);
+        await StartApprovalRouteAsync(sz, actorUserId, templateId);
 
         await tx.CommitAsync();
 
@@ -1660,6 +1808,35 @@ public class SzService : ISzService
     }
 
     /// <summary>
+    /// Отпечаток состава сотрудников записки: кто, где, на какой должности и с какими
+    /// значениями — в порядке списка. Id строк не входят: ReplaceEmployeesAsync
+    /// пересоздаёт их при каждом сохранении. JSON значений нормализуется, чтобы
+    /// разница в пробелах не считалась правкой.
+    ///
+    /// Нужен потому, что сотрудники не входят в отпечаток содержимого под ЭЦП
+    /// (<see cref="SzEcpSheetData.ContentDigestAsync"/>): без этой сверки состав
+    /// кадровой записки меняли на согласовании и подписании, и маршрут не
+    /// перезапускался — визы оставались под другим составом.
+    /// </summary>
+    private async Task<string> EmployeesFingerprintAsync(int szId)
+    {
+        var rows = await _db.SzEmployees.AsNoTracking()
+            .Where(e => e.SzDocumentId == szId)
+            .OrderBy(e => e.SortOrder)
+            .Select(e => new { e.UserId, e.FullName, e.OrgUnitId, e.Position, e.ValuesJson })
+            .ToListAsync();
+
+        return JsonSerializer.Serialize(rows.Select(e => new
+        {
+            e.UserId,
+            e.FullName,
+            e.OrgUnitId,
+            e.Position,
+            Values = ParseValues(e.ValuesJson),
+        }));
+    }
+
+    /// <summary>
     /// Значения полей сотрудника. Испорченный JSON не должен ронять карточку:
     /// строку могли записать вручную запросом к базе.
     /// </summary>
@@ -1703,6 +1880,32 @@ public class SzService : ISzService
         }
 
         await _db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Проверка состава согласующих до записи.
+    ///
+    /// Автор визировать собственную записку не может: автоматический подбор
+    /// (<see cref="ResolveDefaultApproverAsync"/>) его и так пропускал, а ручной
+    /// список — нет. Новые согласующие должны существовать и быть активны: иначе
+    /// несуществующий id падал на внешнем ключе ошибкой 500, а уволенный попадал
+    /// в маршрут и задерживал его. Уже стоявших в списке (<paramref name="existing"/>)
+    /// на активность не проверяем, чтобы правка текста старого черновика не
+    /// блокировалась из-за ушедшего согласующего — его заменят при отправке.
+    /// </summary>
+    private async Task ValidateApproversAsync(
+        int authorId, IReadOnlyCollection<int> userIds, IReadOnlyCollection<int> existing)
+    {
+        if (userIds.Contains(authorId))
+            throw new ArgumentException("Автор не может быть согласующим своей записки");
+
+        var added = userIds.Distinct().Where(u => !existing.Contains(u)).ToList();
+        if (added.Count == 0) return;
+
+        var activeCount = await _db.Users.AsNoTracking()
+            .CountAsync(u => added.Contains(u.Id) && u.IsActive);
+        if (activeCount != added.Count)
+            throw new ArgumentException("Среди согласующих есть несуществующий или неактивный пользователь");
     }
 
     private async Task ReplaceApproversAsync(int szId, List<int> userIds)

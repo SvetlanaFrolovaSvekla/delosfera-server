@@ -204,8 +204,7 @@ public static class SubstitutionDocuments
 
     /// <summary>
     /// Подписи приказа от руки: «Председатель Правления» — основной подписант из настроек маршрута
-    /// УЧР; «Завизировали» — согласующие маршрута действующего круга, кроме директора филиала
-    /// (Операционное управление, УЧР), по порядку этапов.
+    /// УЧР; «Завизировали» — постоянный список визирующих из тех же настроек (по порядку).
     /// </summary>
     public static async Task<(string? Chairman, List<string> Visas)> OrderSignersAsync(DelosferaDbContext db,
         SubstitutionRequest r, (int? MainUserId, int[] ExtraUserIds, List<SubstitutionBankSigner> Signers)? bank,
@@ -214,11 +213,9 @@ public static class SubstitutionDocuments
         var b = bank ?? await BankSignersAsync(db, r, ct);
         var chairman = b.Signers.FirstOrDefault(s => s.UserId == b.MainUserId)?.FullName;
 
-        var round = r.Approvals.Select(a => a.Round).DefaultIfEmpty(1).Max();
-        var visaIds = r.Approvals
-            .Where(a => a.Round == round && a.RoleLabel != DirectorStepRole)
-            .OrderBy(a => a.Order)
-            .Select(a => a.UserId)
+        var visaIds = (await db.HrRoutingSettings.AsNoTracking()
+                .Select(s => s.OrderVisaUserIds)
+                .FirstOrDefaultAsync(ct) ?? Array.Empty<int>())
             .Distinct()
             .ToList();
         var names = visaIds.Count == 0
@@ -355,7 +352,9 @@ public static class SubstitutionDocuments
             }
 
             var (content, signatureBlock) = SplitSignatureBlock(body, doc.Kind);
-            foreach (var e in signatureBlock) e.Remove();
+            // «М.П.» (место печати) под подписью Банка в договоре остаётся и в ЭЦП-версии — после
+            // штампов, как на бумаге; остальной рукописный блок заменяют штампы.
+            foreach (var e in signatureBlock.Where(e => TextOf(e).Trim() != "М.П.")) e.Remove();
             if (content.Count == 0)
             {
                 var empty = new Paragraph();
@@ -573,18 +572,18 @@ public static class SubstitutionDocuments
         return table;
     }
 
-    /// <summary>Строка подписи — шрифтом документа (Times New Roman 12), с отступом места подписи.</summary>
+    /// <summary>Строка подписи — шрифтом документа: Segoe UI 10, как приказ и договор (Ф-82-01/ЛС, Ф-94-01/МО).</summary>
     private static Paragraph SignLine(string text, int leftTwips, bool bold, string? color, int before, bool keepNext,
-        int size = 24, int indentLeft = 0)
+        int size = 20, int indentLeft = 0)
     {
         var pPr = new ParagraphProperties();
         if (keepNext) pPr.AppendChild(new KeepNext());
-        pPr.AppendChild(new SpacingBetweenLines { Before = before.ToString(), After = size < 24 ? "0" : "60" });
+        pPr.AppendChild(new SpacingBetweenLines { Before = before.ToString(), After = size < 20 ? "0" : "60" });
         pPr.AppendChild(new Indentation { Left = (leftTwips + indentLeft).ToString() });
         pPr.AppendChild(new Justification { Val = JustificationValues.Left });
         // Порядок свойств — по схеме OOXML: шрифт, жирность, цвет, размер.
         var rPr = new RunProperties(
-            new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman", ComplexScript = "Times New Roman" });
+            new RunFonts { Ascii = "Segoe UI", HighAnsi = "Segoe UI", ComplexScript = "Segoe UI", EastAsia = "Segoe UI" });
         if (bold) rPr.AppendChild(new Bold());
         if (color is not null) rPr.AppendChild(new Color { Val = color });
         rPr.Append(new FontSize { Val = size.ToString() }, new FontSizeComplexScript { Val = size.ToString() });

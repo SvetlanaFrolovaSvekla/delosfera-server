@@ -71,20 +71,43 @@ public class UserController : ControllerBase
         }
     }
 
-    /// <summary>Лента активности пользователя (созданные ВНД, решения по согласованию, инициированные согласования)</summary>
+    /// <summary>Лента активности пользователя (созданные ВНД, решения по согласованию, инициированные согласования).
+    /// Постраничная: следующая страница — по NextCursor из ответа.</summary>
+    /// <param name="id">Пользователь</param>
+    /// <param name="from">Начало периода (включительно)</param>
+    /// <param name="to">Конец периода (включительно)</param>
+    /// <param name="search">Поиск по описанию, коду и названию ВНД (все слова)</param>
+    /// <param name="kinds">Виды действий: created, processStarted, approved, approvedWithComment, rejected, autoApproved, removed, other</param>
+    /// <param name="cursor">Курсор следующей страницы (NextCursor из предыдущего ответа)</param>
+    /// <param name="pageSize">Размер страницы (1–100, по умолчанию 20)</param>
     /// <response code="200">Активность получена</response>
     /// <response code="403">Нет права смотреть чужую активность</response>
     [HttpGet("{id:int}/activity")]
     [ProducesResponseType(typeof(UserActivityResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult<UserActivityResponse>> GetActivity(int id)
+    public async Task<ActionResult<UserActivityResponse>> GetActivity(
+        int id,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? search,
+        [FromQuery] string[]? kinds,
+        [FromQuery] string? cursor,
+        [FromQuery] int pageSize = 20)
     {
         // Свою активность видит каждый; чужую — только с правом управления пользователями.
         if (id != _currentUser.UserId && !_currentUser.HasPermission(PermissionCode.ManageUsers))
             return Forbid();
 
         var language = _languageResolver.Resolve(Request);
-        return Ok(await _activityService.GetActivityAsync(id, language));
+        return Ok(await _activityService.GetActivityAsync(id, language, new UserActivityQuery
+        {
+            From = from,
+            To = to,
+            Search = search,
+            Kinds = kinds,
+            Cursor = cursor,
+            PageSize = pageSize,
+        }));
     }
 
     /// <summary>

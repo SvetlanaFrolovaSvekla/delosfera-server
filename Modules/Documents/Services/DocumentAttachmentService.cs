@@ -64,7 +64,9 @@ public class DocumentAttachmentService : IDocumentAttachmentService
     private readonly IAuditService _audit;
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<DocumentAttachmentService> _logger;
-    // ISzService резолвим по месту: прямая зависимость замкнула бы кольцо сервисов.
+    // Раньше через него по месту резолвился ISzService (перезапуск согласования после правки
+    // вложений). Вложения больше не входят в подписываемое содержимое СЗ — параметр оставлен,
+    // чтобы не менять регистрацию сервиса и тесты.
     private readonly IServiceProvider? _serviceProvider;
 
     public DocumentAttachmentService(
@@ -93,15 +95,13 @@ public class DocumentAttachmentService : IDocumentAttachmentService
     /// а в чужую служебную записку — ещё и обладатель <see cref="PermissionCode.EditAnySz"/>
     /// (Сектор делопроизводства).
     ///
-    /// У служебной записки вложения входят в отпечаток содержимого, под которым согласующие
-    /// ставят ЭЦП (SzResolutionSignatureHasher.BuildContentDigest). Поэтому менять их можно
-    /// только пока записка у автора — черновик, доработка, отозванная, — и не может никто,
-    /// включая администратора: иначе подписи прошедших согласующих оказались бы поставлены
-    /// под другой состав записки. Чтобы поправить файл на согласовании, записку отзывают.
+    /// У служебной записки подпись согласующего удостоверяет текст и реквизиты, но не вложения
+    /// (SzResolutionSignatureHasher, схема sz-content-v2). Поэтому на маршруте — на согласовании
+    /// и на подписании — вложения меняет автор записки или обладатель CorrectSzOnApproval, и
+    /// записка при этом не отзывается и не уходит на новый круг: собранные визы остаются в силе.
+    /// Дальше маршрута (исполнение, архив) вложения не меняет никто.
     /// </summary>
-    /// <returns>true — корректировка записки на согласовании (CorrectSzOnApproval): после
-    /// изменения вложений согласование, возможно, придётся начать заново.</returns>
-    private async Task<bool> EnsureCanChangeAttachmentsAsync(int documentId, int userId, string message)
+    private async Task EnsureCanChangeAttachmentsAsync(int documentId, int userId, string message)
     {
         var document = await _db.Documents.AsNoTracking()
             .Where(d => d.Id == documentId)
@@ -111,11 +111,14 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         var isSz = document.Type == DocumentType.Sz;
 
-        // Корректировка на согласовании: вложение меняется, а собранные визы
-        // пересобираются (RestartApprovalAfterContentChange), а не остаются под чужим составом.
-        if (isSz && document.StatusCode == SzStatus.OnApproval
-                 && _currentUser.HasPermission(PermissionCode.CorrectSzOnApproval))
-            return true;
+        // Записка на маршруте: вложения правит автор или корректирующий (CorrectSzOnApproval),
+        // согласование не перезапускается — вложения не входят в подписываемое содержимое.
+        if (isSz && document.StatusCode is SzStatus.OnApproval or SzStatus.OnSigning)
+        {
+            if (document.AuthorId == userId || _currentUser.HasPermission(PermissionCode.CorrectSzOnApproval))
+                return;
+            throw new UnauthorizedAccessException(message);
+        }
 
         var allowed = document.AuthorId == userId
                       || _currentUser.HasPermission(PermissionCode.ManageSystemSettings)
@@ -125,16 +128,9 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         if (isSz && document.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision or SzStatus.Withdrawn))
             throw new InvalidOperationException(
-                "Вложения служебной записки меняются только в черновике, на доработке или после отзыва: " +
-                "на согласовании и дальше они входят в то, под чем согласующие поставили подпись");
-        return false;
+                "Вложения служебной записки меняются в черновике, на доработке, после отзыва " +
+                "и на маршруте (согласование, подписание); после завершения маршрута — нет");
     }
-
-    private Task RestartSzApprovalAsync(int documentId, int userId) =>
-        _serviceProvider is null
-            ? Task.CompletedTask
-            : _serviceProvider.GetRequiredService<delosfera_server.Modules.Sz.Services.ISzService>()
-                .RestartApprovalAfterContentChangeAsync(documentId, userId);
 
     public async Task<List<AttachmentDto>> ListAsync(int documentId)
     {
@@ -174,7 +170,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
         var document = await _db.Documents.FirstOrDefaultAsync(d => d.Id == documentId)
             ?? throw new KeyNotFoundException("Документ не найден");
 
-        var correction = await EnsureCanChangeAttachmentsAsync(document.Id, userId,
+        await EnsureCanChangeAttachmentsAsync(document.Id, userId,
             "Прикреплять файлы к документу может только его автор");
 
         // У служебной записки число вложений ограничено. Предел проверяем здесь, а не только
@@ -217,7 +213,6 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         await _audit.LogAsync("DocumentAttachment", attachment.Id, "Added", userId,
             new {documentId, file.FileName, hash});
-        if (correction) await RestartSzApprovalAsync(documentId, userId);
 
         return (await ListAsync(documentId)).First(a => a.Id == attachment.Id);
     }
@@ -228,7 +223,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
 
-        var correction = await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
+        await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
             "Заменить файл вложения может только автор документа");
 
         RequireFile(file);
@@ -261,7 +256,6 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         await _audit.LogAsync("DocumentAttachment", attachmentId, "Replaced", userId,
             new {previousFileRef, hash});
-        if (correction) await RestartSzApprovalAsync(attachment.DocumentId, userId);
 
         return (await ListAsync(attachment.DocumentId)).First(a => a.Id == attachmentId);
     }
@@ -272,7 +266,7 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             .FirstOrDefaultAsync(a => a.Id == attachmentId)
             ?? throw new KeyNotFoundException("Вложение не найдено");
 
-        var correction = await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
+        await EnsureCanChangeAttachmentsAsync(attachment.DocumentId, userId,
             "Удалить вложение может только автор документа");
 
         // Подписи не удаляем вместе с вложением, а аннулируем: факт подписания —
@@ -284,7 +278,6 @@ public class DocumentAttachmentService : IDocumentAttachmentService
 
         await _audit.LogAsync("DocumentAttachment", attachmentId, "Deleted", userId,
             new {attachment.DocumentId, attachment.FileName});
-        if (correction) await RestartSzApprovalAsync(attachment.DocumentId, userId);
     }
 
     public async Task<(Stream Stream, string ContentType, string FileName)> DownloadAsync(int attachmentId)

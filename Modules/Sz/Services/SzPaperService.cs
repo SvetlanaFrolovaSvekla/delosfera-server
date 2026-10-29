@@ -226,8 +226,9 @@ public class SzPaperService : ISzPaperService
         if (sz.TravelExpenses is bool travel) Add("Командировочные расходы", travel ? "Да" : "Нет");
 
         // Отпечаток текущего содержимого: лист с ЭЦП сверяет с ним каждую подпись.
-        form.ContentDigest = await SzEcpSheetData.ContentDigestAsync(_db, sz);
-        form.Approvals = await BuildApprovalSheetAsync(sz.DocumentId, form.ContentDigest);
+        var digests = await SzEcpSheetData.ContentDigestsAsync(_db, sz);
+        form.ContentDigest = digests.Current;
+        form.Approvals = await BuildApprovalSheetAsync(sz.DocumentId, digests);
 
         form.Assignments = await _db.SzAssignments.AsNoTracking()
             .Include(a => a.AssigneeUser)
@@ -252,7 +253,7 @@ public class SzPaperService : ISzPaperService
     /// подписания, запущенный после него. Визы прошлых кругов (отклонённые, возвращённые на
     /// доработку) уже недействительны и в лист не попадают — их история остаётся в карточке.
     /// </summary>
-    private async Task<List<SzPrintApprovalResponse>> BuildApprovalSheetAsync(int documentId, string? currentContentDigest)
+    private async Task<List<SzPrintApprovalResponse>> BuildApprovalSheetAsync(int documentId, SzContentDigests? currentContentDigest)
     {
         var actualRouteIds = await SzEcpSheetData.ActualRouteIdsAsync(_db, documentId);
         if (actualRouteIds.Count == 0) return [];
@@ -319,7 +320,7 @@ public class SzPaperService : ISzPaperService
     /// </summary>
     private static SzPrintSignatureResponse? PrintStamp(
         int? signatureId, IReadOnlyDictionary<int, Signature> signatures,
-        IReadOnlyDictionary<int, SzEcpStampInfo> ecpStamps, string? currentContentDigest)
+        IReadOnlyDictionary<int, SzEcpStampInfo> ecpStamps, SzContentDigests? currentContentDigest)
     {
         if (signatureId is not { } id || !signatures.TryGetValue(id, out var signature))
             return null;
@@ -358,6 +359,7 @@ public class SzPaperService : ISzPaperService
         {
             stamp.IsEcp = true;
             stamp.IsTest = ecp.IsTest;
+            stamp.IsSystem = ecp.IsSystem;
             // ФИО владельца — из сертификата (ответ провайдера), а не из справочника пользователей.
             stamp.FullName = ecp.PersonFio ?? stamp.FullName;
             stamp.OrganizationName = ecp.OrganizationName;
@@ -368,7 +370,7 @@ public class SzPaperService : ISzPaperService
             stamp.At = ecp.SignedAt;
             stamp.MatchesCurrentContent = currentContentDigest is null
                 ? null
-                : string.Equals(ecp.ContentDigest, currentContentDigest, StringComparison.OrdinalIgnoreCase);
+                : SzResolutionSignatureHasher.DigestMatches(ecp.ContentDigest, currentContentDigest);
         }
 
         return stamp;

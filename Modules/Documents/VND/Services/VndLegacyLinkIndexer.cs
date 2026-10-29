@@ -33,7 +33,9 @@ public class VndLegacyLinkIndexer : IVndLegacyLinkIndexer
 {
     /// <summary>Версия алгоритма - входит в отпечаток, чтобы при изменении логики извлечения
     /// всё переиндексировалось само.</summary>
-    private const string ScanKeyVersion = "v2"; // v2 - плюс номера вложений (LegacyAttachmentRefs)
+    // v2 - плюс номера вложений (LegacyAttachmentRefs); v3 - плюс текст редакции для поиска
+    // (VndRedactionSearchText): смена версии переиндексирует все редакции автоматически.
+    private const string ScanKeyVersion = "v3";
 
     /// <summary>Отметка "индексация упала" (например, файл недоступен в хранилище) - такая
     /// редакция повторяется, но в последнюю очередь (см. IndexPendingAsync).</summary>
@@ -196,6 +198,7 @@ public class VndLegacyLinkIndexer : IVndLegacyLinkIndexer
 
         var found = new List<(string Lang, string Code)>();
         var attachmentRefs = new List<string>();
+        var texts = new List<string>();
         foreach (var (lang, fileId) in files)
         {
             if (fileId <= 0) continue;
@@ -204,10 +207,20 @@ public class VndLegacyLinkIndexer : IVndLegacyLinkIndexer
             var (stream, _, _) = await _fileService.DownloadAsync(fileId);
             await using (stream)
             {
-                var refs = _extractor.Extract(stream);
+                // Файл читается дважды (ссылки + текст для поиска) - держим его в памяти, а не
+                // скачиваем повторно.
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer, ct);
+
+                buffer.Position = 0;
+                var refs = _extractor.Extract(buffer);
                 found.AddRange(refs.DocumentCodes.Select(code => (lang, code)));
                 if (refs.AttachmentIndexes.Count > 0)
                     attachmentRefs.Add($"{lang}:{string.Join(',', refs.AttachmentIndexes)}");
+
+                buffer.Position = 0;
+                var text = DocxPlainTextExtractor.Extract(buffer);
+                if (text.Length > 0) texts.Add(text);
             }
         }
 
@@ -255,6 +268,22 @@ public class VndLegacyLinkIndexer : IVndLegacyLinkIndexer
             });
         }
 
+        // Текст редакции для расширенного поиска реестра ("Текст редакции").
+        var searchText = string.Join("\n\n", texts);
+        if (searchText.Length > DocxPlainTextExtractor.MaxLength)
+            searchText = searchText[..DocxPlainTextExtractor.MaxLength];
+        var textRow = await _db.VndRedactionSearchTexts.FirstOrDefaultAsync(t => t.RedactionId == redaction.Id, ct);
+        if (textRow is null)
+            _db.VndRedactionSearchTexts.Add(new VndRedactionSearchText
+            {
+                RedactionId = redaction.Id, Text = searchText, IndexedAt = DateTime.UtcNow,
+            });
+        else
+        {
+            textRow.Text = searchText;
+            textRow.IndexedAt = DateTime.UtcNow;
+        }
+
         await _db.SaveChangesAsync(ct);
 
         var attachmentRefsValue = attachmentRefs.Count > 0 ? string.Join(';', attachmentRefs) : null;
@@ -273,7 +302,9 @@ public class VndLegacyLinkIndexer : IVndLegacyLinkIndexer
 public class VndLegacyLinkIndexWorker : BackgroundService
 {
     private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(1);
-    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(30);
+    // Проход, когда менять нечего, - один лёгкий запрос по колонкам-отпечаткам, поэтому можно
+    // часто: новая редакция становится находимой по тексту в течение нескольких минут.
+    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(5);
     private const int BatchSize = 50;
 
     private readonly IServiceScopeFactory _scopeFactory;

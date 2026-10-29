@@ -50,6 +50,17 @@ public sealed class SzEcpResolveRequest
     public long? ProviderTimestampMs { get; set; }
 }
 
+/// <summary>Решение согласующего локальной подписью системы «Делосфера» (право SignWithoutNationalEcp).</summary>
+public sealed class SzSystemSignRequest
+{
+    public int ParticipantId { get; set; }
+    public ResolutionType Decision { get; set; }
+    public string? Comment { get; set; }
+
+    /// <summary>Хэш, показанный пользователю в окне подтверждения (backend пересчитает и сверит).</summary>
+    public string? Hash { get; set; }
+}
+
 /// <summary>Что подписать сохранённой идентификацией (без окна ПИН/кода).</summary>
 public sealed class SzStoredEcpSignRequest
 {
@@ -68,7 +79,8 @@ public sealed record SzEcpStampInfo(
     string Hash,
     string SignatureSha256,
     string ContentDigest,
-    bool IsTest = false);
+    bool IsTest = false,
+    bool IsSystem = false);
 
 public interface ISzResolutionSignatureService
 {
@@ -90,6 +102,14 @@ public interface ISzResolutionSignatureService
     /// пометка «ТЕСТ». Проверку включённости режима делает контроллер.</summary>
     Task ResolveWithTestEcpAsync(
         int szId, SzStoredEcpSignRequest request, int currentUserId, string? ipAddress, string? userAgent,
+        CancellationToken ct = default);
+
+    /// <summary>Решение локальной подписью системы «Делосфера» — для сотрудников без ЭЦП КР (право
+    /// SignWithoutNationalEcp), как у ВНД. Хэш резолюции тот же, что подписывался бы ЭЦП; вместо подписи
+    /// провайдера — HMAC-печать сервера (SystemSeal:HmacKey) над хэшем и реквизитами резолюции. ГП
+    /// «Инфоком» не вызывается. В одной транзакции: подпись контура + запись журнала + резолюция маршрута.</summary>
+    Task ResolveWithSystemSealAsync(
+        int szId, SzSystemSignRequest request, int currentUserId, string? ipAddress, string? userAgent,
         CancellationToken ct = default);
 
     /// <summary>Журнал подписей ЭЦП записки — всем, кто видит записку.</summary>
@@ -133,6 +153,7 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
     private readonly ISubstitutionService _substitutions;
     private readonly ILogger<SzResolutionSignatureService> _logger;
     private readonly ICurrentUserService _currentUser;
+    private readonly ISystemSealService? _systemSeal;
 
     public SzResolutionSignatureService(
         DelosferaDbContext db,
@@ -140,9 +161,11 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
         IRouteEngine routeEngine,
         ISubstitutionService substitutions,
         ILogger<SzResolutionSignatureService> logger,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ISystemSealService? systemSeal = null)
     {
         _currentUser = currentUser;
+        _systemSeal = systemSeal;
         _db = db;
         _infocom = infocom;
         _routeEngine = routeEngine;
@@ -357,7 +380,7 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
         int szId, int currentUserId, CancellationToken ct = default)
     {
         var sz = await LoadVisibleAsync(szId, currentUserId, ct);
-        var currentDigest = await BuildContentDigestAsync(sz, ct);
+        var currentDigests = await SzEcpSheetData.ContentDigestsAsync(_db, sz, ct);
 
         var rows = await _db.SzResolutionSignatures.AsNoTracking()
             .Where(s => s.SzDocumentId == szId)
@@ -371,7 +394,7 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
                 s.PersonFio, s.OrganizationName, s.CertCommonName, s.CertIssuerCommonName, s.CertValidNotAfter,
                 s.HashSchemaVersion, s.Hash, s.SignatureSha256, s.ContentDigest,
                 s.SignedAt, s.VerifiedAt, s.Verified, s.VerificationError,
-                s.CommentText,
+                s.CommentText, s.Method,
             })
             .ToListAsync(ct);
 
@@ -397,11 +420,12 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
             HashSchemaVersion = r.HashSchemaVersion,
             Hash = r.Hash,
             SignatureSha256 = r.SignatureSha256,
-            MatchesCurrentContent = string.Equals(r.ContentDigest, currentDigest, StringComparison.OrdinalIgnoreCase),
+            MatchesCurrentContent = SzResolutionSignatureHasher.DigestMatches(r.ContentDigest, currentDigests),
             SignedAt = r.SignedAt,
             VerifiedAt = r.VerifiedAt,
             Verified = r.Verified,
             IsTest = !r.Verified && r.VerificationError == TestVerificationNote,
+            IsSystem = r.Method == ResolutionSignatureMethod.DelosferaSystem,
             Comment = string.IsNullOrWhiteSpace(r.CommentText) ? null : r.CommentText,
         }).ToList();
     }
@@ -443,14 +467,20 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
                      ResolutionSignatureHasher.Sha256Hex(ResolutionSignatureHasher.NormalizeComment(resolution.Comment))))
             result.ChangedComponents.Add("comment");
 
-        var liveDigest = await BuildContentDigestAsync(sz, ct);
-        if (!string.Equals(liveDigest, entry.ContentDigest, StringComparison.OrdinalIgnoreCase))
+        var liveDigests = await SzEcpSheetData.ContentDigestsAsync(_db, sz, ct);
+        if (!SzResolutionSignatureHasher.DigestMatches(entry.ContentDigest, liveDigests))
             result.ChangedComponents.Add("content");
 
         var isTest = !entry.Verified && entry.VerificationError == TestVerificationNote;
         if (isTest)
         {
             result.SignatureVerified = false;
+            result.SignerPersonFio = entry.PersonFio;
+        }
+        else if (entry.Method == ResolutionSignatureMethod.DelosferaSystem)
+        {
+            // Системную печать «Делосфера» проверяет сам сервер своим ключом — провайдер о ней не знает.
+            result.SignatureVerified = _systemSeal?.Verify(SystemSealPayload(entry), entry.SignatureBase64);
             result.SignerPersonFio = entry.PersonFio;
         }
         else
@@ -465,7 +495,7 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
         string Changed() => string.Join(", ", result.ChangedComponents.Select(c => c switch
         {
             "comment" => "текст резолюции",
-            "content" => "текст или реквизиты записки (в т.ч. вложения)",
+            "content" => "текст или реквизиты записки",
             "decision" => "решение по этапу",
             _ => c,
         }));
@@ -624,6 +654,151 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
     }
 
     // ----------------------------------------------------------------------------------------
+    // Локальная подпись системы «Делосфера» (право SignWithoutNationalEcp)
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>Как печатается уровень подписи в штампе листа согласования.</summary>
+    public const string SystemLevelTitle = "Подписано системой «Делосфера» (без ЭЦП КР)";
+
+    /// <summary>Версия канонической строки печати служебной записки (<see cref="SystemSealPayload"/>).</summary>
+    public const string SystemSealSchema = "delosfera-sz-system-seal-v1";
+
+    /// <summary>Каноническая строка, над которой ставится HMAC-печать: хэш резолюции (решение +
+    /// комментарий + содержимое записки + карточка) и то, КТО, НА КАКОМ ЭТАПЕ и КОГДА её вынес. Правка
+    /// любого из этих полей в БД в обход приложения ломает печать (см. ReverifyAsync).</summary>
+    public static string SystemSealPayload(SzResolutionSignature s) => string.Join('\n',
+        SystemSealSchema,
+        "hash=" + s.Hash.ToUpperInvariant(),
+        "user=" + s.UserId.ToString(CultureInfo.InvariantCulture),
+        "sz=" + s.SzDocumentId.ToString(CultureInfo.InvariantCulture),
+        "document=" + s.DocumentId.ToString(CultureInfo.InvariantCulture),
+        "participant=" + s.RouteParticipantId.ToString(CultureInfo.InvariantCulture),
+        "decision=" + ((int)s.Decision).ToString(CultureInfo.InvariantCulture),
+        "signedAt=" + new DateTimeOffset(DateTime.SpecifyKind(s.SignedAt, DateTimeKind.Utc))
+            .ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));
+
+    public async Task ResolveWithSystemSealAsync(
+        int szId, SzSystemSignRequest request, int currentUserId, string? ipAddress, string? userAgent,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Право проверяет и контроллер; здесь — второй рубеж: печать ставится только обладателю права.
+        if (!_currentUser.HasPermission(PermissionCode.SignWithoutNationalEcp))
+            throw new ResolutionSignatureException(StatusCodes.Status403Forbidden,
+                ResolutionSignatureErrorCodes.SystemSignNotAllowed,
+                "У вас нет права подписывать резолюции без ЭЦП КР — подпишите резолюцию ЭЦП");
+
+        if (_systemSeal is not { IsConfigured: true } seal)
+            throw new ResolutionSignatureException(StatusCodes.Status503ServiceUnavailable,
+                ResolutionSignatureErrorCodes.SystemSealUnavailable,
+                "Системная подпись «Делосфера» не настроена на сервере — обратитесь к администратору");
+
+        var (sz, participant) = await LoadForDecisionAsync(
+            szId, request.ParticipantId, request.Decision, request.Comment, currentUserId, ct);
+
+        var contentDigest = await BuildContentDigestAsync(sz, ct);
+        var components = SzResolutionSignatureHasher.CreateComponents(
+            request.Decision, request.Comment, contentDigest, sz.DocumentId);
+        var hash = SzResolutionSignatureHasher.Compute(components);
+
+        // Клиент показывал хэш в окне подтверждения — подписываем только то, что пользователь видел.
+        if (!string.IsNullOrWhiteSpace(request.Hash) && !ResolutionSignatureHasher.HashesEqual(hash, request.Hash))
+            throw new ResolutionSignatureException(StatusCodes.Status409Conflict,
+                ResolutionSignatureErrorCodes.DocumentChanged,
+                "Записка или комментарий изменились после подтверждения — подтвердите резолюцию заново");
+
+        var user = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == currentUserId)
+            .Select(u => new { u.FullName, Position = u.Position != null ? u.Position.TitleRu : null })
+            .FirstOrDefaultAsync(ct);
+
+        // Миллисекунды: время входит в печать и должно пережить round-trip через timestamptz.
+        var now = DateTime.UtcNow;
+        now = new DateTime(now.Ticks - now.Ticks % TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
+
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        // Подпись контура — того же уровня, что и ЭЦП: этап, требующий квалифицированной подписи,
+        // закрывается и локальной подписью обладателя права (иначе сотрудник без ЭЦП КР не смог бы
+        // подписать записку вовсе). В штампе видно, что это подпись системы, а не ЭЦП.
+        var signature = new Signature
+        {
+            DocumentId = sz.DocumentId,
+            ContentHash = contentDigest,
+            UserId = currentUserId,
+            Level = SignatureLevel.Qualified,
+            At = now,
+            StampMeta = JsonSerializer.Serialize(new
+            {
+                fullName = user?.FullName,
+                position = user?.Position,
+                levelTitle = SystemLevelTitle,
+                ecp = true,
+                system = true,
+            }),
+            Revoked = false,
+        };
+        _db.Signatures.Add(signature);
+        await _db.SaveChangesAsync(ct);
+
+        var entry = new SzResolutionSignature
+        {
+            Method = ResolutionSignatureMethod.DelosferaSystem,
+
+            SzDocumentId = sz.Id,
+            DocumentId = sz.DocumentId,
+            RouteParticipantId = participant.Id,
+            SignatureId = signature.Id,
+            Decision = request.Decision,
+            UserId = currentUserId,
+
+            // ПИН у сотрудника без ЭЦП КР нет.
+            PersonIdnp = "",
+            PersonFio = Truncate(user?.FullName, 300),
+
+            CertKeyIdentifier = Truncate(seal.KeyId, 200),
+            CertCommonName = Truncate(user?.FullName, 300),
+            CertIssuerCommonName = ResolutionSignatureService.SystemSealIssuer,
+
+            HashSchemaVersion = SzResolutionSignatureHasher.SchemaVersion,
+            Hash = hash,
+            CommentText = components.Comment,
+            CommentHash = ResolutionSignatureHasher.Sha256Hex(components.Comment),
+            ContentDigest = contentDigest,
+            SignatureBase64 = "",
+            SignatureSha256 = "",
+
+            SignedAt = now,
+            VerifiedAt = now,
+            Verified = true,
+            VerificationError = null,
+
+            IpAddress = Truncate(ipAddress, 64),
+            UserAgent = Truncate(userAgent, 512),
+        };
+
+        var sealBase64 = seal.Seal(SystemSealPayload(entry));
+        entry.SignatureBase64 = sealBase64;
+        // Уникальный индекс по SHA-256 подписи: печать включает время до миллисекунды и участника,
+        // поэтому совпадение означает повторную отправку той же резолюции.
+        entry.SignatureSha256 = ResolutionSignatureHasher.Sha256Hex(Convert.FromBase64String(sealBase64));
+
+        _db.SzResolutionSignatures.Add(entry);
+        await _db.SaveChangesAsync(ct);
+
+        await _routeEngine.ResolveAsync(participant.Id, request.Decision,
+            string.IsNullOrWhiteSpace(request.Comment) ? null : request.Comment.Trim(),
+            currentUserId, signature.Id);
+
+        await tx.CommitAsync(ct);
+
+        _logger.LogInformation(
+            "СЗ {SzId}: решение {Decision} пользователя {UserId} подписано локальной подписью системы «Делосфера» (без ЭЦП КР)",
+            szId, request.Decision, currentUserId);
+    }
+
+    // ----------------------------------------------------------------------------------------
     // Внутреннее
     // ----------------------------------------------------------------------------------------
 
@@ -675,18 +850,23 @@ public sealed class SzResolutionSignatureService : ISzResolutionSignatureService
     /// закрепляет ПИН за учёткой; ЭЦП, подписывавшая за одного пользователя, не принимается от другого.</summary>
     private async Task EnsurePinBindingAsync(int userId, string signerPin, CancellationToken ct)
     {
+        // Тестовые имитации (Verified=false) и системные подписи «Делосфера» (ПИН пуст) к привязке
+        // ПИН отношения не имеют.
         var boundToOtherPin =
-            await _db.VndResolutionSignatures.AnyAsync(s => s.Verified && s.UserId == userId && s.PersonIdnp != signerPin, ct)
-            // Тестовые имитации (Verified=false) к привязке ПИН отношения не имеют.
-            || await _db.SzResolutionSignatures.AnyAsync(s => s.Verified && s.UserId == userId && s.PersonIdnp != signerPin, ct);
+            await _db.VndResolutionSignatures.AnyAsync(s => s.Verified && s.Method == ResolutionSignatureMethod.InfocomEcp
+                                                            && s.UserId == userId && s.PersonIdnp != signerPin, ct)
+            || await _db.SzResolutionSignatures.AnyAsync(s => s.Verified && s.Method == ResolutionSignatureMethod.InfocomEcp
+                                                              && s.UserId == userId && s.PersonIdnp != signerPin, ct);
         if (boundToOtherPin)
             throw new ResolutionSignatureException(StatusCodes.Status403Forbidden,
                 ResolutionSignatureErrorCodes.IdentityMismatch,
                 "Ваша учётная запись уже привязана к ЭЦП другого лица — подписывать можно только своей ЭЦП");
 
         var usedByOtherUser =
-            await _db.VndResolutionSignatures.AnyAsync(s => s.Verified && s.PersonIdnp == signerPin && s.UserId != userId, ct)
-            || await _db.SzResolutionSignatures.AnyAsync(s => s.Verified && s.PersonIdnp == signerPin && s.UserId != userId, ct);
+            await _db.VndResolutionSignatures.AnyAsync(s => s.Verified && s.Method == ResolutionSignatureMethod.InfocomEcp
+                                                            && s.PersonIdnp == signerPin && s.UserId != userId, ct)
+            || await _db.SzResolutionSignatures.AnyAsync(s => s.Verified && s.Method == ResolutionSignatureMethod.InfocomEcp
+                                                              && s.PersonIdnp == signerPin && s.UserId != userId, ct);
         if (usedByOtherUser)
             throw new ResolutionSignatureException(StatusCodes.Status403Forbidden,
                 ResolutionSignatureErrorCodes.IdentityMismatch,
@@ -849,7 +1029,11 @@ public static class SzEcpSheetData
     }
 
     /// <summary>Отпечаток содержимого записки на текущий момент (см. SzResolutionSignatureHasher.BuildContentDigest).</summary>
-    public static async Task<string> ContentDigestAsync(DelosferaDbContext db, SzDocument sz, CancellationToken ct = default)
+    public static async Task<string> ContentDigestAsync(DelosferaDbContext db, SzDocument sz, CancellationToken ct = default) =>
+        (await ContentDigestsAsync(db, sz, ct)).Current;
+
+    /// <summary>Текущий отпечаток по действующей и по прежней схеме — для сверки подписей разных лет.</summary>
+    public static async Task<SzContentDigests> ContentDigestsAsync(DelosferaDbContext db, SzDocument sz, CancellationToken ct = default)
     {
         var document = sz.Document ?? await db.Documents.AsNoTracking().FirstAsync(d => d.Id == sz.DocumentId, ct);
 
@@ -859,7 +1043,7 @@ public static class SzEcpSheetData
             .Select(a => new { a.Id, a.Hash })
             .ToListAsync(ct);
 
-        return SzResolutionSignatureHasher.BuildContentDigest(new SzContentMaterial(
+        var material = new SzContentMaterial(
             sz.DocumentId,
             document.RegNumber,
             document.Title,
@@ -874,7 +1058,11 @@ public static class SzEcpSheetData
             sz.Amount,
             sz.TravelExpenses,
             sz.ExtraFields?.RootElement.GetRawText(),
-            attachments.Select(a => (a.Id, (string?)a.Hash)).ToList()));
+            attachments.Select(a => (a.Id, (string?)a.Hash)).ToList());
+
+        return new SzContentDigests(
+            SzResolutionSignatureHasher.BuildContentDigest(material),
+            SzResolutionSignatureHasher.BuildLegacyContentDigest(material));
     }
 
     /// <summary>Сведения ЭЦП по подписям контура: Signature.Id → штамп. Подписи без записи в журнале
@@ -899,6 +1087,7 @@ public static class SzEcpSheetData
                 s.SignatureSha256,
                 s.ContentDigest,
                 s.Verified,
+                s.Method,
             })
             .ToListAsync(ct);
 
@@ -908,7 +1097,8 @@ public static class SzEcpSheetData
             {
                 var r = g.First();
                 return new SzEcpStampInfo(r.PersonFio ?? r.CertCommonName, r.OrganizationName, r.CertValidNotAfter,
-                    r.CertIssuerCommonName, r.SignedAt, r.Hash, r.SignatureSha256, r.ContentDigest, !r.Verified);
+                    r.CertIssuerCommonName, r.SignedAt, r.Hash, r.SignatureSha256, r.ContentDigest, !r.Verified,
+                    IsSystem: r.Method == ResolutionSignatureMethod.DelosferaSystem);
             });
     }
 }

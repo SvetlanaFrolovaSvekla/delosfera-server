@@ -128,6 +128,9 @@ public class SzPrintSignatureResponse
     /// <summary>Тестовая имитация ЭЦП (EcpSigning:AllowSzTestEcp) — не подпись; печатается с пометкой «ТЕСТ».</summary>
     public bool IsTest { get; set; }
 
+    /// <summary>Локальная подпись системы «Делосфера» (без ЭЦП КР) — печатается своим штампом.</summary>
+    public bool IsSystem { get; set; }
+
     /// <summary>Организация из ответа провайдера (если подписывали от её имени).</summary>
     public string? OrganizationName { get; set; }
 

@@ -219,6 +219,35 @@ public class DocumentAttachmentTests
     [Theory]
     [InlineData("OnApproval")]
     [InlineData("OnSigning")]
+    public async Task SzAttachments_OnRoute_AuthorAndCorrectorChange_StrangerAndAdminCannot(string status)
+    {
+        await using var db = await _postgres.NewIsolatedDbAsync();
+        var (documentId, authorId) = await SeedDocumentWithAuthorAsync(db);
+
+        var (authorService, _, _) = NewServiceWithStorage(db, new FakeCurrentUser(authorId));
+        var added = await authorService.AddAsync(documentId, FakeFile("исходный", "a.txt"), userId: authorId);
+        await SetStatusAsync(db, documentId, status);
+
+        // Вложения не входят в подписываемое содержимое (sz-content-v2): на маршруте их
+        // меняет автор без отзыва записки и без нового круга согласования.
+        var second = await authorService.AddAsync(documentId, FakeFile("новый", "b.txt"), userId: authorId);
+        await authorService.ReplaceAsync(added.Id, FakeFile("подмена", "a.txt"), userId: authorId);
+
+        // ...и обладатель права корректировки.
+        var (correctorService, _, _) = NewServiceWithStorage(db,
+            new FakeCurrentUser(authorId + 2000, PermissionCode.CorrectSzOnApproval));
+        await correctorService.DeleteAsync(second.Id, userId: authorId + 2000);
+
+        // Посторонний и администратор без права корректировки — нет.
+        var (adminService, _, _) = NewServiceWithStorage(db,
+            new FakeCurrentUser(authorId + 1000, PermissionCode.ManageSystemSettings));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => adminService.AddAsync(documentId, FakeFile("чужой", "c.txt"), userId: authorId + 1000));
+
+        Assert.Single(await authorService.ListAsync(documentId));
+    }
+
+    [Theory]
     [InlineData("OnExecution")]
     public async Task SzAttachments_AreLockedOutsideAuthorStatuses_EvenForAuthorAndAdmin(string status)
     {
@@ -229,8 +258,7 @@ public class DocumentAttachmentTests
         var added = await authorService.AddAsync(documentId, FakeFile("исходный", "a.txt"), userId: authorId);
         await SetStatusAsync(db, documentId, status);
 
-        // Вложения входят в отпечаток, под которым согласующие ставят ЭЦП: на маршруте
-        // их не меняет ни автор, ни администратор — записку для этого отзывают.
+        // После маршрута вложения не меняет ни автор, ни администратор.
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => authorService.AddAsync(documentId, FakeFile("новый", "b.txt"), userId: authorId));
         await Assert.ThrowsAsync<InvalidOperationException>(
