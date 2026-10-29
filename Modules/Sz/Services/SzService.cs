@@ -703,10 +703,8 @@ public class SzService : ISzService
 
         var canChangeRoute = !correction
                              && (byAuthor || _currentUser.HasPermission(PermissionCode.ManageSystemSettings));
-        var digestBefore = correction ? await SzEcpSheetData.ContentDigestAsync(_db, sz) : null;
-        // Сотрудники записки в отпечаток ЭЦП не входят, но это тоже содержание:
-        // о ком кадровая записка и с какими значениями. Сравниваем их отдельно.
-        var employeesBefore = correction ? await EmployeesFingerprintAsync(sz.Id) : null;
+        // Снимок до правки — только то, что считается содержанием (см. RestartFingerprint).
+        var contentBefore = correction ? RestartFingerprint(sz) : null;
         var keptParallel = sz.ApprovalIsParallel;
         var keptSigner = sz.SignerUserId;
 
@@ -770,12 +768,10 @@ public class SzService : ISzService
         await _db.SaveChangesAsync();
         await _audit.LogAsync("Sz", sz.Id, correction ? "CorrectedOnApproval" : "Updated", actorUserId);
 
-        // Изменилось то, под чем ставятся подписи (текст и реквизиты), — собранные визы
-        // недействительны. Вложения и состав маршрута в подписываемое содержимое не входят.
-        var contentChanged = correction
-                             && (digestBefore != await SzEcpSheetData.ContentDigestAsync(_db, sz)
-                                 || employeesBefore != await EmployeesFingerprintAsync(sz.Id));
-        var restarted = contentChanged
+        // Изменился сам текст или значимые значения — собранные визы недействительны,
+        // согласование идёт заново. Люди (адресат, сотрудники, согласующие, подписант),
+        // подразделения и вложения круг не перезапускают: их правят на ходу.
+        var restarted = correction && contentBefore != RestartFingerprint(sz)
                         && await RestartApprovalAfterContentChangeAsync(sz.DocumentId, actorUserId);
 
         // Смена подписанта на маршруте — без отзыва и нового круга.
@@ -1808,32 +1804,69 @@ public class SzService : ISzService
     }
 
     /// <summary>
-    /// Отпечаток состава сотрудников записки: кто, где, на какой должности и с какими
-    /// значениями — в порядке списка. Id строк не входят: ReplaceEmployeesAsync
-    /// пересоздаёт их при каждом сохранении. JSON значений нормализуется, чтобы
-    /// разница в пробелах не считалась правкой.
+    /// Что считается содержанием записки при правке на маршруте: изменение любого из
+    /// этих полей перезапускает согласование. Тема, текст, вид и кадровый вид, сумма,
+    /// командировочные и дополнительные поля вида.
     ///
-    /// Нужен потому, что сотрудники не входят в отпечаток содержимого под ЭЦП
-    /// (<see cref="SzEcpSheetData.ContentDigestAsync"/>): без этой сверки состав
-    /// кадровой записки меняли на согласовании и подписании, и маршрут не
-    /// перезапускался — визы оставались под другим составом.
+    /// Сознательно НЕ входят: адресат и подразделение-адресат, ФИО сотрудника, его
+    /// подразделение и подразделение перевода, список сотрудников, согласующие,
+    /// подписант, рубрики и вложения — их правят без нового круга.
+    ///
+    /// Это не отпечаток под ЭЦП (<see cref="SzEcpSheetData.ContentDigestAsync"/>): тот
+    /// не трогаем, иначе перестанут сходиться уже поставленные подписи.
+    ///
+    /// Значения нормализуются, чтобы сохранение без правок не давало ложного перезапуска:
+    /// сумма без хвостовых нулей (из базы приходит 100.00, из формы 100), JSON доп. полей
+    /// с ключами по порядку (jsonb в Postgres переставляет ключи и пробелы).
     /// </summary>
-    private async Task<string> EmployeesFingerprintAsync(int szId)
-    {
-        var rows = await _db.SzEmployees.AsNoTracking()
-            .Where(e => e.SzDocumentId == szId)
-            .OrderBy(e => e.SortOrder)
-            .Select(e => new { e.UserId, e.FullName, e.OrgUnitId, e.Position, e.ValuesJson })
-            .ToListAsync();
-
-        return JsonSerializer.Serialize(rows.Select(e => new
+    private static string RestartFingerprint(SzDocument sz) =>
+        JsonSerializer.Serialize(new
         {
-            e.UserId,
-            e.FullName,
-            e.OrgUnitId,
-            e.Position,
-            Values = ParseValues(e.ValuesJson),
-        }));
+            Title = sz.Document?.Title,
+            sz.Body,
+            sz.KindId,
+            sz.HrKindId,
+            Amount = sz.Amount?.ToString("G29", System.Globalization.CultureInfo.InvariantCulture),
+            sz.TravelExpenses,
+            Extra = CanonicalJson(sz.ExtraFields),
+        });
+
+    private static string? CanonicalJson(JsonDocument? doc)
+    {
+        if (doc is null) return null;
+
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+            WriteCanonical(doc.RootElement, writer);
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
+    private static void WriteCanonical(JsonElement element, Utf8JsonWriter writer)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in element.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteCanonical(property.Value, writer);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray())
+                    WriteCanonical(item, writer);
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.Number when element.TryGetDecimal(out var number):
+                writer.WriteRawValue(number.ToString("G29", System.Globalization.CultureInfo.InvariantCulture));
+                break;
+            default:
+                element.WriteTo(writer);
+                break;
+        }
     }
 
     /// <summary>
