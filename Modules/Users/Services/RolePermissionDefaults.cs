@@ -40,6 +40,8 @@ public static class RolePermissionDefaults
             PermissionCode.DeleteAnyVnd,
             // Настройки секретности ВНД: администратор и главный редактор.
             PermissionCode.ManageVndSecrecy,
+            // Рубрикатор заявлений ведёт администратор, пока не появится отдельная роль.
+            PermissionCode.ManageStatementDictionaries,
         ]),
 
         // Главный редактор ВНД: удалять ВНД на любом статусе.

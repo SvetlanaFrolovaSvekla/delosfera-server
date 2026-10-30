@@ -418,5 +418,8 @@ public enum PermissionCode
     /// Отправляет на согласование и удаляет черновик по-прежнему только автор: маршрут
     /// запускается от его имени. По умолчанию — администратору.
     /// </summary>
-    EditAnyProcurementDraft = 72
+    EditAnyProcurementDraft = 72,
+
+    /// <summary>Управление справочниками заявлений (Рубрикатор заявлений). По умолчанию — администратору.</summary>
+    ManageStatementDictionaries = 73
 }

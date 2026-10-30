@@ -48,6 +48,7 @@ public class DelosferaDbContext : DbContext
     
     public DbSet<Rubric> Rubrics => Set<Rubric>(); // Справочник: Рубрикатор ВНД
     public DbSet<SzRubric> SzRubrics => Set<SzRubric>(); // Справочник: Рубрикатор СЗ (отдельный от рубрикатора ВНД)
+    public DbSet<StatementRubric> StatementRubrics => Set<StatementRubric>(); // Справочник: Рубрикатор заявлений
     public DbSet<Role> Roles => Set<Role>(); // Роли пользователей
     public DbSet<User> Users => Set<User>(); // Пользователи
     public DbSet<SavedFilter> SavedFilters => Set<SavedFilter>(); // личные сохранённые фильтры реестров (БП-16)

@@ -5189,6 +5189,117 @@ namespace delosfera_server.Migrations
                         });
                 });
 
+            modelBuilder.Entity("delosfera_server.Modules.Dictionaries.Models.StatementRubric", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int?>("ParentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("parent_id");
+
+                    b.Property<string>("TitleEn")
+                        .HasColumnType("text")
+                        .HasColumnName("title_en");
+
+                    b.Property<string>("TitleKg")
+                        .HasColumnType("text")
+                        .HasColumnName("title_kg");
+
+                    b.Property<string>("TitleRu")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title_ru");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_dictionary_statement_rubric");
+
+                    b.HasIndex("ParentId")
+                        .HasDatabaseName("ix_dictionary_statement_rubric_parent_id");
+
+                    b.ToTable("dictionary_statement_rubric", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            TitleEn = "HR matters",
+                            TitleKg = "Кадрдык маселелер",
+                            TitleRu = "Кадровые вопросы",
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 2,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            ParentId = 1,
+                            TitleEn = "Leave",
+                            TitleKg = "Өргүүлөр",
+                            TitleRu = "Отпуска",
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 3,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            ParentId = 1,
+                            TitleEn = "Hiring, transfer, dismissal",
+                            TitleKg = "Ишке алуу, которуу, бошотуу",
+                            TitleRu = "Приём, перевод, увольнение",
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 4,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            TitleEn = "Certificates and document copies",
+                            TitleKg = "Маалым каттар жана документтердин көчүрмөлөрү",
+                            TitleRu = "Справки и копии документов",
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 5,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            TitleEn = "Financial matters",
+                            TitleKg = "Финансылык маселелер",
+                            TitleRu = "Финансовые вопросы",
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 6,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            ParentId = 5,
+                            TitleEn = "Financial assistance",
+                            TitleKg = "Материалдык жардам",
+                            TitleRu = "Материальная помощь",
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = 7,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            TitleEn = "Other",
+                            TitleKg = "Башка",
+                            TitleRu = "Прочее",
+                            UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
+                });
+
             modelBuilder.Entity("delosfera_server.Modules.Dictionaries.Models.StorageTerm", b =>
                 {
                     b.Property<int>("Id")
@@ -5927,14 +6038,14 @@ namespace delosfera_server.Migrations
                         .HasColumnName("search_vector")
                         .HasComputedColumnSql("to_tsvector('russian', coalesce(title, '') || ' ' || coalesce(reg_number, ''))", true);
 
+                    b.Property<DateTime>("StatusChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("status_changed_at");
+
                     b.Property<string>("StatusCode")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("status_code");
-
-                    b.Property<DateTime>("StatusChangedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("status_changed_at");
 
                     b.Property<int?>("StorageTermId")
                         .HasColumnType("integer")
@@ -15081,7 +15192,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 1,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73 },
                             TitleEn = "Administrator",
                             TitleKg = "Администратор",
                             TitleRu = "Администратор",
@@ -15111,7 +15222,7 @@ namespace delosfera_server.Migrations
                         {
                             Id = 4,
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65 },
+                            PermissionCodes = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73 },
                             TitleEn = "Chief VND Editor",
                             TitleKg = "ВНД башкы редактору",
                             TitleRu = "Главный редактор ВНД",
@@ -16647,6 +16758,17 @@ namespace delosfera_server.Migrations
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_dictionary_rubric_dictionary_rubric_parent_id");
+
+                    b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Dictionaries.Models.StatementRubric", b =>
+                {
+                    b.HasOne("delosfera_server.Modules.Dictionaries.Models.StatementRubric", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dictionary_statement_rubric_dictionary_statement_rubric_par");
 
                     b.Navigation("Parent");
                 });
@@ -19457,6 +19579,11 @@ namespace delosfera_server.Migrations
                 });
 
             modelBuilder.Entity("delosfera_server.Modules.Dictionaries.Models.Rubric", b =>
+                {
+                    b.Navigation("Children");
+                });
+
+            modelBuilder.Entity("delosfera_server.Modules.Dictionaries.Models.StatementRubric", b =>
                 {
                     b.Navigation("Children");
                 });

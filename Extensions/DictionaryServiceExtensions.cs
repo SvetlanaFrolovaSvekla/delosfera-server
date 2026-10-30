@@ -18,6 +18,7 @@ public static class DictionaryServiceExtensions
         builder.Services.AddScoped<IUserGroupService, UserGroupService>();
         builder.Services.AddScoped<IRubricService, RubricService>();
         builder.Services.AddScoped<ISzRubricService, SzRubricService>();
+        builder.Services.AddScoped<IStatementRubricService, StatementRubricService>();
 
         return builder;
     }

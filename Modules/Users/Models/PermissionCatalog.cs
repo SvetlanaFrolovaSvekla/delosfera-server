@@ -154,6 +154,12 @@ public static class PermissionCatalog
             TitleEn = "Manage procurement dictionaries",
             TitleKg = "Сатып алуулардын маалымдамаларын башкаруу"
         },
+        [PermissionCode.ManageStatementDictionaries] = new PermissionDescription
+        {
+            TitleRu = "Управление справочниками заявлений",
+            TitleEn = "Manage statement dictionaries",
+            TitleKg = "Арыздардын маалымдамаларын башкаруу"
+        },
         [PermissionCode.EditVndRequisites] = new PermissionDescription
         {
             TitleRu = "Изменение реквизитов существующей ВНД и её связей с другими документами",
