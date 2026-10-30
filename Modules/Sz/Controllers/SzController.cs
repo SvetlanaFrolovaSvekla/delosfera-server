@@ -290,7 +290,8 @@ public class SzController : ControllerBase
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
-    /// <summary>Состав и порядок согласующих (до отправки записки).</summary>
+    /// <summary>Состав, порядок и режим согласующих: до отправки — свободно; на согласовании — без отзыва
+    /// (автор или право CorrectSzOnApproval), непройденная часть маршрута пересобирается.</summary>
     [HttpPut("{id:int}/approvers")]
     public async Task<IActionResult> SetApprovers(int id, [FromBody] ApproversRequest req)
     {
@@ -299,6 +300,7 @@ public class SzController : ControllerBase
             return Ok(await _sz.SetApproversAsync(id, req.UserIds, req.Parallel, _currentUser.UserId));
         }
         catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 

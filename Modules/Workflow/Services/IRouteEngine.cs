@@ -70,4 +70,13 @@ public interface IRouteEngine
     /// продвигается: если задача уже была выдана, она снимается у прежнего и выдаётся новому.
     /// </summary>
     Task<RouteParticipant> ReplaceParticipantAsync(int participantId, int newUserId, int actorUserId);
+
+    /// <summary>
+    /// Пересобрать ещё не пройденную часть согласования идущего маршрута по новому списку
+    /// согласующих и режиму (параллельно / по очереди) — без перезапуска круга. Вынесенные
+    /// решения остаются; кто уже высказался, заново не ставится. Этапы подписания и финального
+    /// контроля остаются в хвосте. Задача, уже выданная согласующему, сохраняется, если он и
+    /// дальше должен решать сейчас, иначе снимается.
+    /// </summary>
+    Task RebuildApprovalAsync(int routeInstanceId, IReadOnlyList<int> approverUserIds, bool parallel, int actorUserId);
 }

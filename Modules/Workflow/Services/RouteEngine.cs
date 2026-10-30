@@ -940,6 +940,134 @@ public class RouteEngine : IRouteEngine
         return result;
     }
 
+    public async Task RebuildApprovalAsync(
+        int routeInstanceId, IReadOnlyList<int> approverUserIds, bool parallel, int actorUserId)
+    {
+        var inst = await InstanceQuery().FirstOrDefaultAsync(i => i.Id == routeInstanceId)
+            ?? throw new KeyNotFoundException($"Маршрут id={routeInstanceId} не найден");
+
+        if (inst.Status != RouteInstanceStatus.Running)
+            throw new InvalidOperationException("Менять согласующих можно только в идущем маршруте");
+
+        static bool IsApproval(RouteStep s) => s.Kind == StepKind.Approval && !s.IsFinalMethodology;
+
+        var steps = inst.Steps.OrderBy(s => s.Order).ToList();
+        var current = steps.FirstOrDefault(s => s.Order == inst.CurrentStepOrder)
+            ?? throw new InvalidOperationException("Не найден текущий этап маршрута");
+        if (!IsApproval(current))
+            throw new InvalidOperationException("Согласование уже пройдено — состав согласующих менять поздно");
+
+        var future = steps.Where(s => s.Order > current.Order).ToList();
+        var futureApproval = future.Where(IsApproval).ToList();
+        // Подписание и финальный контроль остаются в конце маршрута.
+        var tail = future.Where(s => !IsApproval(s)).ToList();
+
+        // Согласующего по роли или подразделению списком из людей не описать — такой маршрут
+        // (собранный по шаблону) правят по одному участнику.
+        if (current.Participants.Concat(futureApproval.SelectMany(s => s.Participants))
+            .Any(p => p.UserId is null && p.State is ParticipantState.Pending or ParticipantState.Active))
+            throw new InvalidOperationException(
+                "В маршруте есть согласующие по роли или подразделению — меняйте участников по одному");
+
+        // Кто уже высказался на этом маршруте — его решение остаётся, повторно его не ставим.
+        var decided = steps.Where(IsApproval)
+            .SelectMany(s => s.Participants)
+            .Where(p => p.State == ParticipantState.Done || p.Resolution != null)
+            .Select(p => p.UserId).OfType<int>()
+            .ToHashSet();
+        var pending = approverUserIds.Distinct().Where(u => !decided.Contains(u)).ToList();
+
+        if (pending.Count == 0 && decided.Count == 0)
+            throw new InvalidOperationException("Оставьте хотя бы одного согласующего");
+
+        // Выданная задача сохраняется за тем, кто и в новом порядке решает сейчас: при
+        // параллельном — за всеми оставшимися в списке, при последовательном — только за первым.
+        var active = current.Participants.Where(p => p.State == ParticipantState.Active).ToList();
+        var keep = parallel
+            ? active.Where(p => pending.Contains(p.UserId!.Value)).ToList()
+            : active.Where(p => pending.Count > 0 && p.UserId == pending[0]).Take(1).ToList();
+
+        foreach (var p in active.Except(keep))
+        {
+            // Снятого оставляем в истории: задача у него уже была.
+            p.State = ParticipantState.Cancelled;
+            CloseTask(p.Id, WorkflowTaskState.Cancelled);
+        }
+
+        // До ожидающих очередь не дошла — задач нет, просто убираем их и будущие этапы согласования.
+        foreach (var p in current.Participants.Where(p => p.State == ParticipantState.Pending).ToList())
+        {
+            current.Participants.Remove(p);
+            _db.Remove(p);
+        }
+        foreach (var s in futureApproval)
+        {
+            _db.RouteParticipants.RemoveRange(s.Participants);
+            _db.RouteSteps.Remove(s);
+        }
+
+        var keptUsers = keep.Select(p => p.UserId!.Value).ToHashSet();
+        List<int> toCurrent;
+        List<int> later;
+        if (parallel)
+        {
+            // Параллельно — все оставшиеся на текущем этапе, разом.
+            toCurrent = pending.Where(u => !keptUsers.Contains(u)).ToList();
+            later = new List<int>();
+        }
+        else
+        {
+            // По очереди — первый решает сейчас, остальные отдельными этапами за ним.
+            toCurrent = keep.Count == 0 && pending.Count > 0 ? new List<int> { pending[0] } : new List<int>();
+            later = pending.Skip(1).ToList();
+        }
+
+        current.Mode = parallel ? StepMode.Parallel : StepMode.Sequential;
+
+        var added = toCurrent
+            .Select(u => new RouteParticipant { UserId = u, Required = true, State = ParticipantState.Pending })
+            .ToList();
+        foreach (var p in added) current.Participants.Add(p);
+
+        var order = current.Order;
+        foreach (var u in later)
+        {
+            _db.RouteSteps.Add(new RouteStep
+            {
+                RouteInstanceId = inst.Id,
+                Order = ++order,
+                Mode = StepMode.Sequential,
+                Kind = StepKind.Approval,
+                TimeNormHours = current.TimeNormHours,
+                RequiredSignatureLevel = current.RequiredSignatureLevel,
+                Participants = [new RouteParticipant { UserId = u, Required = true, State = ParticipantState.Pending }],
+            });
+        }
+        foreach (var s in tail) s.Order = ++order;
+
+        await _db.SaveChangesAsync();
+
+        // Новым на текущем этапе — задача сразу; срок — как у тех, кто уже решает, либо по нормативу.
+        var due = keep.Select(p => p.DueAt).FirstOrDefault(d => d != null)
+                  ?? (current.TimeNormHours.HasValue
+                      ? WorkingCalendar.AddWorkingHours(DateTime.UtcNow, current.TimeNormHours.Value)
+                      : (DateTime?)null);
+        var activated = new List<int>();
+        foreach (var p in added) activated.AddRange(ActivateParticipant(p, due));
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(Entity, inst.Id, "ApprovalRebuilt", actorUserId,
+            new { approvers = pending, parallel, kept = keptUsers.ToList(), step = current.Order });
+
+        if (activated.Count > 0)
+            await _notifier.TaskAssignedAsync(activated);
+
+        // На текущем этапе ждать больше некого (оставили только тех, кто уже высказался) —
+        // этап закрыт, маршрут идёт дальше, как после последнего решения.
+        if (current.Participants.All(p => p.State is ParticipantState.Done or ParticipantState.Cancelled))
+            await AdvanceIfStepComplete(inst.Id, current.Id, actorUserId);
+    }
+
     /// <summary>
     /// Заблокирован ли процесс строгим режимом: маршрут на доработке либо на этапе
     /// есть неснятые замечания.

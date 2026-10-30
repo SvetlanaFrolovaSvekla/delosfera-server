@@ -710,6 +710,24 @@ public class SzService : ISzService
 
         ValidateSaveRequest(request);
 
+        // Состав, порядок и режим согласующих на согласовании меняются тут же, без отзыва:
+        // непройденная часть маршрута пересобирается, вынесенные визы остаются (см.
+        // RebuildApprovalAsync). Проверяем до любой правки, чтобы отказ ничего не записал.
+        var approversOnRoute = correction && sz.Document.StatusCode == SzStatus.OnApproval
+            ? await _db.SzApprovers.Where(a => a.SzDocumentId == sz.Id)
+                .OrderBy(a => a.Order).Select(a => a.UserId).ToListAsync()
+            : null;
+        var requestedApprovers = request.ApproverUserIds.Distinct().ToList();
+        var approversChangedOnRoute = approversOnRoute is not null
+            && (!requestedApprovers.SequenceEqual(approversOnRoute) || request.ApprovalIsParallel != keptParallel);
+        if (approversChangedOnRoute)
+        {
+            if (approversOnRoute!.Count == 0)
+                throw new InvalidOperationException(
+                    "Маршрут собран по шаблону вида — согласующих меняйте по одному в блоке «Согласование»");
+            await ValidateApproversAsync(sz.Document.AuthorId, requestedApprovers, approversOnRoute);
+        }
+
         // Правка полей разрешена, пока записка не ушла дальше автора. Отозванная —
         // тоже у автора: её отзывают как раз затем, чтобы поправить и отправить снова.
         if (!correction && sz.Document!.StatusCode is not (SzStatus.Draft or SzStatus.OnRevision or SzStatus.Withdrawn))
@@ -767,6 +785,10 @@ public class SzService : ISzService
 
         await _db.SaveChangesAsync();
         await _audit.LogAsync("Sz", sz.Id, correction ? "CorrectedOnApproval" : "Updated", actorUserId);
+
+        // До проверки на новый круг: если круг перезапустится, он возьмёт уже новый состав.
+        if (approversChangedOnRoute)
+            await ChangeApproversOnRouteAsync(sz, requestedApprovers, request.ApprovalIsParallel, actorUserId);
 
         // Изменился сам текст или значимые значения — собранные визы недействительны,
         // согласование идёт заново. Люди (адресат, сотрудники, согласующие, подписант),
@@ -922,6 +944,26 @@ public class SzService : ISzService
         await _db.SaveChangesAsync();
         await _audit.LogAsync("Sz", sz.Id, "SignerChangedOnRoute", actorUserId,
             new { from = previous, to = signerUserId });
+    }
+
+    /// <summary>
+    /// Новый состав, порядок и режим согласующих для записки на согласовании — без отзыва и
+    /// нового круга. Непройденная часть маршрута пересобирается движком; список согласующих
+    /// записки ведём вместе с ним, чтобы после доработки круг собрался уже по новому составу.
+    /// </summary>
+    private async Task ChangeApproversOnRouteAsync(SzDocument sz, List<int> userIds, bool parallel, int actorUserId)
+    {
+        var routeId = sz.Document!.CurrentRouteInstanceId
+            ?? throw new InvalidOperationException("У записки нет идущего маршрута");
+
+        await _routeEngine.RebuildApprovalAsync(routeId, userIds, parallel, actorUserId);
+
+        await ReplaceApproversAsync(sz.Id, userIds);
+        sz.ApprovalIsParallel = parallel;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync("Sz", sz.Id, "ApproversChangedOnRoute", actorUserId,
+            new { approvers = userIds, parallel });
     }
 
     public async Task<SzDetails> AddRouteParticipantAsync(int id, int userId, int? beforeStepOrder, int actorUserId)
@@ -1266,6 +1308,21 @@ public class SzService : ISzService
 
         // Состав согласующих — автор и администратор системы: ни ViewAllSz, ни EditAnySz
         // чужой маршрут не переписывают (см. UpdateDraftAsync).
+        // На согласовании — та же корректировка без отзыва: автор или право CorrectSzOnApproval.
+        if (sz.Document!.StatusCode == SzStatus.OnApproval)
+        {
+            await LoadForRouteCorrectionAsync(id, actorUserId);
+            var onRoute = userIds.Distinct().ToList();
+            var current = await _db.SzApprovers.Where(a => a.SzDocumentId == id)
+                .OrderBy(a => a.Order).Select(a => a.UserId).ToListAsync();
+            if (current.Count == 0)
+                throw new InvalidOperationException(
+                    "Маршрут собран по шаблону вида — согласующих меняйте по одному в блоке «Согласование»");
+            await ValidateApproversAsync(sz.Document.AuthorId, onRoute, current);
+            await ChangeApproversOnRouteAsync(sz, onRoute, parallel, actorUserId);
+            return (await GetAsync(sz.Id))!;
+        }
+
         if (sz.Document!.AuthorId != actorUserId
             && !_currentUser.HasPermission(PermissionCode.ManageSystemSettings))
             throw new UnauthorizedAccessException("Состав согласующих меняет только автор записки или администратор");
