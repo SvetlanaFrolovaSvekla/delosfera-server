@@ -156,6 +156,8 @@ public static class RolePermissionDefaults
             PermissionCode.CorrectSubstitution,
             PermissionCode.WithdrawAnySubstitution,
             PermissionCode.ViewAllProcurements,
+            // Застрявший черновик заявки на закупку администратор правит сам.
+            PermissionCode.EditAnyProcurementDraft,
             PermissionCode.ConductProcurement,
             PermissionCode.RecordCommissionDecisions,
             PermissionCode.ManageProcurementProtocol,

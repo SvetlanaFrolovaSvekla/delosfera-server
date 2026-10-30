@@ -93,7 +93,8 @@ public class DocumentAttachmentService : IDocumentAttachmentService
     /// состав карточки — чужой рукой этого делать нельзя. Вмешаться в чужой документ
     /// может только администратор системы (<see cref="PermissionCode.ManageSystemSettings"/>),
     /// а в чужую служебную записку — ещё и обладатель <see cref="PermissionCode.EditAnySz"/>
-    /// (Сектор делопроизводства).
+    /// (Сектор делопроизводства), а в чужую заявку на закупку, пока она черновик или на
+    /// доработке, — обладатель <see cref="PermissionCode.EditAnyProcurementDraft"/>.
     ///
     /// У служебной записки подпись согласующего удостоверяет текст и реквизиты, но не вложения
     /// (SzResolutionSignatureHasher, схема sz-content-v2). Поэтому на маршруте — на согласовании
@@ -120,9 +121,15 @@ public class DocumentAttachmentService : IDocumentAttachmentService
             throw new UnauthorizedAccessException(message);
         }
 
+        var isEditableProcurementDraft = document.Type == DocumentType.Procurement
+            && document.StatusCode is Procurement.Models.ProcurementStatus.Draft
+                or Procurement.Models.ProcurementStatus.OnRevision;
+
         var allowed = document.AuthorId == userId
                       || _currentUser.HasPermission(PermissionCode.ManageSystemSettings)
-                      || (isSz && _currentUser.HasPermission(PermissionCode.EditAnySz));
+                      || (isSz && _currentUser.HasPermission(PermissionCode.EditAnySz))
+                      || (isEditableProcurementDraft
+                          && _currentUser.HasPermission(PermissionCode.EditAnyProcurementDraft));
         if (!allowed)
             throw new UnauthorizedAccessException(message);
 

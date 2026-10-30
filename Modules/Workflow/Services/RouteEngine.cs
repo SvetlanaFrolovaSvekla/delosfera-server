@@ -78,6 +78,28 @@ public class RouteEngine : IRouteEngine
         return new RouteContext(documentId, authorUnit, targetUnit ?? authorUnit);
     }
 
+    /// <summary>
+    /// Почему роль не разрешилась — с названием подразделения, если роль указывает на
+    /// конкретное («unit-head:44»). Иначе текст «не заполнен руководитель подразделения»
+    /// не говорит, какое именно подразделение заполнять в справочнике.
+    /// </summary>
+    private async Task<string> ExplainWithUnitAsync(string roleRef)
+    {
+        var text = _roles.Explain(roleRef);
+
+        var prefix = roleRef.StartsWith(RouteRoles.UnitHeadPrefix) ? RouteRoles.UnitHeadPrefix
+            : roleRef.StartsWith(RouteRoles.UnitCuratorPrefix) ? RouteRoles.UnitCuratorPrefix
+            : null;
+        if (prefix is null || !int.TryParse(roleRef[prefix.Length..], out var unitId))
+            return text;
+
+        var title = await _db.OrganizationUnits.AsNoTracking()
+            .Where(u => u.Id == unitId)
+            .Select(u => u.TitleRu)
+            .FirstOrDefaultAsync();
+        return title is null ? text : $"{text} «{title}»";
+    }
+
     private IQueryable<RouteInstance> InstanceQuery() =>
         _db.RouteInstances
             .Include(i => i.Steps.OrderBy(s => s.Order))
@@ -127,7 +149,7 @@ public class RouteEngine : IRouteEngine
             var userId = await _roles.ResolveAsync(roleRef, context);
             resolved[participant.Id] = userId;
 
-            if (userId is null) unresolved.Add(_roles.Explain(roleRef));
+            if (userId is null) unresolved.Add(await ExplainWithUnitAsync(roleRef));
         }
 
         if (unresolved.Count > 0)

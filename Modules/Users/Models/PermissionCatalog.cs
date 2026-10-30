@@ -353,6 +353,12 @@ public static class PermissionCatalog
             TitleEn = "See all procurement requests, not only own",
             TitleKg = "Өздүкүн гана эмес, бардык сатып алуу арыздарын көрүү"
         },
+        [PermissionCode.EditAnyProcurementDraft] = new PermissionDescription
+        {
+            TitleRu = "Видеть и править чужие черновики заявок на закупку (черновик, доработка)",
+            TitleEn = "See and edit other users' procurement request drafts (draft, revision)",
+            TitleKg = "Башкалардын сатып алуу арыздарынын долбоорлорун көрүү жана оңдоо (долбоор, иштеп чыгуу)"
+        },
         [PermissionCode.ConductProcurement] = new PermissionDescription
         {
             TitleRu = "Вести закупочную процедуру (Сектор закупок): конкурс, публикация, вскрытие",

@@ -86,8 +86,23 @@ public class ProcurementRequestService : IProcurementRequestService
     /// </summary>
     private bool SeesAllRequests => _currentUser.HasPermission(PermissionCode.ViewAllProcurements);
 
+    /// <summary>Право править чужие черновики и заявки на доработке (EditAnyProcurementDraft).</summary>
+    private bool EditsAnyDraft => _currentUser.HasPermission(PermissionCode.EditAnyProcurementDraft);
+
+    private static bool IsEditableStatus(string status) =>
+        status is ProcurementStatus.Draft or ProcurementStatus.OnRevision;
+
+    /// <summary>Править заявку может автор, а с правом EditAnyProcurementDraft — и чужую.</summary>
+    private bool CanEdit(ProcurementRequest r, int userId) =>
+        IsEditableStatus(r.Document!.StatusCode) && (r.Document.AuthorId == userId || EditsAnyDraft);
+
     private IQueryable<ProcurementRequest> RestrictVisibility(IQueryable<ProcurementRequest> q, int currentUserId) =>
-        SeesAllRequests ? q : q.Where(r => r.Document!.AuthorId == currentUserId);
+        SeesAllRequests ? q
+        // С правом править чужие черновики видны и они — иначе их не найти.
+        : EditsAnyDraft ? q.Where(r => r.Document!.AuthorId == currentUserId
+                                       || r.Document.StatusCode == ProcurementStatus.Draft
+                                       || r.Document.StatusCode == ProcurementStatus.OnRevision)
+        : q.Where(r => r.Document!.AuthorId == currentUserId);
 
     public async Task<PagedResult<ProcurementListItemDto>> SearchAsync(
         ProcurementSearchRequest request, int currentUserId)
@@ -304,9 +319,10 @@ public class ProcurementRequestService : IProcurementRequestService
         return new ProcurementCountersDto
         {
             All = byStatus.Values.Sum(),
-            Drafts = await BaseQuery()
+            // С правом EditAnyProcurementDraft вкладка «Черновики» — черновики всех пользователей.
+            Drafts = await RestrictVisibility(BaseQuery(), currentUserId)
                 .CountAsync(r => r.Document!.StatusCode == ProcurementStatus.Draft
-                                 && r.Document.AuthorId == currentUserId),
+                                 && (EditsAnyDraft || r.Document.AuthorId == currentUserId)),
             Mine = await RestrictVisibility(BaseQuery(), currentUserId)
                 .CountAsync(r => r.Document!.AuthorId == currentUserId),
             OnApproval = Count(ProcurementStatus.OnApproval),
@@ -322,7 +338,8 @@ public class ProcurementRequestService : IProcurementRequestService
 
         // Карточку чужой заявки без права ViewAllProcurements не отдаём — иначе реестр
         // закрыт, а прямой переход по id открывал бы любую заявку.
-        if (!SeesAllRequests && r.Document!.AuthorId != _currentUser.UserId)
+        if (!SeesAllRequests && r.Document!.AuthorId != _currentUser.UserId
+            && !(EditsAnyDraft && IsEditableStatus(r.Document.StatusCode)))
             throw new UnauthorizedAccessException("Заявка на закупку доступна только автору и Сектору закупок");
 
         return await BuildCardAsync(r);
@@ -529,7 +546,7 @@ public class ProcurementRequestService : IProcurementRequestService
     {
         var entity = await LoadAsync(id);
 
-        if (entity.Document!.AuthorId != actorUserId)
+        if (entity.Document!.AuthorId != actorUserId && !EditsAnyDraft)
             throw new UnauthorizedAccessException("Править заявку может только её автор");
 
         if (entity.Document.StatusCode is not (ProcurementStatus.Draft or ProcurementStatus.OnRevision))
@@ -575,6 +592,8 @@ public class ProcurementRequestService : IProcurementRequestService
         entity.AnnouncementTo = request.AnnouncementTo;
         entity.InitiatorUnitId = request.InitiatorUnitId ?? entity.InitiatorUnitId;
         entity.CuratorUserId = request.CuratorUserId ?? entity.CuratorUserId;
+        // Заявка без куратора получает куратора СП из справочника при правке.
+        entity.CuratorUserId ??= await UnitCuratorAsync(entity.InitiatorUnitId);
         entity.MethodId = method.Id;
         entity.MatrixRuleId = resolved.RuleId;
         entity.ApprovalChain = resolved.ApprovalChain;
@@ -594,7 +613,7 @@ public class ProcurementRequestService : IProcurementRequestService
     {
         var entity = await LoadAsync(id);
 
-        if (entity.Document!.AuthorId != actorUserId)
+        if (entity.Document!.AuthorId != actorUserId && !EditsAnyDraft)
             throw new UnauthorizedAccessException("Менять ТЗ может только автор заявки");
 
         if (entity.Document.StatusCode is not (ProcurementStatus.Draft or ProcurementStatus.OnRevision))
@@ -636,6 +655,15 @@ public class ProcurementRequestService : IProcurementRequestService
             new {entity.Subject});
     }
 
+    /// <summary>Куратор СП из справочника.</summary>
+    private async Task<int?> UnitCuratorAsync(int? unitId) =>
+        unitId is { } id
+            ? await _db.OrganizationUnits
+                .Where(u => u.Id == id)
+                .Select(u => u.CuratorUserId)
+                .FirstOrDefaultAsync()
+            : null;
+
     public async Task<ProcurementCardDto> SubmitAsync(int id, int actorUserId, IReadOnlyList<int>? extraApproverUserIds = null)
     {
         var entity = await LoadAsync(id);
@@ -645,6 +673,14 @@ public class ProcurementRequestService : IProcurementRequestService
         // отправить чужой черновик по id.
         if (entity.Document!.AuthorId != actorUserId)
             throw new UnauthorizedAccessException("Отправить заявку на согласование может только её автор");
+
+        // Куратор не сохранён — берём куратора СП из справочника до сборки маршрута.
+        if (entity.CuratorUserId is null
+            && await UnitCuratorAsync(entity.InitiatorUnitId) is { } unitCurator)
+        {
+            entity.CuratorUserId = unitCurator;
+            await _db.SaveChangesAsync();
+        }
 
         var card = await BuildCardAsync(entity);
 
@@ -777,7 +813,7 @@ public class ProcurementRequestService : IProcurementRequestService
         _db.ProcurementRequests
             .Include(r => r.Document).ThenInclude(d => d!.Author)
             .Include(r => r.Method)
-            .Include(r => r.InitiatorUnit)
+            .Include(r => r.InitiatorUnit).ThenInclude(u => u!.CuratorUser)
             .Include(r => r.CuratorUser)
             .Include(r => r.SpecificationAttachment)
             .AsQueryable();
@@ -811,14 +847,18 @@ public class ProcurementRequestService : IProcurementRequestService
             PlanItem = r.PlanItem,
             HasSpecification = r.HasSpecification || r.SpecificationAttachmentId is not null,
             InitiatorUnitId = r.InitiatorUnitId,
-            CuratorUserId = r.CuratorUserId,
+            // Куратор не сохранён в заявке (создана, когда у СП его в справочнике не было) —
+            // показываем текущего куратора СП из справочника.
+            CuratorUserId = r.CuratorUserId ?? r.InitiatorUnit?.CuratorUserId,
+            IsAuthor = r.Document.AuthorId == _currentUser.UserId,
+            CanEdit = CanEdit(r, _currentUser.UserId),
             SpecificationAttachmentId = r.SpecificationAttachmentId,
             SpecificationFileName = r.SpecificationAttachment?.FileName,
             AnnouncementFrom = r.AnnouncementFrom,
             AnnouncementTo = r.AnnouncementTo,
             InitiatorName = r.Document.Author?.FullName,
             InitiatorUnit = r.InitiatorUnit?.TitleRu,
-            CuratorName = r.CuratorUser?.FullName,
+            CuratorName = r.CuratorUser?.FullName ?? r.InitiatorUnit?.CuratorUser?.FullName,
             MethodTitle = r.Method!.TitleRu,
             MethodShortTitle = r.Method.ShortTitleRu,
             MethodJustification = r.MethodJustification,

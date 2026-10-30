@@ -161,6 +161,13 @@ public class ProcurementCardDto
     public int? InitiatorUnitId { get; set; }
     public int? CuratorUserId { get; set; }
 
+    /// <summary>Текущий пользователь — автор заявки (отправить и удалить может только он).</summary>
+    public bool IsAuthor { get; set; }
+
+    /// <summary>Текущий пользователь может править заявку: автор или право EditAnyProcurementDraft,
+    /// пока заявка — черновик или на доработке.</summary>
+    public bool CanEdit { get; set; }
+
     /// <summary>Приложенное техническое задание.</summary>
     public int? SpecificationAttachmentId { get; set; }
     public string? SpecificationFileName { get; set; }
